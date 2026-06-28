@@ -1,0 +1,6 @@
+{
+  "name": "Gaks AI",
+  "description": "A sleek Forex market trading assistant with AI signals, customized strategy setup, and real-time watchlists.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
