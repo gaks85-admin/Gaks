@@ -265,6 +265,13 @@ async function startServer() {
           return res.json({ success: true, reason: "Invalid token" });
         }
 
+        // Idempotency check: if already connected
+        if (connection.connected && connection.telegram_chat_id === String(chatId)) {
+          const alreadyConnectedMessage = `🎉 *Welcome to Gaks AI!*\n\nYour Telegram account has been connected successfully.\n\nFuture AI trading signals will be delivered here.\n\nYou can now activate the AI Market Watcher from your dashboard.`;
+          await sendTelegramMessage(chatId, alreadyConnectedMessage);
+          return res.json({ success: true, reason: "Already connected" });
+        }
+
         // Update database record
         const { error: updateError } = await supabase
           .from("telegram_connections")
@@ -288,7 +295,7 @@ async function startServer() {
         }
 
         // Send confirmation message
-        const successMessage = `🎉 *Welcome to Gaks AI!*\n\nYour Telegram account has been connected successfully.\n\nFuture AI trading signals and critical market alerts will be delivered directly here!`;
+        const successMessage = `🎉 *Welcome to Gaks AI!*\n\nYour Telegram account has been connected successfully.\n\nFuture AI trading signals will be delivered here.\n\nYou can now activate the AI Market Watcher from your dashboard.`;
         await sendTelegramMessage(chatId, successMessage);
         console.log(`[Telegram Webhook Express] Connected successfully for user ${connection.user_id}`);
       }

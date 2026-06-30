@@ -99,7 +99,14 @@ export async function POST(request: Request) {
         return NextResponse.json({ success: true, reason: "Invalid token" }, { status: 200 });
       }
 
-      console.log(`[Telegram Webhook] Matching record found for user: ${connection.user_id}. Updating connection status.`);
+      console.log(`[Telegram Webhook] Matching record found for user: ${connection.user_id}. Checking connection status.`);
+
+      // Idempotency: check if already connected
+      if (connection.connected && connection.telegram_chat_id === String(chatId)) {
+        const alreadyConnectedMessage = `🎉 *Welcome to Gaks AI!*\n\nYour Telegram account has been connected successfully.\n\nFuture AI trading signals will be delivered here.\n\nYou can now activate the AI Market Watcher from your dashboard.`;
+        await sendTelegramMessage(chatId, alreadyConnectedMessage);
+        return NextResponse.json({ success: true, reason: "Already connected" }, { status: 200 });
+      }
 
       // Update the database record as connected
       const { error: updateError } = await supabase
@@ -123,8 +130,8 @@ export async function POST(request: Request) {
         return NextResponse.json({ success: false, error: "Database update failure" }, { status: 500 });
       }
 
-      // Success reply to the user inside Telegram
-      const successMessage = `🎉 *Welcome to Gaks AI!*\n\nYour Telegram account has been connected successfully.\n\nFuture AI trading signals and critical market alerts will be delivered directly here!`;
+      // Success reply to the user inside Telegram (exact format requested)
+      const successMessage = `🎉 *Welcome to Gaks AI!*\n\nYour Telegram account has been connected successfully.\n\nFuture AI trading signals will be delivered here.\n\nYou can now activate the AI Market Watcher from your dashboard.`;
       await sendTelegramMessage(chatId, successMessage);
 
       console.log(`[Telegram Webhook] Account linked successfully for User ID: ${connection.user_id}`);
