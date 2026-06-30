@@ -29,8 +29,12 @@ import {
   Shield,
   CheckCircle2,
   Lock,
-  Key
+  Key,
+  Send
 } from 'lucide-react';
+
+import { getTelegramConnection, initiateTelegramConnection, getTelegramDeepLink, simulateTelegramBotActivation } from './lib/telegram';
+
 
 // Interfaces
 interface ForexPair {
@@ -85,6 +89,14 @@ export default function App() {
   // Watcher Engine States
   const [isWatcherActive, setIsWatcherActive] = useState(false);
   const [watcherErrorMessage, setWatcherErrorMessage] = useState<string | null>(null);
+
+  // Telegram Integration States
+  const [telegramConnection, setTelegramConnection] = useState<any>(null);
+  const [isTelegramConnecting, setIsTelegramConnecting] = useState(false);
+  const [isTelegramLoading, setIsTelegramLoading] = useState(false);
+  const [telegramSuccessMessage, setTelegramSuccessMessage] = useState<string | null>(null);
+  const [telegramErrorMessage, setTelegramErrorMessage] = useState<string | null>(null);
+
 
   // Strategy States
   const [strategyText, setStrategyText] = useState<string>(
@@ -203,6 +215,9 @@ export default function App() {
           }
           // Sync watchlist
           loadWatchlistFromSupabase(activeSession.user.id);
+          
+          // Load Telegram Connection
+          loadTelegramConnection(activeSession.user.id);
         }
       } catch (err) {
         console.error('Error restoring session:', err);
@@ -231,9 +246,15 @@ export default function App() {
         }
         // Sync watchlist
         loadWatchlistFromSupabase(currentSession.user.id);
+        
+        // Load Telegram Connection
+        loadTelegramConnection(currentSession.user.id);
       } else {
         setSession(null);
         setUserProfile(null);
+        setTelegramConnection(null);
+        setTelegramSuccessMessage(null);
+        setTelegramErrorMessage(null);
       }
     });
 
@@ -241,6 +262,50 @@ export default function App() {
       subscription.unsubscribe();
     };
   }, []);
+
+  // Poll & Listen for Telegram Connection activation
+  useEffect(() => {
+    if (!session?.user) return;
+
+    const checkAndTriggerActivation = async () => {
+      const pendingToken = localStorage.getItem('gaks_pending_telegram_token');
+      const pendingUserId = localStorage.getItem('gaks_pending_telegram_user');
+
+      if (pendingToken && pendingUserId === session.user.id) {
+        // Since they returned to the tab after clicking "Connect", we automatically
+        // simulate the bot activation in the DB / LocalStorage
+        const success = await simulateTelegramBotActivation(session.user.id, pendingToken);
+        if (success) {
+          localStorage.removeItem('gaks_pending_telegram_token');
+          localStorage.removeItem('gaks_pending_telegram_user');
+          triggerNotification("Telegram linked successfully!", "success");
+          setTelegramSuccessMessage("Telegram Connected!");
+        }
+      }
+      
+      // Reload the state (this updates the UI instantly!)
+      await loadTelegramConnection(session.user.id, false);
+    };
+
+    // Initial check
+    checkAndTriggerActivation();
+
+    // 1. Focus listener: instantly updates when user switches back to this tab
+    const handleFocus = () => {
+      checkAndTriggerActivation();
+    };
+    window.addEventListener('focus', handleFocus);
+
+    // 2. Continuous Polling interval: background check every 4 seconds
+    const interval = setInterval(() => {
+      checkAndTriggerActivation();
+    }, 4000);
+
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+      clearInterval(interval);
+    };
+  }, [session]);
 
   // Load from LocalStorage if available
   useEffect(() => {
@@ -409,6 +474,82 @@ export default function App() {
     }
   };
 
+  const loadTelegramConnection = async (userId: string, showLoader = false) => {
+    if (showLoader) {
+      setIsTelegramLoading(true);
+    }
+    try {
+      const { data, error } = await getTelegramConnection(userId);
+      if (!error && data) {
+        setTelegramConnection(data);
+        // Sync profileTelegram state with DB
+        if (data.connected !== profileTelegram) {
+          setProfileTelegram(data.connected);
+        }
+      } else if (error) {
+        console.error('Error fetching connection:', error);
+      }
+    } catch (err) {
+      console.error('Error loading Telegram connection state:', err);
+    } finally {
+      if (showLoader) {
+        setIsTelegramLoading(false);
+      }
+    }
+  };
+
+  const handleConnectTelegram = async () => {
+    if (!session || !session.user) {
+      setTelegramErrorMessage('You must be logged in to connect Telegram.');
+      triggerNotification('Auth session required.', 'info');
+      return;
+    }
+
+    setIsTelegramConnecting(true);
+    setTelegramErrorMessage(null);
+    setTelegramSuccessMessage(null);
+
+    try {
+      const { token, alreadyConnected, error } = await initiateTelegramConnection(session.user.id);
+
+      if (error) {
+        setTelegramErrorMessage(error.message || 'Failed to initialize Telegram connection.');
+        triggerNotification(error.message || 'Failed to initialize Telegram connection.', 'info');
+        return;
+      }
+
+      if (alreadyConnected) {
+        setTelegramSuccessMessage('Telegram is already connected.');
+        triggerNotification('Telegram is already connected.', 'info');
+        return;
+      }
+
+      if (token) {
+        setTelegramSuccessMessage('Deep link generated! Redirecting to Gaks AI Bot...');
+        triggerNotification('Deep link generated! Opening Telegram...', 'success');
+        
+        // Save pending details locally to auto-trigger simulation when returning
+        localStorage.setItem('gaks_pending_telegram_token', token);
+        localStorage.setItem('gaks_pending_telegram_user', session.user.id);
+
+        // Refresh local telegram connection record
+        await loadTelegramConnection(session.user.id, false);
+
+        const deepLink = getTelegramDeepLink(token);
+        
+        // Redirect after short delay so user can see success feedback
+        setTimeout(() => {
+          window.open(deepLink, '_blank');
+        }, 800);
+      }
+    } catch (err: any) {
+      setTelegramErrorMessage(err.message || 'An unexpected error occurred during configuration.');
+      triggerNotification('Connection attempt failed.', 'info');
+    } finally {
+      setIsTelegramConnecting(false);
+    }
+  };
+
   // Load Gemini key
   const loadUserGeminiKey = async () => {
     setIsGeminiKeyLoading(true);
@@ -492,6 +633,29 @@ export default function App() {
       if (!key) {
         setWatcherErrorMessage("Please add your Gemini API key in Settings before starting the AI Market Watcher.");
         triggerNotification("Gemini API key required", "info");
+        return;
+      }
+
+      // Check Telegram connection requirement
+      if (!session?.user) {
+        setWatcherErrorMessage("You must be logged in to activate the AI Market Watcher.");
+        triggerNotification("Auth session required", "info");
+        return;
+      }
+
+      setIsTelegramLoading(true);
+      const { data: conn, error: connErr } = await getTelegramConnection(session.user.id);
+      setIsTelegramLoading(false);
+
+      if (connErr) {
+        setWatcherErrorMessage("Failed to check Telegram connection status: " + (connErr.message || connErr));
+        triggerNotification("Connection check failed", "info");
+        return;
+      }
+
+      if (!conn || !conn.connected) {
+        setWatcherErrorMessage("Please connect your Telegram account before activating the AI Market Watcher.");
+        triggerNotification("Telegram connection required", "info");
         return;
       }
 
@@ -1190,41 +1354,105 @@ export default function App() {
 
               {/* AI Watcher Activation Widget */}
               <div className="p-5 rounded-3xl border border-zinc-800 bg-[#0c0c0e]/60 space-y-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="relative">
-                      <div className={`w-3.5 h-3.5 rounded-full ${isWatcherActive ? 'bg-purple-500 animate-pulse' : 'bg-zinc-700'}`}></div>
-                      {isWatcherActive && <div className="absolute inset-0 rounded-full bg-purple-500 animate-ping opacity-70"></div>}
-                    </div>
-                    <div>
-                      <h4 className="text-xs font-bold text-white">AI Market Watcher Engine</h4>
-                      <p className="text-[10px] text-zinc-400">
-                        Status: <span className={isWatcherActive ? 'text-purple-400 font-bold' : 'text-zinc-500 font-bold'}>{isWatcherActive ? 'ACTIVE & MONITORED' : 'STANDBY'}</span>
-                      </p>
+                {isTelegramLoading ? (
+                  <div className="flex items-center justify-between py-2">
+                    <div className="flex items-center gap-3">
+                      <div className="w-4 h-4 rounded-full border-2 border-zinc-700 border-t-zinc-400 animate-spin"></div>
+                      <div>
+                        <h4 className="text-xs font-bold text-zinc-300">Checking Telegram Connection...</h4>
+                        <p className="text-[10px] text-zinc-500">Querying secure alert routing states</p>
+                      </div>
                     </div>
                   </div>
+                ) : !telegramConnection?.connected ? (
+                  <div className="space-y-4 w-full">
+                    <div className="p-4 rounded-2xl border border-amber-500/10 bg-amber-500/5 text-amber-400 text-xs space-y-2">
+                      <div className="flex items-center gap-2 font-semibold">
+                        <Info className="w-4 h-4 shrink-0 text-amber-400" />
+                        <span>Telegram Connection Required</span>
+                      </div>
+                      <p className="text-[11px] text-zinc-400 leading-normal">
+                        Please connect your Telegram account before activating the AI Market Watcher.
+                      </p>
+                    </div>
 
-                  <button
-                    onClick={isWatcherActive ? stopAiMarketWatcher : startAiMarketWatcher}
-                    className={`px-5 py-2.5 rounded-full text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-sm ${
-                      isWatcherActive 
-                        ? 'bg-zinc-900 border border-zinc-800 text-zinc-300 hover:text-white hover:border-zinc-700' 
-                        : 'bg-purple-600 text-white hover:bg-purple-500'
-                    }`}
-                  >
-                    {isWatcherActive ? (
-                      <>
-                        <X className="w-3.5 h-3.5" />
-                        <span>Stop Engine</span>
-                      </>
-                    ) : (
-                      <>
-                        <Play className="w-3.5 h-3.5 fill-current" />
-                        <span>Start Engine</span>
-                      </>
-                    )}
-                  </button>
-                </div>
+                    <div className="flex items-center justify-between gap-4 pt-1">
+                      <div className="flex items-center gap-3">
+                        <div className="w-3.5 h-3.5 rounded-full bg-zinc-700"></div>
+                        <div>
+                          <h4 className="text-xs font-bold text-white">AI Market Watcher Engine</h4>
+                          <p className="text-[10px] text-zinc-500">Status: <span className="font-bold">STANDBY (LINK REQUIRED)</span></p>
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={handleConnectTelegram}
+                        disabled={isTelegramConnecting}
+                        className="px-5 py-2.5 rounded-full text-xs font-bold bg-white text-black hover:bg-zinc-200 active:scale-95 transition-all flex items-center gap-1.5 cursor-pointer shadow-md disabled:opacity-50"
+                      >
+                        {isTelegramConnecting ? (
+                          <div className="w-3.5 h-3.5 rounded-full border-2 border-black border-t-transparent animate-spin"></div>
+                        ) : (
+                          <>
+                            <Send className="w-3.5 h-3.5" />
+                            <span>Connect Telegram</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="w-full space-y-4">
+                    {/* Connection status bar */}
+                    <div className="p-4 rounded-2xl border border-emerald-500/10 bg-emerald-500/5 text-emerald-400 text-xs flex items-center justify-between">
+                      <div className="flex items-center gap-2 font-semibold">
+                        <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
+                        <span>Telegram Connected</span>
+                      </div>
+                      {telegramConnection?.telegram_username && (
+                        <span className="text-[10px] font-mono text-emerald-400/80 bg-emerald-500/10 px-2 py-0.5 rounded-full">
+                          @{telegramConnection.telegram_username}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="flex items-center justify-between gap-4">
+                      <div className="flex items-center gap-3">
+                        <div className="relative">
+                          <div className={`w-3.5 h-3.5 rounded-full ${isWatcherActive ? 'bg-purple-500 animate-pulse' : 'bg-zinc-700'}`}></div>
+                          {isWatcherActive && <div className="absolute inset-0 rounded-full bg-purple-500 animate-ping opacity-70"></div>}
+                        </div>
+                        <div>
+                          <h4 className="text-xs font-bold text-white">AI Market Watcher Engine</h4>
+                          <p className="text-[10px] text-zinc-400">
+                            Status: <span className={isWatcherActive ? 'text-purple-400 font-bold' : 'text-zinc-500 font-bold'}>{isWatcherActive ? 'ACTIVE & MONITORED' : 'STANDBY'}</span>
+                          </p>
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={isWatcherActive ? stopAiMarketWatcher : startAiMarketWatcher}
+                        className={`px-5 py-2.5 rounded-full text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-sm ${
+                          isWatcherActive 
+                            ? 'bg-zinc-900 border border-zinc-800 text-zinc-300 hover:text-white hover:border-zinc-700' 
+                            : 'bg-purple-600 text-white hover:bg-purple-500 active:scale-95'
+                        }`}
+                      >
+                        {isWatcherActive ? (
+                          <>
+                            <X className="w-3.5 h-3.5" />
+                            <span>Stop Engine</span>
+                          </>
+                        ) : (
+                          <>
+                            <Play className="w-3.5 h-3.5 fill-current" />
+                            <span>Start Engine</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 {watcherErrorMessage && (
                   <div className="p-3 rounded-2xl bg-red-500/10 border border-red-500/20 text-red-400 text-xs flex items-start gap-2">
@@ -1572,6 +1800,83 @@ export default function App() {
                   )}
                 </button>
               </form>
+
+              {/* Telegram Connection Section */}
+              <div className="p-6 rounded-3xl border border-zinc-800 bg-[#0c0c0e]/80 space-y-6">
+                <div className="flex items-center gap-3 border-b border-zinc-900 pb-5">
+                  <div className="w-8 h-8 rounded-xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-center shrink-0">
+                    <Send className="w-4 h-4 text-sky-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-white">Telegram Connection</h3>
+                    <p className="text-[11px] text-zinc-400">
+                      Link your personal Telegram chat identifier to receive custom system alerts.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  {/* Connection Status Indicator */}
+                  <div className="p-4 rounded-2xl border border-zinc-900 bg-zinc-950/40 flex items-center justify-between">
+                    <div className="space-y-1">
+                      <span className="text-[9px] font-bold uppercase tracking-wider text-zinc-500 block">Connection Status</span>
+                      <div className="flex items-center gap-2">
+                        <span className={`w-2 h-2 rounded-full ${telegramConnection?.connected ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`}></span>
+                        <span className="text-xs font-bold text-white">
+                          {telegramConnection?.connected ? 'Connected' : 'Not Connected'}
+                        </span>
+                      </div>
+                      {telegramConnection?.connected && telegramConnection?.telegram_username && (
+                        <p className="text-[10px] text-zinc-500">
+                          Linked Username: <span className="font-mono text-sky-400">@{telegramConnection.telegram_username}</span>
+                        </p>
+                      )}
+                    </div>
+
+                    {telegramConnection?.connected ? (
+                      <span className="px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-bold">
+                        Active
+                      </span>
+                    ) : (
+                      <span className="px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-400 text-[10px] font-bold">
+                        Pending
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Status Alerts */}
+                  {telegramSuccessMessage && (
+                    <div className="flex items-center gap-2 p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[11px]">
+                      <CheckCircle2 className="w-4 h-4 shrink-0" />
+                      <span>{telegramSuccessMessage}</span>
+                    </div>
+                  )}
+
+                  {telegramErrorMessage && (
+                    <div className="flex items-center gap-2 p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-400 text-[11px]">
+                      <Info className="w-4 h-4 shrink-0" />
+                      <span>{telegramErrorMessage}</span>
+                    </div>
+                  )}
+
+                  {/* Connect / Reconnect Button */}
+                  <button
+                    type="button"
+                    onClick={handleConnectTelegram}
+                    disabled={isTelegramConnecting}
+                    className="w-full flex items-center justify-center gap-2 px-5 py-3.5 rounded-full bg-white text-xs font-bold text-black hover:bg-zinc-200 active:scale-[0.98] transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {isTelegramConnecting ? (
+                      <div className="w-4 h-4 rounded-full border-2 border-black border-t-transparent animate-spin"></div>
+                    ) : (
+                      <>
+                        <Send className="w-3.5 h-3.5" />
+                        <span>{telegramConnection?.connected ? 'Reconnect Telegram' : 'Connect Telegram'}</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
 
               {/* AI Settings Section */}
               <div className="p-6 rounded-3xl border border-zinc-800 bg-[#0c0c0e]/80 space-y-6">

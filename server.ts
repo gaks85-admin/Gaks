@@ -1,6 +1,7 @@
 import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
+import { createClient } from "@supabase/supabase-js";
 
 interface ERResponse {
   result: string;
@@ -172,6 +173,132 @@ async function startServer() {
 
   // Keep track of user's active watcher key in memory (simulating background analysis setup)
   let activeWatcherApiKey: string | null = null;
+
+  // Initialize Supabase Client
+  const SUPABASE_URL = "https://wkujrqmxivljnuvumfau.supabase.co";
+  const SUPABASE_PUBLIC_KEY = "sb_publishable_BheqR2OkNYKqT7bj8xThWA_gGG2hcjf";
+  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || SUPABASE_PUBLIC_KEY;
+  const supabase = createClient(SUPABASE_URL, supabaseKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false
+    }
+  });
+
+  // Telegram helper to reply to users
+  async function sendTelegramMessage(chatId: string | number, text: string) {
+    const token = process.env.TELEGRAM_BOT_TOKEN;
+    if (!token) {
+      console.warn("TELEGRAM_BOT_TOKEN is not defined in environment variables.");
+      return;
+    }
+
+    const url = `https://api.telegram.org/bot${token}/sendMessage`;
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text: text,
+          parse_mode: "Markdown"
+        })
+      });
+
+      if (!response.ok) {
+        console.error(`Telegram sendMessage failed with status ${response.status}:`, await response.text());
+      }
+    } catch (err) {
+      console.error("Error sending Telegram message:", err);
+    }
+  }
+
+  // Telegram Webhook POST Route
+  app.post("/api/telegram/webhook", async (req, res) => {
+    try {
+      const body = req.body;
+      console.log("[Telegram Webhook Express] Received update:", JSON.stringify(body, null, 2));
+
+      const message = body.message;
+      if (!message) {
+        // Return 200 for other update types (e.g. callback queries) so Telegram bot doesn't retry
+        return res.json({ success: true, reason: "No message payload" });
+      }
+
+      const chatId = message.chat?.id;
+      const telegramUserId = message.from?.id;
+      const telegramUsername = message.from?.username || null;
+      const text = message.text || "";
+
+      if (!chatId) {
+        return res.status(400).json({ success: false, error: "Missing chat identifier" });
+      }
+
+      if (text.startsWith("/start")) {
+        const parts = text.split(" ");
+        const token = parts[1]?.trim();
+
+        if (!token) {
+          await sendTelegramMessage(
+            chatId,
+            "❌ *Gaks AI Verification Required*\n\nPlease use the *Connect Telegram* button from your Gaks AI Settings dashboard to link this account."
+          );
+          return res.json({ success: true, reason: "Start command without token" });
+        }
+
+        console.log(`[Telegram Webhook Express] Looking up token: ${token}`);
+
+        const { data: connection, error: selectError } = await supabase
+          .from("telegram_connections")
+          .select("*")
+          .eq("connection_token", token)
+          .maybeSingle();
+
+        if (selectError || !connection) {
+          console.error(`[Telegram Webhook Express] Token lookup failed:`, selectError);
+          await sendTelegramMessage(
+            chatId,
+            "❌ *Verification Failed*\n\nThe connection token is invalid or has expired. Please return to the Gaks AI Dashboard, regenerate your link, and try again."
+          );
+          return res.json({ success: true, reason: "Invalid token" });
+        }
+
+        // Update database record
+        const { error: updateError } = await supabase
+          .from("telegram_connections")
+          .update({
+            telegram_chat_id: String(chatId),
+            telegram_user_id: String(telegramUserId),
+            telegram_username: telegramUsername,
+            connected: true,
+            connected_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          })
+          .eq("connection_token", token);
+
+        if (updateError) {
+          console.error("[Telegram Webhook Express] DB Update Error:", updateError);
+          await sendTelegramMessage(
+            chatId,
+            "❌ *Database Sync Error*\n\nWe encountered an error while saving your profile link. Please try again in a few moments."
+          );
+          return res.status(500).json({ success: false, error: "Database update failure" });
+        }
+
+        // Send confirmation message
+        const successMessage = `🎉 *Welcome to Gaks AI!*\n\nYour Telegram account has been connected successfully.\n\nFuture AI trading signals and critical market alerts will be delivered directly here!`;
+        await sendTelegramMessage(chatId, successMessage);
+        console.log(`[Telegram Webhook Express] Connected successfully for user ${connection.user_id}`);
+      }
+
+      return res.json({ success: true });
+    } catch (error: any) {
+      console.error("[Telegram Webhook Express] Error:", error);
+      return res.status(500).json({ success: false, error: error.message || "Internal server error" });
+    }
+  });
 
   // Initialize rates baseline
   await updateRatesFromAPI();
