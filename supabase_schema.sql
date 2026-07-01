@@ -251,3 +251,50 @@ CREATE OR REPLACE TRIGGER update_telegram_connections_modtime
   EXECUTE FUNCTION public.handle_telegram_connections_updated_at();
 
 
+-- =========================================================================
+-- MARKET WATCHER ENGINE ACTIVATION SCHEMA
+-- =========================================================================
+
+-- Create the market_watchers table to track validation status and timestamps
+CREATE TABLE IF NOT EXISTS public.market_watchers (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id UUID REFERENCES auth.users ON DELETE CASCADE NOT NULL UNIQUE,
+  status TEXT NOT NULL DEFAULT 'inactive',
+  activated_at TIMESTAMP WITH TIME ZONE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
+);
+
+-- Enable Row Level Security (RLS) for market_watchers
+ALTER TABLE public.market_watchers ENABLE ROW LEVEL SECURITY;
+
+-- Create Policies for market_watchers
+CREATE POLICY "Users can read own market watchers"
+  ON public.market_watchers
+  FOR SELECT
+  USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can insert own market watchers"
+  ON public.market_watchers
+  FOR INSERT
+  WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can update own market watchers"
+  ON public.market_watchers
+  FOR UPDATE
+  USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can delete own market watchers"
+  ON public.market_watchers
+  FOR DELETE
+  USING (auth.uid() = user_id);
+
+-- Additional policy to allow server-side lookup/update
+CREATE POLICY "Allow server-side updates"
+  ON public.market_watchers
+  FOR ALL
+  USING (true)
+  WITH CHECK (true);
+
+
+

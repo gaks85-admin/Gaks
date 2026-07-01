@@ -218,6 +218,9 @@ export default function App() {
           
           // Load Telegram Connection
           loadTelegramConnection(activeSession.user.id);
+          
+          // Load Trading Preferences
+          loadTradingPreferences(activeSession.user.id);
         }
       } catch (err) {
         console.error('Error restoring session:', err);
@@ -249,6 +252,9 @@ export default function App() {
         
         // Load Telegram Connection
         loadTelegramConnection(currentSession.user.id);
+        
+        // Load Trading Preferences
+        loadTradingPreferences(currentSession.user.id);
       } else {
         setSession(null);
         setUserProfile(null);
@@ -408,9 +414,32 @@ export default function App() {
   };
 
   // Save Strategy Page Form
-  const saveStrategyPlaybook = () => {
+  const saveStrategyPlaybook = async () => {
     localStorage.setItem('gaks_strategy_text', strategyText);
-    triggerNotification("Strategy playbook saved successfully!");
+    
+    if (session?.user) {
+      try {
+        const { error } = await supabase
+          .from('trading_preferences')
+          .upsert({
+            user_id: session.user.id,
+            strategy_text: strategyText,
+            updated_at: new Date().toISOString()
+          }, { onConflict: 'user_id' });
+          
+        if (error) {
+          console.error("Error saving strategy to Supabase:", error.message);
+          triggerNotification("Saved locally. Supabase sync failed.", "info");
+        } else {
+          triggerNotification("Strategy playbook saved & synchronized successfully!");
+        }
+      } catch (err: any) {
+        console.error("Exception saving strategy to Supabase:", err);
+        triggerNotification("Saved locally.", "info");
+      }
+    } else {
+      triggerNotification("Strategy playbook saved successfully!");
+    }
   };
 
   const resetStrategyPlaybook = () => {
@@ -495,6 +524,36 @@ export default function App() {
       if (showLoader) {
         setIsTelegramLoading(false);
       }
+    }
+  };
+
+  const loadTradingPreferences = async (userId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('trading_preferences')
+        .select('*')
+        .eq('user_id', userId)
+        .maybeSingle();
+
+      if (error) {
+        console.warn("Could not load trading preferences from Supabase:", error.message);
+        return;
+      }
+
+      if (data) {
+        if (data.strategy_text) setStrategyText(data.strategy_text);
+        if (data.capital) setCapital(data.capital);
+        if (data.custom_capital) setCustomCapital(data.custom_capital);
+        if (data.preferred_risk) setPreferredRisk(data.preferred_risk);
+        if (data.risk_reward) setRiskReward(data.risk_reward);
+        if (data.account_type === 'personal' || data.account_type === 'prop') {
+          setAccountType(data.account_type);
+        }
+        if (data.preferred_sessions) setPreferredSessions(data.preferred_sessions);
+        if (data.preferred_timeframes) setPreferredTimeframes(data.preferred_timeframes);
+      }
+    } catch (err: any) {
+      console.error("Exception loading trading preferences:", err);
     }
   };
 
@@ -625,58 +684,81 @@ export default function App() {
     }
   };
 
-  // Start AI Market Watcher
-  const startAiMarketWatcher = async () => {
+  // Activate and Start AI Market Watcher with backend requirements validation
+  const startAiMarketWatcher = async (symbolToAdd?: string, timeframeToWatch?: string) => {
     setWatcherErrorMessage(null);
+    
+    if (!session?.user) {
+      setWatcherErrorMessage("You must be logged in to activate the AI Market Watcher.");
+      triggerNotification("Auth session required", "info");
+      return;
+    }
+
     try {
-      const key = await getGeminiKey();
-      if (!key) {
-        setWatcherErrorMessage("Please add your Gemini API key in Settings before starting the AI Market Watcher.");
-        triggerNotification("Gemini API key required", "info");
-        return;
+      // First ensure local changes are synced to Supabase (so backend checks pass)
+      triggerNotification("Synchronizing local setup with Gaks AI...", "info");
+      
+      // Save playbooks & preferences to Supabase first so the backend validation doesn't fail on stale cache
+      const { error: playbookErr } = await supabase
+        .from('trading_preferences')
+        .upsert({
+          user_id: session.user.id,
+          strategy_text: strategyText,
+          capital: capital,
+          custom_capital: customCapital,
+          preferred_risk: preferredRisk,
+          risk_reward: riskReward,
+          account_type: accountType,
+          preferred_sessions: preferredSessions,
+          preferred_timeframes: preferredTimeframes,
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'user_id' });
+
+      if (playbookErr) {
+        console.warn("Could not auto-sync trading preferences to Supabase:", playbookErr.message);
       }
 
-      // Check Telegram connection requirement
-      if (!session?.user) {
-        setWatcherErrorMessage("You must be logged in to activate the AI Market Watcher.");
-        triggerNotification("Auth session required", "info");
-        return;
-      }
-
-      setIsTelegramLoading(true);
-      const { data: conn, error: connErr } = await getTelegramConnection(session.user.id);
-      setIsTelegramLoading(false);
-
-      if (connErr) {
-        setWatcherErrorMessage("Failed to check Telegram connection status: " + (connErr.message || connErr));
-        triggerNotification("Connection check failed", "info");
-        return;
-      }
-
-      if (!conn || !conn.connected) {
-        setWatcherErrorMessage("Please connect your Telegram account before activating the AI Market Watcher.");
-        triggerNotification("Telegram connection required", "info");
-        return;
-      }
-
-      // Prepare infrastructure by passing to backend
-      const response = await fetch('/api/watcher/start', {
+      // Call secure backend activation route
+      const response = await fetch('/api/watcher/activate', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ apiKey: key })
+        body: JSON.stringify({ userId: session.user.id })
       });
 
-      if (!response.ok) {
-        throw new Error("Failed to initialize backend analysis service.");
+      const result = await response.json();
+
+      if (!response.ok || !result.success) {
+        const errMsg = result.error || "Failed to activate AI Market Watcher.";
+        setWatcherErrorMessage(errMsg);
+        triggerNotification(errMsg, "info");
+        return;
+      }
+
+      // Activate Gemini background key in parallel to align architecture
+      const key = await getGeminiKey();
+      if (key) {
+        await fetch('/api/watcher/start', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ apiKey: key })
+        }).catch(err => console.warn("Backend preparation error:", err));
       }
 
       setIsWatcherActive(true);
-      triggerNotification("AI Market Watcher started!", "success");
+      setWatcherErrorMessage(null);
+      triggerNotification(result.message || "AI Market Watcher activated successfully!", "success");
+
+      if (symbolToAdd) {
+        handleAddPair(symbolToAdd, timeframeToWatch || 'H1');
+      }
     } catch (err: any) {
-      setWatcherErrorMessage(err.message || "An unexpected error occurred.");
-      triggerNotification("Failed to start Watcher", "info");
+      console.error("Exception in startAiMarketWatcher:", err);
+      setWatcherErrorMessage(err.message || "An unexpected error occurred during activation.");
+      triggerNotification("Activation failed", "info");
     }
   };
 
@@ -696,7 +778,7 @@ export default function App() {
     }
   }, [session]);
 
-  const savePreferences = () => {
+  const savePreferences = async () => {
     localStorage.setItem('gaks_capital', capital);
     localStorage.setItem('gaks_custom_capital', customCapital);
     localStorage.setItem('gaks_preferred_risk', preferredRisk);
@@ -704,7 +786,36 @@ export default function App() {
     localStorage.setItem('gaks_account_type', accountType);
     localStorage.setItem('gaks_sessions', JSON.stringify(preferredSessions));
     localStorage.setItem('gaks_timeframes', JSON.stringify(preferredTimeframes));
-    triggerNotification("Trading preferences successfully saved!");
+    
+    if (session?.user) {
+      try {
+        const { error } = await supabase
+          .from('trading_preferences')
+          .upsert({
+            user_id: session.user.id,
+            capital: capital,
+            custom_capital: customCapital,
+            preferred_risk: preferredRisk,
+            risk_reward: riskReward,
+            account_type: accountType,
+            preferred_sessions: preferredSessions,
+            preferred_timeframes: preferredTimeframes,
+            updated_at: new Date().toISOString()
+          }, { onConflict: 'user_id' });
+          
+        if (error) {
+          console.error("Error saving preferences to Supabase:", error.message);
+          triggerNotification("Preferences saved locally. Sync failed.", "info");
+        } else {
+          triggerNotification("Trading preferences saved & synced successfully!");
+        }
+      } catch (err: any) {
+        console.error("Exception saving preferences to Supabase:", err);
+        triggerNotification("Preferences saved locally.", "info");
+      }
+    } else {
+      triggerNotification("Trading preferences successfully saved!");
+    }
   };
 
   // Toggle Preferred Sessions list
@@ -1525,7 +1636,7 @@ export default function App() {
                         triggerNotification('Please enter a valid asset symbol first.', 'info');
                         return;
                       }
-                      handleAddPair(watcherSearch, watcherTimeframe);
+                      startAiMarketWatcher(watcherSearch, watcherTimeframe);
                     }}
                     className="w-full flex items-center justify-center gap-2 px-5 py-3.5 rounded-full bg-white text-xs font-bold text-black hover:bg-zinc-200 active:scale-[0.98] transition-all cursor-pointer shadow-sm font-display mt-2"
                   >
