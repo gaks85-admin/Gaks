@@ -143,3 +143,16 @@ export async function POST(request: Request) {
     return NextResponse.json({ success: false, error: error.message || "Internal server error" }, { status: 500 });
   }
 }
+
+/**
+ * GET Handler for verifying that the endpoint exists and is operational.
+ */
+export async function GET() {
+  return NextResponse.json({
+    status: "operational",
+    service: "Gaks AI Telegram Webhook API",
+    message: "Telegram Webhook endpoint is active and listening for POST requests.",
+    timestamp: new Date().toISOString()
+  }, { status: 200 });
+}
+
