@@ -1,6 +1,5 @@
 import express from "express";
 import path from "path";
-import { createServer as createViteServer } from "vite";
 import { createClient } from "@supabase/supabase-js";
 
 interface ERResponse {
@@ -169,6 +168,32 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
+  // CORS Middleware to allow cross-origin requests from frontend hosted on Vercel or locally
+  app.use((req, res, next) => {
+    const origin = req.headers.origin;
+    const allowedOrigins = [
+      "https://gaks-ai.vercel.app",
+      "http://localhost:5173",
+      "http://localhost:3000"
+    ];
+    
+    if (origin && (allowedOrigins.includes(origin) || origin.endsWith(".vercel.app") || origin.endsWith(".run.app"))) {
+      res.setHeader("Access-Control-Allow-Origin", origin);
+    } else {
+      // Direct client fallback
+      res.setHeader("Access-Control-Allow-Origin", "https://gaks-ai.vercel.app");
+    }
+
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, PATCH, DELETE");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With");
+    res.setHeader("Access-Control-Allow-Credentials", "true");
+
+    if (req.method === "OPTIONS") {
+      return res.sendStatus(200);
+    }
+    next();
+  });
+
   app.use(express.json());
 
   // Keep track of user's active watcher key in memory (simulating background analysis setup)
@@ -307,6 +332,16 @@ async function startServer() {
     }
   });
 
+  // Telegram Webhook GET Route (for health check / verification)
+  app.get("/api/telegram/webhook", (req, res) => {
+    return res.json({
+      status: "operational",
+      service: "Gaks AI Telegram Webhook Express API",
+      message: "Telegram Webhook endpoint is active and listening for POST requests.",
+      timestamp: new Date().toISOString()
+    });
+  });
+
   // Initialize rates baseline
   await updateRatesFromAPI();
 
@@ -338,20 +373,31 @@ async function startServer() {
     });
   });
 
-  // Serve static assets or mount Vite middleware
-  if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
+  // Catch-all route to serve API list/health indicator since we are an API-only server now
+  app.get("/", (req, res) => {
+    res.json({
+      status: "online",
+      service: "Gaks AI Backend API",
+      message: "This server is acting strictly as an API backend.",
+      endpoints: [
+        "GET /",
+        "GET /api/telegram/webhook",
+        "POST /api/telegram/webhook",
+        "POST /api/watcher/start",
+        "GET /api/live-rates"
+      ],
+      timestamp: new Date().toISOString()
     });
-    app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
+  });
+
+  // Catch-all 404 for other unhandled routes
+  app.use((req, res) => {
+    res.status(404).json({
+      success: false,
+      error: "Endpoint not found",
+      message: `The route ${req.method} ${req.path} is not registered on this backend.`
     });
-  }
+  });
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
