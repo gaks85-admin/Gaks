@@ -728,7 +728,16 @@ export default function App() {
         body: JSON.stringify({ userId: session.user.id })
       });
 
-      const result = await response.json();
+      const contentType = response.headers.get("content-type");
+      let result;
+      
+      if (contentType && contentType.includes("application/json")) {
+        result = await response.json();
+      } else {
+        const text = await response.text();
+        console.error("Non-JSON response from /api/watcher/start:", response.status, text.substring(0, 200));
+        throw new Error(`Server returned an invalid response (${response.status}). This endpoint may be missing or misconfigured.`);
+      }
 
       if (!response.ok || !result.success) {
         const errMsg = result.error || "Failed to activate AI Market Watcher.";
