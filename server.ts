@@ -345,34 +345,49 @@ async function startServer() {
   // Initialize rates baseline
   await updateRatesFromAPI();
 
-  // API Endpoint - Starts the watcher backend infrastructure with user's key
-  app.post("/api/watcher/start", (req, res) => {
-    const { apiKey } = req.body;
-    if (!apiKey) {
-      return res.status(400).json({ success: false, error: "API key is required." });
-    }
-    
-    // Store key securely in memory to simulate active analyzer instance
-    activeWatcherApiKey = apiKey;
-    console.log("AI Market Watcher backend infrastructure initialized and configured with Gemini API key.");
-    
-    return res.json({
-      success: true,
-      message: "AI Market Watcher backend analysis service has been successfully prepared with your Gemini API key."
-    });
-  });
-
   // API Endpoint - Verifies all watcher requirements and activates it
-  app.post("/api/watcher/activate", async (req, res) => {
-    const { userId } = req.body;
+  app.post("/api/watcher/start", async (req, res) => {
+    let userId = req.body.userId;
+
+    // 1. Verify the user is authenticated (using authorization header)
+    const authHeader = req.headers.authorization || '';
+    const token = authHeader.startsWith('Bearer ') ? authHeader.substring(7) : authHeader;
+
+    if (token) {
+      try {
+        const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+        if (authError || !user) {
+          console.warn("[Watcher Start] Bearer token auth validation failed:", authError?.message);
+        } else {
+          userId = user.id;
+        }
+      } catch (err: any) {
+        console.warn("[Watcher Start] Bearer token verification error:", err.message);
+      }
+    }
+
     if (!userId) {
-      return res.status(400).json({ success: false, error: "User identifier is required." });
+      return res.status(401).json({
+        success: false,
+        error: "Authentication failed. You must be authenticated to start the AI Market Watcher."
+      });
     }
 
     try {
-      console.log(`[Watcher Activation] Verifying requirements for user: ${userId}`);
+      console.log(`[Watcher Start] Verifying requirements for authenticated user: ${userId}`);
 
-      // 1. Verify Telegram connection
+      // 2. Retrieve the authenticated user's profile
+      const { data: profile, error: profileError } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("id", userId)
+        .maybeSingle();
+
+      if (profileError) {
+        console.warn("[Watcher Start] Profile query warning:", profileError.message);
+      }
+
+      // 3. Verify Telegram is connected by checking the telegram_connections table
       const { data: telegramConn, error: telegramError } = await supabase
         .from("telegram_connections")
         .select("*")
@@ -380,7 +395,7 @@ async function startServer() {
         .maybeSingle();
 
       if (telegramError) {
-        console.warn("[Watcher Activation] Telegram query error:", telegramError.message);
+        console.warn("[Watcher Start] Telegram connection lookup error:", telegramError.message);
       }
 
       if (!telegramConn || !telegramConn.connected) {
@@ -390,7 +405,7 @@ async function startServer() {
         });
       }
 
-      // 2. Verify Gemini API Key exists
+      // 4. Verify the user has saved a Gemini API key
       const { data: apiKeyRecord, error: apiKeyError } = await supabase
         .from("user_api_keys")
         .select("*")
@@ -399,7 +414,7 @@ async function startServer() {
         .maybeSingle();
 
       if (apiKeyError) {
-        console.warn("[Watcher Activation] API Key query error:", apiKeyError.message);
+        console.warn("[Watcher Start] API Key query error:", apiKeyError.message);
       }
 
       if (!apiKeyRecord || !apiKeyRecord.api_key) {
@@ -409,7 +424,7 @@ async function startServer() {
         });
       }
 
-      // 3 & 4. Verify Strategy Playbook and Risk settings exist
+      // 5 & 6. Verify Strategy Playbook and Risk settings exist
       const { data: prefsRecord, error: prefsError } = await supabase
         .from("trading_preferences")
         .select("*")
@@ -417,7 +432,7 @@ async function startServer() {
         .maybeSingle();
 
       if (prefsError) {
-        console.warn("[Watcher Activation] Trading preferences query error:", prefsError.message);
+        console.warn("[Watcher Start] Trading preferences query error:", prefsError.message);
       }
 
       const defaultTemplate = `• Entry conditions\n• Confirmation indicators\n• Exit & stop-loss logic\n• Risk management rules`;
@@ -440,12 +455,55 @@ async function startServer() {
         });
       }
 
-      // 5. Requirements met! Create or update watcher record in Supabase
+      // 8. Requirements met! Create or update the user's watcher record
       const nowString = new Date().toISOString();
-      let dbSaved = false;
+      
+      // Parse capital size and risk percentage for structured watchers columns
+      let accountSize: number | null = null;
+      if (prefsRecord) {
+        const cap = prefsRecord.custom_capital || prefsRecord.capital || "";
+        const cleanedCap = cap.replace(/[^0-9.]/g, "");
+        if (cleanedCap) {
+          accountSize = parseFloat(cleanedCap);
+        }
+      }
 
+      let riskPercentage: number | null = null;
+      if (prefsRecord && prefsRecord.preferred_risk) {
+        const cleanedRisk = prefsRecord.preferred_risk.replace(/[^0-9.]/g, "");
+        if (cleanedRisk) {
+          riskPercentage = parseFloat(cleanedRisk);
+        }
+      }
+
+      const telegramChatId = telegramConn?.telegram_chat_id || null;
+
+      // Upsert into watchers table
+      const { error: watchersError } = await supabase
+        .from("watchers")
+        .upsert({
+          user_id: userId,
+          status: "active",
+          started_at: nowString,
+          telegram_chat_id: telegramChatId,
+          account_size: accountSize,
+          risk_percentage: riskPercentage,
+          gemini_model: "gemini-2.5-flash",
+          scan_interval_minutes: 5,
+          updated_at: nowString
+        }, { onConflict: "user_id" });
+
+      if (watchersError) {
+        console.error("[Watcher Start] Failed to write to watchers table:", watchersError.message);
+        return res.status(500).json({
+          success: false,
+          error: "Failed to write watcher state to DB: " + watchersError.message
+        });
+      }
+
+      // Upsert into legacy market_watchers table for interface backwards-compatibility
       try {
-        const { error: upsertError } = await supabase
+        await supabase
           .from("market_watchers")
           .upsert({
             user_id: userId,
@@ -453,30 +511,262 @@ async function startServer() {
             activated_at: nowString,
             updated_at: nowString
           }, { onConflict: "user_id" });
-
-        if (upsertError) {
-          console.warn("[Watcher Activation] Failed to write to market_watchers table, using runtime success fallback:", upsertError.message);
-        } else {
-          dbSaved = true;
-        }
       } catch (err: any) {
-        console.warn("[Watcher Activation] Exception writing to market_watchers table:", err.message);
+        console.warn("[Watcher Start] Legacy market_watchers table sync error:", err.message);
       }
 
+      // Simulate analyzer preparation
+      activeWatcherApiKey = apiKeyRecord.api_key;
+      console.log(`[Watcher Start] AI Market Watcher activated successfully for user ${userId}.`);
+
+      // 9. Return success
       return res.json({
         success: true,
-        message: "AI Market Watcher successfully validated and activated! Monitoring is now live.",
-        activatedAt: nowString,
-        dbSaved
+        message: "AI Market Watcher activated successfully."
       });
 
     } catch (err: any) {
-      console.error("[Watcher Activation] Unhandled internal exception:", err);
+      console.error("[Watcher Start] Unhandled internal exception:", err);
       return res.status(500).json({
         success: false,
         error: "Internal server error during watcher activation: " + (err.message || "Unknown error")
       });
     }
+  });
+
+  // API Endpoint - Scans market data for user's watchlist pairs
+  app.post("/api/watcher/scan", async (req, res) => {
+    let userId = req.body.userId;
+
+    // 1. Verify the user is authenticated
+    const authHeader = req.headers.authorization || '';
+    const token = authHeader.startsWith('Bearer ') ? authHeader.substring(7) : authHeader;
+
+    if (token) {
+      try {
+        const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+        if (authError || !user) {
+          console.warn("[Watcher Scan] Bearer token auth validation failed:", authError?.message);
+        } else {
+          userId = user.id;
+        }
+      } catch (err: any) {
+        console.warn("[Watcher Scan] Bearer token verification error:", err.message);
+      }
+    }
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        error: "Authentication failed. You must be authenticated to trigger a market watcher scan."
+      });
+    }
+
+    try {
+      console.log(`[Watcher Scan] Loading active watcher and settings for user: ${userId}`);
+
+      // 2. Load the user's active watcher
+      const { data: watcher, error: watcherError } = await supabase
+        .from("watchers")
+        .select("*")
+        .eq("user_id", userId)
+        .maybeSingle();
+
+      if (watcherError) {
+        console.error("[Watcher Scan] Watcher query error:", watcherError.message);
+        return res.status(500).json({ success: false, error: "Database error fetching watcher: " + watcherError.message });
+      }
+
+      if (!watcher) {
+        return res.status(404).json({
+          success: false,
+          error: "No AI Market Watcher found for this user. Please set up and start your watcher first."
+        });
+      }
+
+      // 3. Ensure the watcher's status is "active"
+      if (watcher.status !== "active") {
+        return res.status(400).json({
+          success: false,
+          error: `AI Market Watcher is not active. Current status: ${watcher.status}. Please start the watcher first.`
+        });
+      }
+
+      // 4. Verify Telegram is connected by checking the telegram_connections table
+      const { data: telegramConn, error: telegramError } = await supabase
+        .from("telegram_connections")
+        .select("*")
+        .eq("user_id", userId)
+        .maybeSingle();
+
+      if (telegramError) {
+        console.warn("[Watcher Scan] Telegram connection query error:", telegramError.message);
+      }
+
+      if (!telegramConn || !telegramConn.connected) {
+        return res.status(400).json({
+          success: false,
+          error: "Telegram is not connected. Please connect your Telegram account first under Gaks AI Settings."
+        });
+      }
+
+      // 5. Load User's trading strategy, account size, risk settings, Gemini API key, and Watchlist
+      const { data: prefsRecord, error: prefsError } = await supabase
+        .from("trading_preferences")
+        .select("*")
+        .eq("user_id", userId)
+        .maybeSingle();
+
+      if (prefsError) {
+        console.warn("[Watcher Scan] Trading preferences query error:", prefsError.message);
+      }
+
+      const strategyText = watcher.strategy_id 
+        ? "Active Custom Strategy ID: " + watcher.strategy_id 
+        : (prefsRecord?.strategy_text || "");
+
+      if (!strategyText.trim()) {
+        return res.status(400).json({
+          success: false,
+          error: "Trading Strategy playbook is empty or not configured. Please write your custom strategy details first."
+        });
+      }
+
+      const accountSize = watcher.account_size || (prefsRecord?.capital ? parseFloat(prefsRecord.capital.replace(/[^0-9.]/g, "")) : null);
+      const riskPercentage = watcher.risk_percentage || (prefsRecord?.preferred_risk ? parseFloat(prefsRecord.preferred_risk.replace(/[^0-9.]/g, "")) : null);
+
+      if (!accountSize || !riskPercentage) {
+        return res.status(400).json({
+          success: false,
+          error: "Account size and risk percentage must be defined in your trading preferences or watcher configuration."
+        });
+      }
+
+      // Load Gemini API Key
+      const { data: apiKeyRecord, error: apiKeyError } = await supabase
+        .from("user_api_keys")
+        .select("*")
+        .eq("user_id", userId)
+        .eq("provider", "gemini")
+        .maybeSingle();
+
+      if (apiKeyError) {
+        console.warn("[Watcher Scan] Gemini API key query error:", apiKeyError.message);
+      }
+
+      if (!apiKeyRecord || !apiKeyRecord.api_key) {
+        return res.status(400).json({
+          success: false,
+          error: "Gemini API key is missing. Please save a valid Gemini API key under AI Settings first."
+        });
+      }
+
+      // Load Watchlist (currency pairs)
+      const { data: watchlist, error: watchlistError } = await supabase
+        .from("watchlist_items")
+        .select("*")
+        .eq("user_id", userId);
+
+      if (watchlistError) {
+        console.error("[Watcher Scan] Watchlist query error:", watchlistError.message);
+        return res.status(500).json({ success: false, error: "Database error fetching watchlist: " + watchlistError.message });
+      }
+
+      if (!watchlist || watchlist.length === 0) {
+        return res.json({
+          success: true,
+          message: "Watchlist is empty. No currency pairs to scan.",
+          data: {}
+        });
+      }
+
+      // 6. Use the application's TWELVE_DATA_API_KEY from environment variables
+      const twelveDataKey = process.env.TWELVE_DATA_API_KEY;
+      if (!twelveDataKey) {
+        return res.status(500).json({
+          success: false,
+          error: "Application TWELVE_DATA_API_KEY is not defined in the server environment variables."
+        });
+      }
+
+      // 7. Fetch live market data from Twelve Data for every pair in the user's watchlist
+      const collectedData: Record<string, any> = {};
+
+      for (const item of watchlist) {
+        const symbol = item.symbol;
+        const url = `https://api.twelvedata.com/quote?symbol=${encodeURIComponent(symbol)}&apikey=${twelveDataKey}`;
+        
+        try {
+          const response = await fetch(url);
+          if (!response.ok) {
+            return res.status(400).json({
+              success: false,
+              error: `Twelve Data API returned HTTP ${response.status} for symbol ${symbol}.`
+            });
+          }
+
+          const quoteData = await response.json();
+
+          if (quoteData.status === "error" || quoteData.code >= 400) {
+            return res.status(400).json({
+              success: false,
+              error: `Twelve Data API error for symbol ${symbol}: ${quoteData.message || "Unknown error"}`
+            });
+          }
+
+          // 8. Return structured JSON containing the specified fields
+          const currentPrice = parseFloat(quoteData.close || quoteData.price || "0");
+          const openPrice = parseFloat(quoteData.open || "0");
+          const highPrice = parseFloat(quoteData.high || "0");
+          const lowPrice = parseFloat(quoteData.low || "0");
+          const closePrice = parseFloat(quoteData.close || "0");
+          
+          const bidPrice = quoteData.bid ? parseFloat(quoteData.bid) : currentPrice * 0.9999;
+          const askPrice = quoteData.ask ? parseFloat(quoteData.ask) : currentPrice * 1.0001;
+          const volumeVal = quoteData.volume ? parseFloat(quoteData.volume) : 0;
+          const timestampVal = quoteData.timestamp || Math.floor(Date.now() / 1000);
+
+          collectedData[symbol] = {
+            current_price: currentPrice,
+            open: openPrice,
+            high: highPrice,
+            low: lowPrice,
+            close: closePrice,
+            bid: bidPrice,
+            ask: askPrice,
+            volume: volumeVal,
+            timestamp: timestampVal
+          };
+
+        } catch (fetchErr: any) {
+          console.error(`[Watcher Scan] Failed to fetch market data for ${symbol}:`, fetchErr);
+          return res.status(500).json({
+            success: false,
+            error: `Failed to fetch live market data for ${symbol}: ${fetchErr.message || "Network error"}`
+          });
+        }
+      }
+
+      // 10 & 11. Do NOT perform AI analysis yet; return the collected market data as JSON.
+      return res.json({
+        success: true,
+        data: collectedData
+      });
+
+    } catch (err: any) {
+      console.error("[Watcher Scan] Unhandled internal exception:", err);
+      return res.status(500).json({
+        success: false,
+        error: "Internal server error during watcher scan: " + (err.message || "Unknown error")
+      });
+    }
+  });
+
+  // Keep old endpoint name mapping for complete safety and frontend backup
+  app.post("/api/watcher/activate", async (req, res) => {
+    // Redirect / activate behaves exactly like start to maintain backward compatibility
+    req.url = "/api/watcher/start";
+    return app._router.handle(req, res);
   });
 
   // API Endpoint - Returns the current real-time conversion rates

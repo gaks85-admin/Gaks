@@ -297,4 +297,100 @@ CREATE POLICY "Allow server-side updates"
   WITH CHECK (true);
 
 
+-- =========================================================================
+-- WATCHERS TABLE MIGRATION
+-- =========================================================================
+
+-- Create the watchers table representing each user's AI Market Watcher
+CREATE TABLE IF NOT EXISTS public.watchers (
+  -- Unique identifier for the watcher
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  
+  -- Reference to the owning user in Supabase auth
+  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL UNIQUE,
+  
+  -- The current operational status of the watcher (must be active, paused, or stopped)
+  status TEXT DEFAULT 'stopped' NOT NULL CONSTRAINT chk_watcher_status CHECK (status IN ('active', 'paused', 'stopped')),
+  
+  -- Optional reference to the active strategy playbook
+  strategy_id UUID,
+  
+  -- Telegram chat identifier for push notifications
+  telegram_chat_id TEXT,
+  
+  -- Capital sizing under management
+  account_size NUMERIC,
+  
+  -- Risk percentage per trade (e.g., 1.0 for 1%)
+  risk_percentage NUMERIC,
+  
+  -- Selected Gemini model for scanning and analysis
+  gemini_model TEXT,
+  
+  -- Frequency of scanning intervals in minutes
+  scan_interval_minutes INTEGER DEFAULT 5 NOT NULL,
+  
+  -- Timestamps for monitoring operations
+  last_scan_at TIMESTAMPTZ,
+  started_at TIMESTAMPTZ,
+  stopped_at TIMESTAMPTZ,
+  
+  -- Auditing and metadata timestamps
+  created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
+  updated_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
+);
+
+-- Enable Row Level Security (RLS) to protect user data privacy
+ALTER TABLE public.watchers ENABLE ROW LEVEL SECURITY;
+
+-- Policy to allow authenticated users to view only their own watcher record
+CREATE POLICY select_own_watcher ON public.watchers
+  FOR SELECT
+  TO authenticated
+  USING (auth.uid() = user_id);
+
+-- Policy to allow authenticated users to register their own watcher record
+CREATE POLICY insert_own_watcher ON public.watchers
+  FOR INSERT
+  TO authenticated
+  WITH CHECK (auth.uid() = user_id);
+
+-- Policy to allow authenticated users to modify their own watcher record
+CREATE POLICY update_own_watcher ON public.watchers
+  FOR UPDATE
+  TO authenticated
+  USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);
+
+-- Policy to allow authenticated users to delete their own watcher record
+CREATE POLICY delete_own_watcher ON public.watchers
+  FOR DELETE
+  TO authenticated
+  USING (auth.uid() = user_id);
+
+-- Performance optimization indexes for standard lookup queries
+CREATE INDEX IF NOT EXISTS idx_watchers_user_id ON public.watchers(user_id);
+CREATE INDEX IF NOT EXISTS idx_watchers_status ON public.watchers(status);
+
+-- Automatic update trigger for tracking the updated_at timestamp
+CREATE OR REPLACE FUNCTION public.handle_watchers_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE TRIGGER update_watchers_modtime
+  BEFORE UPDATE ON public.watchers
+  FOR EACH ROW
+  EXECUTE FUNCTION public.handle_watchers_updated_at();
+
+-- SQL Comment descriptions for schema and administration documentation
+COMMENT ON TABLE public.watchers IS 'Represents each user''s custom Gaks AI Market Watcher service configuration and operational status.';
+COMMENT ON COLUMN public.watchers.status IS 'Operational status restricted to active, paused, or stopped.';
+COMMENT ON COLUMN public.watchers.user_id IS 'Unique user reference with foreign key to auth.users, enforcing a single watcher per user constraint.';
+
+
+
 

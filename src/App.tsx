@@ -719,10 +719,11 @@ export default function App() {
       }
 
       // Call secure backend activation route
-      const response = await fetch('/api/watcher/activate', {
+      const response = await fetch('/api/watcher/start', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session?.access_token || ''}`
         },
         body: JSON.stringify({ userId: session.user.id })
       });
@@ -734,18 +735,6 @@ export default function App() {
         setWatcherErrorMessage(errMsg);
         triggerNotification(errMsg, "info");
         return;
-      }
-
-      // Activate Gemini background key in parallel to align architecture
-      const key = await getGeminiKey();
-      if (key) {
-        await fetch('/api/watcher/start', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({ apiKey: key })
-        }).catch(err => console.warn("Backend preparation error:", err));
       }
 
       setIsWatcherActive(true);
