@@ -58,6 +58,7 @@ export default async function handler(req: any, res: any) {
 
   let userId = req.body.userId;
   let selectedPair = req.body.selectedPair;
+  let selectedTimeframe = req.body.selectedTimeframe;
 
   // 1. Verify the user is authenticated (using authorization header)
   const authHeader = req.headers.authorization || '';
@@ -232,6 +233,7 @@ export default async function handler(req: any, res: any) {
         account_size: accountSize,
         risk_percentage: riskPercentage,
         selected_pair: selectedPair,
+        selected_timeframe: selectedTimeframe || 'H1',
         gemini_model: "gemini-2.5-flash",
         scan_interval_minutes: scanInterval,
         updated_at: nowString

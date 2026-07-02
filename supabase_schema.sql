@@ -327,6 +327,9 @@ CREATE TABLE IF NOT EXISTS public.watchers (
   -- The single selected trading pair to monitor
   selected_pair TEXT,
   
+  -- The selected timeframe for analysis
+  selected_timeframe TEXT,
+  
   -- Selected Gemini model for scanning and analysis
   gemini_model TEXT,
   

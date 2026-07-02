@@ -727,7 +727,8 @@ export default function App() {
         },
         body: JSON.stringify({ 
           userId: session.user.id,
-          selectedPair: symbolToAdd
+          selectedPair: symbolToAdd,
+          selectedTimeframe: timeframeToWatch
         })
       });
 
@@ -841,7 +842,7 @@ export default function App() {
     // Check if already in watchlist
     if (watchlist.some(w => w.symbol === cleanSymbol)) {
       triggerNotification(`${cleanSymbol} is already in your watchlist`, 'info');
-      setWatcherSearch('');
+      setWatcherSearch(cleanSymbol);
       return;
     }
 
@@ -868,7 +869,7 @@ export default function App() {
     const updatedWatchlist = [newPair];
     setWatchlist(updatedWatchlist);
     localStorage.setItem('gaks_watchlist', JSON.stringify(updatedWatchlist));
-    setWatcherSearch('');
+    setWatcherSearch(cleanSymbol);
     
     if (session?.user) {
       // First, delete old watchlist items to maintain only one
@@ -1635,16 +1636,18 @@ export default function App() {
 
                   {/* Activation Trigger */}
                   <button
+                    disabled={!watcherSearch.trim() || !watcherTimeframe}
                     onClick={() => {
-                      if (!watcherSearch.trim()) {
-                        triggerNotification('Please enter a valid asset symbol first.', 'info');
-                        return;
-                      }
+                      if (!watcherSearch.trim() || !watcherTimeframe) return;
                       startAiMarketWatcher(watcherSearch, watcherTimeframe);
                     }}
-                    className="w-full flex items-center justify-center gap-2 px-5 py-3.5 rounded-full bg-white text-xs font-bold text-black hover:bg-zinc-200 active:scale-[0.98] transition-all cursor-pointer shadow-sm font-display mt-2"
+                    className={`w-full flex items-center justify-center gap-2 px-5 py-3.5 rounded-full text-xs font-bold transition-all shadow-sm font-display mt-2 ${
+                      !watcherSearch.trim() || !watcherTimeframe
+                        ? 'bg-zinc-800 text-zinc-500 cursor-not-allowed opacity-70'
+                        : 'bg-white text-black hover:bg-zinc-200 active:scale-[0.98] cursor-pointer'
+                    }`}
                   >
-                    <Play className="w-3.5 h-3.5 fill-current text-zinc-950 stroke-zinc-950" />
+                    <Play className={`w-3.5 h-3.5 fill-current ${(!watcherSearch.trim() || !watcherTimeframe) ? 'text-zinc-500' : 'text-zinc-950 stroke-zinc-950'}`} />
                     <span>Activate Market Watcher</span>
                   </button>
                 </div>
@@ -1654,18 +1657,27 @@ export default function App() {
               <div className="space-y-2.5">
                 <span className="text-[11px] font-bold text-zinc-500 uppercase tracking-wider">Select Symbol to Configure:</span>
                 <div className="flex flex-wrap gap-2">
-                  {['EURUSD', 'GBPUSD', 'XAUUSD', 'BTCUSD', 'NAS100', 'US30'].map(symbol => (
-                    <button
-                      key={symbol}
-                      onClick={() => {
-                        setWatcherSearch(symbol);
-                        triggerNotification(`Selected ${symbol}. Choose a timeframe and press Activate.`, 'info');
-                      }}
-                      className="px-3.5 py-1.5 rounded-full text-xs font-semibold border border-zinc-900 bg-zinc-950/40 text-zinc-300 hover:text-white hover:border-zinc-800 transition-all cursor-pointer"
-                    >
-                      {symbol}
-                    </button>
-                  ))}
+                  {['EURUSD', 'GBPUSD', 'XAUUSD', 'BTCUSD', 'NAS100', 'US30'].map(symbol => {
+                    const isSelected = watcherSearch.trim().toUpperCase() === symbol;
+                    return (
+                      <button
+                        key={symbol}
+                        onClick={() => {
+                          setWatcherSearch(symbol);
+                          handleAddPair(symbol, watcherTimeframe);
+                          triggerNotification(`Selected ${symbol}. Choose a timeframe and press Activate.`, 'info');
+                        }}
+                        className={`px-3.5 py-1.5 rounded-full text-xs font-semibold border transition-all cursor-pointer flex items-center gap-1.5 ${
+                          isSelected
+                            ? 'border-white bg-white text-black'
+                            : 'border-zinc-900 bg-zinc-950/40 text-zinc-300 hover:text-white hover:border-zinc-800'
+                        }`}
+                      >
+                        {isSelected && <Check className="w-3.5 h-3.5" />}
+                        {symbol}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 
