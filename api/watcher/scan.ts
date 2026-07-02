@@ -184,22 +184,12 @@ export default async function handler(req: any, res: any) {
       });
     }
 
-    // Load Watchlist (currency pairs)
-    const { data: watchlist, error: watchlistError } = await supabase
-      .from("watchlist_items")
-      .select("*")
-      .eq("user_id", userId);
-
-    if (watchlistError) {
-      console.error("[Watcher Scan] Watchlist query error:", watchlistError.message);
-      return res.status(500).json({ success: false, error: "Database error fetching watchlist: " + watchlistError.message });
-    }
-
-    if (!watchlist || watchlist.length === 0) {
-      return res.json({
-        success: true,
-        message: "Watchlist is empty. No currency pairs to scan.",
-        data: {}
+    // Check for selected pair
+    const selectedPair = watcher.selected_pair;
+    if (!selectedPair) {
+      return res.status(400).json({
+        success: false,
+        error: "No trading pair is selected for monitoring. Please select a pair in the AI Market Watcher settings."
       });
     }
 
@@ -212,62 +202,60 @@ export default async function handler(req: any, res: any) {
       });
     }
 
-    // 7. Fetch live market data from Twelve Data for every pair in the user's watchlist
+    // 7. Fetch live market data from Twelve Data for the selected pair
     const collectedData: Record<string, any> = {};
 
-    for (const item of watchlist) {
-      const symbol = item.symbol;
-      const url = `https://api.twelvedata.com/quote?symbol=${encodeURIComponent(symbol)}&apikey=${twelveDataKey}`;
-      
-      try {
-        const response = await fetch(url);
-        if (!response.ok) {
-          return res.status(400).json({
-            success: false,
-            error: `Twelve Data API returned HTTP ${response.status} for symbol ${symbol}.`
-          });
-        }
-
-        const quoteData = await response.json();
-
-        if (quoteData.status === "error" || quoteData.code >= 400) {
-          return res.status(400).json({
-            success: false,
-            error: `Twelve Data API error for symbol ${symbol}: ${quoteData.message || "Unknown error"}`
-          });
-        }
-
-        // 8. Return structured JSON containing the specified fields
-        const currentPrice = parseFloat(quoteData.close || quoteData.price || "0");
-        const openPrice = parseFloat(quoteData.open || "0");
-        const highPrice = parseFloat(quoteData.high || "0");
-        const lowPrice = parseFloat(quoteData.low || "0");
-        const closePrice = parseFloat(quoteData.close || "0");
-        
-        const bidPrice = quoteData.bid ? parseFloat(quoteData.bid) : currentPrice * 0.9999;
-        const askPrice = quoteData.ask ? parseFloat(quoteData.ask) : currentPrice * 1.0001;
-        const volumeVal = quoteData.volume ? parseFloat(quoteData.volume) : 0;
-        const timestampVal = quoteData.timestamp || Math.floor(Date.now() / 1000);
-
-        collectedData[symbol] = {
-          current_price: currentPrice,
-          open: openPrice,
-          high: highPrice,
-          low: lowPrice,
-          close: closePrice,
-          bid: bidPrice,
-          ask: askPrice,
-          volume: volumeVal,
-          timestamp: timestampVal
-        };
-
-      } catch (fetchErr: any) {
-        console.error(`[Watcher Scan] Failed to fetch market data for ${symbol}:`, fetchErr);
-        return res.status(500).json({
+    const symbol = selectedPair;
+    const url = `https://api.twelvedata.com/quote?symbol=${encodeURIComponent(symbol)}&apikey=${twelveDataKey}`;
+    
+    try {
+      const response = await fetch(url);
+      if (!response.ok) {
+        return res.status(400).json({
           success: false,
-          error: `Failed to fetch live market data for ${symbol}: ${fetchErr.message || "Network error"}`
+          error: `Twelve Data API returned HTTP ${response.status} for symbol ${symbol}.`
         });
       }
+
+      const quoteData = await response.json();
+
+      if (quoteData.status === "error" || quoteData.code >= 400) {
+        return res.status(400).json({
+          success: false,
+          error: `Twelve Data API error for symbol ${symbol}: ${quoteData.message || "Unknown error"}`
+        });
+      }
+
+      // 8. Return structured JSON containing the specified fields
+      const currentPrice = parseFloat(quoteData.close || quoteData.price || "0");
+      const openPrice = parseFloat(quoteData.open || "0");
+      const highPrice = parseFloat(quoteData.high || "0");
+      const lowPrice = parseFloat(quoteData.low || "0");
+      const closePrice = parseFloat(quoteData.close || "0");
+      
+      const bidPrice = quoteData.bid ? parseFloat(quoteData.bid) : currentPrice * 0.9999;
+      const askPrice = quoteData.ask ? parseFloat(quoteData.ask) : currentPrice * 1.0001;
+      const volumeVal = quoteData.volume ? parseFloat(quoteData.volume) : 0;
+      const timestampVal = quoteData.timestamp || Math.floor(Date.now() / 1000);
+
+      collectedData[symbol] = {
+        current_price: currentPrice,
+        open: openPrice,
+        high: highPrice,
+        low: lowPrice,
+        close: closePrice,
+        bid: bidPrice,
+        ask: askPrice,
+        volume: volumeVal,
+        timestamp: timestampVal
+      };
+
+    } catch (fetchErr: any) {
+      console.error(`[Watcher Scan] Failed to fetch market data for ${symbol}:`, fetchErr);
+      return res.status(500).json({
+        success: false,
+        error: `Failed to fetch live market data for ${symbol}: ${fetchErr.message || "Network error"}`
+      });
     }
 
     // 10 & 11. Perform AI analysis with Gemini

@@ -324,6 +324,9 @@ CREATE TABLE IF NOT EXISTS public.watchers (
   -- Risk percentage per trade (e.g., 1.0 for 1%)
   risk_percentage NUMERIC,
   
+  -- The single selected trading pair to monitor
+  selected_pair TEXT,
+  
   -- Selected Gemini model for scanning and analysis
   gemini_model TEXT,
   

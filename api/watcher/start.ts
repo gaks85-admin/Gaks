@@ -57,6 +57,7 @@ export default async function handler(req: any, res: any) {
   }
 
   let userId = req.body.userId;
+  let selectedPair = req.body.selectedPair;
 
   // 1. Verify the user is authenticated (using authorization header)
   const authHeader = req.headers.authorization || '';
@@ -80,6 +81,28 @@ export default async function handler(req: any, res: any) {
       success: false,
       error: "Authentication failed. You must be authenticated to start the AI Market Watcher."
     });
+  }
+  
+  if (!selectedPair) {
+    // If it wasn't passed in the request body, try fetching from watchlist
+    const { data: watchlist } = await supabase
+      .from("watchlist_items")
+      .select("symbol")
+      .eq("user_id", userId);
+    
+    if (watchlist && watchlist.length === 1) {
+      selectedPair = watchlist[0].symbol;
+    } else if (watchlist && watchlist.length > 1) {
+      return res.status(400).json({
+        success: false,
+        error: "Free plan only supports monitoring a single trading pair. Please remove extra pairs from your watchlist."
+      });
+    } else {
+      return res.status(400).json({
+        success: false,
+        error: "Please select a trading pair to monitor before activating the Market Watcher."
+      });
+    }
   }
 
   let telegramChatId: string | null = null;
@@ -172,17 +195,8 @@ export default async function handler(req: any, res: any) {
     }
     
     // Fetch user's watchlist to include in the Telegram message
-    const { data: watchlist, error: watchlistError } = await supabase
-      .from("watchlist_items")
-      .select("symbol")
-      .eq("user_id", userId);
-      
-    if (watchlistError) {
-      console.warn("[Watcher Start] Watchlist query error:", watchlistError.message);
-    }
-    const pairsMonitored = (watchlist && watchlist.length > 0) 
-      ? watchlist.map(w => w.symbol).join(", ") 
-      : "None";
+    // (Deprecated: Now we just use selectedPair)
+    const pairsMonitored = selectedPair;
 
     // 8. Requirements met! Create or update the user's watcher record
     const nowString = new Date().toISOString();
@@ -217,6 +231,7 @@ export default async function handler(req: any, res: any) {
         telegram_chat_id: telegramChatId,
         account_size: accountSize,
         risk_percentage: riskPercentage,
+        selected_pair: selectedPair,
         gemini_model: "gemini-2.5-flash",
         scan_interval_minutes: scanInterval,
         updated_at: nowString

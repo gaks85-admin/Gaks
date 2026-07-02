@@ -725,7 +725,10 @@ export default function App() {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${session?.access_token || ''}`
         },
-        body: JSON.stringify({ userId: session.user.id })
+        body: JSON.stringify({ 
+          userId: session.user.id,
+          selectedPair: symbolToAdd
+        })
       });
 
       const contentType = response.headers.get("content-type");
@@ -862,13 +865,16 @@ export default function App() {
       timeframe: timeframeToWatch
     };
 
-    const updatedWatchlist = [...watchlist, newPair];
+    const updatedWatchlist = [newPair];
     setWatchlist(updatedWatchlist);
     localStorage.setItem('gaks_watchlist', JSON.stringify(updatedWatchlist));
     setWatcherSearch('');
     
     if (session?.user) {
-      addWatchlistItemToSupabase(newPair, session.user.id);
+      // First, delete old watchlist items to maintain only one
+      supabase.from('watchlist_items').delete().eq('user_id', session.user.id).then(() => {
+        addWatchlistItemToSupabase(newPair, session.user.id);
+      });
     }
     
     triggerNotification(`${cleanSymbol} added to watchlist!`);
@@ -1672,16 +1678,16 @@ export default function App() {
                       <Search className="w-5 h-5 text-zinc-400 stroke-[1.8]" />
                     </div>
                     <div className="space-y-1.5 max-w-[240px]">
-                      <h3 className="text-sm font-bold text-white">Your watchlist is empty</h3>
+                      <h3 className="text-sm font-bold text-white">No pair selected</h3>
                       <p className="text-[11px] text-zinc-500 leading-relaxed">
-                        Add a symbol above to start tracking live prices, spread, volatility and AI confidence.
+                        Select a symbol above to configure the Market Watcher.
                       </p>
                     </div>
                   </div>
                 ) : (
                   /* Watchlisted symbols cards deck */
                   <div className="space-y-3">
-                    <h4 className="text-xs font-bold uppercase tracking-wider text-zinc-500 mb-1">Your Tracking Watchlist ({watchlist.length})</h4>
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-zinc-500 mb-1">Monitored Pair</h4>
                     {watchlist.map(pair => {
                       const isBullish = pair.direction === 'Bullish';
                       const isBearish = pair.direction === 'Bearish';
