@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { GoogleGenAI, Type } from "@google/genai";
 
 const SUPABASE_URL = process.env.VITE_SUPABASE_URL || "https://wkujrqmxivljnuvumfau.supabase.co";
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || "sb_publishable_BheqR2OkNYKqT7bj8xThWA_gGG2hcjf";
@@ -9,6 +10,38 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
     autoRefreshToken: false
   }
 });
+
+async function sendTelegramMessage(chatId: string | number, text: string): Promise<boolean> {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) {
+    console.warn("TELEGRAM_BOT_TOKEN is not defined in environment variables.");
+    return false;
+  }
+
+  const url = `https://api.telegram.org/bot${token}/sendMessage`;
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text: text,
+        parse_mode: "Markdown"
+      })
+    });
+
+    if (!response.ok) {
+      console.error(`Telegram sendMessage failed with status ${response.status}:`, await response.text());
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.error("Error sending Telegram message:", err);
+    return false;
+  }
+}
 
 export default async function handler(req: any, res: any) {
   // CORS configuration
@@ -91,7 +124,9 @@ export default async function handler(req: any, res: any) {
       console.warn("[Watcher Scan] Telegram connection query error:", telegramError.message);
     }
 
-    if (!telegramConn || !telegramConn.connected) {
+    const telegramChatId = telegramConn?.telegram_chat_id;
+
+    if (!telegramConn || !telegramConn.connected || !telegramChatId) {
       return res.status(400).json({
         success: false,
         error: "Telegram is not connected. Please connect your Telegram account first under Gaks AI Settings."
@@ -235,10 +270,91 @@ export default async function handler(req: any, res: any) {
       }
     }
 
-    // 10 & 11. Do NOT perform AI analysis yet; return the collected market data as JSON.
+    // 10 & 11. Perform AI analysis with Gemini
+    const ai = new GoogleGenAI({ apiKey: apiKeyRecord.api_key });
+
+    const promptText = `
+You are an expert AI trading assistant.
+Analyze the following live market data against the user's trading strategy.
+Return a structured JSON list of trading signals. Only generate a signal if the setup strongly matches the strategy.
+If no valid setups are found, return an empty array for signals.
+
+User's Trading Strategy:
+${strategyText}
+
+Account Size: $${accountSize}
+Risk Percentage per trade: ${riskPercentage}%
+
+Live Market Data (Twelve Data):
+${JSON.stringify(collectedData, null, 2)}
+`;
+
+    const aiResponse = await ai.models.generateContent({
+      model: "gemini-3.5-flash",
+      contents: promptText,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            signals: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  pair: { type: Type.STRING, description: "The trading pair symbol (e.g., EUR/USD)" },
+                  direction: { type: Type.STRING, description: "BUY or SELL" },
+                  entryPrice: { type: Type.NUMBER, description: "Suggested entry price" },
+                  stopLoss: { type: Type.NUMBER, description: "Suggested stop loss price" },
+                  takeProfit: { type: Type.NUMBER, description: "Suggested take profit price" },
+                  riskRewardRatio: { type: Type.STRING, description: "Risk/Reward ratio (e.g., '1:2.5')" },
+                  confidenceScore: { type: Type.NUMBER, description: "Confidence score from 0 to 100" },
+                  aiReasoning: { type: Type.STRING, description: "Brief explanation of why this setup matches the strategy" },
+                },
+                required: ["pair", "direction", "entryPrice", "stopLoss", "takeProfit", "riskRewardRatio", "confidenceScore", "aiReasoning"]
+              }
+            }
+          },
+          required: ["signals"]
+        }
+      }
+    });
+
+    const resultText = aiResponse.text;
+    if (!resultText) {
+      throw new Error("Gemini returned an empty response.");
+    }
+
+    const parsedResult = JSON.parse(resultText);
+    const signals = parsedResult.signals || [];
+    let telegramDelivered = false;
+
+    // Send Telegram notifications for any valid signals
+    if (signals.length > 0) {
+      for (const signal of signals) {
+        if (signal.confidenceScore >= 70) {
+          const alertMessage = `🚨 *Gaks AI Trading Alert* 🚨\n\n` +
+            `*Pair:* ${signal.pair}\n` +
+            `*Direction:* ${signal.direction === 'BUY' ? '🟢 BUY' : '🔴 SELL'}\n` +
+            `*Entry Price:* ${signal.entryPrice}\n` +
+            `*Stop Loss:* ${signal.stopLoss}\n` +
+            `*Take Profit:* ${signal.takeProfit}\n` +
+            `*Risk/Reward:* ${signal.riskRewardRatio}\n` +
+            `*Confidence:* ${signal.confidenceScore}/100\n\n` +
+            `*AI Reasoning:* ${signal.aiReasoning}\n\n` +
+            `*Time:* ${new Date().toUTCString()}`;
+
+          const success = await sendTelegramMessage(telegramChatId, alertMessage);
+          if (success) telegramDelivered = true;
+        }
+      }
+    }
+
     return res.json({
       success: true,
-      data: collectedData
+      data: collectedData,
+      signals: signals,
+      telegram_delivered: telegramDelivered
     });
 
   } catch (err: any) {
