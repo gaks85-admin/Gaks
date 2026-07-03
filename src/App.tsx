@@ -886,13 +886,6 @@ export default function App() {
     const cleanSymbol = symbolToAdd.trim().toUpperCase();
     if (!cleanSymbol) return;
 
-    // Check if already in watchlist
-    if (watchlist.some(w => w.symbol === cleanSymbol)) {
-      triggerNotification(`${cleanSymbol} is already in your watchlist`, 'info');
-      setWatcherSearch(cleanSymbol);
-      return;
-    }
-
     // Generate random realistic metrics for this symbol
     const basePrice = cleanSymbol.includes('JPY') ? 150 + Math.random() * 20 : 1 + Math.random() * 1.5;
     const isGold = cleanSymbol.includes('XAU') || cleanSymbol.includes('GOLD');
@@ -1592,27 +1585,6 @@ export default function App() {
                           </p>
                         </div>
                       </div>
-
-                      <button
-                        onClick={isWatcherActive ? stopAiMarketWatcher : startAiMarketWatcher}
-                        className={`px-5 py-2.5 rounded-full text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-sm ${
-                          isWatcherActive 
-                            ? 'bg-zinc-900 border border-zinc-800 text-zinc-300 hover:text-white hover:border-zinc-700' 
-                            : 'bg-white text-zinc-950 hover:bg-zinc-200 active:scale-95'
-                        }`}
-                      >
-                        {isWatcherActive ? (
-                          <>
-                            <X className="w-3.5 h-3.5" />
-                            <span>Stop Engine</span>
-                          </>
-                        ) : (
-                          <>
-                            <Play className="w-3.5 h-3.5 fill-current" />
-                            <span>Start Engine</span>
-                          </>
-                        )}
-                      </button>
                     </div>
                   </div>
                 )}
@@ -1678,21 +1650,48 @@ export default function App() {
                   </div>
 
                   {/* Activation Trigger */}
-                  <button
-                    disabled={!watcherSearch.trim() || !watcherTimeframe}
-                    onClick={() => {
-                      if (!watcherSearch.trim() || !watcherTimeframe) return;
-                      startAiMarketWatcher(watcherSearch, watcherTimeframe);
-                    }}
-                    className={`w-full flex items-center justify-center gap-2 px-5 py-3.5 rounded-full text-xs font-bold transition-all shadow-sm font-display mt-2 ${
-                      !watcherSearch.trim() || !watcherTimeframe
-                        ? 'bg-zinc-800 text-zinc-500 cursor-not-allowed opacity-70'
-                        : 'bg-white text-black hover:bg-zinc-200 active:scale-[0.98] cursor-pointer'
-                    }`}
-                  >
-                    <Play className={`w-3.5 h-3.5 fill-current ${(!watcherSearch.trim() || !watcherTimeframe) ? 'text-zinc-500' : 'text-zinc-950 stroke-zinc-950'}`} />
-                    <span>Activate Market Watcher</span>
-                  </button>
+                  {isWatcherActive ? (
+                    <div className="flex items-center gap-2 mt-2">
+                      <button
+                        onClick={stopAiMarketWatcher}
+                        className="flex-1 flex items-center justify-center gap-2 px-5 py-3.5 rounded-full text-xs font-bold transition-all shadow-sm font-display bg-zinc-900 border border-zinc-800 text-zinc-300 hover:text-white hover:border-zinc-700 cursor-pointer"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                        <span>Stop Watcher</span>
+                      </button>
+                      <button
+                        disabled={!watcherSearch.trim() || !watcherTimeframe}
+                        onClick={() => {
+                          if (!watcherSearch.trim() || !watcherTimeframe) return;
+                          startAiMarketWatcher(watcherSearch, watcherTimeframe);
+                        }}
+                        className={`flex-1 flex items-center justify-center gap-2 px-5 py-3.5 rounded-full text-xs font-bold transition-all shadow-sm font-display ${
+                          !watcherSearch.trim() || !watcherTimeframe
+                            ? 'bg-zinc-800 text-zinc-500 cursor-not-allowed opacity-70'
+                            : 'bg-white text-black hover:bg-zinc-200 active:scale-[0.98] cursor-pointer'
+                        }`}
+                      >
+                        <Play className={`w-3.5 h-3.5 fill-current ${(!watcherSearch.trim() || !watcherTimeframe) ? 'text-zinc-500' : 'text-zinc-950 stroke-zinc-950'}`} />
+                        <span>Update Watcher</span>
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      disabled={!watcherSearch.trim() || !watcherTimeframe}
+                      onClick={() => {
+                        if (!watcherSearch.trim() || !watcherTimeframe) return;
+                        startAiMarketWatcher(watcherSearch, watcherTimeframe);
+                      }}
+                      className={`w-full flex items-center justify-center gap-2 px-5 py-3.5 rounded-full text-xs font-bold transition-all shadow-sm font-display mt-2 ${
+                        !watcherSearch.trim() || !watcherTimeframe
+                          ? 'bg-zinc-800 text-zinc-500 cursor-not-allowed opacity-70'
+                          : 'bg-white text-black hover:bg-zinc-200 active:scale-[0.98] cursor-pointer'
+                      }`}
+                    >
+                      <Play className={`w-3.5 h-3.5 fill-current ${(!watcherSearch.trim() || !watcherTimeframe) ? 'text-zinc-500' : 'text-zinc-950 stroke-zinc-950'}`} />
+                      <span>Activate Market Watcher</span>
+                    </button>
+                  )}
                 </div>
               </div>
 
