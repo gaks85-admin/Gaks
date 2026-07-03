@@ -33,7 +33,7 @@ import {
   Send
 } from 'lucide-react';
 
-import { getTelegramConnection, initiateTelegramConnection, getTelegramDeepLink, simulateTelegramBotActivation } from './lib/telegram';
+import { getTelegramConnection, initiateTelegramConnection, getTelegramDeepLink } from './lib/telegram';
 
 
 // Interfaces
@@ -221,6 +221,9 @@ export default function App() {
           
           // Load Trading Preferences
           loadTradingPreferences(activeSession.user.id);
+          
+          // Load Watcher Status
+          loadWatcherStatus(activeSession.user.id);
         }
       } catch (err) {
         console.error('Error restoring session:', err);
@@ -255,6 +258,9 @@ export default function App() {
         
         // Load Trading Preferences
         loadTradingPreferences(currentSession.user.id);
+        
+        // Load Watcher Status
+        loadWatcherStatus(currentSession.user.id);
       } else {
         setSession(null);
         setUserProfile(null);
@@ -277,20 +283,19 @@ export default function App() {
       const pendingToken = localStorage.getItem('gaks_pending_telegram_token');
       const pendingUserId = localStorage.getItem('gaks_pending_telegram_user');
 
+      // Reload the state (this updates the UI instantly if the backend updated it)
+      await loadTelegramConnection(session.user.id, false);
+      
       if (pendingToken && pendingUserId === session.user.id) {
-        // Since they returned to the tab after clicking "Connect", we automatically
-        // simulate the bot activation in the DB / LocalStorage
-        const success = await simulateTelegramBotActivation(session.user.id, pendingToken);
-        if (success) {
+        // We need to check if it's connected now
+        const { data } = await getTelegramConnection(session.user.id);
+        if (data && data.connected) {
           localStorage.removeItem('gaks_pending_telegram_token');
           localStorage.removeItem('gaks_pending_telegram_user');
           triggerNotification("Telegram linked successfully!", "success");
           setTelegramSuccessMessage("Telegram Connected!");
         }
       }
-      
-      // Reload the state (this updates the UI instantly!)
-      await loadTelegramConnection(session.user.id, false);
     };
 
     // Initial check
@@ -557,6 +562,24 @@ export default function App() {
     }
   };
 
+  const loadWatcherStatus = async (userId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('watchers')
+        .select('status, selected_pair, selected_timeframe')
+        .eq('user_id', userId)
+        .maybeSingle();
+        
+      if (data) {
+        setIsWatcherActive(data.status === 'active');
+        if (data.selected_pair) setWatcherSearch(data.selected_pair);
+        if (data.selected_timeframe) setWatcherTimeframe(data.selected_timeframe);
+      }
+    } catch (err) {
+      console.error("Error loading watcher status:", err);
+    }
+  };
+
   const handleConnectTelegram = async () => {
     if (!session || !session.user) {
       setTelegramErrorMessage('You must be logged in to connect Telegram.');
@@ -694,6 +717,15 @@ export default function App() {
       return;
     }
 
+    const targetSymbol = symbolToAdd || watcherSearch;
+    const targetTimeframe = timeframeToWatch || watcherTimeframe;
+
+    if (!targetSymbol || !targetTimeframe) {
+      setWatcherErrorMessage("Please select a pair and timeframe before activating.");
+      triggerNotification("Selection required", "info");
+      return;
+    }
+
     try {
       // First ensure local changes are synced to Supabase (so backend checks pass)
       triggerNotification("Synchronizing local setup with Gaks AI...", "info");
@@ -727,8 +759,8 @@ export default function App() {
         },
         body: JSON.stringify({ 
           userId: session.user.id,
-          selectedPair: symbolToAdd,
-          selectedTimeframe: timeframeToWatch
+          selectedPair: targetSymbol,
+          selectedTimeframe: targetTimeframe
         })
       });
 
@@ -754,9 +786,7 @@ export default function App() {
       setWatcherErrorMessage(null);
       triggerNotification(result.message || "AI Market Watcher activated successfully!", "success");
 
-      if (symbolToAdd) {
-        handleAddPair(symbolToAdd, timeframeToWatch || 'H1');
-      }
+      handleAddPair(targetSymbol, targetTimeframe);
     } catch (err: any) {
       console.error("Exception in startAiMarketWatcher:", err);
       setWatcherErrorMessage(err.message || "An unexpected error occurred during activation.");
@@ -764,8 +794,25 @@ export default function App() {
     }
   };
 
-  const stopAiMarketWatcher = () => {
+  const stopAiMarketWatcher = async () => {
+    if (session?.user) {
+      try {
+        await supabase
+          .from('watchers')
+          .update({ status: 'inactive', updated_at: new Date().toISOString() })
+          .eq('user_id', session.user.id);
+          
+        await supabase
+          .from('watchlist_items')
+          .delete()
+          .eq('user_id', session.user.id);
+      } catch (err) {
+        console.error("Error stopping watcher:", err);
+      }
+    }
     setIsWatcherActive(false);
+    setWatchlist([]);
+    localStorage.removeItem('gaks_watchlist');
     triggerNotification("AI Market Watcher stopped.", "info");
   };
 
@@ -1597,11 +1644,7 @@ export default function App() {
                         onChange={(e) => setWatcherSearch(e.target.value)}
                         onKeyDown={(e) => {
                           if (e.key === 'Enter') {
-                            if (!watcherSearch.trim()) {
-                              triggerNotification('Please enter a valid asset symbol first.', 'info');
-                            } else {
-                              handleAddPair(watcherSearch, watcherTimeframe);
-                            }
+                            e.currentTarget.blur();
                           }
                         }}
                         placeholder="Enter symbol... e.g. EURUSD, GBPUSD, XAUUSD"
@@ -1664,7 +1707,6 @@ export default function App() {
                         key={symbol}
                         onClick={() => {
                           setWatcherSearch(symbol);
-                          handleAddPair(symbol, watcherTimeframe);
                           triggerNotification(`Selected ${symbol}. Choose a timeframe and press Activate.`, 'info');
                         }}
                         className={`px-3.5 py-1.5 rounded-full text-xs font-semibold border transition-all cursor-pointer flex items-center gap-1.5 ${
@@ -1683,7 +1725,7 @@ export default function App() {
 
               {/* Watchlist Display area */}
               <div className="space-y-4">
-                {watchlist.length === 0 ? (
+                {watchlist.length === 0 || !isWatcherActive ? (
                   /* Empty state - Matches Screenshot 11 exactly */
                   <div className="p-12 rounded-3xl border border-zinc-800 bg-[#0c0c0e]/40 flex flex-col items-center text-center space-y-4">
                     <div className="w-12 h-12 rounded-full bg-zinc-950/80 border border-zinc-900 flex items-center justify-center text-zinc-400">

@@ -297,6 +297,26 @@ async function startServer() {
           return res.json({ success: true, reason: "Already connected" });
         }
 
+        // Enforce 1-to-1 mapping: Check if this Telegram account is already linked to another Gaks AI user
+        const { data: existingLinkedAccount } = await supabase
+          .from("telegram_connections")
+          .select("user_id")
+          .eq("telegram_user_id", String(telegramUserId))
+          .neq("user_id", connection.user_id)
+          .maybeSingle();
+
+        if (existingLinkedAccount) {
+          await sendTelegramMessage(
+            chatId,
+            "❌ *Connection Failed*\n\nThis Telegram account is already linked to another Gaks AI user. Please use a different Telegram account or disconnect the other one."
+          );
+          return res.json({ success: true, reason: "Telegram account already linked to another user" });
+        }
+
+        // Invalidate the token to prevent reuse by generating a new one
+        const crypto = require('crypto');
+        const newToken = crypto.randomBytes(12).toString('hex');
+
         // Update database record
         const { error: updateError } = await supabase
           .from("telegram_connections")
@@ -305,6 +325,7 @@ async function startServer() {
             telegram_user_id: String(telegramUserId),
             telegram_username: telegramUsername,
             connected: true,
+            connection_token: newToken,
             connected_at: new Date().toISOString(),
             updated_at: new Date().toISOString()
           })
@@ -490,6 +511,8 @@ async function startServer() {
           risk_percentage: riskPercentage,
           gemini_model: "gemini-2.5-flash",
           scan_interval_minutes: 5,
+          selected_pair: req.body.selectedPair,
+          selected_timeframe: req.body.selectedTimeframe,
           updated_at: nowString
         }, { onConflict: "user_id" });
 
@@ -761,6 +784,7 @@ async function startServer() {
       });
     }
   });
+
 
   // Keep old endpoint name mapping for complete safety and frontend backup
   app.post("/api/watcher/activate", async (req, res) => {

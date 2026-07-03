@@ -42,11 +42,13 @@ function saveLocalConnection(userId: string, connection: TelegramConnection) {
     const connectionsStr = localStorage.getItem('gaks_telegram_connections') || '[]';
     const connections: TelegramConnection[] = JSON.parse(connectionsStr);
     const index = connections.findIndex(c => c.user_id === userId);
+    
     if (index !== -1) {
       connections[index] = connection;
     } else {
       connections.push(connection);
     }
+    
     localStorage.setItem('gaks_telegram_connections', JSON.stringify(connections));
   } catch (e) {
     console.error('Error saving local telegram connection', e);
@@ -83,7 +85,7 @@ export async function getTelegramConnection(userId: string): Promise<{ data: Tel
 export async function initiateTelegramConnection(userId: string): Promise<{ token: string | null; alreadyConnected: boolean; error: any }> {
   try {
     const { data: existingConnection, isFallback } = await getTelegramConnection(userId);
-
+    
     if (existingConnection && existingConnection.connected) {
       return { token: null, alreadyConnected: true, error: null };
     }
@@ -125,7 +127,7 @@ export async function initiateTelegramConnection(userId: string): Promise<{ toke
           updated_at: new Date().toISOString()
         })
         .eq('user_id', userId);
-
+        
       if (error) {
         // Fall back to local
         const nowStr = new Date().toISOString();
@@ -147,7 +149,7 @@ export async function initiateTelegramConnection(userId: string): Promise<{ toke
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString()
         });
-
+        
       if (error) {
         // Fall back to local
         const nowStr = new Date().toISOString();
@@ -167,7 +169,7 @@ export async function initiateTelegramConnection(userId: string): Promise<{ toke
         return { token, alreadyConnected: false, error: null };
       }
     }
-
+    
     return { token, alreadyConnected: false, error: null };
   } catch (err: any) {
     // Ultimate fallback to LocalStorage
@@ -202,54 +204,3 @@ export async function initiateTelegramConnection(userId: string): Promise<{ toke
 export function getTelegramDeepLink(token: string): string {
   return `https://t.me/Gaksai_bot?start=${token}`;
 }
-
-/**
- * Simulates a successful bot linking for demo/preview purposes.
- * In production, the real Telegram webhook/bot would do this on the backend.
- */
-export async function simulateTelegramBotActivation(userId: string, token: string): Promise<boolean> {
-  try {
-    const { data: existing, isFallback } = await getTelegramConnection(userId);
-    if (!existing) {
-      return false;
-    }
-
-    const nowStr = new Date().toISOString();
-    const updatedRecord: TelegramConnection = {
-      ...existing,
-      connected: true,
-      telegram_chat_id: '987654321',
-      telegram_user_id: '123456789',
-      telegram_username: 'GaksTrader',
-      connected_at: nowStr,
-      updated_at: nowStr
-    };
-
-    if (isFallback) {
-      saveLocalConnection(userId, updatedRecord);
-      return true;
-    }
-
-    // Try real Supabase
-    const { error } = await supabase
-      .from('telegram_connections')
-      .update({
-        connected: true,
-        telegram_chat_id: '987654321',
-        telegram_user_id: '123456789',
-        telegram_username: 'GaksTrader',
-        connected_at: nowStr,
-        updated_at: nowStr
-      })
-      .eq('user_id', userId);
-
-    if (error) {
-      // Fallback
-      saveLocalConnection(userId, updatedRecord);
-    }
-    return true;
-  } catch (err) {
-    return false;
-  }
-}
-
