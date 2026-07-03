@@ -89,13 +89,15 @@ export default async function handler(req: any, res: any) {
     }
 
     const results = [];
+    const skipped = [];
+    const errors = [];
     // Process each active watcher
     for (const watcher of watchers) {
       const userId = watcher.user_id;
       const selectedPair = watcher.selected_pair;
       const selectedTimeframe = watcher.selected_timeframe || 'H1';
       
-      if (!selectedPair) continue;
+      if (!selectedPair) { skipped.push({ userId, reason: "No selected pair" }); continue; }
 
       try {
         // Check Telegram connection
@@ -107,6 +109,7 @@ export default async function handler(req: any, res: any) {
 
         if (!telegramConn || !telegramConn.connected || !telegramConn.telegram_chat_id) {
           console.log(`[User ${userId}] Telegram not connected. Skipping.`);
+          skipped.push({ userId, reason: "Telegram not connected" });
           continue;
         }
         const telegramChatId = telegramConn.telegram_chat_id;
@@ -123,6 +126,7 @@ export default async function handler(req: any, res: any) {
 
         if (!strategyText.trim()) {
           console.log(`[User ${userId}] Strategy text empty. Skipping.`);
+          skipped.push({ userId, reason: "Strategy text empty" });
           continue;
         }
 
@@ -131,11 +135,13 @@ export default async function handler(req: any, res: any) {
 
         if (!accountSize || !riskPercentage) {
           console.log(`[User ${userId}] Account size or risk percentage not defined. Skipping.`);
+          skipped.push({ userId, reason: "Account size or risk percentage not defined" });
           continue;
         }
 
         if (!apiKeyRecord || !apiKeyRecord.api_key) {
           console.log(`[User ${userId}] Gemini API Key missing. Skipping.`);
+          skipped.push({ userId, reason: "Gemini API Key missing" });
           continue;
         }
 
@@ -266,11 +272,12 @@ ${JSON.stringify(marketData, null, 2)}`;
 
       } catch (err: any) {
         console.error(`[User ${userId}] Error processing watcher:`, err.message || err);
+        errors.push({ userId, error: err.message || "Unknown error" });
       }
     }
 
     console.log("[Market Watcher Cron] Cycle complete. Processed:", results.length);
-    return res.status(200).json({ success: true, processed: results.length, results });
+    return res.status(200).json({ success: true, processed: results.length, results, skipped, errors });
 
   } catch (err: any) {
     console.error("[Market Watcher Cron] Fatal Error:", err.message || err);
