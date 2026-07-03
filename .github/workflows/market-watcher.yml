@@ -1,0 +1,17 @@
+name: Market Watcher Cron
+
+on:
+  schedule:
+    - cron: '*/5 * * * *' # Run every 5 minutes
+  workflow_dispatch: # Allow manual triggering
+
+jobs:
+  run-market-watcher:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Market Watcher Serverless API
+        run: |
+          curl -X POST https://gaks-ai.vercel.app/api/cron/market-watcher \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            -H "Content-Type: application/json" \
+            --fail

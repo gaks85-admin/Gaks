@@ -1,6 +1,7 @@
 import express from "express";
 import path from "path";
 import { createClient } from "@supabase/supabase-js";
+import { GoogleGenAI, Type } from "@google/genai";
 
 interface ERResponse {
   result: string;
