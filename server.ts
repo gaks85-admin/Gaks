@@ -2,6 +2,7 @@ import express from "express";
 import path from "path";
 import { createClient } from "@supabase/supabase-js";
 import { GoogleGenAI, Type } from "@google/genai";
+import marketWatcherCronHandler from "./api/cron/market-watcher";
 
 interface ERResponse {
   result: string;
@@ -716,9 +717,28 @@ async function startServer() {
       // 7. Fetch live market data from Twelve Data for every pair in the user's watchlist
       const collectedData: Record<string, any> = {};
 
+      const convertSymbol = (sym: string): string => {
+        let mapped = sym.trim().toUpperCase();
+        if (mapped === 'NAS100') return 'IXIC';
+        if (mapped === 'US30') return 'DJI';
+        if (mapped === 'SPX500' || mapped === 'US500') return 'SPX';
+        
+        if (mapped.includes('/')) return mapped;
+        
+        if (mapped.length === 6 && /^[A-Z]{6}$/.test(mapped)) {
+          return `${mapped.slice(0, 3)}/${mapped.slice(3)}`;
+        }
+        if (mapped.endsWith('USD') && mapped.length > 3) return mapped.slice(0, -3) + '/USD';
+        if (mapped.endsWith('JPY') && mapped.length > 3) return mapped.slice(0, -3) + '/JPY';
+        if (mapped.endsWith('EUR') && mapped.length > 3) return mapped.slice(0, -3) + '/EUR';
+        if (mapped.endsWith('GBP') && mapped.length > 3) return mapped.slice(0, -3) + '/GBP';
+        return mapped;
+      };
+
       for (const item of watchlist) {
         const symbol = item.symbol;
-        const url = `https://api.twelvedata.com/quote?symbol=${encodeURIComponent(symbol)}&apikey=${twelveDataKey}`;
+        const mappedSymbol = convertSymbol(symbol);
+        const url = `https://api.twelvedata.com/quote?symbol=${encodeURIComponent(mappedSymbol)}&apikey=${twelveDataKey}`;
         
         try {
           const response = await fetch(url);
@@ -805,6 +825,9 @@ async function startServer() {
     });
   });
 
+  // Scheduled Cron execution for active market watchers
+  app.post("/api/cron/market-watcher", marketWatcherCronHandler);
+
   // Catch-all route to serve API list/health indicator since we are an API-only server now
   app.get("/", (req, res) => {
     res.json({
@@ -816,7 +839,8 @@ async function startServer() {
         "GET /api/telegram/webhook",
         "POST /api/telegram/webhook",
         "POST /api/watcher/start",
-        "GET /api/live-rates"
+        "GET /api/live-rates",
+        "POST /api/cron/market-watcher"
       ],
       timestamp: new Date().toISOString()
     });

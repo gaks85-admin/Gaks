@@ -125,14 +125,101 @@ serve(async (req) => {
         }
 
         // Fetch live market data from Twelve Data
+        const convertSymbol = (sym: string): string => {
+          let mapped = sym.trim().toUpperCase();
+          if (mapped === 'NAS100') return 'IXIC';
+          if (mapped === 'US30') return 'DJI';
+          if (mapped === 'SPX500' || mapped === 'US500') return 'SPX';
+          
+          if (mapped.includes('/')) return mapped;
+          
+          if (mapped.length === 6 && /^[A-Z]{6}$/.test(mapped)) {
+            return `${mapped.slice(0, 3)}/${mapped.slice(3)}`;
+          }
+          if (mapped.endsWith('USD') && mapped.length > 3) return mapped.slice(0, -3) + '/USD';
+          if (mapped.endsWith('JPY') && mapped.length > 3) return mapped.slice(0, -3) + '/JPY';
+          if (mapped.endsWith('EUR') && mapped.length > 3) return mapped.slice(0, -3) + '/EUR';
+          if (mapped.endsWith('GBP') && mapped.length > 3) return mapped.slice(0, -3) + '/GBP';
+          return mapped;
+        };
+
+        const mapTimeframeToInterval = (tf: string): string => {
+          const u = tf.toUpperCase();
+          if (u === 'M1' || u === '1M') return '1min';
+          if (u === 'M5' || u === '5M') return '5min';
+          if (u === 'M15' || u === '15M') return '15min';
+          if (u === 'M30' || u === '30M') return '30min';
+          if (u === 'H1' || u === '1H') return '1h';
+          if (u === 'H2' || u === '2H') return '2h';
+          if (u === 'H4' || u === '4H') return '4h';
+          if (u === 'D1' || u === 'D' || u === 'DAILY') return '1day';
+          if (u === 'W1' || u === 'W' || u === 'WEEKLY') return '1week';
+          return '1h';
+        };
+
         const symbol = selectedPair;
-        const url = `https://api.twelvedata.com/quote?symbol=${encodeURIComponent(symbol)}&apikey=${twelveDataKey}`
-        const tdRes = await fetch(url)
+        const mappedSymbol = convertSymbol(selectedPair);
+        const interval = mapTimeframeToInterval(selectedTimeframe);
         
-        if (!tdRes.ok) throw new Error(`TwelveData HTTP Error: ${tdRes.status}`);
-        
-        const quoteData = await tdRes.json();
-        if (quoteData.status === "error") throw new Error(`TwelveData Error: ${quoteData.message}`);
+        let quoteData: any = null;
+        let finalEndpoint = "time_series";
+        const timeSeriesUrl = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(mappedSymbol)}&interval=${interval}&outputsize=1&apikey=${twelveDataKey}`;
+        const maskedTimeSeriesUrl = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(mappedSymbol)}&interval=${interval}&outputsize=1&apikey=HIDDEN`;
+
+        console.log(`[Twelve Data Request Details]:`);
+        console.log(`- Watcher ID: ${watcher.id}`);
+        console.log(`- Selected Pair: ${selectedPair}`);
+        console.log(`- Converted Symbol: ${mappedSymbol}`);
+        console.log(`- Timeframe: ${selectedTimeframe}`);
+        console.log(`- Exact Endpoint: /time_series`);
+        console.log(`- Exact Symbol: ${mappedSymbol}`);
+        console.log(`- Exact Interval: ${interval}`);
+        console.log(`- Request URL: ${maskedTimeSeriesUrl}`);
+
+        try {
+          const tsRes = await fetch(timeSeriesUrl);
+          if (tsRes.ok) {
+            const tsData = await tsRes.json();
+            if (tsData.status === "ok" && tsData.values && tsData.values.length > 0) {
+              quoteData = tsData.values[0];
+              console.log(`[Twelve Data API] Successfully fetched candles from /time_series for ${mappedSymbol}`);
+            } else {
+              console.warn(`[Twelve Data API] /time_series returned status: ${tsData.status || "error"}, message: ${tsData.message || "Unknown error"}. Falling back to /quote.`);
+            }
+          } else {
+            console.warn(`[Twelve Data API] /time_series failed with HTTP ${tsRes.status}. Falling back to /quote.`);
+          }
+        } catch (tsErr: any) {
+          console.warn(`[Twelve Data API] /time_series error: ${tsErr.message || tsErr}. Falling back to /quote.`);
+        }
+
+        // Fallback to /quote if /time_series did not work
+        if (!quoteData) {
+          finalEndpoint = "quote";
+          const quoteUrl = `https://api.twelvedata.com/quote?symbol=${encodeURIComponent(mappedSymbol)}&apikey=${twelveDataKey}`;
+          const maskedQuoteUrl = `https://api.twelvedata.com/quote?symbol=${encodeURIComponent(mappedSymbol)}&apikey=HIDDEN`;
+          
+          console.log(`[Twelve Data Fallback Request Details]:`);
+          console.log(`- Watcher ID: ${watcher.id}`);
+          console.log(`- Selected Pair: ${selectedPair}`);
+          console.log(`- Converted Symbol: ${mappedSymbol}`);
+          console.log(`- Timeframe: ${selectedTimeframe}`);
+          console.log(`- Exact Endpoint: /quote`);
+          console.log(`- Exact Symbol: ${mappedSymbol}`);
+          console.log(`- Exact Interval: N/A (Daily Quote)`);
+          console.log(`- Request URL: ${maskedQuoteUrl}`);
+          
+          const qRes = await fetch(quoteUrl);
+          if (!qRes.ok) {
+            throw new Error(`TwelveData HTTP Error: ${qRes.status}`);
+          }
+          const qData = await qRes.json();
+          if (qData.status === "error") {
+            throw new Error(`TwelveData Error: ${qData.message}`);
+          }
+          quoteData = qData;
+          console.log(`[Twelve Data API] Successfully fetched quote from /quote for ${mappedSymbol}`);
+        }
 
         const currentPrice = parseFloat(quoteData.close || quoteData.price || "0");
         const marketData = {
