@@ -91,7 +91,9 @@ async function validateSymbolWithTwelveData(symbol: string, apiKey: string): Pro
       }
       return { isValid: true, matchedSymbol: data.data[0].symbol, instrumentType: data.data[0].instrument_type };
     }
-    return { isValid: false };
+    // No matching symbols found in Twelve Data database - warn and proceed with original symbol as fallback
+    console.warn(`[Symbol Search] No matching symbols found in search results for "${symbol}". Proceeding with original symbol.`);
+    return { isValid: true, matchedSymbol: symbol };
   } catch (err: any) {
     console.error(`[Symbol Search] Error validating symbol ${symbol}:`, err.message || err);
     return { isValid: true };
