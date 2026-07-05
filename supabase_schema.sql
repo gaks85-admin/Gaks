@@ -313,7 +313,7 @@ CREATE TABLE IF NOT EXISTS public.watchers (
   status TEXT DEFAULT 'stopped' NOT NULL CONSTRAINT chk_watcher_status CHECK (status IN ('active', 'paused', 'stopped')),
   
   -- Optional reference to the active strategy playbook
-  strategy_id UUID,
+  strategy_id TEXT DEFAULT 'default' NOT NULL,
   
   -- Telegram chat identifier for push notifications
   telegram_chat_id TEXT,

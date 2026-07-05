@@ -63,6 +63,34 @@ function extractActiveStrategyText(strategyText: string): string {
   return strategyText;
 }
 
+function extractActiveStrategyDetails(strategyText: string) {
+  const DEFAULT_STRATEGY_NAME = 'Gaks AI Default Strategy';
+
+  if (!strategyText || !strategyText.trim()) {
+    return { id: 'default', name: DEFAULT_STRATEGY_NAME, text: DEFAULT_STRATEGY_TEXT, isDefault: true };
+  }
+  const defaultTemplate = `• Entry conditions\n• Confirmation indicators\n• Exit & stop-loss logic\n• Risk management rules`;
+  if (strategyText.trim() === defaultTemplate.trim()) {
+    return { id: 'default', name: DEFAULT_STRATEGY_NAME, text: DEFAULT_STRATEGY_TEXT, isDefault: true };
+  }
+
+  try {
+    const parsed = JSON.parse(strategyText);
+    if (parsed && typeof parsed === 'object' && Array.isArray(parsed.strategies)) {
+      const active = parsed.strategies.find((s: any) => s.id === parsed.activeId) || parsed.strategies[0];
+      return {
+        id: active ? (active.id || 'default') : 'default',
+        name: active ? (active.name || DEFAULT_STRATEGY_NAME) : DEFAULT_STRATEGY_NAME,
+        text: active ? (active.text || DEFAULT_STRATEGY_TEXT) : DEFAULT_STRATEGY_TEXT,
+        isDefault: active ? !!active.isDefault : true
+      };
+    }
+  } catch (e) {
+    // Not JSON, return legacy custom
+  }
+  return { id: 'legacy-custom', name: 'Legacy Custom Strategy', text: strategyText, isDefault: false };
+}
+
 let pairsCache: Record<string, LivePairData> = {};
 let lastFetchTime = 0;
 const FETCH_COOLDOWN = 10 * 60 * 1000; // 10 minutes cache for external api
@@ -493,7 +521,8 @@ async function startServer() {
       }
 
       const strategyTextRaw = prefsRecord?.strategy_text || '';
-      const strategyText = extractActiveStrategyText(strategyTextRaw);
+      const strategyDetails = extractActiveStrategyDetails(strategyTextRaw);
+      const strategyText = strategyDetails.text;
 
       if (!strategyText.trim()) {
         return res.status(400).json({
@@ -541,6 +570,7 @@ async function startServer() {
         .upsert({
           user_id: userId,
           status: "active",
+          strategy_id: strategyDetails.id,
           started_at: nowString,
           telegram_chat_id: telegramChatId,
           account_size: accountSize,

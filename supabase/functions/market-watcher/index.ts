@@ -130,21 +130,22 @@ This is the default, institutional-grade multi-timeframe strategy designed for c
 - **Stop Loss Placement**: Always placed structurally beyond the swing high/low of the trigger candlestick or key institutional zone boundary.
 - **Daily Drawdown Cap**: If a user experiences 3 consecutive losses in a 24-hour cycle, trading must halt for that day to preserve capital and prevent emotional over-trading.`;
 
-    function extractActiveStrategyText(strategyText: string): string {
-      if (!strategyText || !strategyText.trim()) return DEFAULT_STRATEGY_TEXT;
+    function extractStrategyTextById(strategyTextRaw: string, strategyId?: string): string {
+      if (!strategyTextRaw || !strategyTextRaw.trim()) return DEFAULT_STRATEGY_TEXT;
       const defaultTemplate = `• Entry conditions\n• Confirmation indicators\n• Exit & stop-loss logic\n• Risk management rules`;
-      if (strategyText.trim() === defaultTemplate.trim()) return DEFAULT_STRATEGY_TEXT;
+      if (strategyTextRaw.trim() === defaultTemplate.trim()) return DEFAULT_STRATEGY_TEXT;
 
       try {
-        const parsed = JSON.parse(strategyText);
+        const parsed = JSON.parse(strategyTextRaw);
         if (parsed && typeof parsed === 'object' && Array.isArray(parsed.strategies)) {
-          const active = parsed.strategies.find((s: any) => s.id === parsed.activeId) || parsed.strategies[0];
+          const targetId = strategyId || parsed.activeId;
+          const active = parsed.strategies.find((s: any) => s.id === targetId) || parsed.strategies[0];
           return active ? (active.text || DEFAULT_STRATEGY_TEXT) : DEFAULT_STRATEGY_TEXT;
         }
       } catch (e) {
         // Not JSON, return as-is
       }
-      return strategyText;
+      return strategyTextRaw;
     }
 
     // 3. Load active watchers from the database
@@ -193,11 +194,7 @@ This is the default, institutional-grade multi-timeframe strategy designed for c
           supabase.from("user_api_keys").select("*").eq("user_id", userId).eq("provider", "gemini").maybeSingle()
         ]);
 
-        const rawStrategyText = watcher.strategy_id 
-          ? `Active Custom Strategy ID: ${watcher.strategy_id}`
-          : (prefsRecord?.strategy_text || "");
-
-        const strategyText = extractActiveStrategyText(rawStrategyText);
+        const strategyText = extractStrategyTextById(prefsRecord?.strategy_text || '', watcher.strategy_id);
 
         if (!strategyText.trim()) {
           console.log(`[User ${userId}] Strategy text empty. Skipping.`);

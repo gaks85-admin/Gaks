@@ -63,11 +63,11 @@ function extractActiveStrategyDetails(strategyText: string) {
   const DEFAULT_STRATEGY_NAME = 'Gaks AI Default Strategy';
 
   if (!strategyText || !strategyText.trim()) {
-    return { name: DEFAULT_STRATEGY_NAME, text: DEFAULT_STRATEGY_TEXT, isDefault: true };
+    return { id: 'default', name: DEFAULT_STRATEGY_NAME, text: DEFAULT_STRATEGY_TEXT, isDefault: true };
   }
   const defaultTemplate = `• Entry conditions\n• Confirmation indicators\n• Exit & stop-loss logic\n• Risk management rules`;
   if (strategyText.trim() === defaultTemplate.trim()) {
-    return { name: DEFAULT_STRATEGY_NAME, text: DEFAULT_STRATEGY_TEXT, isDefault: true };
+    return { id: 'default', name: DEFAULT_STRATEGY_NAME, text: DEFAULT_STRATEGY_TEXT, isDefault: true };
   }
 
   try {
@@ -75,6 +75,7 @@ function extractActiveStrategyDetails(strategyText: string) {
     if (parsed && typeof parsed === 'object' && Array.isArray(parsed.strategies)) {
       const active = parsed.strategies.find((s: any) => s.id === parsed.activeId) || parsed.strategies[0];
       return {
+        id: active ? (active.id || 'default') : 'default',
         name: active ? (active.name || DEFAULT_STRATEGY_NAME) : DEFAULT_STRATEGY_NAME,
         text: active ? (active.text || DEFAULT_STRATEGY_TEXT) : DEFAULT_STRATEGY_TEXT,
         isDefault: active ? !!active.isDefault : true
@@ -83,7 +84,7 @@ function extractActiveStrategyDetails(strategyText: string) {
   } catch (e) {
     // Not JSON, return legacy custom
   }
-  return { name: 'Legacy Custom Strategy', text: strategyText, isDefault: false };
+  return { id: 'legacy-custom', name: 'Legacy Custom Strategy', text: strategyText, isDefault: false };
 }
 
 export default async function handler(req: any, res: any) {
@@ -385,6 +386,7 @@ export default async function handler(req: any, res: any) {
       .upsert({
         user_id: userId,
         status: "active",
+        strategy_id: strategyDetails.id,
         started_at: nowString,
         telegram_chat_id: telegramChatId,
         account_size: accountSize,
