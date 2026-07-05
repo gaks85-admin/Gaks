@@ -208,26 +208,7 @@ export default function Auth({ onAuthSuccess, initialMode = 'login' }: AuthProps
   // Google OAuth flow simulation (for premium screenshots alignment)
   const handleGoogleSignIn = () => {
     setErrorMessage(null);
-    setSuccessMessage(null);
-    setIsLoading(true);
-    setTimeout(() => {
-      // Simulate Google auth login
-      const mockProfile = {
-        id: 'google-user-' + Math.floor(Math.random() * 1000000),
-        full_name: 'Gaks Trader',
-        email: 'trader@gaks.ai',
-        avatar_url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&h=100&fit=crop&crop=face',
-        subscription_plan: 'Premium Pro',
-        telegram_connected: false,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      };
-      
-      // Save simulation
-      localStorage.setItem('gaks_active_user', JSON.stringify(mockProfile));
-      onAuthSuccess({ user: mockProfile, access_token: 'google-token-abc' });
-      setIsLoading(false);
-    }, 1000);
+    setSuccessMessage('Please sign up manually, this feature is not ready.');
   };
 
   return (
