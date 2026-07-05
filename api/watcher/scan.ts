@@ -100,6 +100,40 @@ async function validateSymbolWithTwelveData(symbol: string, apiKey: string): Pro
   }
 }
 
+const DEFAULT_STRATEGY_TEXT = `# Gaks AI Default Strategy
+
+## 1. Overview
+This is the default, institutional-grade multi-timeframe strategy designed for capturing consistent intraday trends in liquid assets (Forex, major Indices, and BTC). It relies on price action structures, key liquidity zones, and volume confirmation to filter out noise.
+
+## 2. Core Methodology & Rules
+- **Timeframe Alignment**: Primary analysis on the 1-Hour (H1) chart for structural trend direction, refined on the 15-Minute (M15) chart for precise execution triggers.
+- **Support & Resistance / Liquidity**: Identify major daily/weekly highs, lows, and key order blocks. Signals are only generated when price tests these key institutional zones.
+- **Momentum & Volume Confirmation**: A trade entry requires a strong candlestick rejection pattern (pin bar, engulfing) accompanied by volume expansion or a clear breakout of local structure (Break of Structure - BOS).
+- **Trend Following**: Always prioritize trading in the direction of the dominant H1 market trend. Counter-trend setups require exceptional rejection patterns at critical daily boundaries.
+
+## 3. Risk & Money Management (Strict 1% Rule)
+- **Risk Per Trade**: Maximum of 1.0% of total account capital per trade setup.
+- **Risk-to-Reward Ratio (R:R)**: Minimum target of 1:2. Trailing stops may be employed to secure profits once the first target (1:1) is achieved.
+- **Stop Loss Placement**: Always placed structurally beyond the swing high/low of the trigger candlestick or key institutional zone boundary.
+- **Daily Drawdown Cap**: If a user experiences 3 consecutive losses in a 24-hour cycle, trading must halt for that day to preserve capital and prevent emotional over-trading.`;
+
+function extractActiveStrategyText(strategyText: string): string {
+  if (!strategyText || !strategyText.trim()) return DEFAULT_STRATEGY_TEXT;
+  const defaultTemplate = `• Entry conditions\n• Confirmation indicators\n• Exit & stop-loss logic\n• Risk management rules`;
+  if (strategyText.trim() === defaultTemplate.trim()) return DEFAULT_STRATEGY_TEXT;
+
+  try {
+    const parsed = JSON.parse(strategyText);
+    if (parsed && typeof parsed === 'object' && Array.isArray(parsed.strategies)) {
+      const active = parsed.strategies.find((s: any) => s.id === parsed.activeId) || parsed.strategies[0];
+      return active ? (active.text || DEFAULT_STRATEGY_TEXT) : DEFAULT_STRATEGY_TEXT;
+    }
+  } catch (e) {
+    // Not JSON, return as-is
+  }
+  return strategyText;
+}
+
 export default async function handler(req: any, res: any) {
   // CORS configuration
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -201,14 +235,16 @@ export default async function handler(req: any, res: any) {
       console.warn("[Watcher Scan] Trading preferences query error:", prefsError.message);
     }
 
-    const strategyText = watcher.strategy_id 
+    const rawStrategyText = watcher.strategy_id 
       ? "Active Custom Strategy ID: " + watcher.strategy_id 
       : (prefsRecord?.strategy_text || "");
+
+    const strategyText = extractActiveStrategyText(rawStrategyText);
 
     if (!strategyText.trim()) {
       return res.status(400).json({
         success: false,
-        error: "Trading Strategy playbook is empty or not configured. Please write your custom strategy details first."
+        error: "Active trading strategy is empty. Please configure your strategy playbook first."
       });
     }
 

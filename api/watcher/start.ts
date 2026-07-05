@@ -42,6 +42,50 @@ async function sendTelegramMessage(chatId: string | number, text: string): Promi
   }
 }
 
+const DEFAULT_STRATEGY_TEXT = `# Gaks AI Default Strategy
+
+## 1. Overview
+This is the default, institutional-grade multi-timeframe strategy designed for capturing consistent intraday trends in liquid assets (Forex, major Indices, and BTC). It relies on price action structures, key liquidity zones, and volume confirmation to filter out noise.
+
+## 2. Core Methodology & Rules
+- **Timeframe Alignment**: Primary analysis on the 1-Hour (H1) chart for structural trend direction, refined on the 15-Minute (M15) chart for precise execution triggers.
+- **Support & Resistance / Liquidity**: Identify major daily/weekly highs, lows, and key order blocks. Signals are only generated when price tests these key institutional zones.
+- **Momentum & Volume Confirmation**: A trade entry requires a strong candlestick rejection pattern (pin bar, engulfing) accompanied by volume expansion or a clear breakout of local structure (Break of Structure - BOS).
+- **Trend Following**: Always prioritize trading in the direction of the dominant H1 market trend. Counter-trend setups require exceptional rejection patterns at critical daily boundaries.
+
+## 3. Risk & Money Management (Strict 1% Rule)
+- **Risk Per Trade**: Maximum of 1.0% of total account capital per trade setup.
+- **Risk-to-Reward Ratio (R:R)**: Minimum target of 1:2. Trailing stops may be employed to secure profits once the first target (1:1) is achieved.
+- **Stop Loss Placement**: Always placed structurally beyond the swing high/low of the trigger candlestick or key institutional zone boundary.
+- **Daily Drawdown Cap**: If a user experiences 3 consecutive losses in a 24-hour cycle, trading must halt for that day to preserve capital and prevent emotional over-trading.`;
+
+function extractActiveStrategyDetails(strategyText: string) {
+  const DEFAULT_STRATEGY_NAME = 'Gaks AI Default Strategy';
+
+  if (!strategyText || !strategyText.trim()) {
+    return { name: DEFAULT_STRATEGY_NAME, text: DEFAULT_STRATEGY_TEXT, isDefault: true };
+  }
+  const defaultTemplate = `• Entry conditions\n• Confirmation indicators\n• Exit & stop-loss logic\n• Risk management rules`;
+  if (strategyText.trim() === defaultTemplate.trim()) {
+    return { name: DEFAULT_STRATEGY_NAME, text: DEFAULT_STRATEGY_TEXT, isDefault: true };
+  }
+
+  try {
+    const parsed = JSON.parse(strategyText);
+    if (parsed && typeof parsed === 'object' && Array.isArray(parsed.strategies)) {
+      const active = parsed.strategies.find((s: any) => s.id === parsed.activeId) || parsed.strategies[0];
+      return {
+        name: active ? (active.name || DEFAULT_STRATEGY_NAME) : DEFAULT_STRATEGY_NAME,
+        text: active ? (active.text || DEFAULT_STRATEGY_TEXT) : DEFAULT_STRATEGY_TEXT,
+        isDefault: active ? !!active.isDefault : true
+      };
+    }
+  } catch (e) {
+    // Not JSON, return legacy custom
+  }
+  return { name: 'Legacy Custom Strategy', text: strategyText, isDefault: false };
+}
+
 export default async function handler(req: any, res: any) {
   // CORS configuration
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -191,14 +235,14 @@ export default async function handler(req: any, res: any) {
       console.warn("[Watcher Start] Trading preferences query error:", prefsError.message);
     }
 
-    const defaultTemplate = `• Entry conditions\n• Confirmation indicators\n• Exit & stop-loss logic\n• Risk management rules`;
-    const strategyText = prefsRecord?.strategy_text || '';
+    const strategyDetails = extractActiveStrategyDetails(prefsRecord?.strategy_text || '');
+    const activeStrategyText = strategyDetails.text;
 
-    if (!strategyText.trim() || strategyText.trim() === defaultTemplate.trim()) {
-      await sendTelegramMessage(telegramChatId, "❌ *Market Watcher Activation Failed*\n\nReason: Trading Strategy playbook is empty or not configured. Please write your custom strategy details under the Strategy Playbook section first.");
+    if (!activeStrategyText.trim()) {
+      await sendTelegramMessage(telegramChatId, "❌ *Market Watcher Activation Failed*\n\nReason: Active trading strategy is empty. Please configure your strategy first.");
       return res.status(400).json({
         success: false,
-        error: "Trading Strategy playbook is empty or not configured. Please write your custom strategy details under the Strategy Playbook section first."
+        error: "Active trading strategy is empty. Please configure your strategy first."
       });
     }
 
@@ -380,7 +424,7 @@ export default async function handler(req: any, res: any) {
     const telegramSuccess = await sendTelegramMessage(telegramChatId, `✅ *Gaks AI Market Watcher Activated*\n\n` +
       `*Status:* Active 🟢\n` +
       `*Pairs Monitored:* ${pairsMonitored}\n` +
-      `*Strategy:* Custom Playbook\n` +
+      `*Strategy:* ${strategyDetails.name} (${strategyDetails.isDefault ? 'Default' : 'Custom'})\n` +
       `*Account Size:* $${accountSize || 'Not set'}\n` +
       `*Risk:* ${riskPercentage ? riskPercentage + '%' : 'Not set'}\n` +
       `*Scan Interval:* Every ${scanInterval} minutes\n\n` +

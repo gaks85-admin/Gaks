@@ -59,6 +59,87 @@ interface WatchlistItem {
   timeframe: string;
 }
 
+interface Strategy {
+  id: string;
+  name: string;
+  text: string;
+  isDefault: boolean;
+}
+
+const GAKS_DEFAULT_STRATEGY: Strategy = {
+  id: 'default',
+  name: 'Gaks AI Default Strategy',
+  isDefault: true,
+  text: `# Gaks AI Default Strategy
+
+## 1. Overview
+This is the default, institutional-grade multi-timeframe strategy designed for capturing consistent intraday trends in liquid assets (Forex, major Indices, and BTC). It relies on price action structures, key liquidity zones, and volume confirmation to filter out noise.
+
+## 2. Core Methodology & Rules
+- **Timeframe Alignment**: Primary analysis on the 1-Hour (H1) chart for structural trend direction, refined on the 15-Minute (M15) chart for precise execution triggers.
+- **Support & Resistance / Liquidity**: Identify major daily/weekly highs, lows, and key order blocks. Signals are only generated when price tests these key institutional zones.
+- **Momentum & Volume Confirmation**: A trade entry requires a strong candlestick rejection pattern (pin bar, engulfing) accompanied by volume expansion or a clear breakout of local structure (Break of Structure - BOS).
+- **Trend Following**: Always prioritize trading in the direction of the dominant H1 market trend. Counter-trend setups require exceptional rejection patterns at critical daily boundaries.
+
+## 3. Risk & Money Management (Strict 1% Rule)
+- **Risk Per Trade**: Maximum of 1.0% of total account capital per trade setup.
+- **Risk-to-Reward Ratio (R:R)**: Minimum target of 1:2. Trailing stops may be employed to secure profits once the first target (1:1) is achieved.
+- **Stop Loss Placement**: Always placed structurally beyond the swing high/low of the trigger candlestick or key institutional zone boundary.
+- **Daily Drawdown Cap**: If a user experiences 3 consecutive losses in a 24-hour cycle, trading must halt for that day to preserve capital and prevent emotional over-trading.`
+};
+
+const parseStrategyText = (rawText: string) => {
+  if (!rawText || rawText.trim() === '' || rawText.trim() === '• Entry conditions\n• Confirmation indicators\n• Exit & stop-loss logic\n• Risk management rules') {
+    return {
+      activeId: 'default',
+      strategies: [GAKS_DEFAULT_STRATEGY]
+    };
+  }
+
+  try {
+    const parsed = JSON.parse(rawText);
+    if (parsed && typeof parsed === 'object' && Array.isArray(parsed.strategies)) {
+      const hasDefault = parsed.strategies.some((s: any) => s.isDefault || s.id === 'default');
+      const list = hasDefault ? parsed.strategies : [GAKS_DEFAULT_STRATEGY, ...parsed.strategies];
+      
+      const updatedList = list.map((s: any) => {
+        if (s.id === 'default' || s.isDefault) {
+          return GAKS_DEFAULT_STRATEGY;
+        }
+        return s;
+      });
+
+      return {
+        activeId: parsed.activeId || 'default',
+        strategies: updatedList
+      };
+    }
+  } catch (e) {
+    const existingCustom: Strategy = {
+      id: 'legacy-custom',
+      name: 'My Custom Strategy',
+      isDefault: false,
+      text: rawText
+    };
+    return {
+      activeId: 'legacy-custom',
+      strategies: [GAKS_DEFAULT_STRATEGY, existingCustom]
+    };
+  }
+
+  return {
+    activeId: 'default',
+    strategies: [GAKS_DEFAULT_STRATEGY]
+  };
+};
+
+const serializeStrategies = (activeId: string, list: Strategy[]) => {
+  return JSON.stringify({
+    activeId,
+    strategies: list
+  });
+};
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<'home' | 'strategy' | 'watcher' | 'settings'>('home');
   const [currentTime, setCurrentTime] = useState<Date>(new Date('2026-06-28T15:01:00'));
@@ -99,9 +180,10 @@ export default function App() {
 
 
   // Strategy States
-  const [strategyText, setStrategyText] = useState<string>(
-    `• Entry conditions\n• Confirmation indicators\n• Exit & stop-loss logic\n• Risk management rules`
-  );
+  const [strategyText, setStrategyText] = useState<string>('');
+  const [strategies, setStrategies] = useState<Strategy[]>([GAKS_DEFAULT_STRATEGY]);
+  const [activeStrategyId, setActiveStrategyId] = useState<string>('default');
+  const [selectedStrategyId, setSelectedStrategyId] = useState<string>('default');
   const [capital, setCapital] = useState<string>('$1,000');
   const [customCapital, setCustomCapital] = useState<string>('');
   const [preferredRisk, setPreferredRisk] = useState<string>('1%');
@@ -322,7 +404,24 @@ export default function App() {
   useEffect(() => {
     try {
       const savedStrategy = localStorage.getItem('gaks_strategy_text');
-      if (savedStrategy) setStrategyText(savedStrategy);
+      if (savedStrategy) {
+        setStrategyText(savedStrategy);
+        const parsed = parseStrategyText(savedStrategy);
+        setStrategies(parsed.strategies);
+        setActiveStrategyId(parsed.activeId);
+        setSelectedStrategyId(parsed.activeId);
+      } else {
+        const defaultState = {
+          activeId: 'default',
+          strategies: [GAKS_DEFAULT_STRATEGY]
+        };
+        const serialized = JSON.stringify(defaultState);
+        setStrategyText(serialized);
+        setStrategies(defaultState.strategies);
+        setActiveStrategyId(defaultState.activeId);
+        setSelectedStrategyId(defaultState.activeId);
+        localStorage.setItem('gaks_strategy_text', serialized);
+      }
       
       const savedCapital = localStorage.getItem('gaks_capital');
       if (savedCapital) setCapital(savedCapital);
@@ -420,7 +519,9 @@ export default function App() {
 
   // Save Strategy Page Form
   const saveStrategyPlaybook = async () => {
-    localStorage.setItem('gaks_strategy_text', strategyText);
+    const serialized = serializeStrategies(activeStrategyId, strategies);
+    setStrategyText(serialized);
+    localStorage.setItem('gaks_strategy_text', serialized);
     
     if (session?.user) {
       try {
@@ -428,7 +529,7 @@ export default function App() {
           .from('trading_preferences')
           .upsert({
             user_id: session.user.id,
-            strategy_text: strategyText,
+            strategy_text: serialized,
             updated_at: new Date().toISOString()
           }, { onConflict: 'user_id' });
           
@@ -448,10 +549,152 @@ export default function App() {
   };
 
   const resetStrategyPlaybook = () => {
-    const defaultPlaybook = `• Entry conditions\n• Confirmation indicators\n• Exit & stop-loss logic\n• Risk management rules`;
-    setStrategyText(defaultPlaybook);
-    localStorage.setItem('gaks_strategy_text', defaultPlaybook);
-    triggerNotification("Playbook reset to template", "info");
+    if (selectedStrategyId === 'default') {
+      const updatedList = strategies.map(s => {
+        if (s.id === 'default') {
+          return { ...s, text: GAKS_DEFAULT_STRATEGY.text };
+        }
+        return s;
+      });
+      setStrategies(updatedList);
+      const serialized = serializeStrategies(activeStrategyId, updatedList);
+      setStrategyText(serialized);
+      localStorage.setItem('gaks_strategy_text', serialized);
+      triggerNotification("Default strategy restored to institutional playbook", "info");
+    } else {
+      const updatedList = strategies.map(s => {
+        if (s.id === selectedStrategyId) {
+          return { ...s, text: `• Entry conditions\n• Confirmation indicators\n• Exit & stop-loss logic\n• Risk management rules` };
+        }
+        return s;
+      });
+      setStrategies(updatedList);
+      const serialized = serializeStrategies(activeStrategyId, updatedList);
+      setStrategyText(serialized);
+      localStorage.setItem('gaks_strategy_text', serialized);
+      triggerNotification("Playbook reset to blank template", "info");
+    }
+  };
+
+  const handleSetActiveStrategy = async (id: string) => {
+    setActiveStrategyId(id);
+    const serialized = serializeStrategies(id, strategies);
+    setStrategyText(serialized);
+    localStorage.setItem('gaks_strategy_text', serialized);
+    
+    if (session?.user) {
+      try {
+        const { error } = await supabase
+          .from('trading_preferences')
+          .upsert({
+            user_id: session.user.id,
+            strategy_text: serialized,
+            updated_at: new Date().toISOString()
+          }, { onConflict: 'user_id' });
+          
+        if (error) {
+          console.error("Error activating strategy:", error.message);
+          triggerNotification("Activated locally. DB sync failed.", "info");
+        } else {
+          triggerNotification(`"${strategies.find(s => s.id === id)?.name}" is now active!`);
+        }
+      } catch (err: any) {
+        console.error("Exception activating strategy:", err);
+        triggerNotification("Activated locally.", "info");
+      }
+    } else {
+      triggerNotification(`"${strategies.find(s => s.id === id)?.name}" is now active!`);
+    }
+  };
+
+  const handleCreateCustomStrategy = () => {
+    const newId = crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2) + '-' + Date.now();
+    const newStrategy: Strategy = {
+      id: newId,
+      name: `Custom Strategy ${strategies.filter(s => !s.isDefault).length + 1}`,
+      isDefault: false,
+      text: `• Entry conditions\n• Confirmation indicators\n• Exit & stop-loss logic\n• Risk management rules`
+    };
+    const updatedList = [...strategies, newStrategy];
+    setStrategies(updatedList);
+    setSelectedStrategyId(newId);
+    
+    const serialized = serializeStrategies(activeStrategyId, updatedList);
+    setStrategyText(serialized);
+    localStorage.setItem('gaks_strategy_text', serialized);
+    triggerNotification("Custom strategy created!");
+  };
+
+  const handleDuplicateStrategy = (strategyToDuplicate: Strategy) => {
+    const newId = crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2) + '-' + Date.now();
+    const newStrategy: Strategy = {
+      id: newId,
+      name: `${strategyToDuplicate.name} (Copy)`,
+      isDefault: false,
+      text: strategyToDuplicate.text
+    };
+    const updatedList = [...strategies, newStrategy];
+    setStrategies(updatedList);
+    setSelectedStrategyId(newId);
+    
+    const serialized = serializeStrategies(activeStrategyId, updatedList);
+    setStrategyText(serialized);
+    localStorage.setItem('gaks_strategy_text', serialized);
+    triggerNotification(`Duplicated "${strategyToDuplicate.name}"!`);
+  };
+
+  const handleDeleteStrategy = (id: string) => {
+    if (id === 'default') {
+      triggerNotification("The default strategy cannot be deleted.", "info");
+      return;
+    }
+    
+    const updatedList = strategies.filter(s => s.id !== id);
+    let newActiveId = activeStrategyId;
+    if (activeStrategyId === id) {
+      newActiveId = 'default';
+    }
+    let newSelectedId = selectedStrategyId;
+    if (selectedStrategyId === id) {
+      newSelectedId = 'default';
+    }
+    
+    setStrategies(updatedList);
+    setActiveStrategyId(newActiveId);
+    setSelectedStrategyId(newSelectedId);
+    
+    const serialized = serializeStrategies(newActiveId, updatedList);
+    setStrategyText(serialized);
+    localStorage.setItem('gaks_strategy_text', serialized);
+    triggerNotification("Strategy deleted.");
+  };
+
+  const handleRenameStrategy = (newName: string) => {
+    if (selectedStrategyId === 'default') return;
+    const updatedList = strategies.map(s => {
+      if (s.id === selectedStrategyId) {
+        return { ...s, name: newName };
+      }
+      return s;
+    });
+    setStrategies(updatedList);
+    const serialized = serializeStrategies(activeStrategyId, updatedList);
+    setStrategyText(serialized);
+    localStorage.setItem('gaks_strategy_text', serialized);
+  };
+
+  const handleStrategyTextChange = (newText: string) => {
+    if (selectedStrategyId === 'default') return;
+    const updatedList = strategies.map(s => {
+      if (s.id === selectedStrategyId) {
+        return { ...s, text: newText };
+      }
+      return s;
+    });
+    setStrategies(updatedList);
+    const serialized = serializeStrategies(activeStrategyId, updatedList);
+    setStrategyText(serialized);
+    localStorage.setItem('gaks_strategy_text', serialized);
   };
 
   const syncStrategy = () => {
@@ -546,7 +789,13 @@ export default function App() {
       }
 
       if (data) {
-        if (data.strategy_text) setStrategyText(data.strategy_text);
+        if (data.strategy_text) {
+          setStrategyText(data.strategy_text);
+          const parsed = parseStrategyText(data.strategy_text);
+          setStrategies(parsed.strategies);
+          setActiveStrategyId(parsed.activeId);
+          setSelectedStrategyId(parsed.activeId);
+        }
         if (data.capital) setCapital(data.capital);
         if (data.custom_capital) setCustomCapital(data.custom_capital);
         if (data.preferred_risk) setPreferredRisk(data.preferred_risk);
@@ -1288,51 +1537,215 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Strategy Editor Card */}
-              <div className="rounded-3xl border border-zinc-800 bg-[#0c0c0e]/80 overflow-hidden flex flex-col">
-                <div className="px-5 py-3 border-b border-zinc-900 flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                  <span className="text-xs font-semibold text-zinc-400">Strategy Editor</span>
-                </div>
+              {/* Strategy Board & Editor */}
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                 
-                <div className="p-5 flex flex-col gap-4">
-                  <textarea
-                    value={strategyText}
-                    onChange={(e) => setStrategyText(e.target.value)}
-                    placeholder="Describe your trading strategy in detail..."
-                    className="w-full h-44 bg-zinc-950/60 border border-zinc-900 rounded-2xl p-4 text-xs font-medium text-zinc-300 placeholder-zinc-600 focus:outline-none focus:border-zinc-700 leading-relaxed resize-none font-sans"
-                  />
-
-                  {/* Card Actions */}
-                  <div className="flex justify-between items-center pt-1">
-                    <div className="flex gap-2">
-                      <button
-                        onClick={resetStrategyPlaybook}
-                        className="p-2 rounded-xl border border-zinc-800 hover:border-zinc-700 bg-zinc-950/40 text-zinc-400 hover:text-white transition-all flex items-center gap-1.5 text-xs font-medium cursor-pointer"
-                        title="Reset playbook"
-                      >
-                        <RotateCcw className="w-3.5 h-3.5" />
-                        <span>Reset</span>
-                      </button>
-                      <button
-                        onClick={syncStrategy}
-                        className="p-2 rounded-xl border border-zinc-800 hover:border-zinc-700 bg-zinc-950/40 text-zinc-400 hover:text-white transition-all flex items-center gap-1.5 text-xs font-medium cursor-pointer"
-                        title="Sync playbook"
-                      >
-                        <CloudLightning className="w-3.5 h-3.5" />
-                        <span>Sync</span>
-                      </button>
-                    </div>
-                    
+                {/* Left Panel: Strategies List */}
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-xs font-bold text-zinc-500 uppercase tracking-wider">My Playbooks</h3>
                     <button
-                      onClick={saveStrategyPlaybook}
-                      className="px-5 py-2 rounded-full bg-white text-xs font-bold text-black hover:bg-zinc-200 transition-all flex items-center gap-1.5 cursor-pointer"
+                      onClick={handleCreateCustomStrategy}
+                      className="px-3 py-1.5 rounded-xl border border-zinc-800 hover:border-zinc-700 bg-zinc-950/40 text-zinc-300 hover:text-white transition-all flex items-center gap-1 text-xs font-medium cursor-pointer"
                     >
-                      <Check className="w-3.5 h-3.5 stroke-[2.5]" />
-                      <span>Save Strategy</span>
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>New</span>
                     </button>
                   </div>
+
+                  <div className="space-y-3 max-h-[500px] overflow-y-auto pr-1">
+                    {strategies.map((strat) => {
+                      const isActive = strat.id === activeStrategyId;
+                      const isSelected = strat.id === selectedStrategyId;
+                      return (
+                        <div
+                          key={strat.id}
+                          onClick={() => setSelectedStrategyId(strat.id)}
+                          className={`p-4 rounded-2xl border transition-all cursor-pointer flex flex-col gap-3 ${
+                            isSelected
+                              ? 'border-emerald-500/50 bg-emerald-500/5'
+                              : 'border-zinc-900 bg-[#0c0c0e]/40 hover:border-zinc-800'
+                          }`}
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="space-y-1">
+                              <div className="font-semibold text-xs text-white truncate max-w-[150px]">
+                                {strat.name}
+                              </div>
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                {strat.isDefault ? (
+                                  <span className="px-1.5 py-0.5 text-[8px] font-bold tracking-wider uppercase bg-zinc-800 text-zinc-300 rounded">
+                                    Default
+                                  </span>
+                                ) : (
+                                  <span className="px-1.5 py-0.5 text-[8px] font-bold tracking-wider uppercase bg-zinc-900 text-emerald-400 border border-emerald-500/20 rounded">
+                                    Custom
+                                  </span>
+                                )}
+                                {isActive && (
+                                  <span className="px-1.5 py-0.5 text-[8px] font-bold tracking-wider uppercase bg-emerald-500/10 text-emerald-400 rounded flex items-center gap-1">
+                                    <span className="w-1 h-1 rounded-full bg-emerald-400 animate-pulse"></span>
+                                    Active
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-1 shrink-0">
+                              {/* Duplicate Action */}
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDuplicateStrategy(strat);
+                                }}
+                                className="p-1.5 rounded-lg border border-zinc-850 hover:border-zinc-700 bg-zinc-950/60 text-zinc-400 hover:text-white transition-all cursor-pointer"
+                                title="Duplicate strategy"
+                              >
+                                <Plus className="w-3 h-3" />
+                              </button>
+
+                              {/* Delete Action (only for non-default) */}
+                              {!strat.isDefault && (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDeleteStrategy(strat.id);
+                                  }}
+                                  className="p-1.5 rounded-lg border border-red-950/20 hover:border-red-900/40 bg-zinc-950/60 text-red-400 hover:text-red-300 transition-all cursor-pointer"
+                                  title="Delete strategy"
+                                >
+                                  <Trash2 className="w-3 h-3" />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Action Button inside card if not active */}
+                          {!isActive && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleSetActiveStrategy(strat.id);
+                              }}
+                              className="w-full py-1.5 rounded-xl border border-zinc-800 hover:border-zinc-700 bg-zinc-950/40 hover:bg-zinc-950 text-center text-[9px] font-bold uppercase tracking-wider text-zinc-400 hover:text-white transition-all cursor-pointer"
+                            >
+                              Activate Strategy
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
+
+                {/* Right Panel: Selected Strategy Editor */}
+                <div className="lg:col-span-2 space-y-4">
+                  {(() => {
+                    const selectedStrat = strategies.find(s => s.id === selectedStrategyId) || GAKS_DEFAULT_STRATEGY;
+                    return (
+                      <div className="rounded-3xl border border-zinc-800 bg-[#0c0c0e]/80 overflow-hidden flex flex-col">
+                        <div className="px-5 py-4 border-b border-zinc-900 flex flex-wrap items-center justify-between gap-3 bg-[#08080a]">
+                          <div className="flex items-center gap-2.5">
+                            <span className={`w-2 h-2 rounded-full ${selectedStrat.id === activeStrategyId ? 'bg-emerald-500 animate-pulse' : 'bg-zinc-600'}`}></span>
+                            
+                            {/* Rename input if custom, else static label */}
+                            {selectedStrat.isDefault ? (
+                              <span className="text-xs font-bold text-white uppercase tracking-wider">{selectedStrat.name}</span>
+                            ) : (
+                              <input
+                                type="text"
+                                value={selectedStrat.name}
+                                onChange={(e) => handleRenameStrategy(e.target.value)}
+                                className="bg-transparent border-b border-dashed border-zinc-850 hover:border-zinc-700 focus:border-emerald-500 focus:outline-none text-xs font-bold text-white uppercase tracking-wider pb-0.5"
+                                title="Click to rename"
+                                placeholder="Rename Strategy..."
+                              />
+                            )}
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            {selectedStrat.isDefault && (
+                              <span className="text-[10px] bg-zinc-900/60 border border-zinc-800 text-zinc-400 px-2.5 py-1 rounded-full font-semibold">
+                                Built-in Default
+                              </span>
+                            )}
+                            {selectedStrat.id === activeStrategyId ? (
+                              <span className="text-[10px] bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 px-2.5 py-1 rounded-full font-bold uppercase tracking-wider flex items-center gap-1.5">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                                Currently Active
+                              </span>
+                            ) : (
+                              <button
+                                onClick={() => handleSetActiveStrategy(selectedStrat.id)}
+                                className="px-3 py-1 text-[10px] bg-white text-black hover:bg-zinc-200 transition-all rounded-full font-bold uppercase tracking-wider cursor-pointer shadow-md"
+                              >
+                                Activate
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="p-5 flex flex-col gap-4">
+                          {selectedStrat.isDefault && (
+                            <div className="p-3.5 rounded-2xl bg-zinc-950/60 border border-zinc-900 text-zinc-400 text-xs leading-relaxed flex items-start gap-2.5">
+                              <Info className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
+                              <div>
+                                This is our institutional **Gaks AI Default Strategy**. It is optimized for the free-tier Twelve Data feeds. If you wish to customize these rules, click the **Duplicate** button to create your own editable playbook copy.
+                              </div>
+                            </div>
+                          )}
+
+                          <textarea
+                            value={selectedStrat.text}
+                            onChange={(e) => handleStrategyTextChange(e.target.value)}
+                            readOnly={selectedStrat.isDefault}
+                            placeholder="Describe your trading strategy in detail..."
+                            className={`w-full h-80 bg-zinc-950/60 border border-zinc-900 rounded-2xl p-4 text-xs font-medium leading-relaxed resize-none font-sans focus:outline-none ${
+                              selectedStrat.isDefault
+                                ? 'text-zinc-500 cursor-not-allowed border-zinc-950 bg-zinc-950/30'
+                                : 'text-zinc-300 focus:border-zinc-700'
+                            }`}
+                          />
+
+                          {/* Card Actions */}
+                          <div className="flex justify-between items-center pt-1">
+                            <div className="flex gap-2">
+                              {!selectedStrat.isDefault && (
+                                <button
+                                  onClick={resetStrategyPlaybook}
+                                  className="p-2 rounded-xl border border-zinc-800 hover:border-zinc-700 bg-zinc-950/40 text-zinc-400 hover:text-white transition-all flex items-center gap-1.5 text-xs font-medium cursor-pointer"
+                                  title="Reset playbook"
+                                >
+                                  <RotateCcw className="w-3.5 h-3.5" />
+                                  <span>Reset</span>
+                                </button>
+                              )}
+                              <button
+                                onClick={syncStrategy}
+                                className="p-2 rounded-xl border border-zinc-800 hover:border-zinc-700 bg-zinc-950/40 text-zinc-400 hover:text-white transition-all flex items-center gap-1.5 text-xs font-medium cursor-pointer"
+                                title="Sync playbook"
+                              >
+                                <CloudLightning className="w-3.5 h-3.5" />
+                                <span>Sync</span>
+                              </button>
+                            </div>
+
+                            {!selectedStrat.isDefault && (
+                              <button
+                                onClick={saveStrategyPlaybook}
+                                className="px-5 py-2 rounded-full bg-white text-xs font-bold text-black hover:bg-zinc-200 transition-all flex items-center gap-1.5 cursor-pointer"
+                              >
+                                <Check className="w-3.5 h-3.5 stroke-[2.5]" />
+                                <span>Save Changes</span>
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+
               </div>
 
               {/* Trading Preferences Card - Matches Screenshot 9 */}
