@@ -116,13 +116,13 @@ const parseStrategyText = (rawText: string) => {
     }
   } catch (e) {
     const existingCustom: Strategy = {
-      id: 'legacy-custom',
+      id: '11111111-1111-1111-1111-111111111111',
       name: 'My Custom Strategy',
       isDefault: false,
       text: rawText
     };
     return {
-      activeId: 'legacy-custom',
+      activeId: '11111111-1111-1111-1111-111111111111',
       strategies: [GAKS_DEFAULT_STRATEGY, existingCustom]
     };
   }

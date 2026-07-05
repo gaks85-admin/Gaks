@@ -132,8 +132,8 @@ function extractStrategyTextById(strategyTextRaw: string, strategyId?: string): 
         if (targetId === '00000000-0000-0000-0000-000000000000' || targetId === 'default') {
           return s.id === '00000000-0000-0000-0000-000000000000' || s.id === 'default' || s.isDefault;
         }
-        if (targetId === '11111111-1111-1111-1111-111111111111' || targetId === 'legacy-custom') {
-          return s.id === '11111111-1111-1111-1111-111111111111' || s.id === 'legacy-custom';
+        if (targetId === '11111111-1111-1111-1111-111111111111' || targetId === '11111111-1111-1111-1111-111111111111') {
+          return s.id === '11111111-1111-1111-1111-111111111111' || s.id === '11111111-1111-1111-1111-111111111111';
         }
         return s.id === targetId;
       }) || parsed.strategies[0];

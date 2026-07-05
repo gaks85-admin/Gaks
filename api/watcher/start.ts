@@ -85,7 +85,7 @@ function extractActiveStrategyDetails(strategyText: string) {
       let finalId = active ? active.id : DEFAULT_STRATEGY_UUID;
       if (finalId === 'default') {
         finalId = DEFAULT_STRATEGY_UUID;
-      } else if (finalId === 'legacy-custom') {
+      } else if (finalId === '11111111-1111-1111-1111-111111111111') {
         finalId = LEGACY_CUSTOM_STRATEGY_UUID;
       }
 
