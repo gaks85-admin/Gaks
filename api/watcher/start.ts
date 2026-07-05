@@ -199,6 +199,85 @@ export default async function handler(req: any, res: any) {
     // (Deprecated: Now we just use selectedPair)
     const pairsMonitored = selectedPair;
 
+    // Validate Symbol with Twelve Data before activating
+    const twelveDataKey = process.env.TWELVE_DATA_API_KEY;
+    if (!twelveDataKey) {
+      console.warn("[Watcher Start] Missing TWELVE_DATA_API_KEY. Skipping Twelve Data symbol validation.");
+    } else {
+      const convertSymbol = (sym: string): string => {
+        if (!sym) return sym;
+        const mapped = sym.toUpperCase().trim().replace('/', '');
+        
+        const commonCryptoCoins = ["BTC", "ETH", "SOL", "XRP", "ADA", "DOGE", "AVAX", "DOT", "LINK", "MATIC"];
+        const commonCryptoQuote = ["USD", "USDT", "BTC", "ETH", "EUR", "GBP", "FDUSD", "USDC"];
+        
+        for (const coin of commonCryptoCoins) {
+          if (mapped.startsWith(coin)) {
+            const suffix = mapped.slice(coin.length);
+            if (commonCryptoQuote.includes(suffix)) {
+              return `${coin}/${suffix}`;
+            }
+          }
+        }
+        
+        if (mapped.length === 6 && /^[A-Z]{6}$/.test(mapped)) {
+          return `${mapped.slice(0, 3)}/${mapped.slice(3)}`;
+        }
+        
+        if (mapped.endsWith('USD') && mapped.length > 3) return mapped.slice(0, -3) + '/USD';
+        if (mapped.endsWith('JPY') && mapped.length > 3) return mapped.slice(0, -3) + '/JPY';
+        if (mapped.endsWith('EUR') && mapped.length > 3) return mapped.slice(0, -3) + '/EUR';
+        if (mapped.endsWith('GBP') && mapped.length > 3) return mapped.slice(0, -3) + '/GBP';
+        return mapped;
+      };
+
+      const mappedSymbol = convertSymbol(selectedPair);
+      console.log(`[Watcher Start] Validating symbol "${mappedSymbol}" (converted from "${selectedPair}") against Twelve Data API...`);
+      
+      try {
+        const searchUrl = `https://api.twelvedata.com/symbol_search?symbol=${encodeURIComponent(mappedSymbol)}&apikey=${twelveDataKey}`;
+        const searchRes = await fetch(searchUrl);
+        if (searchRes.ok) {
+          const searchData = await searchRes.json();
+          if (searchData.status === "error") {
+            console.warn(`[Watcher Start] Symbol search API returned error: ${searchData.message}`);
+          } else if (searchData.data && Array.isArray(searchData.data)) {
+            const symbolUpper = mappedSymbol.toUpperCase().replace('/', '');
+            const hasMatch = searchData.data.some((item: any) => 
+              item.symbol.toUpperCase().replace('/', '') === symbolUpper
+            );
+            if (!hasMatch && searchData.data.length === 0) {
+              return res.status(400).json({
+                success: false,
+                error: `TwelveData HTTP Error: 404. The symbol "${selectedPair}" was not found or is invalid on Twelve Data. Please use standard tickers like EURUSD, BTCUSD, AAPL.`
+              });
+            }
+          }
+        }
+        
+        // Also perform a lightweight quote validation to be absolutely sure the symbol works
+        const quoteUrl = `https://api.twelvedata.com/quote?symbol=${encodeURIComponent(mappedSymbol)}&apikey=${twelveDataKey}`;
+        const quoteRes = await fetch(quoteUrl);
+        if (quoteRes.status === 404) {
+          return res.status(400).json({
+            success: false,
+            error: `TwelveData HTTP Error: 404. Symbol "${selectedPair}" is not recognized or not supported by Twelve Data. Please try another symbol.`
+          });
+        } else if (quoteRes.ok) {
+          const quoteData = await quoteRes.json();
+          if (quoteData.status === "error") {
+            return res.status(400).json({
+              success: false,
+              error: `TwelveData Error: ${quoteData.message || "Invalid symbol on Twelve Data."}`
+            });
+          }
+        }
+      } catch (validationErr: any) {
+        console.warn("[Watcher Start] Warning during Twelve Data symbol validation check:", validationErr.message || validationErr);
+        // Continue anyway if it's a transient network/fetch error to avoid blocking the user
+      }
+    }
+
     // 8. Requirements met! Create or update the user's watcher record
     const nowString = new Date().toISOString();
     
