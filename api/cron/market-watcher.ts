@@ -208,7 +208,8 @@ export default async function handler(req: any, res: any) {
 
         // Fetch live market data from Twelve Data
         const convertSymbol = (sym: string): string => {
-          let mapped = sym.trim().toUpperCase();
+          if (!sym) return "";
+          let mapped = sym.trim().toUpperCase().replace(/[-_\s]/g, '');
           if (mapped === 'NAS100') return 'IXIC';
           if (mapped === 'US30') return 'DJI';
           if (mapped === 'SPX500' || mapped === 'US500') return 'SPX';

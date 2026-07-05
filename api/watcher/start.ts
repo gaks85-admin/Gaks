@@ -206,7 +206,7 @@ export default async function handler(req: any, res: any) {
     } else {
       const convertSymbol = (sym: string): string => {
         if (!sym) return sym;
-        const mapped = sym.toUpperCase().trim().replace('/', '');
+        const mapped = sym.toUpperCase().trim().replace(/[-_\s/]/g, '');
         
         const commonCryptoCoins = ["BTC", "ETH", "SOL", "XRP", "ADA", "DOGE", "AVAX", "DOT", "LINK", "MATIC"];
         const commonCryptoQuote = ["USD", "USDT", "BTC", "ETH", "EUR", "GBP", "FDUSD", "USDC"];
