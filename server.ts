@@ -718,12 +718,24 @@ async function startServer() {
       const collectedData: Record<string, any> = {};
 
       const convertSymbol = (sym: string): string => {
-        let mapped = sym.trim().toUpperCase();
-        if (mapped === 'NAS100') return 'IXIC';
-        if (mapped === 'US30') return 'DJI';
-        if (mapped === 'SPX500' || mapped === 'US500') return 'SPX';
+        if (!sym) return "";
+        let mapped = sym.trim().toUpperCase().replace(/[-_\s/]/g, '');
         
-        if (mapped.includes('/')) return mapped;
+        // Symbol mapping layer for Twelve Data compatibility on free plans
+        const mappings: Record<string, string> = {
+          'EURUSD': 'EUR/USD',
+          'GBPUSD': 'GBP/USD',
+          'XAUUSD': 'XAU/USD',
+          'BTCUSD': 'BTC/USD',
+          'NAS100': 'QQQ',
+          'US30': 'DIA',
+          'SPX500': 'SPY',
+          'US500': 'SPY'
+        };
+
+        if (mappings[mapped]) {
+          return mappings[mapped];
+        }
         
         if (mapped.length === 6 && /^[A-Z]{6}$/.test(mapped)) {
           return `${mapped.slice(0, 3)}/${mapped.slice(3)}`;

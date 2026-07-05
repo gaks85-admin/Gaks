@@ -106,6 +106,24 @@ export default async function handler(req: any, res: any) {
     }
   }
 
+  // Validate if symbol is supported before proceeding
+  const isSupportedSymbol = (sym: string): boolean => {
+    if (!sym) return false;
+    const normalized = sym.toUpperCase().trim().replace(/[-_\s/]/g, "");
+    const supported = [
+      'EURUSD', 'GBPUSD', 'XAUUSD', 'BTCUSD', 'NAS100', 'US30', 'SPX500', 'US500',
+      'EUR/USD', 'GBP/USD', 'XAU/USD', 'BTC/USD', 'QQQ', 'DIA', 'SPY'
+    ].map(s => s.toUpperCase().trim().replace(/[-_\s/]/g, ""));
+    return supported.includes(normalized);
+  };
+
+  if (!isSupportedSymbol(selectedPair)) {
+    return res.status(400).json({
+      success: false,
+      error: `Symbol "${selectedPair}" is not supported. Please choose one of our supported pairs: EURUSD, GBPUSD, XAUUSD, BTCUSD, NAS100, US30.`
+    });
+  }
+
   let telegramChatId: string | null = null;
 
   try {
@@ -208,6 +226,22 @@ export default async function handler(req: any, res: any) {
         if (!sym) return sym;
         const mapped = sym.toUpperCase().trim().replace(/[-_\s/]/g, '');
         
+        // Symbol mapping layer for Twelve Data compatibility on free plans
+        const mappings: Record<string, string> = {
+          'EURUSD': 'EUR/USD',
+          'GBPUSD': 'GBP/USD',
+          'XAUUSD': 'XAU/USD',
+          'BTCUSD': 'BTC/USD',
+          'NAS100': 'QQQ',
+          'US30': 'DIA',
+          'SPX500': 'SPY',
+          'US500': 'SPY'
+        };
+
+        if (mappings[mapped]) {
+          return mappings[mapped];
+        }
+
         const commonCryptoCoins = ["BTC", "ETH", "SOL", "XRP", "ADA", "DOGE", "AVAX", "DOT", "LINK", "MATIC"];
         const commonCryptoQuote = ["USD", "USDT", "BTC", "ETH", "EUR", "GBP", "FDUSD", "USDC"];
         

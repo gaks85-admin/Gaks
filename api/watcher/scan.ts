@@ -264,12 +264,23 @@ export default async function handler(req: any, res: any) {
 
     const convertSymbol = (sym: string): string => {
       if (!sym) return "";
-      let mapped = sym.trim().toUpperCase().replace(/[-_\s]/g, '');
-      if (mapped === 'NAS100') return 'IXIC';
-      if (mapped === 'US30') return 'DJI';
-      if (mapped === 'SPX500' || mapped === 'US500') return 'SPX';
+      let mapped = sym.trim().toUpperCase().replace(/[-_\s/]/g, '');
       
-      if (mapped.includes('/')) return mapped;
+      // Symbol mapping layer for Twelve Data compatibility on free plans
+      const mappings: Record<string, string> = {
+        'EURUSD': 'EUR/USD',
+        'GBPUSD': 'GBP/USD',
+        'XAUUSD': 'XAU/USD',
+        'BTCUSD': 'BTC/USD',
+        'NAS100': 'QQQ',
+        'US30': 'DIA',
+        'SPX500': 'SPY',
+        'US500': 'SPY'
+      };
+
+      if (mappings[mapped]) {
+        return mappings[mapped];
+      }
       
       // Forex standard 6 letters (e.g. EURUSD, GBPUSD, USDJPY, AUDCAD, etc.)
       const commonCurrencies = ["EUR", "USD", "GBP", "JPY", "AUD", "CAD", "CHF", "NZD", "SGD", "HKD", "SEK", "NOK", "MXN", "CNH", "CNY", "ZAR", "TRY"];
