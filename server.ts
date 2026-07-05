@@ -46,40 +46,64 @@ This is the default, institutional-grade multi-timeframe strategy designed for c
 - **Stop Loss Placement**: Always placed structurally beyond the swing high/low of the trigger candlestick or key institutional zone boundary.
 - **Daily Drawdown Cap**: If a user experiences 3 consecutive losses in a 24-hour cycle, trading must halt for that day to preserve capital and prevent emotional over-trading.`;
 
-function extractActiveStrategyText(strategyText: string): string {
-  if (!strategyText || !strategyText.trim()) return DEFAULT_STRATEGY_TEXT;
+function extractStrategyTextById(strategyTextRaw: string, strategyId?: string): string {
+  if (!strategyTextRaw || !strategyTextRaw.trim()) return DEFAULT_STRATEGY_TEXT;
   const defaultTemplate = `• Entry conditions\n• Confirmation indicators\n• Exit & stop-loss logic\n• Risk management rules`;
-  if (strategyText.trim() === defaultTemplate.trim()) return DEFAULT_STRATEGY_TEXT;
+  if (strategyTextRaw.trim() === defaultTemplate.trim()) return DEFAULT_STRATEGY_TEXT;
 
   try {
-    const parsed = JSON.parse(strategyText);
+    const parsed = JSON.parse(strategyTextRaw);
     if (parsed && typeof parsed === 'object' && Array.isArray(parsed.strategies)) {
-      const active = parsed.strategies.find((s: any) => s.id === parsed.activeId) || parsed.strategies[0];
+      const targetId = strategyId || parsed.activeId;
+      const active = parsed.strategies.find((s: any) => {
+        if (targetId === '00000000-0000-0000-0000-000000000000' || targetId === 'default') {
+          return s.id === '00000000-0000-0000-0000-000000000000' || s.id === 'default' || s.isDefault;
+        }
+        if (targetId === '11111111-1111-1111-1111-111111111111' || targetId === 'legacy-custom') {
+          return s.id === '11111111-1111-1111-1111-111111111111' || s.id === 'legacy-custom';
+        }
+        return s.id === targetId;
+      }) || parsed.strategies[0];
       return active ? (active.text || DEFAULT_STRATEGY_TEXT) : DEFAULT_STRATEGY_TEXT;
     }
   } catch (e) {
     // Not JSON, return as-is
   }
-  return strategyText;
+  return strategyTextRaw;
 }
 
 function extractActiveStrategyDetails(strategyText: string) {
   const DEFAULT_STRATEGY_NAME = 'Gaks AI Default Strategy';
+  const DEFAULT_STRATEGY_UUID = '00000000-0000-0000-0000-000000000000';
+  const LEGACY_CUSTOM_STRATEGY_UUID = '11111111-1111-1111-1111-111111111111';
 
   if (!strategyText || !strategyText.trim()) {
-    return { id: 'default', name: DEFAULT_STRATEGY_NAME, text: DEFAULT_STRATEGY_TEXT, isDefault: true };
+    return { id: DEFAULT_STRATEGY_UUID, name: DEFAULT_STRATEGY_NAME, text: DEFAULT_STRATEGY_TEXT, isDefault: true };
   }
   const defaultTemplate = `• Entry conditions\n• Confirmation indicators\n• Exit & stop-loss logic\n• Risk management rules`;
   if (strategyText.trim() === defaultTemplate.trim()) {
-    return { id: 'default', name: DEFAULT_STRATEGY_NAME, text: DEFAULT_STRATEGY_TEXT, isDefault: true };
+    return { id: DEFAULT_STRATEGY_UUID, name: DEFAULT_STRATEGY_NAME, text: DEFAULT_STRATEGY_TEXT, isDefault: true };
   }
 
   try {
     const parsed = JSON.parse(strategyText);
     if (parsed && typeof parsed === 'object' && Array.isArray(parsed.strategies)) {
-      const active = parsed.strategies.find((s: any) => s.id === parsed.activeId) || parsed.strategies[0];
+      const active = parsed.strategies.find((s: any) => {
+        if (parsed.activeId === 'default' || parsed.activeId === DEFAULT_STRATEGY_UUID) {
+          return s.id === 'default' || s.id === DEFAULT_STRATEGY_UUID || s.isDefault;
+        }
+        return s.id === parsed.activeId;
+      }) || parsed.strategies[0];
+
+      let finalId = active ? active.id : DEFAULT_STRATEGY_UUID;
+      if (finalId === 'default') {
+        finalId = DEFAULT_STRATEGY_UUID;
+      } else if (finalId === 'legacy-custom') {
+        finalId = LEGACY_CUSTOM_STRATEGY_UUID;
+      }
+
       return {
-        id: active ? (active.id || 'default') : 'default',
+        id: finalId,
         name: active ? (active.name || DEFAULT_STRATEGY_NAME) : DEFAULT_STRATEGY_NAME,
         text: active ? (active.text || DEFAULT_STRATEGY_TEXT) : DEFAULT_STRATEGY_TEXT,
         isDefault: active ? !!active.isDefault : true
@@ -88,7 +112,7 @@ function extractActiveStrategyDetails(strategyText: string) {
   } catch (e) {
     // Not JSON, return legacy custom
   }
-  return { id: 'legacy-custom', name: 'Legacy Custom Strategy', text: strategyText, isDefault: false };
+  return { id: LEGACY_CUSTOM_STRATEGY_UUID, name: 'Legacy Custom Strategy', text: strategyText, isDefault: false };
 }
 
 let pairsCache: Record<string, LivePairData> = {};
@@ -564,6 +588,22 @@ async function startServer() {
 
       const telegramChatId = telegramConn?.telegram_chat_id || null;
 
+      // Ensure the strategy exists in public.strategies table to satisfy foreign key constraint
+      const { error: stratError } = await supabase
+        .from("strategies")
+        .upsert({
+          id: strategyDetails.id,
+          user_id: strategyDetails.isDefault ? null : userId,
+          name: strategyDetails.name,
+          text: strategyDetails.text,
+          is_default: strategyDetails.isDefault,
+          updated_at: nowString
+        });
+
+      if (stratError) {
+        console.warn("[Watcher Start] Warning upserting into strategies table:", stratError.message);
+      }
+
       // Upsert into watchers table
       const { error: watchersError } = await supabase
         .from("watchers")
@@ -710,11 +750,8 @@ async function startServer() {
         console.warn("[Watcher Scan] Trading preferences query error:", prefsError.message);
       }
 
-      const strategyTextRaw = watcher.strategy_id 
-        ? "Active Custom Strategy ID: " + watcher.strategy_id 
-        : (prefsRecord?.strategy_text || "");
-
-      const strategyText = extractActiveStrategyText(strategyTextRaw);
+      const strategyTextRaw = prefsRecord?.strategy_text || "";
+      const strategyText = extractStrategyTextById(strategyTextRaw, watcher.strategy_id);
 
       if (!strategyText.trim()) {
         return res.status(400).json({

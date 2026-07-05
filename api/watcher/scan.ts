@@ -126,7 +126,15 @@ function extractStrategyTextById(strategyTextRaw: string, strategyId?: string): 
     const parsed = JSON.parse(strategyTextRaw);
     if (parsed && typeof parsed === 'object' && Array.isArray(parsed.strategies)) {
       const targetId = strategyId || parsed.activeId;
-      const active = parsed.strategies.find((s: any) => s.id === targetId) || parsed.strategies[0];
+      const active = parsed.strategies.find((s: any) => {
+        if (targetId === '00000000-0000-0000-0000-000000000000' || targetId === 'default') {
+          return s.id === '00000000-0000-0000-0000-000000000000' || s.id === 'default' || s.isDefault;
+        }
+        if (targetId === '11111111-1111-1111-1111-111111111111' || targetId === 'legacy-custom') {
+          return s.id === '11111111-1111-1111-1111-111111111111' || s.id === 'legacy-custom';
+        }
+        return s.id === targetId;
+      }) || parsed.strategies[0];
       return active ? (active.text || DEFAULT_STRATEGY_TEXT) : DEFAULT_STRATEGY_TEXT;
     }
   } catch (e) {

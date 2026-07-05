@@ -298,6 +298,71 @@ CREATE POLICY "Allow server-side updates"
 
 
 -- =========================================================================
+-- STRATEGIES TABLE DEFINITION
+-- =========================================================================
+
+-- Create the strategies table to store custom and default user strategies
+CREATE TABLE IF NOT EXISTS public.strategies (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  text TEXT NOT NULL,
+  is_default BOOLEAN DEFAULT false NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
+  updated_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
+);
+
+-- Enable RLS for strategies
+ALTER TABLE public.strategies ENABLE ROW LEVEL SECURITY;
+
+-- Create Policies for strategies
+CREATE POLICY select_all_strategies ON public.strategies
+  FOR SELECT
+  TO authenticated
+  USING (true);
+
+CREATE POLICY insert_own_strategies ON public.strategies
+  FOR INSERT
+  TO authenticated
+  WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY update_own_strategies ON public.strategies
+  FOR UPDATE
+  TO authenticated
+  USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY delete_own_strategies ON public.strategies
+  FOR DELETE
+  TO authenticated
+  USING (auth.uid() = user_id);
+
+-- Insert global default strategy
+INSERT INTO public.strategies (id, name, text, is_default)
+VALUES (
+  '00000000-0000-0000-0000-000000000000',
+  'Gaks AI Default Strategy',
+  '# Gaks AI Default Strategy
+
+## 1. Overview
+This is the default, institutional-grade multi-timeframe strategy designed for capturing consistent intraday trends in liquid assets (Forex, major Indices, and BTC). It relies on price action structures, key liquidity zones, and volume confirmation to filter out noise.
+
+## 2. Core Methodology & Rules
+- **Timeframe Alignment**: Primary analysis on the 1-Hour (H1) chart for structural trend direction, refined on the 15-Minute (M15) chart for precise execution triggers.
+- **Support & Resistance / Liquidity**: Identify major daily/weekly highs, lows, and key order blocks. Signals are only generated when price tests these key institutional zones.
+- **Momentum & Volume Confirmation**: A trade entry requires a strong candlestick rejection pattern (pin bar, engulfing) accompanied by volume expansion or a clear breakout of local structure (Break of Structure - BOS).
+- **Trend Following**: Always prioritize trading in the direction of the dominant H1 market trend. Counter-trend setups require exceptional rejection patterns at critical daily boundaries.
+
+## 3. Risk & Money Management (Strict 1% Rule)
+- **Risk Per Trade**: Maximum of 1.0% of total account capital per trade setup.
+- **Risk-to-Reward Ratio (R:R)**: Minimum target of 1:2. Trailing stops may be employed to secure profits once the first target (1:1) is achieved.
+- **Stop Loss Placement**: Always placed structurally beyond the swing high/low of the trigger candlestick or key institutional zone boundary.
+- **Daily Drawdown Cap**: If a user experiences 3 consecutive losses in a 24-hour cycle, trading must halt for that day to preserve capital and prevent emotional over-trading.',
+  true
+)
+ON CONFLICT (id) DO NOTHING;
+
+-- =========================================================================
 -- WATCHERS TABLE MIGRATION
 -- =========================================================================
 
@@ -313,7 +378,7 @@ CREATE TABLE IF NOT EXISTS public.watchers (
   status TEXT DEFAULT 'stopped' NOT NULL CONSTRAINT chk_watcher_status CHECK (status IN ('active', 'paused', 'stopped')),
   
   -- Optional reference to the active strategy playbook
-  strategy_id TEXT DEFAULT 'default' NOT NULL,
+  strategy_id UUID DEFAULT '00000000-0000-0000-0000-000000000000' NOT NULL REFERENCES public.strategies(id),
   
   -- Telegram chat identifier for push notifications
   telegram_chat_id TEXT,

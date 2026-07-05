@@ -61,21 +61,36 @@ This is the default, institutional-grade multi-timeframe strategy designed for c
 
 function extractActiveStrategyDetails(strategyText: string) {
   const DEFAULT_STRATEGY_NAME = 'Gaks AI Default Strategy';
+  const DEFAULT_STRATEGY_UUID = '00000000-0000-0000-0000-000000000000';
+  const LEGACY_CUSTOM_STRATEGY_UUID = '11111111-1111-1111-1111-111111111111';
 
   if (!strategyText || !strategyText.trim()) {
-    return { id: 'default', name: DEFAULT_STRATEGY_NAME, text: DEFAULT_STRATEGY_TEXT, isDefault: true };
+    return { id: DEFAULT_STRATEGY_UUID, name: DEFAULT_STRATEGY_NAME, text: DEFAULT_STRATEGY_TEXT, isDefault: true };
   }
   const defaultTemplate = `• Entry conditions\n• Confirmation indicators\n• Exit & stop-loss logic\n• Risk management rules`;
   if (strategyText.trim() === defaultTemplate.trim()) {
-    return { id: 'default', name: DEFAULT_STRATEGY_NAME, text: DEFAULT_STRATEGY_TEXT, isDefault: true };
+    return { id: DEFAULT_STRATEGY_UUID, name: DEFAULT_STRATEGY_NAME, text: DEFAULT_STRATEGY_TEXT, isDefault: true };
   }
 
   try {
     const parsed = JSON.parse(strategyText);
     if (parsed && typeof parsed === 'object' && Array.isArray(parsed.strategies)) {
-      const active = parsed.strategies.find((s: any) => s.id === parsed.activeId) || parsed.strategies[0];
+      const active = parsed.strategies.find((s: any) => {
+        if (parsed.activeId === 'default' || parsed.activeId === DEFAULT_STRATEGY_UUID) {
+          return s.id === 'default' || s.id === DEFAULT_STRATEGY_UUID || s.isDefault;
+        }
+        return s.id === parsed.activeId;
+      }) || parsed.strategies[0];
+
+      let finalId = active ? active.id : DEFAULT_STRATEGY_UUID;
+      if (finalId === 'default') {
+        finalId = DEFAULT_STRATEGY_UUID;
+      } else if (finalId === 'legacy-custom') {
+        finalId = LEGACY_CUSTOM_STRATEGY_UUID;
+      }
+
       return {
-        id: active ? (active.id || 'default') : 'default',
+        id: finalId,
         name: active ? (active.name || DEFAULT_STRATEGY_NAME) : DEFAULT_STRATEGY_NAME,
         text: active ? (active.text || DEFAULT_STRATEGY_TEXT) : DEFAULT_STRATEGY_TEXT,
         isDefault: active ? !!active.isDefault : true
@@ -84,7 +99,7 @@ function extractActiveStrategyDetails(strategyText: string) {
   } catch (e) {
     // Not JSON, return legacy custom
   }
-  return { id: 'legacy-custom', name: 'Legacy Custom Strategy', text: strategyText, isDefault: false };
+  return { id: LEGACY_CUSTOM_STRATEGY_UUID, name: 'Legacy Custom Strategy', text: strategyText, isDefault: false };
 }
 
 export default async function handler(req: any, res: any) {
@@ -379,6 +394,22 @@ export default async function handler(req: any, res: any) {
     }
 
     const scanInterval = 5;
+
+    // Ensure the strategy exists in public.strategies table to satisfy foreign key constraint
+    const { error: stratError } = await supabase
+      .from("strategies")
+      .upsert({
+        id: strategyDetails.id,
+        user_id: strategyDetails.isDefault ? null : userId,
+        name: strategyDetails.name,
+        text: strategyDetails.text,
+        is_default: strategyDetails.isDefault,
+        updated_at: nowString
+      });
+
+    if (stratError) {
+      console.warn("[Watcher Start] Warning upserting into strategies table:", stratError.message);
+    }
 
     // Upsert into watchers table
     const { error: watchersError } = await supabase
