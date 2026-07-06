@@ -3,6 +3,7 @@ import { useLiveRates } from './hooks/useLiveRates';
 import { supabase } from './supabaseClient';
 import { getGeminiKey, saveGeminiKey, deleteGeminiKey } from './lib/apiKeys';
 import Auth from './components/Auth';
+import AdminDashboard from './components/admin/AdminDashboard';
 import {
   Home as HomeIcon,
   TrendingUp,
@@ -141,7 +142,13 @@ const serializeStrategies = (activeId: string, list: Strategy[]) => {
 };
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'home' | 'strategy' | 'watcher' | 'settings'>('home');
+  const [activeTab, setActiveTab] = useState<'home' | 'strategy' | 'watcher' | 'settings' | 'admin'>('home');
+
+  useEffect(() => {
+    if (window.location.pathname === '/admin') {
+      setActiveTab('admin');
+    }
+  }, []);
   const [currentTime, setCurrentTime] = useState<Date>(new Date('2026-06-28T15:01:00'));
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -2552,6 +2559,9 @@ export default function App() {
               </div>
             </div>
           )}
+          {activeTab === 'admin' && (
+            <AdminDashboard userProfile={userProfile} />
+          )}
 
         </main>
 
@@ -2620,6 +2630,24 @@ export default function App() {
               <span className="text-[9px] uppercase tracking-wider font-bold">Settings</span>
             </div>
           </button>
+          
+          {session?.user?.email === 'gaks6535@gmail.com' && (
+            <button
+              onClick={() => setActiveTab('admin')}
+              className={`flex-1 flex flex-col items-center gap-1 cursor-pointer transition-all ${
+                activeTab === 'admin'
+                  ? 'text-white'
+                  : 'text-zinc-500 hover:text-zinc-300'
+              }`}
+            >
+              <div className={`p-2 rounded-2xl w-[90%] flex flex-col items-center gap-1.5 transition-all ${
+                activeTab === 'admin' ? 'bg-[#151515] text-white font-semibold' : ''
+              }`}>
+                <Shield className="w-4.5 h-4.5 stroke-[1.8]" />
+                <span className="text-[9px] uppercase tracking-wider font-bold">Admin</span>
+              </div>
+            </button>
+          )}
         </nav>
 
       </div>
