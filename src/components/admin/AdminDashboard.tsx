@@ -3,17 +3,27 @@ import { LayoutDashboard, Users, Eye, Zap, Activity, Settings as SettingsIcon, S
 import { supabase } from '../../supabaseClient';
 
 const DashboardPage = () => {
-  const [data, setData] = useState({ users: 0, active: 0, inactive: 0 });
+  const [data, setData] = useState({ users: 0, active: 0, inactive: 0, error: null as string | null });
   
   useEffect(() => {
     async function fetchData() {
-        const { count: users } = await supabase.from('profiles').select('*', { count: 'exact', head: true });
-        const { count: active } = await supabase.from('watchers').select('*', { count: 'exact', head: true }).eq('status', 'active');
-        const { count: inactive } = await supabase.from('watchers').select('*', { count: 'exact', head: true }).eq('status', 'inactive');
-        setData({ users: users || 0, active: active || 0, inactive: inactive || 0 });
+        try {
+            const { count: users, error: userErr } = await supabase.from('profiles').select('*', { count: 'exact', head: true });
+            if (userErr) throw userErr;
+            const { count: active, error: activeErr } = await supabase.from('watchers').select('*', { count: 'exact', head: true }).eq('status', 'active');
+            if (activeErr) throw activeErr;
+            const { count: inactive, error: inactiveErr } = await supabase.from('watchers').select('*', { count: 'exact', head: true }).eq('status', 'inactive');
+            if (inactiveErr) throw inactiveErr;
+            setData({ users: users || 0, active: active || 0, inactive: inactive || 0, error: null });
+        } catch (e: any) {
+            console.error("Dashboard data fetch error:", e);
+            setData(prev => ({ ...prev, error: e.message }));
+        }
     }
     fetchData();
   }, []);
+  
+  if (data.error) return <div className="p-4 text-red-500">Error: {data.error}</div>;
   
   return <div className="p-4 grid grid-cols-1 md:grid-cols-3 gap-4 text-white">
      <div className="bg-zinc-900 p-4 rounded-xl shadow-lg border border-zinc-800">
@@ -30,7 +40,44 @@ const DashboardPage = () => {
      </div>
   </div>;
 }
-const UsersPage = () => <div className="p-4 text-white">Users Content</div>;
+const UsersPage = () => {
+  const [users, setUsers] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  
+  useEffect(() => {
+    async function fetchUsers() {
+        setLoading(true);
+        const { data, error } = await supabase.from('profiles').select('email, created_at, telegram_connected');
+        if (error) console.error("Users fetch error:", error);
+        else setUsers(data || []);
+        setLoading(false);
+    }
+    fetchUsers();
+  }, []);
+
+  if (loading) return <div className="p-4 text-white">Loading users...</div>;
+
+  return <div className="p-4 text-white overflow-x-auto">
+    <table className="w-full text-left text-sm">
+        <thead>
+            <tr className="border-b border-zinc-800 text-zinc-400">
+                <th className="p-2">Email</th>
+                <th className="p-2">Created At</th>
+                <th className="p-2">Telegram</th>
+            </tr>
+        </thead>
+        <tbody>
+            {users.map(user => (
+                <tr key={user.email} className="border-b border-zinc-800">
+                    <td className="p-2">{user.email}</td>
+                    <td className="p-2">{new Date(user.created_at).toLocaleDateString()}</td>
+                    <td className="p-2">{user.telegram_connected ? 'Connected' : 'Disconnected'}</td>
+                </tr>
+            ))}
+        </tbody>
+    </table>
+  </div>;
+}
 const WatchersPage = () => <div className="p-4 text-white">Watchers Content</div>;
 const SignalsPage = () => <div className="p-4 text-white">Signals Content</div>;
 const SystemHealthPage = () => <div className="p-4 text-white">System Health Content</div>;
@@ -73,7 +120,7 @@ export default function AdminDashboard({ userProfile, session, authLoading }: { 
   ];
 
   return (
-    <div className="flex h-screen bg-[#080808]">
+    <div className="flex h-[100dvh] bg-[#080808]">
       {/* Sidebar */}
       <div className={`fixed inset-y-0 left-0 z-50 w-64 bg-[#0c0c0e] border-r border-zinc-900 transform transition-transform duration-200 ease-in-out ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0`}>
         <div className="p-4 border-b border-zinc-900 flex justify-between items-center">
