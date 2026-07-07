@@ -1125,7 +1125,41 @@ export default function AdminDashboard({ userProfile, session, authLoading }: { 
     if (!headers.has('Content-Type') && !(options.body instanceof FormData)) {
       headers.set('Content-Type', 'application/json');
     }
-    return fetch(url, { ...options, headers });
+    
+    console.log(`[Admin Fetch Request] URL: ${url}`, { method: options.method || 'GET', headers: Object.fromEntries(headers.entries()) });
+    
+    try {
+      const response = await fetch(url, { ...options, headers });
+      
+      console.log(`[Admin Fetch Debug] Request URL: ${url}`);
+      console.log(`[Admin Fetch Debug] HTTP Status: ${response.status}`);
+      
+      const responseHeaders: Record<string, string> = {};
+      response.headers.forEach((value, key) => {
+        responseHeaders[key] = value;
+      });
+      console.log(`[Admin Fetch Debug] Response Headers:`, responseHeaders);
+      
+      const text = await response.text();
+      console.log(`[Admin Fetch Debug] Raw Response Body:`, text);
+      
+      const isHtml = text.trim().startsWith('<') || text.trim().startsWith('<!DOCTYPE html');
+      if (isHtml) {
+        console.error(`[Admin Fetch HTML Response Alert]
+- Requested URL: ${url}
+- Status Code: ${response.status}
+- Why the endpoint does not exist: The endpoint returned HTML content instead of JSON. This typically happens when the server route is not found (404) or matches a catch-all route that serves index.html (the frontend SPA entry point) instead of a proper API response.`);
+      }
+      
+      return new Response(text, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: response.headers
+      });
+    } catch (err: any) {
+      console.error(`[Admin Fetch Network Error] URL: ${url}, Error:`, err);
+      throw err;
+    }
   };
 
   if (authLoading) {
