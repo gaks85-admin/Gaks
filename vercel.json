@@ -5,19 +5,7 @@
   "outputDirectory": "dist",
   "rewrites": [
     {
-      "source": "/api/telegram-webhook",
-      "destination": "/api/telegram-webhook"
-    },
-    {
-      "source": "/api/cron/market-watcher",
-      "destination": "/api/cron/market-watcher"
-    },
-    {
-      "source": "/api/:path*",
-      "destination": "/api/:path*"
-    },
-    {
-      "source": "/:path*",
+      "source": "/((?!api/).*)",
       "destination": "/index.html"
     }
   ]
