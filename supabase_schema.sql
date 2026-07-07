@@ -250,6 +250,32 @@ CREATE OR REPLACE TRIGGER update_telegram_connections_modtime
   FOR EACH ROW
   EXECUTE FUNCTION public.handle_telegram_connections_updated_at();
 
+-- Create the signals table
+CREATE TABLE IF NOT EXISTS public.signals (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
+  pair TEXT NOT NULL,
+  signal_type TEXT NOT NULL,
+  confidence INTEGER NOT NULL,
+  delivery_status TEXT NOT NULL,
+  timestamp TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
+);
+
+-- Enable RLS for signals
+ALTER TABLE public.signals ENABLE ROW LEVEL SECURITY;
+
+-- Create Policies for signals
+CREATE POLICY select_own_signals ON public.signals
+  FOR SELECT
+  TO authenticated
+  USING (auth.uid() = user_id);
+
+-- Create Policy for admin lookup of all signals
+CREATE POLICY admin_select_signals ON public.signals
+  FOR SELECT
+  TO authenticated
+  USING (auth.email() = 'gaks6535@gmail.com');
+
 
 -- =========================================================================
 -- MARKET WATCHER ENGINE ACTIVATION SCHEMA
