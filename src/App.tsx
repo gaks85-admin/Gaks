@@ -2560,7 +2560,7 @@ export default function App() {
             </div>
           )}
           {activeTab === 'admin' && (
-            <AdminDashboard userProfile={userProfile} authLoading={isAuthLoading} />
+            <AdminDashboard userProfile={userProfile} session={session} authLoading={isAuthLoading} />
           )}
 
         </main>

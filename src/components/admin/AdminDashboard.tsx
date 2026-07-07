@@ -36,28 +36,31 @@ const SignalsPage = () => <div className="p-4 text-white">Signals Content</div>;
 const SystemHealthPage = () => <div className="p-4 text-white">System Health Content</div>;
 const SettingsPage = () => <div className="p-4 text-white">Settings Content</div>;
 
-export default function AdminDashboard({ userProfile, authLoading }: { userProfile: any, authLoading: boolean }) {
+export default function AdminDashboard({ userProfile, session, authLoading }: { userProfile: any, session: any, authLoading: boolean }) {
   const [activeAdminTab, setActiveAdminTab] = useState<'dashboard' | 'users' | 'watchers' | 'signals' | 'health' | 'settings'>('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   const ADMIN_EMAIL = "gaks6535@gmail.com";
-  const userEmail = userProfile?.email?.trim().toLowerCase();
+  
+  // Use email from profile, fallback to session
+  const userEmail = (userProfile?.email || session?.user?.email)?.trim().toLowerCase();
   const isAdmin = userEmail === ADMIN_EMAIL.trim().toLowerCase();
 
   useEffect(() => {
     console.log("Admin auth check:");
     console.log("Auth loading:", authLoading);
-    console.log("Authenticated user:", userProfile?.email);
+    console.log("Authenticated userProfile email:", userProfile?.email);
+    console.log("Authenticated session email:", session?.user?.email);
     console.log("Admin email:", ADMIN_EMAIL);
     console.log("Is admin:", isAdmin);
-  }, [userProfile, authLoading, isAdmin]);
+  }, [userProfile, session, authLoading, isAdmin]);
 
   if (authLoading) {
     return <div className="p-8 text-white text-center">Loading admin panel...</div>;
   }
 
   if (!isAdmin) {
-    return <div className="p-8 text-white text-center">Unauthorized access.</div>;
+    return <div className="p-8 text-white text-center">Unauthorized access. (Email: {userEmail})</div>;
   }
 
   const menuItems = [
