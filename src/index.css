@@ -6,9 +6,11 @@
   --font-display: "Space Grotesk", sans-serif;
 }
 
-html, body {
+html, body, #root {
   background-color: #080808;
-  height: 100%;
+  min-height: 100dvh;
+  margin: 0;
+  padding: 0;
 }
 
 /* Custom scrollbar styling for a premium feel */
