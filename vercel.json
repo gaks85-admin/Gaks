@@ -5,47 +5,11 @@
   "outputDirectory": "dist",
   "rewrites": [
     {
-      "source": "/api/admin/stats",
-      "destination": "/api/admin/stats.ts"
+      "source": "/api/:path*",
+      "destination": "/api/:path*"
     },
     {
-      "source": "/api/admin/users",
-      "destination": "/api/admin/users/index.ts"
-    },
-    {
-      "source": "/api/admin/users/action",
-      "destination": "/api/admin/users/action.ts"
-    },
-    {
-      "source": "/api/admin/watchers",
-      "destination": "/api/admin/watchers/index.ts"
-    },
-    {
-      "source": "/api/admin/watchers/action",
-      "destination": "/api/admin/watchers/action.ts"
-    },
-    {
-      "source": "/api/admin/signals",
-      "destination": "/api/admin/signals.ts"
-    },
-    {
-      "source": "/api/admin/health",
-      "destination": "/api/admin/health.ts"
-    },
-    {
-      "source": "/api/admin/settings",
-      "destination": "/api/admin/settings.ts"
-    },
-    {
-      "source": "/api/telegram-webhook",
-      "destination": "/api/telegram-webhook.ts"
-    },
-    {
-      "source": "/api/cron/market-watcher",
-      "destination": "/api/cron/market-watcher.ts"
-    },
-    {
-      "source": "/((?!api/).*)",
+      "source": "/:path*",
       "destination": "/index.html"
     }
   ]
