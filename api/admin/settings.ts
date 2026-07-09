@@ -26,7 +26,7 @@ function loadSettings() {
   return {
     defaultStrategy: "Gaks AI Default Strategy",
     defaultGeminiModel: "gemini-2.5-flash",
-    scanInterval: 5,
+    scanInterval: 15,
     maintenanceMode: false
   };
 }

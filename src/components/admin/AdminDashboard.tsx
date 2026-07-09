@@ -966,7 +966,7 @@ const SettingsPage = ({ fetchWithAuth, showToast }: { fetchWithAuth: any; showTo
   const [settings, setSettings] = useState<any>({
     defaultStrategy: "",
     defaultGeminiModel: "gemini-2.5-flash",
-    scanInterval: 5,
+    scanInterval: 15,
     maintenanceMode: false
   });
   const [loading, setLoading] = useState(true);
