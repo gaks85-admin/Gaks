@@ -160,12 +160,77 @@ export default async function handler(req: any, res: any) {
   }
 
   // Protect the endpoint using a CRON_SECRET (allow bypass in non-production or if secret is missing)
-  const authHeader = req.headers.authorization;
-  const cronSecret = process.env.CRON_SECRET;
-  if (process.env.NODE_ENV === "production" && cronSecret && authHeader !== `Bearer ${cronSecret}`) {
-    console.warn("[Market Watcher Cron] Unauthorized access attempt.");
-    return res.status(401).json({ success: false, error: "Unauthorized" });
+  const authHeader = req.headers.authorization || req.headers['authorization'];
+  const cronSecretRaw = process.env.CRON_SECRET;
+  
+  // Debug logging without leaking the secret
+  console.log("[Market Watcher Cron] Debug Auth Check:");
+  console.log(`- NODE_ENV: ${process.env.NODE_ENV}`);
+  console.log(`- Authorization header exists: ${!!authHeader}`);
+  if (authHeader) {
+    console.log(`- Authorization header length: ${authHeader.length}`);
+    const startsWithBearer = authHeader.toLowerCase().startsWith("bearer ");
+    console.log(`- Authorization header starts with 'bearer ' / 'Bearer ': ${startsWithBearer}`);
+    if (startsWithBearer) {
+      const extractedToken = authHeader.substring(7).trim();
+      console.log(`- Extracted token length from header: ${extractedToken.length}`);
+    } else {
+      console.log(`- First 15 chars of Authorization header (sanitized): "${authHeader.substring(0, 15).replace(/[^a-zA-Z0-9\s]/g, '*')}"`);
+    }
   }
+
+  console.log(`- CRON_SECRET env var exists: ${!!cronSecretRaw}`);
+  if (cronSecretRaw) {
+    console.log(`- CRON_SECRET length (raw): ${cronSecretRaw.length}`);
+    const cronSecretClean = cronSecretRaw.trim().replace(/^['"]|['"]$/g, '').trim();
+    console.log(`- CRON_SECRET length (cleaned): ${cronSecretClean.length}`);
+    if (cronSecretRaw.length !== cronSecretClean.length) {
+      console.warn(`- WARNING: CRON_SECRET had leading/trailing whitespace or quotes! Raw length: ${cronSecretRaw.length}, Cleaned length: ${cronSecretClean.length}`);
+    }
+  }
+
+  // Robust parsing of Bearer token
+  let token: string | null = null;
+  if (authHeader) {
+    const trimmedHeader = authHeader.trim();
+    if (trimmedHeader.toLowerCase().startsWith("bearer ")) {
+      token = trimmedHeader.substring(7).trim();
+    } else {
+      // Fallback: if they passed just the token without Bearer prefix
+      token = trimmedHeader;
+    }
+  }
+
+  // Clean the extracted token of quotes or spaces
+  const cleanToken = token ? token.replace(/^['"]|['"]$/g, '').trim() : "";
+  const cleanCronSecret = cronSecretRaw ? cronSecretRaw.trim().replace(/^['"]|['"]$/g, '').trim() : "";
+
+  let authorized = true;
+  let authFailureReason = "";
+
+  if (process.env.NODE_ENV === "production" && cleanCronSecret) {
+    if (!authHeader) {
+      authorized = false;
+      authFailureReason = "Authorization header is missing.";
+    } else if (!cleanToken) {
+      authorized = false;
+      authFailureReason = "No token could be extracted from Authorization header.";
+    } else if (cleanToken !== cleanCronSecret) {
+      authorized = false;
+      if (cleanToken.length !== cleanCronSecret.length) {
+        authFailureReason = `Token length mismatch. Extracted: ${cleanToken.length}, Expected: ${cleanCronSecret.length}`;
+      } else {
+        authFailureReason = "Token content mismatch (same length).";
+      }
+    }
+  }
+
+  if (!authorized) {
+    console.warn(`[Market Watcher Cron] Unauthorized access attempt: ${authFailureReason}`);
+    return res.status(401).json({ success: false, error: "Unauthorized", reason: authFailureReason });
+  }
+
+  console.log("[Market Watcher Cron] Authorization check passed.");
 
   try {
     console.log("[Market Watcher Cron] Starting scheduled execution...");
