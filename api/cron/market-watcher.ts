@@ -146,6 +146,15 @@ function extractStrategyTextById(strategyTextRaw: string, strategyId?: string): 
 }
 
 export default async function handler(req: any, res: any) {
+  const startTime = Date.now();
+  const requestTimestamp = new Date().toISOString();
+
+  // Metrics trackers
+  let watchersProcessedCount = 0;
+  let watchersSkippedCount = 0;
+  let signalsGeneratedCount = 0;
+  let telegramMessagesSentCount = 0;
+
   // CORS configuration
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
@@ -227,6 +236,23 @@ export default async function handler(req: any, res: any) {
 
   if (!authorized) {
     console.warn(`[Market Watcher Cron] Unauthorized access attempt: ${authFailureReason}`);
+    const totalTime = Date.now() - startTime;
+    console.log(`
+=========================================
+[Market Watcher Cron Request Summary]
+- Timestamp: ${requestTimestamp}
+- Request Type: POST /api/cron/market-watcher
+- Authorization Header Present: ${!!authHeader}
+- Authentication Result: FAILED
+- Process Status: UNAUTHORIZED
+- Watchers Processed: 0
+- Watchers Skipped: 0
+- Signals Generated: 0
+- Telegram Messages Sent: 0
+- Total Execution Time: ${totalTime}ms
+- Error Details: ${authFailureReason}
+=========================================
+    `);
     return res.status(401).json({ success: false, error: "Unauthorized", reason: authFailureReason });
   }
 
@@ -237,6 +263,23 @@ export default async function handler(req: any, res: any) {
     const twelveDataKey = process.env.TWELVE_DATA_API_KEY;
     if (!twelveDataKey) {
       console.error("Missing TWELVE_DATA_API_KEY environment variable.");
+      const totalTime = Date.now() - startTime;
+      console.log(`
+=========================================
+[Market Watcher Cron Request Summary]
+- Timestamp: ${requestTimestamp}
+- Request Type: POST /api/cron/market-watcher
+- Authorization Header Present: ${!!authHeader}
+- Authentication Result: PASSED
+- Process Status: CONFIG_ERROR
+- Watchers Processed: 0
+- Watchers Skipped: 0
+- Signals Generated: 0
+- Telegram Messages Sent: 0
+- Total Execution Time: ${totalTime}ms
+- Error Details: Missing TWELVE_DATA_API_KEY environment variable.
+=========================================
+      `);
       return res.status(500).json({ error: "Server configuration error: missing Twelve Data API key." });
     }
 
@@ -248,11 +291,45 @@ export default async function handler(req: any, res: any) {
       
     if (fetchError) {
       console.error("[Market Watcher Cron] Failed to fetch active watchers:", fetchError);
+      const totalTime = Date.now() - startTime;
+      console.log(`
+=========================================
+[Market Watcher Cron Request Summary]
+- Timestamp: ${requestTimestamp}
+- Request Type: POST /api/cron/market-watcher
+- Authorization Header Present: ${!!authHeader}
+- Authentication Result: PASSED
+- Process Status: DATABASE_ERROR
+- Watchers Processed: 0
+- Watchers Skipped: 0
+- Signals Generated: 0
+- Telegram Messages Sent: 0
+- Total Execution Time: ${totalTime}ms
+- Error Details: Database error fetching watchers: ${fetchError.message || JSON.stringify(fetchError)}
+=========================================
+      `);
       return res.status(500).json({ error: "Database error fetching watchers" });
     }
     
     if (!watchers || watchers.length === 0) {
       console.log("[Market Watcher Cron] No active watchers found.");
+      const totalTime = Date.now() - startTime;
+      console.log(`
+=========================================
+[Market Watcher Cron Request Summary]
+- Timestamp: ${requestTimestamp}
+- Request Type: POST /api/cron/market-watcher
+- Authorization Header Present: ${!!authHeader}
+- Authentication Result: PASSED
+- Process Status: SUCCESS
+- Watchers Processed: 0
+- Watchers Skipped: 0
+- Signals Generated: 0
+- Telegram Messages Sent: 0
+- Total Execution Time: ${totalTime}ms
+- Details: No active watchers found.
+=========================================
+      `);
       return res.status(200).json({ success: true, message: "No active watchers." });
     }
 
@@ -266,7 +343,11 @@ export default async function handler(req: any, res: any) {
       const symbol = selectedPair;
       const selectedTimeframe = watcher.selected_timeframe || 'H1';
       
-      if (!selectedPair) { skipped.push({ userId, reason: "No selected pair" }); continue; }
+      if (!selectedPair) {
+        skipped.push({ userId, reason: "No selected pair" });
+        watchersSkippedCount++;
+        continue;
+      }
 
       try {
         // Check Telegram connection
@@ -279,6 +360,7 @@ export default async function handler(req: any, res: any) {
         if (!telegramConn || !telegramConn.connected || !telegramConn.telegram_chat_id) {
           console.log(`[User ${userId}] Telegram not connected. Skipping.`);
           skipped.push({ userId, reason: "Telegram not connected" });
+          watchersSkippedCount++;
           continue;
         }
         const telegramChatId = telegramConn.telegram_chat_id;
@@ -294,6 +376,7 @@ export default async function handler(req: any, res: any) {
         if (!strategyText.trim()) {
           console.log(`[User ${userId}] Strategy text empty. Skipping.`);
           skipped.push({ userId, reason: "Strategy text empty" });
+          watchersSkippedCount++;
           continue;
         }
 
@@ -303,12 +386,14 @@ export default async function handler(req: any, res: any) {
         if (!accountSize || !riskPercentage) {
           console.log(`[User ${userId}] Account size or risk percentage not defined. Skipping.`);
           skipped.push({ userId, reason: "Account size or risk percentage not defined" });
+          watchersSkippedCount++;
           continue;
         }
 
         if (!apiKeyRecord || !apiKeyRecord.api_key) {
           console.log(`[User ${userId}] Gemini API Key missing. Skipping.`);
           skipped.push({ userId, reason: "Gemini API Key missing" });
+          watchersSkippedCount++;
           continue;
         }
 
@@ -522,6 +607,7 @@ ${JSON.stringify(marketData, null, 2)}`;
 
         const parsedResult = JSON.parse(aiResponse.text || '{"signals": []}');
         const signals = parsedResult.signals || [];
+        signalsGeneratedCount += signals.length;
         let signalsSent = 0;
 
         // Send Telegram Message if valid signals found
@@ -556,6 +642,7 @@ ${JSON.stringify(marketData, null, 2)}`;
                 .eq("user_id", userId);
                 
               signalsSent++;
+              telegramMessagesSentCount++;
             }
           }
         }
@@ -569,20 +656,66 @@ ${JSON.stringify(marketData, null, 2)}`;
           })
           .eq("user_id", userId);
 
+        watchersProcessedCount++;
         results.push({ userId, symbol, signalsFound: signals.length, signalsSent });
         console.log(`[User ${userId}] Scan complete. Signals found: ${signals.length}, Sent: ${signalsSent}`);
 
       } catch (err: any) {
         console.error(`[User ${userId}] Error processing watcher:`, err.message || err);
         errors.push({ userId, error: err.message || "Unknown error" });
+        watchersSkippedCount++;
       }
     }
 
     console.log("[Market Watcher Cron] Cycle complete. Processed:", results.length);
-    return res.status(200).json({ success: true, processed: results.length, results, skipped, errors });
+    const totalTime = Date.now() - startTime;
+    console.log(`
+=========================================
+[Market Watcher Cron Request Summary]
+- Timestamp: ${requestTimestamp}
+- Request Type: POST /api/cron/market-watcher
+- Authorization Header Present: ${!!authHeader}
+- Authentication Result: PASSED
+- Process Status: SUCCESS
+- Watchers Processed: ${watchersProcessedCount}
+- Watchers Skipped: ${watchersSkippedCount}
+- Signals Generated: ${signalsGeneratedCount}
+- Telegram Messages Sent: ${telegramMessagesSentCount}
+- Total Execution Time: ${totalTime}ms
+=========================================
+    `);
+
+    return res.status(200).json({
+      success: true,
+      processed: watchersProcessedCount,
+      skipped: watchersSkippedCount,
+      signalsGenerated: signalsGeneratedCount,
+      telegramMessagesSent: telegramMessagesSentCount,
+      executionTimeMs: totalTime,
+      results,
+      skippedDetails: skipped,
+      errors
+    });
 
   } catch (err: any) {
+    const totalTime = Date.now() - startTime;
     console.error("[Market Watcher Cron] Fatal Error:", err.message || err);
-    return res.status(500).json({ error: err.message || "Unknown error" });
+    console.log(`
+=========================================
+[Market Watcher Cron Request Summary]
+- Timestamp: ${requestTimestamp}
+- Request Type: POST /api/cron/market-watcher
+- Authorization Header Present: ${!!authHeader}
+- Authentication Result: PASSED
+- Process Status: ERROR
+- Watchers Processed: ${watchersProcessedCount}
+- Watchers Skipped: ${watchersSkippedCount}
+- Signals Generated: ${signalsGeneratedCount}
+- Telegram Messages Sent: ${telegramMessagesSentCount}
+- Total Execution Time: ${totalTime}ms
+- Error Details: ${err.message || "Unknown error"}
+=========================================
+    `);
+    return res.status(500).json({ success: false, error: err.message || "Unknown error" });
   }
 }

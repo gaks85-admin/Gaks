@@ -892,7 +892,7 @@ const SystemHealthPage = ({ fetchWithAuth }: { fetchWithAuth: any }) => {
     { name: "Gemini 2.5 API Availability", key: "gemini", desc: "Checks API keys and performs dynamic generation tests" },
     { name: "Telegram Bot Broadcast Ingress", key: "telegram", desc: "Verifies webhook listener status and getMe bot payload" },
     { name: "Twelve Data Market Quotes Feed", key: "twelveData", desc: "Confirms rate limits and endpoints latency" },
-    { name: "Autonomous GitHub Cron Engine", key: "cron", desc: "Checks background watcher scheduler status", details: health?.cron?.details },
+    { name: "Autonomous Cron Engine (cron-job.org)", key: "cron", desc: "Checks background watcher scheduler status", details: health?.cron?.details },
   ];
 
   return (
