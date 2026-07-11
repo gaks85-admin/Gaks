@@ -169,6 +169,16 @@ export default async function handler(req: any, res: any) {
     return res.status(405).json({ success: false, error: "Method Not Allowed. Use POST." });
   }
 
+  // Debug logging immediately before the authorization check
+  console.log("DEBUG CRON AUTH:", {
+    method: req.method,
+    headers: req.headers,
+    rawHeaders: (req as any).rawHeaders || null,
+    authorization: req.headers.authorization || req.headers['authorization'] || null,
+    authHeaderExists: !!(req.headers.authorization || req.headers['authorization']),
+    authHeaderLength: (req.headers.authorization || req.headers['authorization'])?.length ?? 0
+  });
+
   // Protect the endpoint using a CRON_SECRET
   const authHeader = req.headers.authorization || req.headers['authorization'];
   const cronSecretRaw = process.env.CRON_SECRET;
@@ -245,11 +255,9 @@ export default async function handler(req: any, res: any) {
     }));
     return res.status(401).json({
       success: false,
-      authorizationHeaderPresent: !!authHeader,
-      authorizationHeaderLength: authHeader ? authHeader.length : 0,
-      cronSecretPresent: !!process.env.CRON_SECRET,
-      cronSecretLength: process.env.CRON_SECRET ? process.env.CRON_SECRET.length : 0,
-      tokenMatches: cleanToken === cleanCronSecret
+      receivedAuthorization: req.headers.authorization || null,
+      method: req.method,
+      headersPresent: Object.keys(req.headers)
     });
   }
 
