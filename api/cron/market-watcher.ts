@@ -188,6 +188,17 @@ export default async function handler(req: any, res: any) {
   const cleanToken = token ? token.replace(/^['"]|['"]$/g, '').trim() : "";
   const cleanCronSecret = cronSecretRaw ? cronSecretRaw.trim().replace(/^['"]|['"]$/g, '').trim() : "";
 
+  // Log the debug information WITHOUT exposing secrets
+  console.log(JSON.stringify({
+    event: "debug_auth_info",
+    authorizationHeaderPresent: !!authHeader,
+    authorizationHeaderLength: authHeader ? authHeader.length : 0,
+    startsWithBearer: !!(authHeader && authHeader.trim().toLowerCase().startsWith("bearer ")),
+    cronSecretPresent: !!process.env.CRON_SECRET,
+    cronSecretLength: process.env.CRON_SECRET ? process.env.CRON_SECRET.length : 0,
+    tokenMatches: cleanToken === cleanCronSecret
+  }));
+
   let authorized = true;
   let authFailureReason = "";
 
@@ -232,7 +243,14 @@ export default async function handler(req: any, res: any) {
       telegramMessagesSentCount: 0,
       executionTimeMs: totalTime
     }));
-    return res.status(401).json({ success: false, error: "Unauthorized" });
+    return res.status(401).json({
+      success: false,
+      authorizationHeaderPresent: !!authHeader,
+      authorizationHeaderLength: authHeader ? authHeader.length : 0,
+      cronSecretPresent: !!process.env.CRON_SECRET,
+      cronSecretLength: process.env.CRON_SECRET ? process.env.CRON_SECRET.length : 0,
+      tokenMatches: cleanToken === cleanCronSecret
+    });
   }
 
   try {
