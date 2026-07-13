@@ -11,6 +11,7 @@ import adminWatchersActionHandler from "./api/admin/watchers/action";
 import adminSignalsHandler from "./api/admin/signals";
 import adminHealthHandler from "./api/admin/health";
 import adminSettingsHandler from "./api/admin/settings";
+import adminSendTestAlertHandler from "./api/admin/send-test-alert";
 
 interface ERResponse {
   result: string;
@@ -519,6 +520,7 @@ async function startServer() {
   app.get("/api/admin/health", adminHealthHandler);
   app.get("/api/admin/settings", adminSettingsHandler);
   app.post("/api/admin/settings", adminSettingsHandler);
+  app.post("/api/admin/send-test-alert", adminSendTestAlertHandler);
 
   // Initialize rates baseline
   await updateRatesFromAPI();

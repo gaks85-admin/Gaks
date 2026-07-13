@@ -488,6 +488,37 @@ COMMENT ON TABLE public.watchers IS 'Represents each user''s custom Gaks AI Mark
 COMMENT ON COLUMN public.watchers.status IS 'Operational status restricted to active, paused, or stopped.';
 COMMENT ON COLUMN public.watchers.user_id IS 'Unique user reference with foreign key to auth.users, enforcing a single watcher per user constraint.';
 
+-- =========================================================================
+-- NOTIFICATION LOGS FEATURE SCHEMA
+-- =========================================================================
+
+CREATE TABLE IF NOT EXISTS public.notification_logs (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  type TEXT NOT NULL,
+  status TEXT NOT NULL,
+  reason TEXT,
+  timestamp TIMESTAMPTZ DEFAULT NOW() NOT NULL
+);
+
+-- Enable Row Level Security
+ALTER TABLE public.notification_logs ENABLE ROW LEVEL SECURITY;
+
+-- Create Policies for notification_logs
+CREATE POLICY "Allow authenticated read on notification_logs"
+  ON public.notification_logs
+  FOR SELECT
+  TO authenticated
+  USING (true);
+
+CREATE POLICY "Allow authenticated insert on notification_logs"
+  ON public.notification_logs
+  FOR INSERT
+  TO authenticated
+  WITH CHECK (true);
+
+COMMENT ON TABLE public.notification_logs IS 'Tracks simulated test alerts and system delivery pipeline telemetry for monitoring.';
+
+
 
 
 

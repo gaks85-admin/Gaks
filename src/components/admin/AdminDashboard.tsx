@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   LayoutDashboard, Users, Eye, Zap, Activity, Settings as SettingsIcon, 
   Shield, Menu, X, Key, MessageSquare, Clock, Heart, Search, RefreshCw, 
-  Play, Pause, Trash2, AlertTriangle, CheckCircle2, Power, Terminal, Sliders, Check, ExternalLink
+  Play, Pause, Trash2, AlertTriangle, CheckCircle2, Power, Terminal, Sliders, Check, ExternalLink, Send
 } from 'lucide-react';
 import { supabase } from '../../supabaseClient';
 
@@ -163,9 +163,268 @@ const DashboardPage = ({ fetchWithAuth }: { fetchWithAuth: any }) => {
           </div>
         </div>
       </div>
+
+      {/* Admin Send Test Notification card */}
+      <div className="mt-6">
+        <SendTestNotificationCard fetchWithAuth={fetchWithAuth} />
+      </div>
     </div>
   );
 };
+
+// ----------------------------------------------------
+// 1b. Send Test Notification Card Component
+// ----------------------------------------------------
+const SendTestNotificationCard = ({ fetchWithAuth }: { fetchWithAuth: any }) => {
+  const [users, setUsers] = useState<any[]>([]);
+  const [usersLoading, setUsersLoading] = useState(false);
+  
+  const [targetType, setTargetType] = useState<'list' | 'email' | 'telegram'>('list');
+  const [selectedUserId, setSelectedUserId] = useState('');
+  const [emailQuery, setEmailQuery] = useState('');
+  const [telegramQuery, setTelegramQuery] = useState('');
+  
+  const [symbol, setSymbol] = useState('BTCUSD');
+  const [timeframe, setTimeframe] = useState('1H');
+  
+  const [sending, setSending] = useState(false);
+  const [status, setStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  useEffect(() => {
+    const fetchUsersList = async () => {
+      setUsersLoading(true);
+      try {
+        const res = await fetchWithAuth('/api/admin/users');
+        const json = await res.json();
+        if (json.success) {
+          setUsers(json.users || []);
+        }
+      } catch (err) {
+        console.error("Error loading users for selector:", err);
+      } finally {
+        setUsersLoading(false);
+      }
+    };
+    fetchUsersList();
+  }, []);
+
+  const handleSendTest = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSending(true);
+    setStatus(null);
+
+    const payload: any = {
+      symbol: symbol || "BTCUSD",
+      timeframe: timeframe || "1H"
+    };
+
+    if (targetType === 'list') {
+      if (!selectedUserId) {
+        setStatus({ type: 'error', message: 'Please select a registered user.' });
+        setSending(false);
+        return;
+      }
+      payload.userId = selectedUserId;
+    } else if (targetType === 'email') {
+      if (!emailQuery.trim()) {
+        setStatus({ type: 'error', message: 'Please enter an email address to search.' });
+        setSending(false);
+        return;
+      }
+      payload.email = emailQuery.trim();
+    } else if (targetType === 'telegram') {
+      if (!telegramQuery.trim()) {
+        setStatus({ type: 'error', message: 'Please enter a Telegram username to search.' });
+        setSending(false);
+        return;
+      }
+      payload.telegramUsername = telegramQuery.trim();
+    }
+
+    try {
+      const response = await fetchWithAuth('/api/admin/send-test-alert', {
+        method: 'POST',
+        body: JSON.stringify(payload)
+      });
+      const data = await response.json();
+      if (data.success) {
+        setStatus({
+          type: 'success',
+          message: `Test alert successfully delivered to Telegram chat for user: ${data.user}`
+        });
+      } else {
+        setStatus({
+          type: 'error',
+          message: data.error || 'Failed to send test alert.'
+        });
+      }
+    } catch (err: any) {
+      setStatus({
+        type: 'error',
+        message: err.message || 'Network error encountered during send.'
+      });
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div className="bg-zinc-950 p-6 rounded-2xl border border-zinc-900/80">
+      <div className="flex items-center gap-2 mb-2">
+        <Send className="w-4.5 h-4.5 text-sky-400" />
+        <h4 className="text-xs font-bold uppercase tracking-wider text-zinc-400 font-display">
+          Send Test Notification
+        </h4>
+      </div>
+      <p className="text-[11px] text-zinc-500 mb-5 leading-relaxed">
+        Send a simulated market signal to any connected user to verify Telegram delivery.
+      </p>
+
+      <form onSubmit={handleSendTest} className="space-y-4">
+        {/* Target selection tabs */}
+        <div className="grid grid-cols-3 gap-1 p-0.5 bg-zinc-900 border border-zinc-800 rounded-xl text-[10px]">
+          <button
+            type="button"
+            onClick={() => { setTargetType('list'); setStatus(null); }}
+            className={`py-1.5 rounded-lg font-bold uppercase transition-all cursor-pointer ${targetType === 'list' ? 'bg-zinc-800 text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-300'}`}
+          >
+            User List
+          </button>
+          <button
+            type="button"
+            onClick={() => { setTargetType('email'); setStatus(null); }}
+            className={`py-1.5 rounded-lg font-bold uppercase transition-all cursor-pointer ${targetType === 'email' ? 'bg-zinc-800 text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-300'}`}
+          >
+            Email
+          </button>
+          <button
+            type="button"
+            onClick={() => { setTargetType('telegram'); setStatus(null); }}
+            className={`py-1.5 rounded-lg font-bold uppercase transition-all cursor-pointer ${targetType === 'telegram' ? 'bg-zinc-800 text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-300'}`}
+          >
+            Telegram
+          </button>
+        </div>
+
+        {/* Dynamic target input */}
+        <div>
+          {targetType === 'list' && (
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Select Registered User</label>
+              {usersLoading ? (
+                <div className="flex items-center gap-2 py-2 text-xs text-zinc-500">
+                  <RefreshCw className="w-3 h-3 animate-spin text-sky-500" /> Loading users list...
+                </div>
+              ) : (
+                <select
+                  value={selectedUserId}
+                  onChange={(e) => { setSelectedUserId(e.target.value); setStatus(null); }}
+                  className="w-full bg-zinc-900 border border-zinc-800 text-white rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-1 focus:ring-sky-500 cursor-pointer"
+                >
+                  <option value="">-- Choose registered user --</option>
+                  {users.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.full_name || 'No Name'} ({u.email})
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+          )}
+
+          {targetType === 'email' && (
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Search by User Email</label>
+              <input
+                type="email"
+                placeholder="user@example.com"
+                value={emailQuery}
+                onChange={(e) => { setEmailQuery(e.target.value); setStatus(null); }}
+                className="w-full bg-zinc-900 border border-zinc-800 text-white rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-1 focus:ring-sky-500"
+              />
+            </div>
+          )}
+
+          {targetType === 'telegram' && (
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Search by Telegram Username</label>
+              <div className="relative">
+                <span className="absolute left-3 top-2 text-zinc-500 text-xs font-semibold">@</span>
+                <input
+                  type="text"
+                  placeholder="username"
+                  value={telegramQuery}
+                  onChange={(e) => { setTelegramQuery(e.target.value); setStatus(null); }}
+                  className="w-full bg-zinc-900 border border-zinc-800 text-white rounded-xl pl-7 pr-3 py-2 text-xs focus:outline-none focus:ring-1 focus:ring-sky-500"
+                />
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Optional fields */}
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-1">
+            <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Symbol (Optional)</label>
+            <input
+              type="text"
+              placeholder="BTCUSD"
+              value={symbol}
+              onChange={(e) => setSymbol(e.target.value)}
+              className="w-full bg-zinc-900 border border-zinc-800 text-white rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-1 focus:ring-sky-500"
+            />
+          </div>
+          <div className="space-y-1">
+            <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Timeframe (Optional)</label>
+            <input
+              type="text"
+              placeholder="1H"
+              value={timeframe}
+              onChange={(e) => setTimeframe(e.target.value)}
+              className="w-full bg-zinc-900 border border-zinc-800 text-white rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-1 focus:ring-sky-500"
+            />
+          </div>
+        </div>
+
+        {/* Status message */}
+        {status && (
+          <div className={`p-3 rounded-xl text-xs flex items-start gap-2.5 border ${
+            status.type === 'success' 
+              ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' 
+              : 'bg-red-500/10 border-red-500/20 text-red-400'
+          }`}>
+            {status.type === 'success' ? (
+              <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
+            ) : (
+              <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+            )}
+            <span>{status.message}</span>
+          </div>
+        )}
+
+        {/* Submit button */}
+        <button
+          type="submit"
+          disabled={sending}
+          className="w-full bg-sky-500 hover:bg-sky-400 disabled:bg-sky-500/50 text-black font-extrabold text-xs uppercase tracking-wider py-2.5 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-2 mt-2"
+        >
+          {sending ? (
+            <>
+              <RefreshCw className="w-4 h-4 animate-spin" />
+              Sending Test Alert...
+            </>
+          ) : (
+            <>
+              <Send className="w-4 h-4" />
+              Send Test Alert
+            </>
+          )}
+        </button>
+      </form>
+    </div>
+  );
+};
+
 
 // ----------------------------------------------------
 // 2. Users Subpage
