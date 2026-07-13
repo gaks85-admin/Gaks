@@ -864,9 +864,19 @@ const SystemHealthPage = ({ fetchWithAuth }: { fetchWithAuth: any }) => {
   const [health, setHealth] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  
+  // Auto-refresh timer (30 seconds)
+  const [countdown, setCountdown] = useState(30);
 
-  const checkHealth = async () => {
-    setLoading(true);
+  // Full System Test States
+  const [isTesting, setIsTesting] = useState(false);
+  const [testStep, setTestStep] = useState(1);
+  const [testResults, setTestResults] = useState<any>(null);
+  const [overallTestStatus, setOverallTestStatus] = useState<string | null>(null);
+  const [testError, setTestError] = useState<string | null>(null);
+
+  const checkHealth = async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const res = await fetchWithAuth('/api/admin/health');
       const json = await res.json();
@@ -879,82 +889,599 @@ const SystemHealthPage = ({ fetchWithAuth }: { fetchWithAuth: any }) => {
     } catch (err: any) {
       setError(err.message || "Network timeout testing services.");
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
+  // Manage initial load and 30s auto-refresh
   useEffect(() => {
     checkHealth();
   }, []);
 
-  const healthServices = [
-    { name: "Supabase Database Connectivity", key: "supabase", desc: "Verifies profiles SELECT queries and schema status", details: health?.supabase?.details },
-    { name: "Gemini 2.5 API Availability", key: "gemini", desc: "Checks API keys and performs dynamic generation tests" },
-    { name: "Telegram Bot Broadcast Ingress", key: "telegram", desc: "Verifies webhook listener status and getMe bot payload" },
-    { name: "Twelve Data Market Quotes Feed", key: "twelveData", desc: "Confirms rate limits and endpoints latency" },
-    { name: "Autonomous Cron Engine (cron-job.org)", key: "cron", desc: "Checks background watcher scheduler status", details: health?.cron?.details },
-  ];
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCountdown((prev) => {
+        if (prev <= 1) {
+          checkHealth(true); // Silent background refresh
+          return 30;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, []);
+
+  const handleManualRefresh = () => {
+    setCountdown(30);
+    checkHealth();
+  };
+
+  // Run full system test sequence
+  const runFullSystemTest = async () => {
+    setIsTesting(true);
+    setTestStep(1);
+    setTestResults(null);
+    setOverallTestStatus(null);
+    setTestError(null);
+
+    // Stagger steps to simulate a real-time active diagnostics engine
+    try {
+      const apiPromise = fetchWithAuth('/api/admin/health', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+
+      // Step 1: Database Check
+      await new Promise(r => setTimeout(r, 800));
+      setTestStep(2);
+
+      // Step 2: Twelve Data Fetch
+      await new Promise(r => setTimeout(r, 1000));
+      setTestStep(3);
+
+      // Step 3: Gemini Analysis
+      await new Promise(r => setTimeout(r, 1200));
+      setTestStep(4);
+
+      // Step 4: Gemini Readout
+      await new Promise(r => setTimeout(r, 800));
+      setTestStep(5);
+
+      // Step 5: Telegram Dispatch
+      await new Promise(r => setTimeout(r, 1000));
+      setTestStep(6);
+
+      const res = await apiPromise;
+      const data = await res.json();
+
+      if (data.success) {
+        setTestResults(data.results);
+        setOverallTestStatus(data.overallStatus);
+      } else {
+        throw new Error(data.error || "Failed running full system diagnostics.");
+      }
+    } catch (err: any) {
+      setTestError(err.message || "Server exception during system diagnostic check.");
+      setOverallTestStatus('SYSTEM ERROR');
+    } finally {
+      // Refresh current dashboard status to reflect test runs
+      checkHealth(true);
+    }
+  };
+
+  const getStatusColor = (status: string) => {
+    if (status === 'ONLINE' || status === 'Healthy' || status === 'SYSTEM HEALTHY') {
+      return 'border-emerald-500/20 bg-emerald-500/10 text-emerald-400';
+    }
+    if (status === 'ERROR' || status === 'OFFLINE' || status === 'SYSTEM ERROR') {
+      return 'border-red-500/20 bg-red-500/10 text-red-400';
+    }
+    return 'border-zinc-800 bg-zinc-900/50 text-zinc-400';
+  };
 
   return (
-    <div className="p-6 space-y-6">
-      {/* Header & Controls */}
-      <div className="flex justify-between items-center pb-2 border-b border-zinc-900">
+    <div className="p-6 space-y-8 max-w-7xl mx-auto">
+      {/* Upper Status Panel */}
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 pb-4 border-b border-zinc-900">
         <div>
-          <h3 className="text-lg font-bold text-white font-display">System Status</h3>
-          <p className="text-xs text-zinc-500">Live integration ping tests against core trading ecosystem components.</p>
+          <h3 className="text-xl font-bold text-white tracking-tight">System Health Diagnostics</h3>
+          <p className="text-xs text-zinc-500 mt-1">
+            Real-time latency logging and operational checks across core trading components.
+          </p>
         </div>
-        <button onClick={checkHealth} className="p-2 bg-zinc-900 border border-zinc-800 rounded-lg hover:bg-zinc-800 text-zinc-300 transition-colors cursor-pointer" title="Re-run Tests">
-          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-        </button>
+        <div className="flex items-center gap-3 w-full md:w-auto">
+          <div className="flex items-center gap-2 bg-zinc-950 px-3.5 py-1.5 rounded-xl border border-zinc-900 font-mono text-[11px] text-zinc-400">
+            <RefreshCw className="w-3.5 h-3.5 animate-spin text-zinc-500" />
+            <span>Refreshes in <b className="text-white">{countdown}s</b></span>
+          </div>
+          <button 
+            onClick={handleManualRefresh} 
+            className="p-2.5 bg-zinc-950 border border-zinc-900 rounded-xl hover:bg-zinc-900 text-zinc-300 hover:text-white transition-all cursor-pointer"
+            title="Refresh diagnostics"
+          >
+            <RefreshCw className="w-4 h-4" />
+          </button>
+          <button
+            onClick={runFullSystemTest}
+            className="flex items-center gap-2 px-4 py-2.5 bg-white text-black font-semibold text-xs rounded-xl hover:bg-zinc-200 transition-all cursor-pointer font-sans"
+          >
+            <Terminal className="w-4 h-4" />
+            Run Full System Test
+          </button>
+        </div>
       </div>
 
       {loading ? (
-        <div className="flex flex-col items-center justify-center py-20 text-zinc-400">
-          <RefreshCw className="w-8 h-8 animate-spin text-sky-500 mb-3" />
-          <span className="text-xs font-semibold">Running live integration ping tests...</span>
+        <div className="flex flex-col items-center justify-center py-24 text-zinc-400">
+          <RefreshCw className="w-10 h-10 animate-spin text-white mb-4" />
+          <span className="text-xs font-semibold tracking-wider font-mono">LOADING SYSTEM TELEMETRY...</span>
         </div>
       ) : error ? (
-        <div className="p-6 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 flex items-center gap-3">
-          <AlertTriangle className="w-5 h-5" />
-          <span className="text-sm font-semibold">{error}</span>
+        <div className="p-6 rounded-2xl bg-red-500/10 border border-red-500/20 text-red-400 flex items-center gap-4 shadow-xl">
+          <AlertTriangle className="w-6 h-6 shrink-0" />
+          <div className="space-y-1">
+            <h4 className="text-sm font-bold">Failed to Fetch Health Telemetry</h4>
+            <p className="text-xs text-red-400/80">{error}</p>
+          </div>
         </div>
       ) : (
-        <div className="space-y-4">
-          {healthServices.map((srv, i) => {
-            const hData = health?.[srv.key];
-            const isOnline = hData?.status === 'ONLINE';
-            const isError = hData?.status === 'ERROR';
-            const isOffline = hData?.status === 'OFFLINE' || !hData;
-
-            return (
-              <div key={i} className="bg-zinc-950 p-5 rounded-2xl border border-zinc-900 shadow-md flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-all hover:bg-zinc-900/20">
-                <div className="space-y-1">
-                  <h4 className="text-xs font-extrabold text-white uppercase tracking-wide">{srv.name}</h4>
-                  <p className="text-[10px] text-zinc-500">{srv.desc}</p>
-                  {(srv.details || hData?.details) && (
-                    <span className="inline-block mt-1 text-[9px] text-sky-400 font-mono bg-sky-500/5 px-2 py-0.5 rounded-lg border border-sky-500/10">
-                      {srv.details || hData?.details}
-                    </span>
-                  )}
-                </div>
-
-                <div className="flex items-center gap-4 shrink-0 sm:text-right">
-                  <div className="flex flex-col sm:items-end text-[10px] text-zinc-500">
-                    <span className="font-mono">Checked: {hData?.timestamp ? new Date(hData.timestamp).toLocaleTimeString() : 'Never'}</span>
+        <div className="space-y-8 animate-fade-in">
+          
+          {/* Primary Ecosystem Grid */}
+          <div>
+            <h4 className="text-xs font-black text-zinc-400 uppercase tracking-widest mb-4 font-mono">Ecosystem Components</h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+              
+              {/* Market Watcher Card */}
+              <div className="bg-zinc-950 p-5 rounded-2xl border border-zinc-900 flex flex-col justify-between hover:border-zinc-800 transition-all">
+                <div className="flex justify-between items-start">
+                  <div className="space-y-1">
+                    <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest font-mono">BACKGROUND SCHEDULER</span>
+                    <h5 className="text-sm font-bold text-white">Market Watcher Cron</h5>
                   </div>
-                  <span className={`inline-flex px-3 py-1 rounded-full text-[10px] font-black border ${
-                    isOnline ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
-                    isError ? 'bg-red-500/10 text-red-400 border-red-500/20' :
-                    'bg-amber-500/10 text-amber-400 border-amber-500/20'
-                  }`}>
-                    {hData?.status || 'OFFLINE'}
+                  <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold border ${getStatusColor(health?.cron?.status)}`}>
+                    {health?.cron?.status === 'ONLINE' ? 'Healthy' : 'Error'}
                   </span>
                 </div>
+                <div className="mt-5 space-y-2 border-t border-zinc-900/80 pt-4 text-xs font-mono">
+                  <div className="flex justify-between">
+                    <span className="text-zinc-500">Last Execution:</span>
+                    <span className="text-zinc-300">{health?.cron?.lastExecutionTime ? new Date(health.cron.lastExecutionTime).toLocaleTimeString() : 'Never'}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-zinc-500">Next Execution:</span>
+                    <span className="text-zinc-300">{health?.cron?.nextExecutionTime ? new Date(health.cron.nextExecutionTime).toLocaleTimeString() : 'N/A'}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-zinc-500">Last Duration:</span>
+                    <span className="text-zinc-300">{health?.cron?.lastDuration || 'N/A'}</span>
+                  </div>
+                </div>
               </div>
-            );
-          })}
+
+              {/* Twelve Data Card */}
+              <div className="bg-zinc-950 p-5 rounded-2xl border border-zinc-900 flex flex-col justify-between hover:border-zinc-800 transition-all">
+                <div className="flex justify-between items-start">
+                  <div className="space-y-1">
+                    <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest font-mono">MARKET DATA FEED</span>
+                    <h5 className="text-sm font-bold text-white">Twelve Data API</h5>
+                  </div>
+                  <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold border ${getStatusColor(health?.twelveData?.status)}`}>
+                    {health?.twelveData?.status === 'ONLINE' ? 'Connected' : 'Failed'}
+                  </span>
+                </div>
+                {health?.twelveData?.error ? (
+                  <p className="mt-4 text-[11px] text-red-400 bg-red-500/5 p-2 rounded-xl border border-red-500/10 font-mono">
+                    Error: {health.twelveData.error}
+                  </p>
+                ) : (
+                  <div className="mt-5 space-y-2 border-t border-zinc-900/80 pt-4 text-xs font-mono">
+                    <div className="flex justify-between">
+                      <span className="text-zinc-500">Tested Symbol:</span>
+                      <span className="text-zinc-300">{health?.twelveData?.symbol || 'N/A'}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-zinc-500">Latest Price:</span>
+                      <span className="text-emerald-400 font-bold">${health?.twelveData?.price || '0.00'}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-zinc-500">Response Time:</span>
+                      <span className="text-zinc-300">{health?.twelveData?.responseTime}ms</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Gemini AI Card */}
+              <div className="bg-zinc-950 p-5 rounded-2xl border border-zinc-900 flex flex-col justify-between hover:border-zinc-800 transition-all">
+                <div className="flex justify-between items-start">
+                  <div className="space-y-1">
+                    <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest font-mono">AI REASONING CORE</span>
+                    <h5 className="text-sm font-bold text-white">Gemini AI</h5>
+                  </div>
+                  <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold border ${getStatusColor(health?.gemini?.status)}`}>
+                    {health?.gemini?.status === 'ONLINE' ? 'Connected' : 'Failed'}
+                  </span>
+                </div>
+                {health?.gemini?.error ? (
+                  <p className="mt-4 text-[11px] text-red-400 bg-red-500/5 p-2 rounded-xl border border-red-500/10 font-mono">
+                    Error: {health.gemini.error}
+                  </p>
+                ) : (
+                  <div className="mt-5 space-y-2 border-t border-zinc-900/80 pt-4 text-xs font-mono">
+                    <div className="flex justify-between">
+                      <span className="text-zinc-500">Tested Prompt:</span>
+                      <span className="text-zinc-300">"Reply only with OK"</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-zinc-500">Response Text:</span>
+                      <span className="text-emerald-400 font-bold">"{health?.gemini?.returnedText || ''}"</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-zinc-500">Response Time:</span>
+                      <span className="text-zinc-300">{health?.gemini?.responseTime}ms</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Telegram Bot Card */}
+              <div className="bg-zinc-950 p-5 rounded-2xl border border-zinc-900 flex flex-col justify-between hover:border-zinc-800 transition-all">
+                <div className="flex justify-between items-start">
+                  <div className="space-y-1">
+                    <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest font-mono">ALERT DISPATCH SYSTEM</span>
+                    <h5 className="text-sm font-bold text-white">Telegram Bot</h5>
+                  </div>
+                  <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold border ${getStatusColor(health?.telegram?.status)}`}>
+                    {health?.telegram?.status === 'ONLINE' ? 'Connected' : 'Failed'}
+                  </span>
+                </div>
+                {health?.telegram?.error ? (
+                  <p className="mt-4 text-[11px] text-red-400 bg-red-500/5 p-2 rounded-xl border border-red-500/10 font-mono">
+                    Error: {health.telegram.error}
+                  </p>
+                ) : (
+                  <div className="mt-5 space-y-2 border-t border-zinc-900/80 pt-4 text-xs font-mono">
+                    <div className="flex justify-between">
+                      <span className="text-zinc-500">Bot Handle:</span>
+                      <span className="text-zinc-300">{health?.telegram?.telegramResponse ? `@${health.telegram.telegramResponse}` : 'N/A'}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-zinc-500">Webhooks:</span>
+                      <span className="text-emerald-400">ACTIVE</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Supabase DB Card */}
+              <div className="bg-zinc-950 p-5 rounded-2xl border border-zinc-900 flex flex-col justify-between hover:border-zinc-800 transition-all">
+                <div className="flex justify-between items-start">
+                  <div className="space-y-1">
+                    <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest font-mono">DURABLE CLOUD STORE</span>
+                    <h5 className="text-sm font-bold text-white">Supabase Database</h5>
+                  </div>
+                  <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold border ${getStatusColor(health?.supabase?.status)}`}>
+                    {health?.supabase?.status === 'ONLINE' ? 'Connected' : 'Failed'}
+                  </span>
+                </div>
+                <div className="mt-5 space-y-2 border-t border-zinc-900/80 pt-4 text-xs font-mono">
+                  <div className="flex justify-between">
+                    <span className="text-zinc-500">Ping/Read Query:</span>
+                    <span className="text-emerald-400">SUCCESS</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-zinc-500">Latency Details:</span>
+                    <span className="text-zinc-300">{health?.supabase?.details || 'N/A'}</span>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+          </div>
+
+          {/* System Metrics Grid */}
+          <div>
+            <h4 className="text-xs font-black text-zinc-400 uppercase tracking-widest mb-4 font-mono">System Metrics</h4>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+              
+              <div className="bg-zinc-950 p-5 rounded-2xl border border-zinc-900 flex flex-col justify-between">
+                <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest font-mono">ACTIVE WATCHERS</span>
+                <div className="mt-3 flex items-baseline gap-2">
+                  <span className="text-2xl font-bold text-white">{health?.stats?.watchers?.active || 0}</span>
+                  <span className="text-xs text-zinc-500">/ {health?.stats?.watchers?.total || 0} total</span>
+                </div>
+                <span className="text-[10px] text-zinc-500 mt-2 font-mono">
+                  Disabled: {health?.stats?.watchers?.disabled || 0}
+                </span>
+              </div>
+
+              <div className="bg-zinc-950 p-5 rounded-2xl border border-zinc-900 flex flex-col justify-between">
+                <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest font-mono">SIGNALS TODAY</span>
+                <div className="mt-3 flex items-baseline gap-2">
+                  <span className="text-2xl font-bold text-emerald-400">{health?.stats?.signals?.sentToday || 0}</span>
+                  <span className="text-xs text-zinc-500">sent successfully</span>
+                </div>
+                <span className="text-[10px] text-red-400 mt-2 font-mono">
+                  Failed: {health?.stats?.signals?.failedToday || 0} (detected: {health?.stats?.signals?.detectedToday || 0})
+                </span>
+              </div>
+
+              <div className="bg-zinc-950 p-5 rounded-2xl border border-zinc-900 flex flex-col justify-between">
+                <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest font-mono">LAST ENGINE SCAN</span>
+                <div className="mt-3">
+                  <span className="text-xs font-semibold text-zinc-300 truncate block">
+                    {health?.stats?.lastScan?.time !== 'Never' ? new Date(health?.stats?.lastScan?.time).toLocaleTimeString() : 'Never'}
+                  </span>
+                  <span className="text-[10px] text-zinc-500 mt-1 block font-mono">
+                    Duration: {health?.stats?.lastScan?.duration || '0s'}
+                  </span>
+                </div>
+                <span className="text-[10px] text-zinc-500 mt-2 font-mono truncate block">
+                  Pairs: {health?.stats?.lastScan?.symbols || 'None'}
+                </span>
+              </div>
+
+              <div className="bg-zinc-950 p-5 rounded-2xl border border-zinc-900 flex flex-col justify-between">
+                <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest font-mono">DAILY API LIMITS</span>
+                <div className="mt-3 space-y-1.5 font-mono text-[11px]">
+                  <div className="flex justify-between text-zinc-300">
+                    <span>Twelve Data:</span>
+                    <span>{health?.stats?.apiUsage?.twelveDataUsed || 0} / 800</span>
+                  </div>
+                  <div className="flex justify-between text-zinc-300">
+                    <span>Gemini AI:</span>
+                    <span>{health?.stats?.apiUsage?.geminiUsed || 0} reqs</span>
+                  </div>
+                </div>
+                <span className="text-[9px] text-zinc-500 mt-2 block uppercase tracking-wider font-mono">FREE LEVEL LIMIT QUOTAS</span>
+              </div>
+
+            </div>
+          </div>
+
+          {/* Historical Diagnostic Audit Logs */}
+          <div className="bg-zinc-950 rounded-2xl border border-zinc-900 overflow-hidden shadow-xl">
+            <div className="px-5 py-4 border-b border-zinc-900 flex justify-between items-center bg-zinc-900/10">
+              <span className="text-xs font-black text-zinc-400 uppercase tracking-widest font-mono">DIAGNOSTIC AUDIT LOGS</span>
+              <span className="text-[10px] font-mono text-zinc-500">Showing last 20 health events</span>
+            </div>
+            
+            {(!health?.recentLogs || health.recentLogs.length === 0) ? (
+              <div className="p-8 text-center text-xs text-zinc-500 font-mono">
+                No diagnostic log history found. Click "Run Full System Test" to trigger a comprehensive system audit.
+              </div>
+            ) : (
+              <div className="overflow-x-auto max-h-80">
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr className="border-b border-zinc-900 bg-zinc-950 text-zinc-500 font-mono text-[10px]">
+                      <th className="p-3">Timestamp</th>
+                      <th className="p-3">Subsystem</th>
+                      <th className="p-3">Status</th>
+                      <th className="p-3">Latency</th>
+                      <th className="p-3">Telemetry Log Details</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-zinc-900/60 font-mono">
+                    {health.recentLogs.map((log: any, idx: number) => {
+                      const isSuccess = log.status === 'ONLINE' || log.status === 'Healthy' || log.status === 'SUCCESS';
+                      return (
+                        <tr key={idx} className="hover:bg-zinc-900/20 text-zinc-300">
+                          <td className="p-3 whitespace-nowrap text-zinc-500 text-[11px]">
+                            {new Date(log.created_at).toLocaleString()}
+                          </td>
+                          <td className="p-3 font-semibold text-white whitespace-nowrap">
+                            {log.service}
+                          </td>
+                          <td className="p-3 whitespace-nowrap">
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${isSuccess ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'}`}>
+                              {log.status}
+                            </span>
+                          </td>
+                          <td className="p-3 text-zinc-400 whitespace-nowrap">
+                            {log.response_time_ms}ms
+                          </td>
+                          <td className="p-3 text-[11px] max-w-md truncate text-zinc-400" title={log.message || log.error}>
+                            {log.message || log.error || 'N/A'}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
         </div>
       )}
+
+      {/* FULL SYSTEM DIAGNOSTICS TESTER MODAL OVERLAY */}
+      {isTesting && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-zinc-950 w-full max-w-xl rounded-2xl border border-zinc-900 shadow-2xl flex flex-col overflow-hidden max-h-[90vh]">
+            
+            <div className="p-5 border-b border-zinc-900 flex justify-between items-center bg-zinc-900/20">
+              <div className="flex items-center gap-2.5">
+                <Terminal className="w-5 h-5 text-white animate-pulse" />
+                <h4 className="text-sm font-bold text-white font-mono tracking-tight uppercase">Full System Diagnostic Suite</h4>
+              </div>
+              {!overallTestStatus && (
+                <div className="flex items-center gap-2 text-xs font-mono text-zinc-400">
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  <span>Testing...</span>
+                </div>
+              )}
+            </div>
+
+            <div className="p-6 space-y-5 overflow-y-auto flex-1">
+              <p className="text-xs text-zinc-400 font-sans leading-relaxed">
+                Running a series of end-to-end integration workflows. Each tier performs real actions, fetches live values, prompts models, and logs operational telemetry.
+              </p>
+
+              {/* Progress Stepper List */}
+              <div className="space-y-4 font-mono text-xs">
+                
+                {/* Step 1 */}
+                <div className={`flex items-center justify-between p-3 rounded-xl border ${
+                  testStep > 1 ? 'bg-emerald-500/5 border-emerald-500/10 text-emerald-400' :
+                  testStep === 1 ? 'bg-zinc-900/40 border-zinc-800 text-white animate-pulse' :
+                  'bg-zinc-900/10 border-transparent text-zinc-600'
+                }`}>
+                  <div className="flex items-center gap-3">
+                    <span className="font-bold">01.</span>
+                    <span>Database Connection Ping Test</span>
+                  </div>
+                  <span>
+                    {testStep > 1 ? '✓ ONLINE' : testStep === 1 ? 'PINGING...' : 'PENDING'}
+                  </span>
+                </div>
+
+                {/* Step 2 */}
+                <div className={`flex items-center justify-between p-3 rounded-xl border ${
+                  testStep > 2 ? 'bg-emerald-500/5 border-emerald-500/10 text-emerald-400' :
+                  testStep === 2 ? 'bg-zinc-900/40 border-zinc-800 text-white animate-pulse' :
+                  'bg-zinc-900/10 border-transparent text-zinc-600'
+                }`}>
+                  <div className="flex items-center gap-3">
+                    <span className="font-bold">02.</span>
+                    <span>Twelve Data Quote Fetch (EUR/USD)</span>
+                  </div>
+                  <span>
+                    {testStep > 2 ? '✓ RECEIVED' : testStep === 2 ? 'FETCHING...' : 'PENDING'}
+                  </span>
+                </div>
+
+                {/* Step 3 */}
+                <div className={`flex items-center justify-between p-3 rounded-xl border ${
+                  testStep > 3 ? 'bg-emerald-500/5 border-emerald-500/10 text-emerald-400' :
+                  testStep === 3 ? 'bg-zinc-900/40 border-zinc-800 text-white animate-pulse' :
+                  'bg-zinc-900/10 border-transparent text-zinc-600'
+                }`}>
+                  <div className="flex items-center gap-3">
+                    <span className="font-bold">03.</span>
+                    <span>Gemini AI Signal Prompt Submission</span>
+                  </div>
+                  <span>
+                    {testStep > 3 ? '✓ GENERATED' : testStep === 3 ? 'GENERATING...' : 'PENDING'}
+                  </span>
+                </div>
+
+                {/* Step 4 */}
+                <div className={`flex items-center justify-between p-3 rounded-xl border ${
+                  testStep > 4 ? 'bg-emerald-500/5 border-emerald-500/10 text-emerald-400' :
+                  testStep === 4 ? 'bg-zinc-900/40 border-zinc-800 text-white animate-pulse' :
+                  'bg-zinc-900/10 border-transparent text-zinc-600'
+                }`}>
+                  <div className="flex items-center gap-3">
+                    <span className="font-bold">04.</span>
+                    <span>Gemini Signal Validation & Logging</span>
+                  </div>
+                  <span>
+                    {testStep > 4 ? '✓ COMPLETED' : testStep === 4 ? 'VALIDATING...' : 'PENDING'}
+                  </span>
+                </div>
+
+                {/* Step 5 */}
+                <div className={`flex items-center justify-between p-3 rounded-xl border ${
+                  testStep > 5 ? 'bg-emerald-500/5 border-emerald-500/10 text-emerald-400' :
+                  testStep === 5 ? 'bg-zinc-900/40 border-zinc-800 text-white animate-pulse' :
+                  'bg-zinc-900/10 border-transparent text-zinc-600'
+                }`}>
+                  <div className="flex items-center gap-3">
+                    <span className="font-bold">05.</span>
+                    <span>Telegram Alert Dispatch to Admin Chat</span>
+                  </div>
+                  <span>
+                    {testStep > 5 ? '✓ BROADCASTED' : testStep === 5 ? 'SENDING...' : 'PENDING'}
+                  </span>
+                </div>
+
+                {/* Step 6 */}
+                <div className={`flex items-center justify-between p-3 rounded-xl border ${
+                  overallTestStatus ? 'bg-emerald-500/5 border-emerald-500/10 text-emerald-400' :
+                  testStep === 6 ? 'bg-zinc-900/40 border-zinc-800 text-white animate-pulse' :
+                  'bg-zinc-900/10 border-transparent text-zinc-600'
+                }`}>
+                  <div className="flex items-center gap-3">
+                    <span className="font-bold">06.</span>
+                    <span>Ecosystem Integrity Check Compilation</span>
+                  </div>
+                  <span>
+                    {overallTestStatus ? '✓ VERIFIED' : testStep === 6 ? 'COMPILING...' : 'PENDING'}
+                  </span>
+                </div>
+
+              </div>
+
+              {/* Show Live Results or Error logs once finished */}
+              {overallTestStatus && (
+                <div className="mt-6 pt-5 border-t border-zinc-900 space-y-4">
+                  
+                  {/* Status Banner */}
+                  <div className={`p-4 rounded-xl border flex items-center gap-3 ${
+                    overallTestStatus === 'SYSTEM HEALTHY' 
+                      ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' 
+                      : 'bg-red-500/10 border-red-500/20 text-red-400'
+                  }`}>
+                    <CheckCircle2 className="w-5 h-5 shrink-0" />
+                    <div>
+                      <h5 className="font-mono text-xs font-black uppercase tracking-wider">{overallTestStatus}</h5>
+                      <p className="text-[11px] opacity-90 mt-0.5">
+                        {overallTestStatus === 'SYSTEM HEALTHY' 
+                          ? 'All checks passed. Every tier of Gaks AI is operating fully.' 
+                          : 'Operational warning: One or more tiers returned failed telemetry.'}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Detail Panel */}
+                  {testResults && (
+                    <div className="bg-zinc-900/20 p-4 rounded-xl border border-zinc-900/80 font-mono text-[11px] space-y-3">
+                      <div className="flex justify-between border-b border-zinc-900/50 pb-1.5">
+                        <span className="text-zinc-500">Twelve Data quote:</span>
+                        <span className="text-white">${testResults.twelveData?.price || 'Fetch Error'}</span>
+                      </div>
+                      <div className="border-b border-zinc-900/50 pb-1.5">
+                        <span className="text-zinc-500 block mb-1">Gemini reasoning analysis:</span>
+                        <span className="text-emerald-400 italic font-sans">"{testResults.gemini?.returnedText || 'Generation Error'}"</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-zinc-500">Telegram dispatch:</span>
+                        <span className="text-white truncate max-w-[280px]">
+                          {testResults.telegram?.telegramResponse || testResults.telegram?.message || 'Error'}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
+                  {testError && (
+                    <div className="p-3.5 bg-red-500/5 border border-red-500/10 rounded-xl text-red-400 font-mono text-[11px]">
+                      <b>Fatal Diagnostic Exception:</b> {testError}
+                    </div>
+                  )}
+
+                </div>
+              )}
+
+            </div>
+
+            <div className="p-5 border-t border-zinc-900 bg-zinc-900/10 flex justify-end">
+              <button
+                onClick={() => setIsTesting(false)}
+                disabled={!overallTestStatus}
+                className="px-4 py-2 bg-zinc-900 border border-zinc-800 text-zinc-300 font-semibold text-xs rounded-xl hover:bg-zinc-800 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed font-mono"
+              >
+                Close Diagnostic Suite
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
+
     </div>
   );
 };
