@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useLiveRates } from './hooks/useLiveRates';
 import { supabase } from './supabaseClient';
 import { getGeminiKey, saveGeminiKey, deleteGeminiKey } from './lib/apiKeys';
@@ -26,6 +26,7 @@ import {
   TrendingDown,
   ChevronRight,
   Info,
+  AlertTriangle,
   User as UserIcon,
   Settings as SettingsIcon,
   Shield,
@@ -199,6 +200,18 @@ export default function App() {
   const [accountType, setAccountType] = useState<'personal' | 'prop'>('personal');
   const [preferredSessions, setPreferredSessions] = useState<string[]>(['London', 'New York', 'Tokyo']);
   const [preferredTimeframes, setPreferredTimeframes] = useState<string[]>(['M15', 'H1']);
+  const [lastSavedStrategyText, setLastSavedStrategyText] = useState<string>('');
+  const prevSelectedId = useRef<string>('default');
+
+  useEffect(() => {
+    if (prevSelectedId.current !== selectedStrategyId) {
+      const nextStrat = strategies.find(s => s.id === selectedStrategyId);
+      if (nextStrat) {
+        setLastSavedStrategyText(nextStrat.text);
+      }
+      prevSelectedId.current = selectedStrategyId;
+    }
+  }, [selectedStrategyId, strategies]);
   const [showNotification, setShowNotification] = useState<{message: string; type: 'success' | 'info'} | null>(null);
 
   // Market Watcher States
@@ -423,6 +436,11 @@ export default function App() {
         setStrategies(parsed.strategies);
         setActiveStrategyId(parsed.activeId);
         setSelectedStrategyId(parsed.activeId);
+        prevSelectedId.current = parsed.activeId;
+        const activeStrat = parsed.strategies.find((s: any) => s.id === parsed.activeId);
+        if (activeStrat) {
+          setLastSavedStrategyText(activeStrat.text);
+        }
       } else {
         const defaultState = {
           activeId: 'default',
@@ -433,6 +451,8 @@ export default function App() {
         setStrategies(defaultState.strategies);
         setActiveStrategyId(defaultState.activeId);
         setSelectedStrategyId(defaultState.activeId);
+        prevSelectedId.current = defaultState.activeId;
+        setLastSavedStrategyText(GAKS_DEFAULT_STRATEGY.text);
         localStorage.setItem('gaks_strategy_text', serialized);
       }
       
@@ -532,9 +552,15 @@ export default function App() {
 
   // Save Strategy Page Form
   const saveStrategyPlaybook = async () => {
+    const selectedStrat = strategies.find(s => s.id === selectedStrategyId);
+    if (!selectedStrat || selectedStrat.text.trim().length === 0) {
+      triggerNotification("Strategy cannot be empty.", "info");
+      return;
+    }
     const serialized = serializeStrategies(activeStrategyId, strategies);
     setStrategyText(serialized);
     localStorage.setItem('gaks_strategy_text', serialized);
+    setLastSavedStrategyText(selectedStrat.text);
     
     if (session?.user) {
       try {
@@ -558,34 +584,6 @@ export default function App() {
       }
     } else {
       triggerNotification("Strategy playbook saved successfully!");
-    }
-  };
-
-  const resetStrategyPlaybook = () => {
-    if (selectedStrategyId === 'default') {
-      const updatedList = strategies.map(s => {
-        if (s.id === 'default') {
-          return { ...s, text: GAKS_DEFAULT_STRATEGY.text };
-        }
-        return s;
-      });
-      setStrategies(updatedList);
-      const serialized = serializeStrategies(activeStrategyId, updatedList);
-      setStrategyText(serialized);
-      localStorage.setItem('gaks_strategy_text', serialized);
-      triggerNotification("Default strategy restored to institutional playbook", "info");
-    } else {
-      const updatedList = strategies.map(s => {
-        if (s.id === selectedStrategyId) {
-          return { ...s, text: `• Entry conditions\n• Confirmation indicators\n• Exit & stop-loss logic\n• Risk management rules` };
-        }
-        return s;
-      });
-      setStrategies(updatedList);
-      const serialized = serializeStrategies(activeStrategyId, updatedList);
-      setStrategyText(serialized);
-      localStorage.setItem('gaks_strategy_text', serialized);
-      triggerNotification("Playbook reset to blank template", "info");
     }
   };
 
@@ -710,13 +708,6 @@ export default function App() {
     localStorage.setItem('gaks_strategy_text', serialized);
   };
 
-  const syncStrategy = () => {
-    triggerNotification("Syncing playbook with Gaks AI Engine...");
-    setTimeout(() => {
-      triggerNotification("All parameters synchronized successfully!");
-    }, 1500);
-  };
-
   // Save Preferences Form
   const handleLogout = async () => {
     try {
@@ -808,6 +799,11 @@ export default function App() {
           setStrategies(parsed.strategies);
           setActiveStrategyId(parsed.activeId);
           setSelectedStrategyId(parsed.activeId);
+          prevSelectedId.current = parsed.activeId;
+          const activeStrat = parsed.strategies.find((s: any) => s.id === parsed.activeId);
+          if (activeStrat) {
+            setLastSavedStrategyText(activeStrat.text);
+          }
         }
         if (data.capital) setCapital(data.capital);
         if (data.custom_capital) setCustomCapital(data.custom_capital);
@@ -1547,20 +1543,35 @@ export default function App() {
           )}
 
           {/* ==================== TAB 2: STRATEGY ==================== */}
-          {activeTab === 'strategy' && (
-            <div className="space-y-8 animate-fade-in">
-              
-              {/* Header Title */}
-              <div className="space-y-2">
-                <h1 className="text-3xl font-bold tracking-tight text-white font-display">Strategy</h1>
-                <p className="text-xs text-zinc-400 leading-relaxed max-w-sm">
-                  Write the playbook your AI assistant trades with.
-                </p>
-                <div className="flex items-center gap-1.5 pt-0.5">
-                  <Check className="w-4 h-4 text-emerald-500 stroke-[2.5]" />
-                  <span className="text-xs text-zinc-400 font-medium">All changes saved</span>
+          {activeTab === 'strategy' && (() => {
+            const selectedStrat = strategies.find(s => s.id === selectedStrategyId) || GAKS_DEFAULT_STRATEGY;
+            const currentStrategyText = selectedStrat.text || '';
+            const isDirty = !selectedStrat.isDefault && lastSavedStrategyText !== currentStrategyText;
+            const canSave = isDirty && currentStrategyText.trim().length > 0;
+
+            return (
+              <div className="space-y-8 animate-fade-in">
+                
+                {/* Header Title */}
+                <div className="space-y-2">
+                  <h1 className="text-3xl font-bold tracking-tight text-white font-display">Strategy</h1>
+                  <p className="text-xs text-zinc-400 leading-relaxed max-w-sm">
+                    Write the playbook your AI assistant trades with.
+                  </p>
+                  <div className="flex items-center gap-1.5 pt-0.5">
+                    {isDirty ? (
+                      <>
+                        <AlertTriangle className="w-4 h-4 text-amber-500 animate-pulse" />
+                        <span className="text-xs text-amber-500 font-medium">Unsaved changes in editor</span>
+                      </>
+                    ) : (
+                      <>
+                        <Check className="w-4 h-4 text-emerald-500 stroke-[2.5]" />
+                        <span className="text-xs text-zinc-400 font-medium">All changes saved</span>
+                      </>
+                    )}
+                  </div>
                 </div>
-              </div>
 
               {/* Strategy Board & Editor */}
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -1665,110 +1676,96 @@ export default function App() {
 
                 {/* Right Panel: Selected Strategy Editor */}
                 <div className="lg:col-span-2 space-y-4">
-                  {(() => {
-                    const selectedStrat = strategies.find(s => s.id === selectedStrategyId) || GAKS_DEFAULT_STRATEGY;
-                    return (
-                      <div className="rounded-3xl border border-zinc-800 bg-[#0c0c0e]/80 overflow-hidden flex flex-col">
-                        <div className="px-5 py-4 border-b border-zinc-900 flex flex-wrap items-center justify-between gap-3 bg-[#08080a]">
-                          <div className="flex items-center gap-2.5">
-                            <span className={`w-2 h-2 rounded-full ${selectedStrat.id === activeStrategyId ? 'bg-emerald-500 animate-pulse' : 'bg-zinc-600'}`}></span>
-                            
-                            {/* Rename input if custom, else static label */}
-                            {selectedStrat.isDefault ? (
-                              <span className="text-xs font-bold text-white uppercase tracking-wider">{selectedStrat.name}</span>
-                            ) : (
-                              <input
-                                type="text"
-                                value={selectedStrat.name}
-                                onChange={(e) => handleRenameStrategy(e.target.value)}
-                                className="bg-transparent border-b border-dashed border-zinc-850 hover:border-zinc-700 focus:border-emerald-500 focus:outline-none text-xs font-bold text-white uppercase tracking-wider pb-0.5"
-                                title="Click to rename"
-                                placeholder="Rename Strategy..."
-                              />
-                            )}
-                          </div>
-
-                          <div className="flex items-center gap-2">
-                            {selectedStrat.isDefault && (
-                              <span className="text-[10px] bg-zinc-900/60 border border-zinc-800 text-zinc-400 px-2.5 py-1 rounded-full font-semibold">
-                                Built-in Default
-                              </span>
-                            )}
-                            {selectedStrat.id === activeStrategyId ? (
-                              <span className="text-[10px] bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 px-2.5 py-1 rounded-full font-bold uppercase tracking-wider flex items-center gap-1.5">
-                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-                                Currently Active
-                              </span>
-                            ) : (
-                              <button
-                                onClick={() => handleSetActiveStrategy(selectedStrat.id)}
-                                className="px-3 py-1 text-[10px] bg-white text-black hover:bg-zinc-200 transition-all rounded-full font-bold uppercase tracking-wider cursor-pointer shadow-md"
-                              >
-                                Activate
-                              </button>
-                            )}
-                          </div>
-                        </div>
-
-                        <div className="p-5 flex flex-col gap-4">
-                          {selectedStrat.isDefault && (
-                            <div className="p-3.5 rounded-2xl bg-zinc-950/60 border border-zinc-900 text-zinc-400 text-xs leading-relaxed flex items-start gap-2.5">
-                              <Info className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
-                              <div>
-                                This is our institutional **Gaks AI Default Strategy**. It is optimized for the free-tier Twelve Data feeds. If you wish to customize these rules, click the **Duplicate** button to create your own editable playbook copy.
-                              </div>
-                            </div>
-                          )}
-
-                          <textarea
-                            value={selectedStrat.text}
-                            onChange={(e) => handleStrategyTextChange(e.target.value)}
-                            readOnly={selectedStrat.isDefault}
-                            placeholder="Describe your trading strategy in detail..."
-                            className={`w-full h-80 bg-zinc-950/60 border border-zinc-900 rounded-2xl p-4 text-xs font-medium leading-relaxed resize-none font-sans focus:outline-none ${
-                              selectedStrat.isDefault
-                                ? 'text-zinc-500 cursor-not-allowed border-zinc-950 bg-zinc-950/30'
-                                : 'text-zinc-300 focus:border-zinc-700'
-                            }`}
+                  <div className="rounded-3xl border border-zinc-800 bg-[#0c0c0e]/80 overflow-hidden flex flex-col">
+                    <div className="px-5 py-4 border-b border-zinc-900 flex flex-wrap items-center justify-between gap-3 bg-[#08080a]">
+                      <div className="flex items-center gap-2.5">
+                        <span className={`w-2 h-2 rounded-full ${selectedStrat.id === activeStrategyId ? 'bg-emerald-500 animate-pulse' : 'bg-zinc-600'}`}></span>
+                        
+                        {/* Rename input if custom, else static label */}
+                        {selectedStrat.isDefault ? (
+                          <span className="text-xs font-bold text-white uppercase tracking-wider">{selectedStrat.name}</span>
+                        ) : (
+                          <input
+                            type="text"
+                            value={selectedStrat.name}
+                            onChange={(e) => handleRenameStrategy(e.target.value)}
+                            className="bg-transparent border-b border-dashed border-zinc-850 hover:border-zinc-700 focus:border-emerald-500 focus:outline-none text-xs font-bold text-white uppercase tracking-wider pb-0.5"
+                            title="Click to rename"
+                            placeholder="Rename Strategy..."
                           />
+                        )}
+                      </div>
 
-                          {/* Card Actions */}
-                          <div className="flex justify-between items-center pt-1">
-                            <div className="flex gap-2">
-                              {!selectedStrat.isDefault && (
-                                <button
-                                  onClick={resetStrategyPlaybook}
-                                  className="p-2 rounded-xl border border-zinc-800 hover:border-zinc-700 bg-zinc-950/40 text-zinc-400 hover:text-white transition-all flex items-center gap-1.5 text-xs font-medium cursor-pointer"
-                                  title="Reset playbook"
-                                >
-                                  <RotateCcw className="w-3.5 h-3.5" />
-                                  <span>Reset</span>
-                                </button>
-                              )}
-                              <button
-                                onClick={syncStrategy}
-                                className="p-2 rounded-xl border border-zinc-800 hover:border-zinc-700 bg-zinc-950/40 text-zinc-400 hover:text-white transition-all flex items-center gap-1.5 text-xs font-medium cursor-pointer"
-                                title="Sync playbook"
-                              >
-                                <CloudLightning className="w-3.5 h-3.5" />
-                                <span>Sync</span>
-                              </button>
-                            </div>
+                      <div className="flex items-center gap-2">
+                        {selectedStrat.isDefault && (
+                          <span className="text-[10px] bg-zinc-900/60 border border-zinc-800 text-zinc-400 px-2.5 py-1 rounded-full font-semibold">
+                            Built-in Default
+                          </span>
+                        )}
+                        {selectedStrat.id === activeStrategyId ? (
+                          <span className="text-[10px] bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 px-2.5 py-1 rounded-full font-bold uppercase tracking-wider flex items-center gap-1.5">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                            Currently Active
+                          </span>
+                        ) : (
+                          <button
+                            onClick={() => handleSetActiveStrategy(selectedStrat.id)}
+                            className="px-3 py-1 text-[10px] bg-white text-black hover:bg-zinc-200 transition-all rounded-full font-bold uppercase tracking-wider cursor-pointer shadow-md"
+                          >
+                            Activate
+                          </button>
+                        )}
+                      </div>
+                    </div>
 
-                            {!selectedStrat.isDefault && (
-                              <button
-                                onClick={saveStrategyPlaybook}
-                                className="px-5 py-2 rounded-full bg-white text-xs font-bold text-black hover:bg-zinc-200 transition-all flex items-center gap-1.5 cursor-pointer"
-                              >
-                                <Check className="w-3.5 h-3.5 stroke-[2.5]" />
-                                <span>Save Changes</span>
-                              </button>
-                            )}
+                    <div className="p-5 flex flex-col gap-4">
+                      {selectedStrat.isDefault && (
+                        <div className="p-3.5 rounded-2xl bg-zinc-950/60 border border-zinc-900 text-zinc-400 text-xs leading-relaxed flex items-start gap-2.5">
+                          <Info className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
+                          <div>
+                            This is our institutional **Gaks AI Default Strategy**. It is optimized for the free-tier Twelve Data feeds. If you wish to customize these rules, click the **Duplicate** button to create your own editable playbook copy.
                           </div>
                         </div>
+                      )}
+
+                      <textarea
+                        value={selectedStrat.text}
+                        onChange={(e) => handleStrategyTextChange(e.target.value)}
+                        readOnly={selectedStrat.isDefault}
+                        placeholder="Describe your trading strategy in detail..."
+                        className={`w-full h-80 bg-zinc-950/60 border border-zinc-900 rounded-2xl p-4 text-xs font-medium leading-relaxed resize-none font-sans focus:outline-none ${
+                          selectedStrat.isDefault
+                            ? 'text-zinc-500 cursor-not-allowed border-zinc-950 bg-zinc-950/30'
+                            : 'text-zinc-300 focus:border-zinc-700'
+                        }`}
+                      />
+
+                      {!selectedStrat.isDefault && selectedStrat.text.trim().length === 0 && (
+                        <p className="text-red-400 text-[11px] font-semibold flex items-center gap-1.5 px-1 animate-fade-in">
+                          <AlertTriangle className="w-3.5 h-3.5" />
+                          <span>Strategy cannot be empty.</span>
+                        </p>
+                      )}
+
+                      {/* Card Actions */}
+                      <div className="flex justify-center items-center pt-2">
+                        {!selectedStrat.isDefault && (
+                          <button
+                            onClick={saveStrategyPlaybook}
+                            disabled={!canSave}
+                            className={`px-8 py-2.5 rounded-full text-xs font-bold transition-all flex items-center gap-1.5 shadow-lg ${
+                              canSave 
+                                ? 'bg-white text-black hover:bg-zinc-200 cursor-pointer active:scale-[0.98]' 
+                                : 'bg-[#5A5A5A] text-zinc-300 cursor-not-allowed opacity-75'
+                            }`}
+                          >
+                            <Check className="w-3.5 h-3.5 stroke-[2.5]" />
+                            <span>Save Changes</span>
+                          </button>
+                        )}
                       </div>
-                    );
-                  })()}
+                    </div>
+                  </div>
                 </div>
 
               </div>
@@ -1932,7 +1929,7 @@ export default function App() {
               </div>
 
             </div>
-          )}
+          ); })()}
 
           {/* ==================== TAB 3: MARKET WATCHER ==================== */}
           {activeTab === 'watcher' && (
