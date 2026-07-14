@@ -3,15 +3,15 @@ import path from "path";
 import { createClient } from "@supabase/supabase-js";
 import { GoogleGenAI, Type } from "@google/genai";
 import marketWatcherCronHandler from "./api/cron/market-watcher";
-import adminStatsHandler from "./api/admin/stats";
-import adminUsersHandler from "./api/admin/users";
-import adminUsersActionHandler from "./api/admin/users/action";
-import adminWatchersHandler from "./api/admin/watchers";
-import adminWatchersActionHandler from "./api/admin/watchers/action";
-import adminSignalsHandler from "./api/admin/signals";
-import adminHealthHandler from "./api/admin/health";
-import adminSettingsHandler from "./api/admin/settings";
-import adminSendTestAlertHandler from "./api/admin/send-test-alert";
+import adminStatsHandler from "./api/_admin/stats";
+import adminUsersHandler from "./api/_admin/users";
+import adminUsersActionHandler from "./api/_admin/users/action";
+import adminWatchersHandler from "./api/_admin/watchers";
+import adminWatchersActionHandler from "./api/_admin/watchers/action";
+import adminSignalsHandler from "./api/_admin/signals";
+import adminHealthHandler from "./api/_admin/health";
+import adminSettingsHandler from "./api/_admin/settings";
+import adminSendTestAlertHandler from "./api/_admin/send-test-alert";
 
 interface ERResponse {
   result: string;
