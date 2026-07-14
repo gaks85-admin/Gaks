@@ -2,8 +2,9 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useLiveRates } from './hooks/useLiveRates';
 import { supabase } from './supabaseClient';
 import { getGeminiKey, saveGeminiKey, deleteGeminiKey } from './lib/apiKeys';
-import Auth from './components/Auth';
-import AdminDashboard from './components/admin/AdminDashboard';
+
+const Auth = React.lazy(() => import('./components/Auth'));
+const AdminDashboard = React.lazy(() => import('./components/admin/AdminDashboard'));
 import {
   Home as HomeIcon,
   TrendingUp,
@@ -289,67 +290,69 @@ export default function App() {
         const { data: { session: activeSession } } = await supabase.auth.getSession();
         if (activeSession) {
           setSession(activeSession);
-          const { data: profile } = await supabase
-            .from('profiles')
-            .select('*')
-            .eq('id', activeSession.user.id)
-            .single();
-            
-          if (profile) {
-            setUserProfile(profile);
-            setProfileFullName(profile.full_name);
-            setProfilePlan(profile.subscription_plan || 'Free');
-            setProfileTelegram(profile.telegram_connected || false);
-            setProfileAvatarUrl(profile.avatar_url || '');
-          }
-          // Sync watchlist
-          loadWatchlistFromSupabase(activeSession.user.id);
-          
-          // Load Telegram Connection
-          loadTelegramConnection(activeSession.user.id);
-          
-          // Load Trading Preferences
-          loadTradingPreferences(activeSession.user.id);
-          
-          // Load Watcher Status
-          loadWatcherStatus(activeSession.user.id);
+          // Set loading to false immediately after getting the active session, so UI renders instantly.
+          setIsAuthLoading(false);
+
+          // Retrieve all supplementary user details in parallel without blocking the main render
+          Promise.all([
+            supabase
+              .from('profiles')
+              .select('*')
+              .eq('id', activeSession.user.id)
+              .single()
+              .then(({ data: profile }) => {
+                if (profile) {
+                  setUserProfile(profile);
+                  setProfileFullName(profile.full_name);
+                  setProfilePlan(profile.subscription_plan || 'Free');
+                  setProfileTelegram(profile.telegram_connected || false);
+                  setProfileAvatarUrl(profile.avatar_url || '');
+                }
+              }),
+            loadWatchlistFromSupabase(activeSession.user.id),
+            loadTelegramConnection(activeSession.user.id),
+            loadTradingPreferences(activeSession.user.id),
+            loadWatcherStatus(activeSession.user.id)
+          ]).catch(err => {
+            console.error('Error fetching secondary user data in background:', err);
+          });
+        } else {
+          setIsAuthLoading(false);
         }
       } catch (err) {
         console.error('Error restoring session:', err);
-      } finally {
         setIsAuthLoading(false);
       }
     };
 
     initAuth();
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event: string, currentSession: any) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event: string, currentSession: any) => {
       if (currentSession) {
         setSession(currentSession);
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', currentSession.user.id)
-          .single();
-          
-        if (profile) {
-          setUserProfile(profile);
-          setProfileFullName(profile.full_name);
-          setProfilePlan(profile.subscription_plan || 'Free');
-          setProfileTelegram(profile.telegram_connected || false);
-          setProfileAvatarUrl(profile.avatar_url || '');
-        }
-        // Sync watchlist
-        loadWatchlistFromSupabase(currentSession.user.id);
-        
-        // Load Telegram Connection
-        loadTelegramConnection(currentSession.user.id);
-        
-        // Load Trading Preferences
-        loadTradingPreferences(currentSession.user.id);
-        
-        // Load Watcher Status
-        loadWatcherStatus(currentSession.user.id);
+        // Load user profile and details in parallel in background, completely non-blocking
+        Promise.all([
+          supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', currentSession.user.id)
+            .single()
+            .then(({ data: profile }) => {
+              if (profile) {
+                setUserProfile(profile);
+                setProfileFullName(profile.full_name);
+                setProfilePlan(profile.subscription_plan || 'Free');
+                setProfileTelegram(profile.telegram_connected || false);
+                setProfileAvatarUrl(profile.avatar_url || '');
+              }
+            }),
+          loadWatchlistFromSupabase(currentSession.user.id),
+          loadTelegramConnection(currentSession.user.id),
+          loadTradingPreferences(currentSession.user.id),
+          loadWatcherStatus(currentSession.user.id)
+        ]).catch(err => {
+          console.error('Error on auth change fetching data:', err);
+        });
       } else {
         setSession(null);
         setUserProfile(null);
@@ -372,22 +375,25 @@ export default function App() {
       const pendingToken = localStorage.getItem('gaks_pending_telegram_token');
       const pendingUserId = localStorage.getItem('gaks_pending_telegram_user');
 
+      // If there is no pending activation token in local storage, completely skip expensive background API/DB queries
+      if (!pendingToken || pendingUserId !== session.user.id) {
+        return;
+      }
+
       // Reload the state (this updates the UI instantly if the backend updated it)
       await loadTelegramConnection(session.user.id, false);
       
-      if (pendingToken && pendingUserId === session.user.id) {
-        // We need to check if it's connected now
-        const { data } = await getTelegramConnection(session.user.id);
-        if (data && data.connected) {
-          localStorage.removeItem('gaks_pending_telegram_token');
-          localStorage.removeItem('gaks_pending_telegram_user');
-          triggerNotification("Telegram linked successfully!", "success");
-          setTelegramSuccessMessage("Telegram Connected!");
-        }
+      // We need to check if it's connected now
+      const { data } = await getTelegramConnection(session.user.id);
+      if (data && data.connected) {
+        localStorage.removeItem('gaks_pending_telegram_token');
+        localStorage.removeItem('gaks_pending_telegram_user');
+        triggerNotification("Telegram linked successfully!", "success");
+        setTelegramSuccessMessage("Telegram Connected!");
       }
     };
 
-    // Initial check
+    // Initial check (only runs if there is a pending token, thanks to the early exit check)
     checkAndTriggerActivation();
 
     // 1. Focus listener: instantly updates when user switches back to this tab
@@ -1241,7 +1247,19 @@ export default function App() {
   }
 
   if (!session) {
-    return <Auth onAuthSuccess={(newSession) => setSession(newSession)} />;
+    return (
+      <React.Suspense fallback={
+        <div className="min-h-screen w-full bg-[#030303] flex flex-col justify-center items-center gap-4">
+          <div className="w-10 h-10 rounded-full border-2 border-zinc-900 border-t-zinc-400 animate-spin"></div>
+          <div className="flex items-center gap-1.5">
+            <span className="text-xl font-bold tracking-tight text-white font-display">Gaks</span>
+            <span className="text-sm font-semibold text-zinc-500 font-display">AI</span>
+          </div>
+        </div>
+      }>
+        <Auth onAuthSuccess={(newSession) => setSession(newSession)} />
+      </React.Suspense>
+    );
   }
 
   return (
@@ -2560,7 +2578,14 @@ export default function App() {
             </div>
           )}
           {activeTab === 'admin' && (
-            <AdminDashboard userProfile={userProfile} session={session} authLoading={isAuthLoading} />
+            <React.Suspense fallback={
+              <div className="py-20 flex flex-col items-center justify-center gap-3">
+                <div className="w-8 h-8 rounded-full border-2 border-zinc-900 border-t-zinc-500 animate-spin"></div>
+                <p className="text-xs text-zinc-500">Loading admin panel analytics...</p>
+              </div>
+            }>
+              <AdminDashboard userProfile={userProfile} session={session} authLoading={isAuthLoading} />
+            </React.Suspense>
           )}
 
         </main>
