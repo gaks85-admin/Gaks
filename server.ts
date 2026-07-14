@@ -518,6 +518,7 @@ async function startServer() {
   app.post("/api/admin/watchers/action", adminWatchersActionHandler);
   app.get("/api/admin/signals", adminSignalsHandler);
   app.get("/api/admin/health", adminHealthHandler);
+  app.post("/api/admin/health", adminHealthHandler);
   app.get("/api/admin/settings", adminSettingsHandler);
   app.post("/api/admin/settings", adminSettingsHandler);
   app.post("/api/admin/send-test-alert", adminSendTestAlertHandler);
