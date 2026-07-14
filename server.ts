@@ -534,6 +534,8 @@ async function startServer() {
     const authHeader = req.headers.authorization || '';
     const token = authHeader.startsWith('Bearer ') ? authHeader.substring(7) : authHeader;
 
+    let userObj: any = null;
+
     if (token) {
       try {
         const { data: { user }, error: authError } = await supabase.auth.getUser(token);
@@ -541,6 +543,7 @@ async function startServer() {
           console.warn("[Watcher Start] Bearer token auth validation failed:", authError?.message);
         } else {
           userId = user.id;
+          userObj = user;
         }
       } catch (err: any) {
         console.warn("[Watcher Start] Bearer token verification error:", err.message);
@@ -566,6 +569,41 @@ async function startServer() {
 
       if (profileError) {
         console.warn("[Watcher Start] Profile query warning:", profileError.message);
+      }
+
+      // Check if user is admin. If not, enforce 1 active watcher limit.
+      const ADMIN_EMAIL = "gaks6535@gmail.com";
+      const isUserAdmin = 
+        (profile?.role === "admin") || 
+        (profile?.email?.trim().toLowerCase() === ADMIN_EMAIL) ||
+        (userObj?.email?.trim().toLowerCase() === ADMIN_EMAIL);
+
+      if (!isUserAdmin) {
+        // Query active watchers for this user in public.watchers
+        const { data: activeWatchers, error: activeError } = await supabase
+          .from("watchers")
+          .select("*")
+          .eq("user_id", userId)
+          .eq("status", "active");
+
+        if (activeError) {
+          console.warn("[Watcher Start] Error querying active watchers:", activeError.message);
+        }
+
+        if (activeWatchers && activeWatchers.length > 0) {
+          // If they already have an active watcher, and it is NOT for the same pair they are starting/updating now, reject.
+          const currentPair = (req.body.selectedPair || "").trim().toUpperCase();
+          const hasDifferentActiveWatcher = activeWatchers.some(
+            w => (w.selected_pair || "").trim().toUpperCase() !== currentPair
+          );
+
+          if (hasDifferentActiveWatcher) {
+            return res.status(403).json({
+              success: false,
+              error: "Free accounts can monitor one market at a time."
+            });
+          }
+        }
       }
 
       // 3. Verify Telegram is connected by checking the telegram_connections table
@@ -692,7 +730,7 @@ async function startServer() {
           selected_pair: req.body.selectedPair,
           selected_timeframe: req.body.selectedTimeframe,
           updated_at: nowString
-        }, { onConflict: "user_id" });
+        }, { onConflict: "user_id,selected_pair" });
 
       if (watchersError) {
         console.error("[Watcher Start] Failed to write to watchers table:", watchersError.message);

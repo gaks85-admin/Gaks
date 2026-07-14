@@ -203,6 +203,49 @@ export default function App() {
   const [lastSavedStrategyText, setLastSavedStrategyText] = useState<string>('');
   const prevSelectedId = useRef<string>('default');
 
+  const [initialPrefs, setInitialPrefs] = useState<{
+    capital: string;
+    customCapital: string;
+    preferredRisk: string;
+    riskReward: string;
+    accountType: 'personal' | 'prop';
+    preferredSessions: string[];
+    preferredTimeframes: string[];
+  }>({
+    capital: '$1,000',
+    customCapital: '',
+    preferredRisk: '1%',
+    riskReward: '1:2',
+    accountType: 'personal',
+    preferredSessions: ['London', 'New York', 'Tokyo'],
+    preferredTimeframes: ['M15', 'H1']
+  });
+
+  const isPrefsDirty = useMemo(() => {
+    if (capital !== initialPrefs.capital) return true;
+    if (customCapital !== initialPrefs.customCapital) return true;
+    if (preferredRisk !== initialPrefs.preferredRisk) return true;
+    if (riskReward !== initialPrefs.riskReward) return true;
+    if (accountType !== initialPrefs.accountType) return true;
+    
+    if (preferredSessions.length !== initialPrefs.preferredSessions.length) return true;
+    const sortedSessions = [...preferredSessions].sort();
+    const sortedInitialSessions = [...initialPrefs.preferredSessions].sort();
+    if (sortedSessions.some((s, idx) => s !== sortedInitialSessions[idx])) return true;
+
+    if (preferredTimeframes.length !== initialPrefs.preferredTimeframes.length) return true;
+    const sortedTimeframes = [...preferredTimeframes].sort();
+    const sortedInitialTimeframes = [...initialPrefs.preferredTimeframes].sort();
+    if (sortedTimeframes.some((t, idx) => t !== sortedInitialTimeframes[idx])) return true;
+
+    return false;
+  }, [capital, customCapital, preferredRisk, riskReward, accountType, preferredSessions, preferredTimeframes, initialPrefs]);
+
+  const ADMIN_EMAIL = "gaks6535@gmail.com";
+  const isAdmin = useMemo(() => {
+    return userProfile?.role === "admin" || session?.user?.email?.trim().toLowerCase() === ADMIN_EMAIL;
+  }, [userProfile, session]);
+
   useEffect(() => {
     if (prevSelectedId.current !== selectedStrategyId) {
       const nextStrat = strategies.find(s => s.id === selectedStrategyId);
@@ -456,26 +499,36 @@ export default function App() {
         localStorage.setItem('gaks_strategy_text', serialized);
       }
       
-      const savedCapital = localStorage.getItem('gaks_capital');
+      const savedCapital = localStorage.getItem('gaks_capital') || '$1,000';
       if (savedCapital) setCapital(savedCapital);
 
-      const savedCustomCapital = localStorage.getItem('gaks_custom_capital');
+      const savedCustomCapital = localStorage.getItem('gaks_custom_capital') || '';
       if (savedCustomCapital) setCustomCapital(savedCustomCapital);
       
-      const savedRisk = localStorage.getItem('gaks_preferred_risk');
+      const savedRisk = localStorage.getItem('gaks_preferred_risk') || '1%';
       if (savedRisk) setPreferredRisk(savedRisk);
       
-      const savedRR = localStorage.getItem('gaks_risk_reward');
+      const savedRR = localStorage.getItem('gaks_risk_reward') || '1:2';
       if (savedRR) setRiskReward(savedRR);
       
-      const savedAccount = localStorage.getItem('gaks_account_type');
-      if (savedAccount === 'personal' || savedAccount === 'prop') setAccountType(savedAccount);
+      const savedAccount = localStorage.getItem('gaks_account_type') || 'personal';
+      if (savedAccount === 'personal' || savedAccount === 'prop') setAccountType(savedAccount as 'personal' | 'prop');
       
-      const savedSessions = localStorage.getItem('gaks_sessions');
-      if (savedSessions) setPreferredSessions(JSON.parse(savedSessions));
+      const savedSessions = localStorage.getItem('gaks_sessions') ? JSON.parse(localStorage.getItem('gaks_sessions')!) : ['London', 'New York', 'Tokyo'];
+      if (savedSessions) setPreferredSessions(savedSessions);
       
-      const savedTimeframes = localStorage.getItem('gaks_timeframes');
-      if (savedTimeframes) setPreferredTimeframes(JSON.parse(savedTimeframes));
+      const savedTimeframes = localStorage.getItem('gaks_timeframes') ? JSON.parse(localStorage.getItem('gaks_timeframes')!) : ['M15', 'H1'];
+      if (savedTimeframes) setPreferredTimeframes(savedTimeframes);
+
+      setInitialPrefs({
+        capital: savedCapital,
+        customCapital: savedCustomCapital,
+        preferredRisk: savedRisk,
+        riskReward: savedRR,
+        accountType: savedAccount as 'personal' | 'prop',
+        preferredSessions: savedSessions,
+        preferredTimeframes: savedTimeframes
+      });
 
       const savedWatchlist = localStorage.getItem('gaks_watchlist');
       if (savedWatchlist) setWatchlist(JSON.parse(savedWatchlist));
@@ -805,6 +858,14 @@ export default function App() {
             setLastSavedStrategyText(activeStrat.text);
           }
         }
+        const capVal = data.capital || '$1,000';
+        const customCapVal = data.custom_capital || '';
+        const riskVal = data.preferred_risk || '1%';
+        const rrVal = data.risk_reward || '1:2';
+        const accountVal = (data.account_type === 'personal' || data.account_type === 'prop') ? data.account_type : 'personal';
+        const sessionsVal = data.preferred_sessions || ['London', 'New York', 'Tokyo'];
+        const timeframesVal = data.preferred_timeframes || ['M15', 'H1'];
+
         if (data.capital) setCapital(data.capital);
         if (data.custom_capital) setCustomCapital(data.custom_capital);
         if (data.preferred_risk) setPreferredRisk(data.preferred_risk);
@@ -814,6 +875,16 @@ export default function App() {
         }
         if (data.preferred_sessions) setPreferredSessions(data.preferred_sessions);
         if (data.preferred_timeframes) setPreferredTimeframes(data.preferred_timeframes);
+
+        setInitialPrefs({
+          capital: capVal,
+          customCapital: customCapVal,
+          preferredRisk: riskVal,
+          riskReward: rrVal,
+          accountType: accountVal as 'personal' | 'prop',
+          preferredSessions: sessionsVal,
+          preferredTimeframes: timeframesVal
+        });
       }
     } catch (err: any) {
       console.error("Exception loading trading preferences:", err);
@@ -1114,6 +1185,15 @@ export default function App() {
           console.error("Error saving preferences to Supabase:", error.message);
           triggerNotification("Preferences saved locally. Sync failed.", "info");
         } else {
+          setInitialPrefs({
+            capital,
+            customCapital,
+            preferredRisk,
+            riskReward,
+            accountType,
+            preferredSessions,
+            preferredTimeframes
+          });
           triggerNotification("Trading preferences saved & synced successfully!");
         }
       } catch (err: any) {
@@ -1121,6 +1201,15 @@ export default function App() {
         triggerNotification("Preferences saved locally.", "info");
       }
     } else {
+      setInitialPrefs({
+        capital,
+        customCapital,
+        preferredRisk,
+        riskReward,
+        accountType,
+        preferredSessions,
+        preferredTimeframes
+      });
       triggerNotification("Trading preferences successfully saved!");
     }
   };
@@ -1164,16 +1253,30 @@ export default function App() {
       timeframe: timeframeToWatch
     };
 
-    const updatedWatchlist = [newPair];
+    let updatedWatchlist;
+    if (isAdmin) {
+      if (watchlist.some(w => w.symbol === cleanSymbol)) {
+        updatedWatchlist = watchlist.map(w => w.symbol === cleanSymbol ? { ...w, timeframe: timeframeToWatch } : w);
+      } else {
+        updatedWatchlist = [...watchlist, newPair];
+      }
+    } else {
+      updatedWatchlist = [newPair];
+    }
+
     setWatchlist(updatedWatchlist);
     localStorage.setItem('gaks_watchlist', JSON.stringify(updatedWatchlist));
     setWatcherSearch(cleanSymbol);
     
     if (session?.user) {
-      // First, delete old watchlist items to maintain only one
-      supabase.from('watchlist_items').delete().eq('user_id', session.user.id).then(() => {
+      if (isAdmin) {
         addWatchlistItemToSupabase(newPair, session.user.id);
-      });
+      } else {
+        // First, delete old watchlist items to maintain only one
+        supabase.from('watchlist_items').delete().eq('user_id', session.user.id).then(() => {
+          addWatchlistItemToSupabase(newPair, session.user.id);
+        });
+      }
     }
     
     triggerNotification(`${cleanSymbol} added to watchlist!`);
@@ -1918,10 +2021,15 @@ export default function App() {
 
                   {/* Save Preferences Trigger */}
                   <button
+                    disabled={!isPrefsDirty}
                     onClick={savePreferences}
-                    className="w-full flex items-center justify-center gap-2 px-5 py-3 rounded-full bg-white text-xs font-bold text-black hover:bg-zinc-200 transition-all cursor-pointer shadow-md mt-4"
+                    className={`w-full flex items-center justify-center gap-2 px-5 py-3 rounded-full transition-all shadow-md mt-4 ${
+                      isPrefsDirty
+                        ? 'bg-white text-zinc-950 hover:bg-zinc-200 cursor-pointer'
+                        : 'bg-zinc-800 text-zinc-500 cursor-not-allowed opacity-70'
+                    }`}
                   >
-                    <Check className="w-3.5 h-3.5 stroke-[2.5]" />
+                    <Check className={`w-3.5 h-3.5 stroke-[2.5] ${isPrefsDirty ? 'text-zinc-950' : 'text-zinc-500'}`} />
                     <span>Save Preferences</span>
                   </button>
 
@@ -2085,48 +2193,65 @@ export default function App() {
                   </div>
 
                   {/* Activation Trigger */}
-                  {isWatcherActive ? (
-                    <div className="flex items-center gap-2 mt-2">
-                      <button
-                        onClick={stopAiMarketWatcher}
-                        className="flex-1 flex items-center justify-center gap-2 px-5 py-3.5 rounded-full text-xs font-bold transition-all shadow-sm font-display bg-zinc-900 border border-zinc-800 text-zinc-300 hover:text-white hover:border-zinc-700 cursor-pointer"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                        <span>Stop Watcher</span>
-                      </button>
-                      <button
-                        disabled={!watcherSearch.trim() || !watcherTimeframe}
-                        onClick={() => {
-                          if (!watcherSearch.trim() || !watcherTimeframe) return;
-                          startAiMarketWatcher(watcherSearch, watcherTimeframe);
-                        }}
-                        className={`flex-1 flex items-center justify-center gap-2 px-5 py-3.5 rounded-full text-xs font-bold transition-all shadow-sm font-display ${
-                          !watcherSearch.trim() || !watcherTimeframe
-                            ? 'bg-zinc-800 text-zinc-500 cursor-not-allowed opacity-70'
-                            : 'bg-white text-black hover:bg-zinc-200 active:scale-[0.98] cursor-pointer'
-                        }`}
-                      >
-                        <Play className={`w-3.5 h-3.5 fill-current ${(!watcherSearch.trim() || !watcherTimeframe) ? 'text-zinc-500' : 'text-zinc-950 stroke-zinc-950'}`} />
-                        <span>Update Watcher</span>
-                      </button>
-                    </div>
-                  ) : (
-                    <button
-                      disabled={!watcherSearch.trim() || !watcherTimeframe}
-                      onClick={() => {
-                        if (!watcherSearch.trim() || !watcherTimeframe) return;
-                        startAiMarketWatcher(watcherSearch, watcherTimeframe);
-                      }}
-                      className={`w-full flex items-center justify-center gap-2 px-5 py-3.5 rounded-full text-xs font-bold transition-all shadow-sm font-display mt-2 ${
-                        !watcherSearch.trim() || !watcherTimeframe
-                          ? 'bg-zinc-800 text-zinc-500 cursor-not-allowed opacity-70'
-                          : 'bg-white text-black hover:bg-zinc-200 active:scale-[0.98] cursor-pointer'
-                      }`}
-                    >
-                      <Play className={`w-3.5 h-3.5 fill-current ${(!watcherSearch.trim() || !watcherTimeframe) ? 'text-zinc-500' : 'text-zinc-950 stroke-zinc-950'}`} />
-                      <span>Activate Market Watcher</span>
-                    </button>
-                  )}
+                  {(() => {
+                    const isPairInWatchlist = watchlist.some(w => w.symbol.toUpperCase() === watcherSearch.trim().toUpperCase());
+                    
+                    if (isWatcherActive && (isAdmin || isPairInWatchlist)) {
+                      return (
+                        <div className="flex items-center gap-2 mt-2">
+                          <button
+                            onClick={stopAiMarketWatcher}
+                            className="flex-1 flex items-center justify-center gap-2 px-5 py-3.5 rounded-full text-xs font-bold transition-all shadow-sm font-display bg-zinc-900 border border-zinc-800 text-zinc-300 hover:text-white hover:border-zinc-700 cursor-pointer"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                            <span>Stop Watcher</span>
+                          </button>
+                          <button
+                            disabled={!watcherSearch.trim() || !watcherTimeframe}
+                            onClick={() => {
+                              if (!watcherSearch.trim() || !watcherTimeframe) return;
+                              startAiMarketWatcher(watcherSearch, watcherTimeframe);
+                            }}
+                            className={`flex-1 flex items-center justify-center gap-2 px-5 py-3.5 rounded-full text-xs font-bold transition-all shadow-sm font-display ${
+                              !watcherSearch.trim() || !watcherTimeframe
+                                ? 'bg-zinc-800 text-zinc-500 cursor-not-allowed opacity-70'
+                                : 'bg-white text-black hover:bg-zinc-200 active:scale-[0.98] cursor-pointer'
+                            }`}
+                          >
+                            <Play className={`w-3.5 h-3.5 fill-current ${(!watcherSearch.trim() || !watcherTimeframe) ? 'text-zinc-500' : 'text-zinc-950 stroke-zinc-950'}`} />
+                            <span>Update Watcher</span>
+                          </button>
+                        </div>
+                      );
+                    } else {
+                      const isDisabled = (isWatcherActive && !isAdmin) || !watcherSearch.trim() || !watcherTimeframe;
+                      return (
+                        <div className="space-y-3 mt-2">
+                          <button
+                            disabled={isDisabled}
+                            onClick={() => {
+                              if (isDisabled) return;
+                              startAiMarketWatcher(watcherSearch, watcherTimeframe);
+                            }}
+                            className={`w-full flex items-center justify-center gap-2 px-5 py-3.5 rounded-full text-xs font-bold transition-all shadow-sm font-display ${
+                              isDisabled
+                                ? 'bg-zinc-800 text-zinc-500 cursor-not-allowed opacity-70'
+                                : 'bg-white text-black hover:bg-zinc-200 active:scale-[0.98] cursor-pointer'
+                            }`}
+                          >
+                            <Play className={`w-3.5 h-3.5 fill-current ${isDisabled ? 'text-zinc-500' : 'text-zinc-950 stroke-zinc-950'}`} />
+                            <span>Activate Market Watcher</span>
+                          </button>
+                          
+                          {isWatcherActive && !isAdmin && (
+                            <div className="p-3 rounded-2xl bg-zinc-900/50 border border-zinc-800 text-zinc-400 text-center text-[11px] leading-relaxed">
+                              Free accounts can monitor one market at a time.
+                            </div>
+                          )}
+                        </div>
+                      );
+                    }
+                  })()}
                 </div>
               </div>
 
