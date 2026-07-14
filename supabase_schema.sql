@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   avatar_url TEXT,
   subscription_plan TEXT NOT NULL DEFAULT 'Free',
   telegram_connected BOOLEAN NOT NULL DEFAULT false,
+  role TEXT NOT NULL DEFAULT 'user',
   created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
@@ -398,7 +399,7 @@ CREATE TABLE IF NOT EXISTS public.watchers (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   
   -- Reference to the owning user in Supabase auth
-  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL UNIQUE,
+  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
   
   -- The current operational status of the watcher (must be active, paused, or stopped)
   status TEXT DEFAULT 'stopped' NOT NULL CONSTRAINT chk_watcher_status CHECK (status IN ('active', 'paused', 'stopped')),
@@ -434,7 +435,10 @@ CREATE TABLE IF NOT EXISTS public.watchers (
   
   -- Auditing and metadata timestamps
   created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
-  updated_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
+  updated_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
+
+  -- Unique constraint per user per pair
+  CONSTRAINT unique_user_pair UNIQUE (user_id, selected_pair)
 );
 
 -- Enable Row Level Security (RLS) to protect user data privacy
@@ -486,7 +490,7 @@ CREATE OR REPLACE TRIGGER update_watchers_modtime
 -- SQL Comment descriptions for schema and administration documentation
 COMMENT ON TABLE public.watchers IS 'Represents each user''s custom Gaks AI Market Watcher service configuration and operational status.';
 COMMENT ON COLUMN public.watchers.status IS 'Operational status restricted to active, paused, or stopped.';
-COMMENT ON COLUMN public.watchers.user_id IS 'Unique user reference with foreign key to auth.users, enforcing a single watcher per user constraint.';
+COMMENT ON COLUMN public.watchers.user_id IS 'User reference with foreign key to auth.users, supporting multiple watchers per admin user.';
 
 -- =========================================================================
 -- NOTIFICATION LOGS FEATURE SCHEMA

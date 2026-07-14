@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   LayoutDashboard, Users, Eye, Zap, Activity, Settings as SettingsIcon, 
   Shield, Menu, X, Key, MessageSquare, Clock, Heart, Search, RefreshCw, 
-  Play, Pause, Trash2, AlertTriangle, CheckCircle2, Power, Terminal, Sliders, Check, ExternalLink, Send
+  Play, Pause, Trash2, AlertTriangle, CheckCircle2, Power, Terminal, Sliders, Check, ExternalLink, Send, Plus
 } from 'lucide-react';
 import { supabase } from '../../supabaseClient';
 
@@ -82,12 +82,12 @@ const DashboardPage = ({ fetchWithAuth }: { fetchWithAuth: any }) => {
   }
 
   const statCards = [
-    { label: "Total Registered Users", value: stats?.totalUsers || 0, desc: "Users in profiles database", icon: Users, color: "text-blue-400 bg-blue-500/10 border-blue-500/20" },
-    { label: "Active Watchers", value: stats?.activeWatchers || 0, desc: "Running market scanners", icon: Eye, color: "text-emerald-400 bg-emerald-500/10 border-emerald-500/20" },
-    { label: "Stopped Watchers", value: stats?.stoppedWatchers || 0, desc: "Paused or offline scanners", icon: Power, color: "text-zinc-400 bg-zinc-800/20 border-zinc-800/40" },
-    { label: "Telegram Connected Users", value: stats?.telegramConnected || 0, desc: "Ready to receive alerts", icon: MessageSquare, color: "text-sky-400 bg-sky-500/10 border-sky-500/20" },
-    { label: "Users Missing Gemini Key", value: stats?.missingGeminiKey || 0, desc: "Requires API configuration", icon: Key, color: "text-amber-400 bg-amber-500/10 border-amber-500/20" },
-    { label: "Signals Sent Today", value: stats?.signalsToday || 0, desc: "Generated in last 24 hours", icon: Zap, color: "text-purple-400 bg-purple-500/10 border-purple-500/20" },
+    { label: "Total Active Watchers", value: stats?.activeWatchers || 0, desc: "Scanners actively running in background", icon: Eye, color: "text-emerald-400 bg-emerald-500/10 border-emerald-500/20" },
+    { label: "Total Pairs Being Monitored", value: stats?.totalPairsMonitored || 0, desc: "Unique currency and crypto trading pairs", icon: Activity, color: "text-blue-400 bg-blue-500/10 border-blue-500/20" },
+    { label: "Total Signals Sent", value: stats?.totalSignalsSent || 0, desc: "Total alerts processed historically", icon: Zap, color: "text-purple-400 bg-purple-500/10 border-purple-500/20" },
+    { label: "Last Scan Time", value: stats?.lastCronRun ? new Date(stats.lastCronRun).toLocaleTimeString() : "Never", desc: stats?.lastCronRun ? new Date(stats.lastCronRun).toLocaleDateString() : "No scan executed yet", icon: Clock, color: "text-amber-400 bg-amber-500/10 border-amber-500/20" },
+    { label: "Total Registered Users", value: stats?.totalUsers || 0, desc: "Users in profiles database", icon: Users, color: "text-zinc-400 bg-zinc-800/10 border-zinc-800/20" },
+    { label: "Telegram Connected Users", value: stats?.telegramConnected || 0, desc: "Profiles with push alerts active", icon: MessageSquare, color: "text-sky-400 bg-sky-500/10 border-sky-500/20" },
   ];
 
   return (
@@ -729,6 +729,46 @@ const WatchersPage = ({ fetchWithAuth, showToast }: { fetchWithAuth: any; showTo
   const [scanningStatus, setScanningStatus] = useState<string>('');
   const [foundSignals, setFoundSignals] = useState<any[] | null>(null);
 
+  // Add custom pair state variables for administrators
+  const [showAddPairModal, setShowAddPairModal] = useState(false);
+  const [addEmail, setAddEmail] = useState('');
+  const [addSymbol, setAddSymbol] = useState('EURUSD');
+  const [addTimeframe, setAddTimeframe] = useState('H1');
+  const [addLoading, setAddLoading] = useState(false);
+
+  const handleAddPair = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!addEmail.trim()) {
+      showToast("User email is required.", "error");
+      return;
+    }
+    setAddLoading(true);
+    try {
+      const res = await fetchWithAuth('/api/admin/watchers/action', {
+        method: 'POST',
+        body: JSON.stringify({
+          action: 'add_pair',
+          email: addEmail.trim(),
+          symbol: addSymbol,
+          timeframe: addTimeframe
+        })
+      });
+      const json = await res.json();
+      if (json.success) {
+        showToast(json.message || "Watcher added successfully!", "success");
+        setShowAddPairModal(false);
+        setAddEmail('');
+        fetchWatchers();
+      } else {
+        showToast(json.error || "Failed to add watcher.", "error");
+      }
+    } catch (err: any) {
+      showToast(err.message || "Request failed.", "error");
+    } finally {
+      setAddLoading(false);
+    }
+  };
+
   const fetchWatchers = async () => {
     setLoading(true);
     try {
@@ -747,7 +787,7 @@ const WatchersPage = ({ fetchWithAuth, showToast }: { fetchWithAuth: any; showTo
     }
   };
 
-  const handleWatcherAction = async (watcherId: string, action: 'restart' | 'stop' | 'force_scan') => {
+  const handleWatcherAction = async (watcherId: string, action: 'restart' | 'stop' | 'force_scan' | 'delete') => {
     if (action === 'force_scan') {
       setScanWatcherId(watcherId);
       setScanningStatus("Initializing Twelve Data price feed and launching Gemini-2.5 model analysis...");
@@ -806,9 +846,18 @@ const WatchersPage = ({ fetchWithAuth, showToast }: { fetchWithAuth: any; showTo
           <h3 className="text-lg font-bold text-white font-display">Active Scanners</h3>
           <p className="text-xs text-zinc-500">Autonomous market watchers currently registered in Supabase.</p>
         </div>
-        <button onClick={fetchWatchers} className="p-2 bg-zinc-900 border border-zinc-800 rounded-lg hover:bg-zinc-800 text-zinc-300 transition-colors cursor-pointer" title="Refresh Watchers">
-          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-        </button>
+        <div className="flex items-center gap-3">
+          <button 
+            onClick={() => setShowAddPairModal(true)}
+            className="flex items-center gap-1.5 px-4 py-2 bg-sky-500 hover:bg-sky-400 text-black text-xs font-bold rounded-lg transition-colors cursor-pointer"
+            title="Add Custom Watcher"
+          >
+            <Plus className="w-3.5 h-3.5" /> Add Pair
+          </button>
+          <button onClick={fetchWatchers} className="p-2 bg-zinc-900 border border-zinc-800 rounded-lg hover:bg-zinc-800 text-zinc-300 transition-colors cursor-pointer" title="Refresh Watchers">
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+          </button>
+        </div>
       </div>
 
       {loading ? (
@@ -893,6 +942,19 @@ const WatchersPage = ({ fetchWithAuth, showToast }: { fetchWithAuth: any; showTo
                         >
                           <Power className="w-3.5 h-3.5" />
                         </button>
+
+                        <button 
+                          onClick={() => {
+                            if (window.confirm(`Are you sure you want to delete the ${watcher.selected_pair} watcher for ${watcher.email}?`)) {
+                              handleWatcherAction(watcher.id, 'delete');
+                            }
+                          }}
+                          disabled={actionLoading === watcher.id}
+                          className="p-1.5 text-zinc-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors cursor-pointer"
+                          title="Delete Watcher"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -971,6 +1033,96 @@ const WatchersPage = ({ fetchWithAuth, showToast }: { fetchWithAuth: any; showTo
                 </button>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Add Pair Modal */}
+      {showAddPairModal && (
+        <div className="fixed inset-0 bg-black/85 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+          <div className="bg-[#0c0c0e] border border-zinc-900 rounded-2xl p-6 w-full max-w-md shadow-2xl space-y-5 animate-fade-in text-white">
+            <div className="flex justify-between items-start border-b border-zinc-900 pb-3">
+              <div>
+                <h4 className="text-sm font-bold text-white font-display">Add Custom Watcher</h4>
+                <p className="text-[10px] text-zinc-500">Quickly spin up a background watcher for any registered user profile.</p>
+              </div>
+              <button 
+                onClick={() => setShowAddPairModal(false)} 
+                className="text-zinc-500 hover:text-white p-1 rounded-lg hover:bg-zinc-900 transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleAddPair} className="space-y-4">
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 block">User Email Address</label>
+                <input 
+                  type="email" 
+                  required 
+                  placeholder="e.g. client@domain.com"
+                  value={addEmail} 
+                  onChange={e => setAddEmail(e.target.value)}
+                  className="w-full bg-zinc-950 border border-zinc-900 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-zinc-700 transition-colors"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 block">Trading Pair</label>
+                  <select 
+                    value={addSymbol} 
+                    onChange={e => setAddSymbol(e.target.value)}
+                    className="w-full bg-zinc-950 border border-zinc-900 rounded-xl px-3 py-2.5 text-xs text-white focus:outline-none focus:border-zinc-700 transition-colors cursor-pointer"
+                  >
+                    <option value="EURUSD">EURUSD</option>
+                    <option value="GBPUSD">GBPUSD</option>
+                    <option value="XAUUSD">XAUUSD</option>
+                    <option value="BTCUSD">BTCUSD</option>
+                    <option value="NAS100">NAS100</option>
+                    <option value="US30">US30</option>
+                  </select>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 block">Timeframe</label>
+                  <select 
+                    value={addTimeframe} 
+                    onChange={e => setAddTimeframe(e.target.value)}
+                    className="w-full bg-zinc-950 border border-zinc-900 rounded-xl px-3 py-2.5 text-xs text-white focus:outline-none focus:border-zinc-700 transition-colors cursor-pointer"
+                  >
+                    <option value="M1">M1 (1 Minute)</option>
+                    <option value="M5">M5 (5 Minutes)</option>
+                    <option value="M15">M15 (15 Minutes)</option>
+                    <option value="M30">M30 (30 Minutes)</option>
+                    <option value="H1">H1 (1 Hour)</option>
+                    <option value="H4">H4 (4 Hours)</option>
+                    <option value="D1">D1 (Daily)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="pt-3 border-t border-zinc-900/60 flex justify-end gap-3">
+                <button 
+                  type="button" 
+                  onClick={() => setShowAddPairModal(false)}
+                  className="px-4 py-2.5 border border-zinc-900 bg-zinc-950 hover:bg-zinc-900 text-zinc-300 text-xs font-semibold rounded-lg transition-all cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button 
+                  type="submit" 
+                  disabled={addLoading}
+                  className="px-5 py-2.5 bg-sky-500 hover:bg-sky-400 text-black text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {addLoading ? (
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <>Add Watcher</>
+                  )}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

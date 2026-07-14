@@ -636,7 +636,7 @@ ${JSON.stringify(marketData, null, 2)}`;
             last_scan_at: new Date().toISOString(),
             updated_at: new Date().toISOString()
           })
-          .eq("user_id", userId);
+          .eq("id", watcher.id);
 
         watchersProcessedCount++;
         results.push({ userId, symbol, signalsFound: signals.length, signalsSent });

@@ -133,8 +133,85 @@ export default async function handler(req: any, res: any) {
     }
 
     const { watcherId, action } = req.body;
-    if (!watcherId || !action) {
-      return res.status(400).json({ success: false, error: "Missing required fields." });
+    if (!action) {
+      return res.status(400).json({ success: false, error: "Missing required field: action." });
+    }
+    if (action !== 'add_pair' && !watcherId) {
+      return res.status(400).json({ success: false, error: "Missing required field: watcherId." });
+    }
+
+    if (action === 'add_pair') {
+      const { email, symbol, timeframe } = req.body;
+      if (!email || !symbol || !timeframe) {
+        return res.status(400).json({ success: false, error: "Missing email, symbol, or timeframe." });
+      }
+
+      // Query profiles by email
+      const { data: profile, error: pErr } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('email', email.trim().toLowerCase())
+        .maybeSingle();
+
+      if (pErr || !profile) {
+        return res.status(404).json({ success: false, error: `No registered profile found with email "${email}".` });
+      }
+
+      const userId = profile.id;
+      const nowString = new Date().toISOString();
+
+      // Ensure default trading preferences exist so strategy text doesn't fail
+      const { data: prefs } = await supabase.from('trading_preferences').select('*').eq('user_id', userId).maybeSingle();
+      if (!prefs) {
+        await supabase.from('trading_preferences').insert({
+          user_id: userId,
+          strategy_text: '• Entry conditions\n• Confirmation indicators\n• Exit & stop-loss logic\n• Risk management rules',
+          capital: '$10,000',
+          preferred_risk: '1%'
+        });
+      }
+
+      // Ensure basic telegram connection record is present
+      const { data: tgConn } = await supabase.from('telegram_connections').select('*').eq('user_id', userId).maybeSingle();
+      if (!tgConn) {
+        await supabase.from('telegram_connections').insert({
+          user_id: userId,
+          connected: false
+        });
+      }
+
+      // Now insert or update the watcher for this user and pair
+      const { data: existingWatcher } = await supabase
+        .from("watchers")
+        .select("id")
+        .eq("user_id", userId)
+        .eq("selected_pair", symbol.toUpperCase())
+        .maybeSingle();
+
+      if (existingWatcher) {
+        await supabase
+          .from("watchers")
+          .update({
+            status: "active",
+            selected_timeframe: timeframe,
+            started_at: nowString,
+            updated_at: nowString
+          })
+          .eq("id", existingWatcher.id);
+      } else {
+        await supabase
+          .from("watchers")
+          .insert({
+            user_id: userId,
+            status: "active",
+            selected_pair: symbol.toUpperCase(),
+            selected_timeframe: timeframe,
+            started_at: nowString,
+            updated_at: nowString
+          });
+      }
+
+      return res.status(200).json({ success: true, message: `Watcher for ${symbol} (${timeframe}) successfully added for ${email}!` });
     }
 
     if (action === 'restart') {
@@ -143,6 +220,9 @@ export default async function handler(req: any, res: any) {
     } else if (action === 'stop') {
       await supabase.from('watchers').update({ status: 'stopped', stopped_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', watcherId);
       return res.status(200).json({ success: true, message: "Watcher stopped successfully." });
+    } else if (action === 'delete') {
+      await supabase.from('watchers').delete().eq('id', watcherId);
+      return res.status(200).json({ success: true, message: "Watcher deleted successfully." });
     } else if (action === 'force_scan') {
       const { data: watcher, error: wErr } = await supabase.from('watchers').select('*').eq('id', watcherId).maybeSingle();
       if (wErr || !watcher) {

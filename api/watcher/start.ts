@@ -272,6 +272,26 @@ export default async function handler(req: any, res: any) {
         error: "Risk settings are incomplete. Please define and save your Preferred Risk and Risk:Reward Ratio under the Risk & Sizing section first."
       });
     }
+
+    // Limit standard users to only one active watcher, while allowing unlimited active watchers for admins.
+    const userRole = (profile?.role === 'admin' || profile?.email?.trim().toLowerCase() === 'gaks6535@gmail.com') ? 'admin' : 'user';
+
+    const { data: existingActiveWatchers } = await supabase
+      .from("watchers")
+      .select("*")
+      .eq("user_id", userId)
+      .eq("status", "active");
+
+    if (userRole === 'user' && existingActiveWatchers && existingActiveWatchers.length > 0) {
+      const hasDifferentActive = existingActiveWatchers.some(w => w.selected_pair !== selectedPair);
+      if (hasDifferentActive) {
+        await sendTelegramMessage(telegramChatId, "❌ *Market Watcher Activation Failed*\n\nReason: You can monitor only one trading pair at a time.");
+        return res.status(400).json({
+          success: false,
+          error: "You can monitor only one trading pair at a time."
+        });
+      }
+    }
     
     // Fetch user's watchlist to include in the Telegram message
     // (Deprecated: Now we just use selectedPair)
@@ -411,23 +431,57 @@ export default async function handler(req: any, res: any) {
       console.warn("[Watcher Start] Warning upserting into strategies table:", stratError.message);
     }
 
-    // Upsert into watchers table
-    const { error: watchersError } = await supabase
+    // Check if a watcher for this user and trading pair already exists
+    const { data: existingWatcher, error: fetchWatcherError } = await supabase
       .from("watchers")
-      .upsert({
-        user_id: userId,
-        status: "active",
-        strategy_id: strategyDetails.id,
-        started_at: nowString,
-        telegram_chat_id: telegramChatId,
-        account_size: accountSize,
-        risk_percentage: riskPercentage,
-        selected_pair: selectedPair,
-        selected_timeframe: selectedTimeframe || 'H1',
-        gemini_model: "gemini-2.5-flash",
-        scan_interval_minutes: scanInterval,
-        updated_at: nowString
-      }, { onConflict: "user_id" });
+      .select("id")
+      .eq("user_id", userId)
+      .eq("selected_pair", selectedPair)
+      .maybeSingle();
+
+    if (fetchWatcherError) {
+      console.warn("[Watcher Start] Warning checking existing watcher:", fetchWatcherError.message);
+    }
+
+    let watchersError;
+    if (existingWatcher) {
+      // Update the existing watcher record for this pair
+      const { error } = await supabase
+        .from("watchers")
+        .update({
+          status: "active",
+          strategy_id: strategyDetails.id,
+          started_at: nowString,
+          telegram_chat_id: telegramChatId,
+          account_size: accountSize,
+          risk_percentage: riskPercentage,
+          selected_timeframe: selectedTimeframe || 'H1',
+          gemini_model: "gemini-2.5-flash",
+          scan_interval_minutes: scanInterval,
+          updated_at: nowString
+        })
+        .eq("id", existingWatcher.id);
+      watchersError = error;
+    } else {
+      // Insert a new watcher record for this pair
+      const { error } = await supabase
+        .from("watchers")
+        .insert({
+          user_id: userId,
+          status: "active",
+          strategy_id: strategyDetails.id,
+          started_at: nowString,
+          telegram_chat_id: telegramChatId,
+          account_size: accountSize,
+          risk_percentage: riskPercentage,
+          selected_pair: selectedPair,
+          selected_timeframe: selectedTimeframe || 'H1',
+          gemini_model: "gemini-2.5-flash",
+          scan_interval_minutes: scanInterval,
+          updated_at: nowString
+        });
+      watchersError = error;
+    }
 
     if (watchersError) {
       console.error("[Watcher Start] Failed to write to watchers table:", watchersError.message);

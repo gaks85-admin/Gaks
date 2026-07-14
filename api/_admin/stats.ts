@@ -68,6 +68,16 @@ export default async function handler(req: any, res: any) {
     const { data: latestScans } = await supabase.from('watchers').select('last_scan_at').order('last_scan_at', { ascending: false }).limit(1);
     const lastCronRun = (latestScans && latestScans[0]?.last_scan_at) || null;
 
+    // Fetch unique pairs being monitored
+    const { data: allWatchers } = await supabase.from('watchers').select('selected_pair');
+    const uniquePairsSet = new Set(allWatchers?.map(w => w.selected_pair).filter(Boolean) || []);
+    const totalPairsMonitored = uniquePairsSet.size;
+
+    // Fetch total signals sent
+    const { count: totalSignalsCount } = await supabase
+      .from('signals')
+      .select('*', { count: 'exact', head: true });
+
     return res.status(200).json({
       success: true,
       stats: {
@@ -77,6 +87,8 @@ export default async function handler(req: any, res: any) {
         telegramConnected: tgCount,
         missingGeminiKey: missingKeyCount,
         signalsToday: sigsCount,
+        totalSignalsSent: totalSignalsCount || 0,
+        totalPairsMonitored,
         lastCronRun,
         systemStatus: "ONLINE"
       }
