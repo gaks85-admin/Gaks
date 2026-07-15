@@ -68,18 +68,18 @@ async function fetchWithRetry(url: string, options: RequestInit = {}, maxRetries
   throw new Error(`Fetch failed after ${maxRetries} attempts`);
 }
 
-async function validateSymbolWithTwelveData(symbol: string, apiKey: string): Promise<{ isValid: boolean; matchedSymbol?: string; instrumentType?: string }> {
+async function validateSymbolWithTwelveData(symbol: string, apiKey: string): Promise<{ isValid: boolean; matchedSymbol?: string; instrumentType?: string; reason?: string }> {
   try {
     const searchUrl = `https://api.twelvedata.com/symbol_search?symbol=${encodeURIComponent(symbol)}&apikey=${apiKey}`;
     const response = await fetchWithRetry(searchUrl, {}, 2, 500);
     if (!response.ok) {
-      console.warn(`[Symbol Search] API returned HTTP ${response.status} for search. Skipping search validation and proceeding.`);
-      return { isValid: true }; // Proceed anyway
+      console.warn(`[Symbol Search] API returned HTTP ${response.status} for search.`);
+      return { isValid: false, reason: `API returned HTTP ${response.status}` };
     }
     const data = await response.json();
     if (data.status === "error") {
       console.warn(`[Symbol Search] API returned error status: ${data.message}`);
-      return { isValid: true }; // Proceed anyway
+      return { isValid: false, reason: data.message };
     }
     if (data.data && Array.isArray(data.data) && data.data.length > 0) {
       const symbolUpper = symbol.toUpperCase().replace('/', '');
@@ -94,11 +94,11 @@ async function validateSymbolWithTwelveData(symbol: string, apiKey: string): Pro
       return { isValid: true, matchedSymbol: data.data[0].symbol, instrumentType: data.data[0].instrument_type };
     }
     // No matching symbols found in Twelve Data database - warn and proceed with original symbol as fallback
-    console.warn(`[Symbol Search] No matching symbols found in search results for "${symbol}". Proceeding with original symbol.`);
-    return { isValid: true, matchedSymbol: symbol };
+    console.warn(`[Symbol Search] No matching symbols found in search results for "${symbol}".`);
+    return { isValid: false, reason: `No matching symbols found for "${symbol}"` };
   } catch (err: any) {
     console.error(`[Symbol Search] Error validating symbol ${symbol}:`, err.message || err);
-    return { isValid: true }; // Proceed on transient/validation-error
+    return { isValid: false, reason: "Error validating symbol" };
   }
 }
 
@@ -610,7 +610,7 @@ ${JSON.stringify(marketData, null, 2)}`;
 
               // 3. We won the database lock, safe to send Telegram message
               const alertMessage = `🚨 *Autonomous AI Trading Alert* 🚨\n\n` +
-                `*Pair:* ${signal.pair} (&selectedTimeframe)\n` +
+                `*Pair:* ${signal.pair} (${selectedTimeframe})\n` +
                 `*Direction:* ${signal.direction === 'BUY' ? '🟢 BUY' : '🔴 SELL'}\n` +
                 `*Entry Price:* ${signal.entryPrice}\n` +
                 `*Stop Loss:* ${signal.stopLoss}\n` +
