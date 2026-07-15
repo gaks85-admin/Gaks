@@ -1128,7 +1128,7 @@ export default function App() {
       try {
         await supabase
           .from('watchers')
-          .update({ status: 'inactive', updated_at: new Date().toISOString() })
+          .update({ status: 'stopped', updated_at: new Date().toISOString() })
           .eq('user_id', session.user.id);
           
         await supabase

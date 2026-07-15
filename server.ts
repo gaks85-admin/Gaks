@@ -581,6 +581,8 @@ async function startServer() {
         (profile?.email?.trim().toLowerCase() === ADMIN_EMAIL) ||
         (userObj?.email?.trim().toLowerCase() === ADMIN_EMAIL);
 
+      console.log(`[Watcher Start] User ${userId} is admin: ${isUserAdmin}`);
+
       if (!isUserAdmin) {
         // Query active watchers for this user in public.watchers
         const { data: activeWatchers, error: activeError } = await supabase
