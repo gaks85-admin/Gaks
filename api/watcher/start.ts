@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { randomUUID } from 'crypto';
 
 const SUPABASE_URL = process.env.VITE_SUPABASE_URL || "https://wkujrqmxivljnuvumfau.supabase.co";
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || "sb_publishable_BheqR2OkNYKqT7bj8xThWA_gGG2hcjf";
@@ -67,7 +68,10 @@ function extractActiveStrategyDetails(strategyText: string) {
   if (!strategyText || !strategyText.trim()) {
     return { id: DEFAULT_STRATEGY_UUID, name: DEFAULT_STRATEGY_NAME, text: DEFAULT_STRATEGY_TEXT, isDefault: true };
   }
-  const defaultTemplate = `• Entry conditions\n• Confirmation indicators\n• Exit & stop-loss logic\n• Risk management rules`;
+  const defaultTemplate = `• Entry conditions
+• Confirmation indicators
+• Exit & stop-loss logic
+• Risk management rules`;
   if (strategyText.trim() === defaultTemplate.trim()) {
     return { id: DEFAULT_STRATEGY_UUID, name: DEFAULT_STRATEGY_NAME, text: DEFAULT_STRATEGY_TEXT, isDefault: true };
   }
@@ -201,13 +205,26 @@ export default async function handler(req: any, res: any) {
     }
 
     // 3. Verify Telegram is connected by checking the telegram_connections table
-    const { data: telegramConn, error: telegramError } = await supabase
+    let { data: telegramConn, error: telegramError } = await supabase
       .from("telegram_connections")
       .select("*")
       .eq("user_id", userId)
       .maybeSingle();
 
-    if (telegramError) {
+    if (!telegramConn) {
+      // Auto-create missing row
+      const { data: newConn, error: insertError } = await supabase
+        .from("telegram_connections")
+        .insert({ user_id: userId, connected: false, connection_token: randomUUID(), created_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+        .select()
+        .single();
+      
+      if (!insertError) {
+        telegramConn = newConn;
+      }
+    }
+
+    if (telegramError && !telegramConn) {
       console.warn("[Watcher Start] Telegram connection lookup error:", telegramError.message);
     }
 
