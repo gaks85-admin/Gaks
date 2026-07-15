@@ -528,6 +528,7 @@ async function startServer() {
 
   // API Endpoint - Verifies all watcher requirements and activates it
   app.post("/api/watcher/start", async (req, res) => {
+    console.log("[Watcher Start] Request received", req.body);
     let userId = req.body.userId;
 
     // 1. Verify the user is authenticated (using authorization header)
@@ -544,6 +545,7 @@ async function startServer() {
         } else {
           userId = user.id;
           userObj = user;
+          console.log("[Watcher Start] Authenticated user ID:", userId);
         }
       } catch (err: any) {
         console.warn("[Watcher Start] Bearer token verification error:", err.message);
@@ -559,6 +561,7 @@ async function startServer() {
 
     try {
       console.log(`[Watcher Start] Verifying requirements for authenticated user: ${userId}`);
+      console.log(`[Watcher Start] Pair: ${req.body.selectedPair}, Timeframe: ${req.body.selectedTimeframe}`);
 
       // 2. Retrieve the authenticated user's profile
       const { data: profile, error: profileError } = await supabase
@@ -613,6 +616,8 @@ async function startServer() {
         .eq("user_id", userId)
         .maybeSingle();
 
+      console.log("[Watcher Start] Telegram connection lookup result:", telegramConn);
+
       if (telegramError) {
         console.warn("[Watcher Start] Telegram connection lookup error:", telegramError.message);
       }
@@ -629,8 +634,10 @@ async function startServer() {
         .from("user_api_keys")
         .select("*")
         .eq("user_id", userId)
-        .eq("provider", "gemini")
+        .provider("gemini")
         .maybeSingle();
+
+      console.log("[Watcher Start] API Key found:", !!apiKeyRecord?.api_key);
 
       if (apiKeyError) {
         console.warn("[Watcher Start] API Key query error:", apiKeyError.message);
@@ -657,6 +664,7 @@ async function startServer() {
       const strategyTextRaw = prefsRecord?.strategy_text || '';
       const strategyDetails = extractActiveStrategyDetails(strategyTextRaw);
       const strategyText = strategyDetails.text;
+      console.log("[Watcher Start] Strategy found:", !!strategyText);
 
       if (!strategyText.trim()) {
         return res.status(400).json({
@@ -715,9 +723,7 @@ async function startServer() {
       }
 
       // Upsert into watchers table
-      const { error: watchersError } = await supabase
-        .from("watchers")
-        .upsert({
+      const watcherUpsertData = {
           user_id: userId,
           status: "active",
           strategy_id: strategyDetails.id,
@@ -730,15 +736,22 @@ async function startServer() {
           selected_pair: req.body.selectedPair,
           selected_timeframe: req.body.selectedTimeframe,
           updated_at: nowString
-        }, { onConflict: "user_id,selected_pair" });
+        };
+      console.log("[Watcher Start] About to upsert watcher:", watcherUpsertData);
+
+      const { error: watchersError } = await supabase
+        .from("watchers")
+        .upsert(watcherUpsertData, { onConflict: "user_id,selected_pair" });
 
       if (watchersError) {
-        console.error("[Watcher Start] Failed to write to watchers table:", watchersError.message);
+        console.error("[Watcher Start] Supabase error:", watchersError);
         return res.status(500).json({
           success: false,
           error: "Failed to write watcher state to DB: " + watchersError.message
         });
       }
+      console.log("[Watcher Start] Upsert successful");
+      return res.status(200).json({ success: true, message: "Watcher activated successfully" });
 
       // Upsert into legacy market_watchers table for interface backwards-compatibility
       try {
