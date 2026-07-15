@@ -431,57 +431,23 @@ export default async function handler(req: any, res: any) {
       console.warn("[Watcher Start] Warning upserting into strategies table:", stratError.message);
     }
 
-    // Check if a watcher for this user and trading pair already exists
-    const { data: existingWatcher, error: fetchWatcherError } = await supabase
+    // Upsert the watcher record for this pair
+    const { error: watchersError } = await supabase
       .from("watchers")
-      .select("id")
-      .eq("user_id", userId)
-      .eq("selected_pair", selectedPair)
-      .maybeSingle();
-
-    if (fetchWatcherError) {
-      console.warn("[Watcher Start] Warning checking existing watcher:", fetchWatcherError.message);
-    }
-
-    let watchersError;
-    if (existingWatcher) {
-      // Update the existing watcher record for this pair
-      const { error } = await supabase
-        .from("watchers")
-        .update({
-          status: "active",
-          strategy_id: strategyDetails.id,
-          started_at: nowString,
-          telegram_chat_id: telegramChatId,
-          account_size: accountSize,
-          risk_percentage: riskPercentage,
-          selected_timeframe: selectedTimeframe || 'H1',
-          gemini_model: "gemini-2.5-flash",
-          scan_interval_minutes: scanInterval,
-          updated_at: nowString
-        })
-        .eq("id", existingWatcher.id);
-      watchersError = error;
-    } else {
-      // Insert a new watcher record for this pair
-      const { error } = await supabase
-        .from("watchers")
-        .insert({
-          user_id: userId,
-          status: "active",
-          strategy_id: strategyDetails.id,
-          started_at: nowString,
-          telegram_chat_id: telegramChatId,
-          account_size: accountSize,
-          risk_percentage: riskPercentage,
-          selected_pair: selectedPair,
-          selected_timeframe: selectedTimeframe || 'H1',
-          gemini_model: "gemini-2.5-flash",
-          scan_interval_minutes: scanInterval,
-          updated_at: nowString
-        });
-      watchersError = error;
-    }
+      .upsert({
+        user_id: userId,
+        status: "active",
+        strategy_id: strategyDetails.id,
+        started_at: nowString,
+        telegram_chat_id: telegramChatId,
+        account_size: accountSize,
+        risk_percentage: riskPercentage,
+        selected_pair: selectedPair,
+        selected_timeframe: selectedTimeframe || 'H1',
+        gemini_model: "gemini-2.5-flash",
+        scan_interval_minutes: scanInterval,
+        updated_at: nowString
+      }, { onConflict: "user_id,selected_pair" });
 
     if (watchersError) {
       console.error("[Watcher Start] Failed to write to watchers table:", watchersError.message);
