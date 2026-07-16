@@ -636,7 +636,7 @@ async function startServer() {
         .from("user_api_keys")
         .select("*")
         .eq("user_id", userId)
-        .provider("gemini")
+        .eq("provider", "gemini")
         .maybeSingle();
 
       console.log("[Watcher Start] API Key found:", !!apiKeyRecord?.api_key);

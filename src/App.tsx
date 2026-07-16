@@ -286,7 +286,7 @@ export default function App() {
           volatility: 'Medium',
           confidence: 0,
           direction: 'Neutral',
-          history: [],
+          history: Array.from({ length: 7 }, () => 0), // Default history to prevent crashes
           timeframe: item.selected_timeframe || 'H1'
         }));
         setWatchlist(mapped);
@@ -1257,6 +1257,7 @@ export default function App() {
   };
 
   const getFullNameForSymbol = (symbol: string): string => {
+    if (!symbol) return 'Unknown Asset';
     const map: Record<string, string> = {
       EURUSD: 'Euro / US Dollar',
       GBPUSD: 'British Pound / US Dollar',
@@ -1275,16 +1276,33 @@ export default function App() {
   };
 
   // Helper to generate coordinates for sparkline graph
-  const getSparklinePaths = (points: number[], width = 100, height = 30) => {
-    const min = Math.min(...points);
-    const max = Math.max(...points);
+  const getSparklinePaths = (points: number[] = [], width = 100, height = 30) => {
+    if (!Array.isArray(points) || points.length === 0) {
+      return { lineD: 'M 0 0', fillD: 'M 0 0 Z' };
+    }
+    
+    // Safety check for all elements being numbers
+    const validPoints = points.filter(p => typeof p === 'number' && !isNaN(p));
+    if (validPoints.length === 0) {
+      return { lineD: 'M 0 0', fillD: 'M 0 0 Z' };
+    }
+
+    if (validPoints.length === 1) {
+      const y = height / 2;
+      return { lineD: `M 0 ${y} L ${width} ${y}`, fillD: `M 0 ${y} L ${width} ${y} L ${width} ${height} L 0 ${height} Z` };
+    }
+
+    const min = Math.min(...validPoints);
+    const max = Math.max(...validPoints);
     const range = max - min || 1;
-    const coords = points.map((val, i) => {
-      const x = (i / (points.length - 1)) * width;
+    const coords = validPoints.map((val, i) => {
+      const x = (i / (validPoints.length - 1)) * width;
       const y = height - ((val - min) / range) * (height - 6) - 3;
       return { x, y };
     });
     
+    if (!coords[0]) return { lineD: 'M 0 0', fillD: 'M 0 0 Z' };
+
     let lineD = `M ${coords[0].x} ${coords[0].y}`;
     for (let i = 1; i < coords.length; i++) {
       const cpX = (coords[i-1].x + coords[i].x) / 2;
@@ -2156,7 +2174,7 @@ export default function App() {
 
                   {/* Activation Trigger */}
                   {(() => {
-                    const isPairInWatchlist = watchlist.some(w => w.symbol.toUpperCase() === watcherSearch.trim().toUpperCase());
+                    const isPairInWatchlist = (watchlist || []).some(w => w && w.symbol && w.symbol.toUpperCase() === (watcherSearch || '').trim().toUpperCase());
                     
                     if (isWatcherActive && (isAdmin || isPairInWatchlist)) {
                       return (
@@ -2246,7 +2264,7 @@ export default function App() {
 
               {/* Watchlist Display area */}
               <div className="space-y-4">
-                {watchlist.length === 0 || !isWatcherActive ? (
+                {(watchlist || []).length === 0 || !isWatcherActive ? (
                   /* Empty state - Matches Screenshot 11 exactly */
                   <div className="p-12 rounded-3xl border border-zinc-800 bg-[#0c0c0e]/40 flex flex-col items-center text-center space-y-4">
                     <div className="w-12 h-12 rounded-full bg-zinc-950/80 border border-zinc-900 flex items-center justify-center text-zinc-400">
@@ -2263,7 +2281,8 @@ export default function App() {
                   /* Watchlisted symbols cards deck */
                   <div className="space-y-3">
                     <h4 className="text-xs font-bold uppercase tracking-wider text-zinc-500 mb-1">Monitored Pair</h4>
-                    {watchlist.map(pair => {
+                    {(watchlist || []).map(pair => {
+                      if (!pair) return null;
                       const isBullish = pair.direction === 'Bullish';
                       const isBearish = pair.direction === 'Bearish';
                       const { lineD, fillD } = getSparklinePaths(pair.history, 100, 24);
@@ -2319,7 +2338,7 @@ export default function App() {
                             </div>
 
                             <div className="text-right">
-                              <div className="text-lg font-bold text-white tracking-tight">{pair.price.toLocaleString(undefined, { minimumFractionDigits: pair.price > 10 ? 2 : 4 })}</div>
+                              <div className="text-lg font-bold text-white tracking-tight">{(pair.price || 0).toLocaleString(undefined, { minimumFractionDigits: (pair.price || 0) > 10 ? 2 : 4 })}</div>
                               <div className={`text-xs font-semibold flex items-center justify-end gap-0.5 ${pair.change >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
                                 {pair.change >= 0 ? '+' : ''}{pair.change}%
                               </div>

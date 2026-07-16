@@ -82,12 +82,12 @@ export function useLiveRates() {
       const data = await response.json();
       if (data && data.success && Array.isArray(data.pairs)) {
         const mappedPairs: ForexPair[] = data.pairs.map((p: any) => ({
-          symbol: p.symbol,
-          name: p.name,
-          price: p.currentPrice !== undefined ? p.currentPrice : p.price,
-          change: p.change,
-          sentiment: p.sentiment,
-          history: p.history || []
+          symbol: p.symbol || 'Unknown',
+          name: p.name || 'Unknown',
+          price: Number(p.currentPrice !== undefined ? p.currentPrice : (p.price || 0)),
+          change: Number(p.change || 0),
+          sentiment: p.sentiment || 'Neutral',
+          history: Array.isArray(p.history) ? p.history.filter((h: any) => typeof h === 'number' && !isNaN(h)) : [0, 0, 0, 0, 0, 0, 0]
         }));
         setRates(mappedPairs);
         setError(null);
