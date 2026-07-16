@@ -149,25 +149,10 @@ export default async function handler(req: any, res: any) {
   }
   
   if (!selectedPair) {
-    // If it wasn't passed in the request body, try fetching from watchlist
-    const { data: watchlist } = await supabase
-      .from("watchlist_items")
-      .select("symbol")
-      .eq("user_id", userId);
-    
-    if (watchlist && watchlist.length === 1) {
-      selectedPair = watchlist[0].symbol;
-    } else if (watchlist && watchlist.length > 1) {
-      return res.status(400).json({
-        success: false,
-        error: "Free plan only supports monitoring a single trading pair. Please remove extra pairs from your watchlist."
-      });
-    } else {
-      return res.status(400).json({
-        success: false,
-        error: "Please select a trading pair to monitor before activating the Market Watcher."
-      });
-    }
+    return res.status(400).json({
+      success: false,
+      error: "Please select a trading pair to monitor before activating the Market Watcher."
+    });
   }
 
   // Validate if symbol is supported before proceeding

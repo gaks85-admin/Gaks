@@ -914,21 +914,22 @@ async function startServer() {
         });
       }
 
-      // Load Watchlist (currency pairs)
-      const { data: watchlist, error: watchlistError } = await supabase
-        .from("watchlist_items")
+      // Load Watchlist (currency pairs) from watchers table
+      const { data: activeWatchers, error: watchersError2 } = await supabase
+        .from("watchers")
         .select("*")
-        .eq("user_id", userId);
+        .eq("user_id", userId)
+        .eq("status", "active");
 
-      if (watchlistError) {
-        console.error("[Watcher Scan] Watchlist query error:", watchlistError.message);
-        return res.status(500).json({ success: false, error: "Database error fetching watchlist: " + watchlistError.message });
+      if (watchersError2) {
+        console.error("[Watcher Scan] Watchers query error:", watchersError2.message);
+        return res.status(500).json({ success: false, error: "Database error fetching active watchers: " + watchersError2.message });
       }
 
-      if (!watchlist || watchlist.length === 0) {
+      if (!activeWatchers || activeWatchers.length === 0) {
         return res.json({
           success: true,
-          message: "Watchlist is empty. No currency pairs to scan.",
+          message: "No active watchers found. No currency pairs to scan.",
           data: {}
         });
       }
@@ -942,7 +943,7 @@ async function startServer() {
         });
       }
 
-      // 7. Fetch live market data from Twelve Data for every pair in the user's watchlist
+      // 7. Fetch live market data from Twelve Data for every pair in the user's watchers
       const collectedData: Record<string, any> = {};
 
       const convertSymbol = (sym: string): string => {
@@ -975,8 +976,8 @@ async function startServer() {
         return mapped;
       };
 
-      for (const item of watchlist) {
-        const symbol = item.symbol;
+      for (const watcherItem of activeWatchers) {
+        const symbol = watcherItem.selected_pair;
         const mappedSymbol = convertSymbol(symbol);
         const url = `https://api.twelvedata.com/quote?symbol=${encodeURIComponent(mappedSymbol)}&apikey=${twelveDataKey}`;
         

@@ -349,8 +349,10 @@ export default async function handler(req: any, res: any) {
       const selectedPair = watcher.selected_pair;
       const symbol = selectedPair;
       const selectedTimeframe = watcher.selected_timeframe || 'H1';
+      console.log("[WATCHER START]\nwatcher_id: " + watcher.id + "\nuser_id: " + userId + "\nselected_pair: " + selectedPair + "\nselected_timeframe: " + selectedTimeframe);
       
       if (!selectedPair) {
+        console.log("[WATCHER SKIPPED]\nwatcher_id: " + watcher.id + "\nuser_id: " + userId + "\nselected_pair: " + selectedPair + "\nselected_timeframe: " + selectedTimeframe + "\nreason: Missing selected_pair");
         skipped.push({ userId, reason: "No selected pair" });
         watchersSkippedCount++;
         continue;
@@ -365,6 +367,7 @@ export default async function handler(req: any, res: any) {
           .maybeSingle();
 
         if (!telegramConn || !telegramConn.connected || !telegramConn.telegram_chat_id) {
+          console.log("[WATCHER SKIPPED]\nwatcher_id: " + watcher.id + "\nuser_id: " + userId + "\nselected_pair: " + selectedPair + "\nselected_timeframe: " + selectedTimeframe + "\nreason: Telegram not connected");
           skipped.push({ userId, reason: "Telegram not connected" });
           watchersSkippedCount++;
           continue;
@@ -380,6 +383,7 @@ export default async function handler(req: any, res: any) {
         const strategyText = extractStrategyTextById(prefsRecord?.strategy_text || '', watcher.strategy_id);
 
         if (!strategyText.trim()) {
+          console.log("[WATCHER SKIPPED]\nwatcher_id: " + watcher.id + "\nuser_id: " + userId + "\nselected_pair: " + selectedPair + "\nselected_timeframe: " + selectedTimeframe + "\nreason: Strategy text empty");
           skipped.push({ userId, reason: "Strategy text empty" });
           watchersSkippedCount++;
           continue;
@@ -389,12 +393,14 @@ export default async function handler(req: any, res: any) {
         const riskPercentage = watcher.risk_percentage || (prefsRecord?.preferred_risk ? parseFloat(prefsRecord.preferred_risk.replace(/[^0-9.]/g, "")) : null);
 
         if (!accountSize || !riskPercentage) {
+          console.log("[WATCHER SKIPPED]\nwatcher_id: " + watcher.id + "\nuser_id: " + userId + "\nselected_pair: " + selectedPair + "\nselected_timeframe: " + selectedTimeframe + "\nreason: Account size or risk percentage not defined");
           skipped.push({ userId, reason: "Account size or risk percentage not defined" });
           watchersSkippedCount++;
           continue;
         }
 
         if (!apiKeyRecord || !apiKeyRecord.api_key) {
+          console.log("[WATCHER SKIPPED]\nwatcher_id: " + watcher.id + "\nuser_id: " + userId + "\nselected_pair: " + selectedPair + "\nselected_timeframe: " + selectedTimeframe + "\nreason: Gemini API Key missing");
           skipped.push({ userId, reason: "Gemini API Key missing" });
           watchersSkippedCount++;
           continue;
@@ -472,6 +478,7 @@ export default async function handler(req: any, res: any) {
         // Validate symbol before making requests
         const validation = await validateSymbolWithTwelveData(mappedSymbol, twelveDataKey);
         if (!validation.isValid) {
+          console.log("[WATCHER SKIPPED]\nwatcher_id: " + watcher.id + "\nuser_id: " + userId + "\nselected_pair: " + selectedPair + "\nselected_timeframe: " + selectedTimeframe + "\nreason: TwelveData validation failed: " + validation.reason);
           throw new Error(`TwelveData HTTP Error: 404 (Symbol not found or invalid on Twelve Data)`);
         }
         
@@ -586,6 +593,7 @@ ${JSON.stringify(marketData, null, 2)}`;
               
               // 1. Local Cache check
               if (watcher.last_signal_data === signalHash) {
+                console.log("[WATCHER SKIPPED]\nwatcher_id: " + watcher.id + "\nuser_id: " + userId + "\nselected_pair: " + selectedPair + "\nselected_timeframe: " + selectedTimeframe + "\nreason: Duplicate signal detected");
                 console.log(`[User ${userId}] Duplicate signal detected for ${signal.pair} (checked local state). Skipping alert.`);
                 continue;
               }
@@ -599,11 +607,13 @@ ${JSON.stringify(marketData, null, 2)}`;
                 .select();
 
               if (updateError) {
+                console.log("[WATCHER SKIPPED]\nwatcher_id: " + watcher.id + "\nuser_id: " + userId + "\nselected_pair: " + selectedPair + "\nselected_timeframe: " + selectedTimeframe + "\nreason: Atomic update error: " + updateError.message);
                 console.error(`[User ${userId}] Error performing atomic update for signal:`, updateError);
                 continue;
               }
 
               if (!updatedRows || updatedRows.length === 0) {
+                console.log("[WATCHER SKIPPED]\nwatcher_id: " + watcher.id + "\nuser_id: " + userId + "\nselected_pair: " + selectedPair + "\nselected_timeframe: " + selectedTimeframe + "\nreason: Concurrent or duplicate signal already registered");
                 console.log(`[User ${userId}] Concurrent or duplicate signal already registered in database for ${signal.pair}. Skipping alert.`);
                 continue;
               }
@@ -638,10 +648,13 @@ ${JSON.stringify(marketData, null, 2)}`;
           })
           .eq("id", watcher.id);
 
+        console.log("[WATCHER SUCCESS]\nwatcher_id: " + watcher.id + "\nlast_scan_at: " + new Date().toISOString());
+
         watchersProcessedCount++;
         results.push({ userId, symbol, signalsFound: signals.length, signalsSent });
 
       } catch (err) {
+        console.log("[WATCHER SKIPPED]\nwatcher_id: " + watcher.id + "\nuser_id: " + userId + "\nselected_pair: " + selectedPair + "\nselected_timeframe: " + selectedTimeframe + "\nreason: Error: " + (err.message || err));
         console.error(`[User ${userId}] Error processing watcher:`, err.message || err);
         errors.push({ userId, error: err.message || "Unknown error" });
         watchersSkippedCount++;

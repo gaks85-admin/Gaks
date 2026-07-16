@@ -266,76 +266,37 @@ export default function App() {
   const loadWatchlistFromSupabase = async (userId: string) => {
     try {
       const { data, error } = await supabase
-        .from('watchlist_items')
+        .from('watchers')
         .select('*')
-        .eq('user_id', userId);
+        .eq('user_id', userId)
+        .eq('status', 'active');
 
       if (error) {
-        console.warn("Could not load watchlist items from Supabase (falling back to local storage):", error.message);
+        console.warn("Could not load watchers from Supabase:", error.message);
         return;
       }
 
       if (data && data.length > 0) {
         const mapped: WatchlistItem[] = data.map((item: any) => ({
-          symbol: item.symbol,
-          name: item.name,
-          price: Number(item.price),
-          change: Number(item.change),
-          spread: Number(item.spread),
-          volatility: item.volatility,
-          confidence: item.confidence,
-          direction: item.direction,
-          history: item.history || [],
-          timeframe: item.timeframe || 'H1'
+          symbol: item.selected_pair,
+          name: getFullNameForSymbol(item.selected_pair),
+          price: 0, // Will be updated by live rates or scan
+          change: 0,
+          spread: 0,
+          volatility: 'Medium',
+          confidence: 0,
+          direction: 'Neutral',
+          history: [],
+          timeframe: item.selected_timeframe || 'H1'
         }));
         setWatchlist(mapped);
         localStorage.setItem('gaks_watchlist', JSON.stringify(mapped));
+      } else {
+        setWatchlist([]);
+        localStorage.removeItem('gaks_watchlist');
       }
     } catch (err) {
-      console.error("Exception loading watchlist from Supabase:", err);
-    }
-  };
-
-  const addWatchlistItemToSupabase = async (item: WatchlistItem, userId: string) => {
-    try {
-      const { error } = await supabase
-        .from('watchlist_items')
-        .upsert({
-          user_id: userId,
-          symbol: item.symbol,
-          name: item.name,
-          price: item.price,
-          change: item.change,
-          spread: item.spread,
-          volatility: item.volatility,
-          confidence: item.confidence,
-          direction: item.direction,
-          history: item.history,
-          timeframe: item.timeframe || 'H1',
-          created_at: new Date().toISOString()
-        }, { onConflict: 'user_id,symbol' });
-
-      if (error) {
-        console.warn("Could not save watchlist item to Supabase (using local storage fallback):", error.message);
-      }
-    } catch (err) {
-      console.error("Exception saving watchlist item to Supabase:", err);
-    }
-  };
-
-  const deleteWatchlistItemFromSupabase = async (symbol: string, userId: string) => {
-    try {
-      const { error } = await supabase
-        .from('watchlist_items')
-        .delete()
-        .eq('user_id', userId)
-        .eq('symbol', symbol);
-
-      if (error) {
-        console.warn("Could not delete watchlist item from Supabase (using local storage fallback):", error.message);
-      }
-    } catch (err) {
-      console.error("Exception deleting watchlist item from Supabase:", err);
+      console.error("Exception loading watchers from Supabase:", err);
     }
   };
 
@@ -1130,11 +1091,6 @@ export default function App() {
           .from('watchers')
           .update({ status: 'stopped', updated_at: new Date().toISOString() })
           .eq('user_id', session.user.id);
-          
-        await supabase
-          .from('watchlist_items')
-          .delete()
-          .eq('user_id', session.user.id);
       } catch (err) {
         console.error("Error stopping watcher:", err);
       }
@@ -1270,12 +1226,9 @@ export default function App() {
     
     if (session?.user) {
       if (isAdmin) {
-        addWatchlistItemToSupabase(newPair, session.user.id);
+        // No-op for now, adding logic for admin multiple watchers if needed
       } else {
-        // First, delete old watchlist items to maintain only one
-        supabase.from('watchlist_items').delete().eq('user_id', session.user.id).then(() => {
-          addWatchlistItemToSupabase(newPair, session.user.id);
-        });
+        // User is not admin, they only have one watcher. The startAiMarketWatcher handles upsert.
       }
     }
     
@@ -1283,12 +1236,21 @@ export default function App() {
   };
 
   const handleRemovePair = (symbolToRemove: string) => {
-    const updatedWatchlist = watchlist.filter(w => w.symbol !== symbolToRemove);
-    setWatchlist(updatedWatchlist);
-    localStorage.setItem('gaks_watchlist', JSON.stringify(updatedWatchlist));
-    
-    if (session?.user) {
-      deleteWatchlistItemFromSupabase(symbolToRemove, session.user.id);
+    if (isAdmin) {
+      const updatedWatchlist = watchlist.filter(w => w.symbol !== symbolToRemove);
+      setWatchlist(updatedWatchlist);
+      localStorage.setItem('gaks_watchlist', JSON.stringify(updatedWatchlist));
+      
+      if (session?.user) {
+        supabase
+          .from('watchers')
+          .update({ status: 'stopped', updated_at: new Date().toISOString() })
+          .eq('user_id', session.user.id)
+          .eq('selected_pair', symbolToRemove)
+          .then();
+      }
+    } else {
+      stopAiMarketWatcher();
     }
     
     triggerNotification(`${symbolToRemove} removed from watchlist`, 'info');
