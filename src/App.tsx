@@ -529,6 +529,32 @@ export default function App() {
   // Forex live rates fetched from Express API (with public er-api.com USD rate mapping)
   const { rates: liveRates, isLoading: isRatesLoading, error: ratesError, refetch: refetchRates } = useLiveRates();
 
+  // Sync live rates into the monitored watchlist for real-time price updates
+  useEffect(() => {
+    if (liveRates.length > 0 && watchlist.length > 0) {
+      const hasUpdates = watchlist.some(item => {
+        const live = liveRates.find(r => r.symbol === item.symbol);
+        return live && (live.price !== item.price || live.change !== item.change);
+      });
+
+      if (hasUpdates) {
+        const updated = watchlist.map(item => {
+          const live = liveRates.find(r => r.symbol === item.symbol);
+          if (live) {
+            return {
+              ...item,
+              price: live.price,
+              change: live.change,
+              direction: live.change > 0 ? 'Bullish' : live.change < 0 ? 'Bearish' : 'Neutral'
+            };
+          }
+          return item;
+        });
+        setWatchlist(updated as WatchlistItem[]);
+      }
+    }
+  }, [liveRates, watchlist]);
+
   // Quick Analyze Mock Results
   const mockAnalysisPhrases = [
     "Divergence detected on EURUSD H1 chart near key support. Expect a potential reversal.",
@@ -857,13 +883,19 @@ export default function App() {
       const { data, error } = await supabase
         .from('watchers')
         .select('status, selected_pair, selected_timeframe')
-        .eq('user_id', userId)
-        .maybeSingle();
+        .eq('user_id', userId);
         
-      if (data) {
-        setIsWatcherActive(data.status === 'active');
-        if (data.selected_pair) setWatcherSearch(data.selected_pair);
-        if (data.selected_timeframe) setWatcherTimeframe(data.selected_timeframe);
+      if (data && data.length > 0) {
+        // If any watcher is active, we consider the watcher service "active" for the UI badge
+        const anyActive = data.some(w => w.status === 'active');
+        setIsWatcherActive(anyActive);
+        
+        // Use the first active watcher to populate search/timeframe defaults
+        const activeOne = data.find(w => w.status === 'active') || data[0];
+        if (activeOne.selected_pair) setWatcherSearch(activeOne.selected_pair);
+        if (activeOne.selected_timeframe) setWatcherTimeframe(activeOne.selected_timeframe);
+      } else {
+        setIsWatcherActive(false);
       }
     } catch (err) {
       console.error("Error loading watcher status:", err);
@@ -1076,6 +1108,10 @@ export default function App() {
       setWatcherErrorMessage(null);
       triggerNotification(result.message || "AI Market Watcher activated successfully!", "success");
 
+      // Refresh source of truth from Supabase instead of just mocking locally
+      await loadWatchlistFromSupabase(session.user.id);
+      
+      // Still call handleAddPair to ensure local search state and notifications are consistent
       handleAddPair(targetSymbol, targetTimeframe);
     } catch (err: any) {
       console.error("Exception in startAiMarketWatcher:", err);
