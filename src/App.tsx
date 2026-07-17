@@ -531,14 +531,18 @@ export default function App() {
 
   // Sync live rates into the monitored watchlist for real-time price updates
   useEffect(() => {
-    if (liveRates.length > 0 && watchlist.length > 0) {
-      const hasUpdates = watchlist.some(item => {
-        const live = liveRates.find(r => r.symbol === item.symbol);
-        return live && (live.price !== item.price || live.change !== item.change);
-      });
+    if (liveRates.length > 0) {
+      setWatchlist(prevWatchlist => {
+        if (prevWatchlist.length === 0) return prevWatchlist;
+        
+        const hasUpdates = prevWatchlist.some(item => {
+          const live = liveRates.find(r => r.symbol === item.symbol);
+          return live && (live.price !== item.price || live.change !== item.change);
+        });
 
-      if (hasUpdates) {
-        const updated = watchlist.map(item => {
+        if (!hasUpdates) return prevWatchlist;
+
+        const updated = prevWatchlist.map(item => {
           const live = liveRates.find(r => r.symbol === item.symbol);
           if (live) {
             return {
@@ -550,10 +554,10 @@ export default function App() {
           }
           return item;
         });
-        setWatchlist(updated as WatchlistItem[]);
-      }
+        return updated as WatchlistItem[];
+      });
     }
-  }, [liveRates, watchlist]);
+  }, [liveRates]);
 
   // Quick Analyze Mock Results
   const mockAnalysisPhrases = [
@@ -1111,8 +1115,8 @@ export default function App() {
       // Refresh source of truth from Supabase instead of just mocking locally
       await loadWatchlistFromSupabase(session.user.id);
       
-      // Still call handleAddPair to ensure local search state and notifications are consistent
-      handleAddPair(targetSymbol, targetTimeframe);
+      // Clear UI state
+      setWatcherSearch("");
     } catch (err: any) {
       console.error("Exception in startAiMarketWatcher:", err);
       setWatcherErrorMessage(err.message || "An unexpected error occurred during activation.");
@@ -1245,19 +1249,21 @@ export default function App() {
       timeframe: timeframeToWatch
     };
 
-    let updatedWatchlist;
-    if (isAdmin) {
-      if (watchlist.some(w => w.symbol === cleanSymbol)) {
-        updatedWatchlist = watchlist.map(w => w.symbol === cleanSymbol ? { ...w, timeframe: timeframeToWatch } : w);
+    setWatchlist(prev => {
+      let updatedWatchlist;
+      if (isAdmin) {
+        if (prev.some(w => w.symbol === cleanSymbol)) {
+          updatedWatchlist = prev.map(w => w.symbol === cleanSymbol ? { ...w, timeframe: timeframeToWatch } : w);
+        } else {
+          updatedWatchlist = [...prev, newPair];
+        }
       } else {
-        updatedWatchlist = [...watchlist, newPair];
+        updatedWatchlist = [newPair];
       }
-    } else {
-      updatedWatchlist = [newPair];
-    }
+      localStorage.setItem('gaks_watchlist', JSON.stringify(updatedWatchlist));
+      return updatedWatchlist;
+    });
 
-    setWatchlist(updatedWatchlist);
-    localStorage.setItem('gaks_watchlist', JSON.stringify(updatedWatchlist));
     setWatcherSearch(cleanSymbol);
     
     if (session?.user) {
@@ -1273,9 +1279,11 @@ export default function App() {
 
   const handleRemovePair = (symbolToRemove: string) => {
     if (isAdmin) {
-      const updatedWatchlist = watchlist.filter(w => w.symbol !== symbolToRemove);
-      setWatchlist(updatedWatchlist);
-      localStorage.setItem('gaks_watchlist', JSON.stringify(updatedWatchlist));
+      setWatchlist(prev => {
+        const updated = prev.filter(w => w.symbol !== symbolToRemove);
+        localStorage.setItem('gaks_watchlist', JSON.stringify(updated));
+        return updated;
+      });
       
       if (session?.user) {
         supabase

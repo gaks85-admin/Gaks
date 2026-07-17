@@ -38,6 +38,36 @@ const PAIR_METADATA = [
   { symbol: "USDCHF", base: "USD", quote: "CHF", name: "US Dollar / Swiss Franc", isUSDQuote: false },
 ];
 
+const convertSymbol = (sym: string): string => {
+  if (!sym) return "";
+  let mapped = sym.trim().toUpperCase().replace(/[-_\s/]/g, '');
+  
+  // Symbol mapping layer for Twelve Data compatibility on free plans
+  const mappings: Record<string, string> = {
+    'EURUSD': 'EUR/USD',
+    'GBPUSD': 'GBP/USD',
+    'XAUUSD': 'XAU/USD',
+    'BTCUSD': 'BTC/USD',
+    'NAS100': 'QQQ',
+    'US30': 'DIA',
+    'SPX500': 'SPY',
+    'US500': 'SPY'
+  };
+
+  if (mappings[mapped]) {
+    return mappings[mapped];
+  }
+  
+  if (mapped.length === 6 && /^[A-Z]{6}$/.test(mapped)) {
+    return `${mapped.slice(0, 3)}/${mapped.slice(3)}`;
+  }
+  if (mapped.endsWith('USD') && mapped.length > 3) return mapped.slice(0, -3) + '/USD';
+  if (mapped.endsWith('JPY') && mapped.length > 3) return mapped.slice(0, -3) + '/JPY';
+  if (mapped.endsWith('EUR') && mapped.length > 3) return mapped.slice(0, -3) + '/EUR';
+  if (mapped.endsWith('GBP') && mapped.length > 3) return mapped.slice(0, -3) + '/GBP';
+  return mapped;
+};
+
 const DEFAULT_STRATEGY_TEXT = `# Gaks AI Default Strategy
 
 ## 1. Overview
@@ -128,8 +158,100 @@ let pairsCache: Record<string, LivePairData> = {};
 let lastFetchTime = 0;
 const FETCH_COOLDOWN = 10 * 60 * 1000; // 10 minutes cache for external api
 
-async function updateRatesFromAPI() {
+async function updateRatesFromAPI(supabase?: any) {
   try {
+    const twelveDataKey = process.env.TWELVE_DATA_API_KEY;
+    
+    // 1. Determine symbols to monitor dynamically from watchers table + default Forex pairs
+    let symbolsToFetch = PAIR_METADATA.map(p => p.symbol);
+    
+    if (supabase) {
+      try {
+        const { data: watchers } = await supabase.from('watchers').select('selected_pair');
+        if (watchers && watchers.length > 0) {
+          const watcherPairs = watchers.map((w: any) => w.selected_pair.toUpperCase());
+          symbolsToFetch = Array.from(new Set([...symbolsToFetch, ...watcherPairs]));
+        }
+      } catch (dbErr) {
+        console.warn("[Rates Update] Could not fetch watcher symbols from DB, using defaults:", dbErr);
+      }
+    }
+
+    if (twelveDataKey) {
+      console.log(`[Rates Update] Fetching dynamic rates for ${symbolsToFetch.length} symbols from Twelve Data...`);
+      
+      // Fetch in batches to stay within API limits and handle many symbols
+      const batchSize = 25;
+      for (let i = 0; i < symbolsToFetch.length; i += batchSize) {
+        const batch = symbolsToFetch.slice(i, i + batchSize);
+        const mappedBatch = batch.map(s => convertSymbol(s)).join(',');
+        const url = `https://api.twelvedata.com/quote?symbol=${encodeURIComponent(mappedBatch)}&apikey=${twelveDataKey}`;
+        
+        try {
+          const response = await fetch(url);
+          if (!response.ok) {
+            console.error(`[Rates Update] Twelve Data API batch error: ${response.status}`);
+            continue;
+          }
+          
+          const data = await response.json();
+          
+          // Twelve Data returns an object with symbol keys if multiple, or single object if one
+          const quotes = batch.length === 1 ? { [convertSymbol(batch[0])]: data } : data;
+          
+          batch.forEach(symbol => {
+            const mapped = convertSymbol(symbol);
+            const quote = quotes[mapped];
+            
+            if (!quote || quote.status === 'error') {
+              // If dynamic symbol fails and it's not in PAIR_METADATA, skip it
+              // If it's in PAIR_METADATA, we might want a fallback later
+              return;
+            }
+            
+            const currentPrice = parseFloat(quote.close || quote.price || "0");
+            const basePrice = parseFloat(quote.previous_close || quote.open || "0") || currentPrice;
+            const change = parseFloat(quote.percent_change || "0");
+            const name = quote.name || symbol;
+
+            if (!pairsCache[symbol]) {
+              // Initialize new dynamic pair
+              const history: number[] = [];
+              for (let j = 0; j < 7; j++) {
+                const mult = 1 + (Math.random() * 0.002 - 0.001);
+                history.push(Number((currentPrice * mult).toFixed(symbol.includes("JPY") ? 2 : 4)));
+              }
+
+              pairsCache[symbol] = {
+                symbol,
+                name,
+                basePrice,
+                currentPrice,
+                change,
+                sentiment: change >= 0 ? 'Bullish' : 'Bearish',
+                history
+              };
+            } else {
+              // Update existing pair
+              pairsCache[symbol] = {
+                ...pairsCache[symbol],
+                basePrice,
+                currentPrice,
+                change,
+                sentiment: change >= 0 ? 'Bullish' : 'Bearish'
+              };
+            }
+          });
+        } catch (batchErr) {
+          console.error(`[Rates Update] Error processing batch starting at ${i}:`, batchErr);
+        }
+      }
+      lastFetchTime = Date.now();
+      return; // Successfully updated via Twelve Data
+    }
+
+    // Fallback to legacy Exchange Rate API for Forex if no Twelve Data key
+    console.log("[Rates Update] Using fallback Exchange Rate API for Forex pairs...");
     const response = await fetch("https://open.er-api.com/v6/latest/USD");
     if (!response.ok) {
       throw new Error(`Failed to fetch exchange rates: ${response.statusText}`);
@@ -157,7 +279,6 @@ async function updateRatesFromAPI() {
 
       const cached = pairsCache[pair.symbol];
       if (!cached) {
-        // Initialize rolling history array
         const history: number[] = [];
         for (let i = 0; i < 7; i++) {
           const mult = 1 + (Math.random() * 0.002 - 0.001);
@@ -174,25 +295,18 @@ async function updateRatesFromAPI() {
           history: history,
         };
       } else {
-        // Keep tracking the baseline price but preserve current ticks and change history
         pairsCache[pair.symbol].basePrice = basePrice;
       }
     });
 
     lastFetchTime = Date.now();
   } catch (error) {
-    console.error("Error updating exchange rates from API, using fallback defaults:", error);
+    console.error("Error updating dynamic rates:", error);
     
-    // Seed fallbacks if empty
+    // Seed fallbacks for Forex if empty
     if (Object.keys(pairsCache).length === 0) {
       const fallbackRates: Record<string, number> = {
-        EUR: 0.9195,
-        GBP: 0.7853,
-        JPY: 156.42,
-        CAD: 1.3650,
-        AUD: 1.5124,
-        NZD: 1.6340,
-        CHF: 0.8945
+        EUR: 0.9195, GBP: 0.7853, JPY: 156.42, CAD: 1.3650, AUD: 1.5124, NZD: 1.6340, CHF: 0.8945
       };
 
       PAIR_METADATA.forEach(pair => {
@@ -250,22 +364,11 @@ function tickPrices() {
   });
 }
 
-// Periodically fetch baseline rates every 10 minutes, and tick rates every 5 seconds
-setInterval(() => {
-  if (Date.now() - lastFetchTime > FETCH_COOLDOWN) {
-    updateRatesFromAPI();
-  }
-}, 60 * 1000);
-
-setInterval(() => {
-  tickPrices();
-}, 5000);
-
 async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  // CORS Middleware to allow cross-origin requests from frontend hosted on Vercel or locally
+  // CORS Middleware
   app.use((req, res, next) => {
     const origin = req.headers.origin;
     const allowedOrigins = [
@@ -277,7 +380,6 @@ async function startServer() {
     if (origin && (allowedOrigins.includes(origin) || origin.endsWith(".vercel.app") || origin.endsWith(".run.app"))) {
       res.setHeader("Access-Control-Allow-Origin", origin);
     } else {
-      // Direct client fallback
       res.setHeader("Access-Control-Allow-Origin", "https://gaks-ai.vercel.app");
     }
 
@@ -293,9 +395,6 @@ async function startServer() {
 
   app.use(express.json());
 
-  // Keep track of user's active watcher key in memory (simulating background analysis setup)
-  let activeWatcherApiKey: string | null = null;
-
   // Initialize Supabase Client
   const SUPABASE_URL = "https://wkujrqmxivljnuvumfau.supabase.co";
   const SUPABASE_PUBLIC_KEY = "sb_publishable_BheqR2OkNYKqT7bj8xThWA_gGG2hcjf";
@@ -306,6 +405,22 @@ async function startServer() {
       autoRefreshToken: false
     }
   });
+
+  // Initial fetch and setup intervals
+  updateRatesFromAPI(supabase);
+  
+  setInterval(() => {
+    if (Date.now() - lastFetchTime > FETCH_COOLDOWN) {
+      updateRatesFromAPI(supabase);
+    }
+  }, 60 * 1000);
+
+  setInterval(() => {
+    tickPrices();
+  }, 5000);
+
+  // Keep track of user's active watcher key in memory
+  let activeWatcherApiKey: string | null = null;
 
   // Telegram helper to reply to users
   async function sendTelegramMessage(chatId: string | number, text: string) {
@@ -945,36 +1060,6 @@ async function startServer() {
 
       // 7. Fetch live market data from Twelve Data for every pair in the user's watchers
       const collectedData: Record<string, any> = {};
-
-      const convertSymbol = (sym: string): string => {
-        if (!sym) return "";
-        let mapped = sym.trim().toUpperCase().replace(/[-_\s/]/g, '');
-        
-        // Symbol mapping layer for Twelve Data compatibility on free plans
-        const mappings: Record<string, string> = {
-          'EURUSD': 'EUR/USD',
-          'GBPUSD': 'GBP/USD',
-          'XAUUSD': 'XAU/USD',
-          'BTCUSD': 'BTC/USD',
-          'NAS100': 'QQQ',
-          'US30': 'DIA',
-          'SPX500': 'SPY',
-          'US500': 'SPY'
-        };
-
-        if (mappings[mapped]) {
-          return mappings[mapped];
-        }
-        
-        if (mapped.length === 6 && /^[A-Z]{6}$/.test(mapped)) {
-          return `${mapped.slice(0, 3)}/${mapped.slice(3)}`;
-        }
-        if (mapped.endsWith('USD') && mapped.length > 3) return mapped.slice(0, -3) + '/USD';
-        if (mapped.endsWith('JPY') && mapped.length > 3) return mapped.slice(0, -3) + '/JPY';
-        if (mapped.endsWith('EUR') && mapped.length > 3) return mapped.slice(0, -3) + '/EUR';
-        if (mapped.endsWith('GBP') && mapped.length > 3) return mapped.slice(0, -3) + '/GBP';
-        return mapped;
-      };
 
       for (const watcherItem of activeWatchers) {
         const symbol = watcherItem.selected_pair;
