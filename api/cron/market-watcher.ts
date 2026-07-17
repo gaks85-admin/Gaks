@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { GoogleGenAI, Type } from '@google/genai';
+import { convertSymbol, mapTimeframeToInterval } from '../../src/lib/market-utils';
 
 const SUPABASE_URL = process.env.VITE_SUPABASE_URL || "https://wkujrqmxivljnuvumfau.supabase.co";
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || "sb_publishable_BheqR2OkNYKqT7bj8xThWA_gGG2hcjf";
@@ -407,71 +408,6 @@ export default async function handler(req: any, res: any) {
         }
 
         // Fetch live market data from Twelve Data
-        const convertSymbol = (sym) => {
-          if (!sym) return "";
-          let mapped = sym.trim().toUpperCase().replace(/[-_\s/]/g, '');
-          
-          const mappings = {
-            'EURUSD': 'EUR/USD',
-            'GBPUSD': 'GBP/USD',
-            'XAUUSD': 'XAU/USD',
-            'BTCUSD': 'BTC/USD',
-            'NAS100': 'QQQ',
-            'US30': 'DIA',
-            'SPX500': 'SPY',
-            'US500': 'SPY'
-          };
-
-          if (mappings[mapped]) {
-            return mappings[mapped];
-          }
-          
-          const commonCurrencies = ["EUR", "USD", "GBP", "JPY", "AUD", "CAD", "CHF", "NZD", "SGD", "HKD", "SEK", "NOK", "MXN", "CNH", "CNY", "ZAR", "TRY"];
-          if (mapped.length === 6 && /^[A-Z]{6}$/.test(mapped)) {
-            const firstHalf = mapped.slice(0, 3);
-            const secondHalf = mapped.slice(3);
-            if (commonCurrencies.includes(firstHalf) && commonCurrencies.includes(secondHalf)) {
-              return `${firstHalf}/${secondHalf}`;
-            }
-          }
-
-          const commonCryptoCoins = ["BTC", "ETH", "SOL", "ADA", "XRP", "DOT", "DOGE", "LTC", "LINK", "AVAX", "XLM", "UNI", "BCH", "ATOM"];
-          const commonCryptoQuote = ["USD", "USDT", "BTC", "ETH", "EUR", "GBP", "FDUSD", "USDC"];
-          
-          for (const coin of commonCryptoCoins) {
-            if (mapped.startsWith(coin)) {
-              const suffix = mapped.slice(coin.length);
-              if (commonCryptoQuote.includes(suffix)) {
-                return `${coin}/${suffix}`;
-              }
-            }
-          }
-          
-          if (mapped.length === 6 && /^[A-Z]{6}$/.test(mapped)) {
-            return `${mapped.slice(0, 3)}/${mapped.slice(3)}`;
-          }
-          
-          if (mapped.endsWith('USD') && mapped.length > 3) return mapped.slice(0, -3) + '/USD';
-          if (mapped.endsWith('JPY') && mapped.length > 3) return mapped.slice(0, -3) + '/JPY';
-          if (mapped.endsWith('EUR') && mapped.length > 3) return mapped.slice(0, -3) + '/EUR';
-          if (mapped.endsWith('GBP') && mapped.length > 3) return mapped.slice(0, -3) + '/GBP';
-          return mapped;
-        };
-
-        const mapTimeframeToInterval = (tf) => {
-          const u = tf.toUpperCase();
-          if (u === 'M1' || u === '1M') return '1min';
-          if (u === 'M5' || u === '5M') return '5min';
-          if (u === 'M15' || u === '15M') return '15min';
-          if (u === 'M30' || u === '30M') return '30min';
-          if (u === 'H1' || u === '1H') return '1h';
-          if (u === 'H2' || u === '2H') return '2h';
-          if (u === 'H4' || u === '4H') return '4h';
-          if (u === 'D1' || u === 'D' || u === 'DAILY') return '1day';
-          if (u === 'W1' || u === 'W' || u === 'WEEKLY') return '1week';
-          return '1h';
-        };
-
         const mappedSymbol = convertSymbol(selectedPair);
         const interval = mapTimeframeToInterval(selectedTimeframe);
 

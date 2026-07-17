@@ -2,6 +2,7 @@ import express from "express";
 import path from "path";
 import { createClient } from "@supabase/supabase-js";
 import { GoogleGenAI, Type } from "@google/genai";
+import { convertSymbol } from "./src/lib/market-utils";
 import marketWatcherCronHandler from "./api/cron/market-watcher";
 import adminStatsHandler from "./api/_admin/stats";
 import adminUsersHandler from "./api/_admin/users";
@@ -37,36 +38,6 @@ const PAIR_METADATA = [
   { symbol: "NZDUSD", base: "NZD", quote: "USD", name: "New Zealand Dollar / US Dollar", isUSDQuote: true },
   { symbol: "USDCHF", base: "USD", quote: "CHF", name: "US Dollar / Swiss Franc", isUSDQuote: false },
 ];
-
-const convertSymbol = (sym: string): string => {
-  if (!sym) return "";
-  let mapped = sym.trim().toUpperCase().replace(/[-_\s/]/g, '');
-  
-  // Symbol mapping layer for Twelve Data compatibility on free plans
-  const mappings: Record<string, string> = {
-    'EURUSD': 'EUR/USD',
-    'GBPUSD': 'GBP/USD',
-    'XAUUSD': 'XAU/USD',
-    'BTCUSD': 'BTC/USD',
-    'NAS100': 'QQQ',
-    'US30': 'DIA',
-    'SPX500': 'SPY',
-    'US500': 'SPY'
-  };
-
-  if (mappings[mapped]) {
-    return mappings[mapped];
-  }
-  
-  if (mapped.length === 6 && /^[A-Z]{6}$/.test(mapped)) {
-    return `${mapped.slice(0, 3)}/${mapped.slice(3)}`;
-  }
-  if (mapped.endsWith('USD') && mapped.length > 3) return mapped.slice(0, -3) + '/USD';
-  if (mapped.endsWith('JPY') && mapped.length > 3) return mapped.slice(0, -3) + '/JPY';
-  if (mapped.endsWith('EUR') && mapped.length > 3) return mapped.slice(0, -3) + '/EUR';
-  if (mapped.endsWith('GBP') && mapped.length > 3) return mapped.slice(0, -3) + '/GBP';
-  return mapped;
-};
 
 const DEFAULT_STRATEGY_TEXT = `# Gaks AI Default Strategy
 
@@ -163,14 +134,15 @@ async function updateRatesFromAPI(supabase?: any) {
     const twelveDataKey = process.env.TWELVE_DATA_API_KEY;
     
     // 1. Determine symbols to monitor dynamically from watchers table + default Forex pairs
-    let symbolsToFetch = PAIR_METADATA.map(p => p.symbol);
+    const defaultSymbols = PAIR_METADATA.map(p => p.symbol);
+    let monitoredSymbols = [...defaultSymbols];
     
     if (supabase) {
       try {
-        const { data: watchers } = await supabase.from('watchers').select('selected_pair');
+        const { data: watchers } = await supabase.from('watchers').select('selected_pair').eq('status', 'active');
         if (watchers && watchers.length > 0) {
           const watcherPairs = watchers.map((w: any) => w.selected_pair.toUpperCase());
-          symbolsToFetch = Array.from(new Set([...symbolsToFetch, ...watcherPairs]));
+          monitoredSymbols = Array.from(new Set([...monitoredSymbols, ...watcherPairs]));
         }
       } catch (dbErr) {
         console.warn("[Rates Update] Could not fetch watcher symbols from DB, using defaults:", dbErr);
@@ -178,12 +150,11 @@ async function updateRatesFromAPI(supabase?: any) {
     }
 
     if (twelveDataKey) {
-      console.log(`[Rates Update] Fetching dynamic rates for ${symbolsToFetch.length} symbols from Twelve Data...`);
+      console.log(`[Rates Update] Fetching dynamic rates for ${monitoredSymbols.length} symbols from Twelve Data...`);
       
-      // Fetch in batches to stay within API limits and handle many symbols
       const batchSize = 25;
-      for (let i = 0; i < symbolsToFetch.length; i += batchSize) {
-        const batch = symbolsToFetch.slice(i, i + batchSize);
+      for (let i = 0; i < monitoredSymbols.length; i += batchSize) {
+        const batch = monitoredSymbols.slice(i, i + batchSize);
         const mappedBatch = batch.map(s => convertSymbol(s)).join(',');
         const url = `https://api.twelvedata.com/quote?symbol=${encodeURIComponent(mappedBatch)}&apikey=${twelveDataKey}`;
         
@@ -195,8 +166,6 @@ async function updateRatesFromAPI(supabase?: any) {
           }
           
           const data = await response.json();
-          
-          // Twelve Data returns an object with symbol keys if multiple, or single object if one
           const quotes = batch.length === 1 ? { [convertSymbol(batch[0])]: data } : data;
           
           batch.forEach(symbol => {
@@ -204,8 +173,7 @@ async function updateRatesFromAPI(supabase?: any) {
             const quote = quotes[mapped];
             
             if (!quote || quote.status === 'error') {
-              // If dynamic symbol fails and it's not in PAIR_METADATA, skip it
-              // If it's in PAIR_METADATA, we might want a fallback later
+              console.warn(`[Rates Update] Symbol failed ${symbol} (${mapped}):`, quote?.message || 'No data');
               return;
             }
             
@@ -215,7 +183,6 @@ async function updateRatesFromAPI(supabase?: any) {
             const name = quote.name || symbol;
 
             if (!pairsCache[symbol]) {
-              // Initialize new dynamic pair
               const history: number[] = [];
               for (let j = 0; j < 7; j++) {
                 const mult = 1 + (Math.random() * 0.002 - 0.001);
@@ -223,21 +190,14 @@ async function updateRatesFromAPI(supabase?: any) {
               }
 
               pairsCache[symbol] = {
-                symbol,
-                name,
-                basePrice,
-                currentPrice,
-                change,
+                symbol, name, basePrice, currentPrice, change,
                 sentiment: change >= 0 ? 'Bullish' : 'Bearish',
                 history
               };
             } else {
-              // Update existing pair
               pairsCache[symbol] = {
                 ...pairsCache[symbol],
-                basePrice,
-                currentPrice,
-                change,
+                basePrice, currentPrice, change,
                 sentiment: change >= 0 ? 'Bullish' : 'Bearish'
               };
             }
@@ -246,8 +206,16 @@ async function updateRatesFromAPI(supabase?: any) {
           console.error(`[Rates Update] Error processing batch starting at ${i}:`, batchErr);
         }
       }
+
+      // Cleanup cache: remove symbols that are no longer monitored and not in the default list
+      Object.keys(pairsCache).forEach(symbol => {
+        if (!monitoredSymbols.includes(symbol)) {
+          delete pairsCache[symbol];
+        }
+      });
+
       lastFetchTime = Date.now();
-      return; // Successfully updated via Twelve Data
+      return; 
     }
 
     // Fallback to legacy Exchange Rate API for Forex if no Twelve Data key
@@ -313,9 +281,10 @@ async function updateRatesFromAPI(supabase?: any) {
         let basePrice = 1;
         if (pair.isUSDQuote) {
           const r = fallbackRates[pair.base];
-          basePrice = 1 / r;
+          if (r) basePrice = 1 / r;
         } else {
-          basePrice = fallbackRates[pair.quote];
+          const r = fallbackRates[pair.quote];
+          if (r) basePrice = r;
         }
 
         const history: number[] = [];
