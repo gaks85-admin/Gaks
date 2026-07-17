@@ -5,71 +5,13 @@ export interface ForexPair {
   name: string;
   price: number;
   change: number;
-  sentiment: 'Bearish' | 'Bullish';
+  sentiment: 'Bearish' | 'Bullish' | 'Neutral';
   history: number[];
+  status?: 'active' | 'unavailable';
 }
 
-const INITIAL_FALLBACK_RATES: ForexPair[] = [
-  {
-    symbol: 'EURUSD',
-    name: 'Euro / US Dollar',
-    price: 1.0875,
-    change: -0.56,
-    sentiment: 'Bearish',
-    history: [1.0920, 1.0910, 1.0895, 1.0890, 1.0882, 1.0870, 1.0875]
-  },
-  {
-    symbol: 'GBPUSD',
-    name: 'British Pound / US Dollar',
-    price: 1.2734,
-    change: -0.26,
-    sentiment: 'Bearish',
-    history: [1.2780, 1.2770, 1.2762, 1.2745, 1.2750, 1.2730, 1.2734]
-  },
-  {
-    symbol: 'USDJPY',
-    name: 'US Dollar / Japanese Yen',
-    price: 156.42,
-    change: -0.38,
-    sentiment: 'Bearish',
-    history: [157.10, 157.02, 156.85, 156.70, 156.62, 156.38, 156.42]
-  },
-  {
-    symbol: 'USDCAD',
-    name: 'US Dollar / Canadian Dollar',
-    price: 1.3650,
-    change: 0.15,
-    sentiment: 'Bullish',
-    history: [1.3620, 1.3630, 1.3640, 1.3645, 1.3652, 1.3648, 1.3650]
-  },
-  {
-    symbol: 'AUDUSD',
-    name: 'Australian Dollar / US Dollar',
-    price: 0.6612,
-    change: -1.15,
-    sentiment: 'Bearish',
-    history: [0.6705, 0.6685, 0.6660, 0.6645, 0.6630, 0.6610, 0.6612]
-  },
-  {
-    symbol: 'NZDUSD',
-    name: 'New Zealand Dollar / US Dollar',
-    price: 0.6120,
-    change: -0.45,
-    sentiment: 'Bearish',
-    history: [0.6180, 0.6170, 0.6155, 0.6140, 0.6132, 0.6118, 0.6120]
-  },
-  {
-    symbol: 'USDCHF',
-    name: 'US Dollar / Swiss Franc',
-    price: 0.8945,
-    change: 0.02,
-    sentiment: 'Bullish',
-    history: [0.8938, 0.8940, 0.8941, 0.8942, 0.8943, 0.8944, 0.8945]
-  }
-];
-
 export function useLiveRates() {
-  const [rates, setRates] = useState<ForexPair[]>(INITIAL_FALLBACK_RATES);
+  const [rates, setRates] = useState<ForexPair[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -87,7 +29,8 @@ export function useLiveRates() {
           price: Number(p.currentPrice !== undefined ? p.currentPrice : (p.price || 0)),
           change: Number(p.change || 0),
           sentiment: p.sentiment || 'Neutral',
-          history: Array.isArray(p.history) ? p.history.filter((h: any) => typeof h === 'number' && !isNaN(h)) : [0, 0, 0, 0, 0, 0, 0]
+          history: Array.isArray(p.history) ? p.history.filter((h: any) => typeof h === 'number' && !isNaN(h)) : [0, 0, 0, 0, 0, 0, 0],
+          status: p.status || 'active'
         }));
         setRates(mappedPairs);
         setError(null);

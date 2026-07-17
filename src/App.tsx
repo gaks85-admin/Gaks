@@ -45,8 +45,9 @@ interface ForexPair {
   name: string;
   price: number;
   change: number;
-  sentiment: 'Bearish' | 'Bullish';
+  sentiment: 'Bearish' | 'Bullish' | 'Neutral';
   history: number[];
+  status?: 'active' | 'unavailable';
 }
 
 interface WatchlistItem {
@@ -60,6 +61,7 @@ interface WatchlistItem {
   direction: 'Bullish' | 'Bearish' | 'Neutral';
   history: number[];
   timeframe: string;
+  status?: 'active' | 'unavailable';
 }
 
 interface Strategy {
@@ -549,7 +551,8 @@ export default function App() {
               ...item,
               price: live.price,
               change: live.change,
-              direction: live.change > 0 ? 'Bullish' : live.change < 0 ? 'Bearish' : 'Neutral'
+              direction: live.change > 0 ? 'Bullish' : live.change < 0 ? 'Bearish' : 'Neutral',
+              status: live.status
             };
           }
           return item;
@@ -1229,24 +1232,21 @@ export default function App() {
     const cleanSymbol = symbolToAdd.trim().toUpperCase();
     if (!cleanSymbol) return;
 
-    // Generate random realistic metrics for this symbol
-    const basePrice = cleanSymbol.includes('JPY') ? 150 + Math.random() * 20 : 1 + Math.random() * 1.5;
-    const isGold = cleanSymbol.includes('XAU') || cleanSymbol.includes('GOLD');
-    const isCrypto = cleanSymbol.includes('BTC') || cleanSymbol.includes('ETH');
-    const finalPrice = isGold ? 2300 + Math.random() * 100 : isCrypto ? (cleanSymbol.includes('BTC') ? 60000 + Math.random() * 5000 : 3000 + Math.random() * 200) : basePrice;
+    // Check if we already have live data for this
+    const live = liveRates.find(r => r.symbol === cleanSymbol);
 
-    const changeVal = Number((Math.random() * 3 - 1.5).toFixed(2));
     const newPair: WatchlistItem = {
       symbol: cleanSymbol,
       name: getFullNameForSymbol(cleanSymbol),
-      price: Number(finalPrice.toFixed(isGold || isCrypto ? 2 : 4)),
-      change: changeVal,
-      spread: Number((0.2 + Math.random() * 1.8).toFixed(1)),
-      volatility: Math.random() > 0.6 ? 'High' : Math.random() > 0.3 ? 'Medium' : 'Low',
-      confidence: Math.floor(55 + Math.random() * 40),
-      direction: changeVal > 0.3 ? 'Bullish' : changeVal < -0.3 ? 'Bearish' : 'Neutral',
-      history: Array.from({ length: 7 }, () => finalPrice * (1 + (Math.random() * 0.02 - 0.01))),
-      timeframe: timeframeToWatch
+      price: live ? live.price : 0,
+      change: live ? live.change : 0,
+      spread: 0,
+      volatility: 'Medium',
+      confidence: 0,
+      direction: live ? (live.change > 0 ? 'Bullish' : live.change < 0 ? 'Bearish' : 'Neutral') : 'Neutral',
+      history: live ? live.history : [],
+      timeframe: timeframeToWatch,
+      status: live ? 'active' : 'unavailable'
     };
 
     setWatchlist(prev => {
@@ -1550,11 +1550,17 @@ export default function App() {
                             {pair.sentiment}
                           </span>
                           <div className="text-right space-y-0.5">
-                            <div className="text-base font-bold text-white tracking-tight">{pair.price.toLocaleString(undefined, { minimumFractionDigits: pair.price > 10 ? 2 : 4 })}</div>
-                            <div className={`text-xs font-semibold flex items-center justify-end gap-0.5 ${isBearish ? 'text-red-500' : 'text-emerald-500'}`}>
-                              {isBearish ? <ArrowDownRight className="w-3.5 h-3.5" /> : <ArrowUpRight className="w-3.5 h-3.5" />}
-                              <span>{isBearish ? '' : '+'}{pair.change.toFixed(2)}%</span>
-                            </div>
+                            {pair.status === 'unavailable' ? (
+                              <div className="text-xs font-bold text-zinc-500 uppercase tracking-wider">Data unavailable</div>
+                            ) : (
+                              <>
+                                <div className="text-base font-bold text-white tracking-tight">{pair.price.toLocaleString(undefined, { minimumFractionDigits: pair.price > 10 ? 2 : 4 })}</div>
+                                <div className={`text-xs font-semibold flex items-center justify-end gap-0.5 ${isBearish ? 'text-red-500' : 'text-emerald-500'}`}>
+                                  {isBearish ? <ArrowDownRight className="w-3.5 h-3.5" /> : <ArrowUpRight className="w-3.5 h-3.5" />}
+                                  <span>{isBearish ? '' : '+'}{pair.change.toFixed(2)}%</span>
+                                </div>
+                              </>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -1570,26 +1576,30 @@ export default function App() {
                   <span className="text-[11px] text-zinc-500 font-medium">Biggest % change today</span>
                 </div>
                 <div className="divide-y divide-zinc-900">
-                  {[
-                    { symbol: 'XAUUSD', name: 'Gold / US Dollar', price: '2,342.50', change: '-1.43%', neg: true },
-                    { symbol: 'USDJPY', name: 'US Dollar / Japanese Yen', price: '156.42', change: '-1.54%', neg: true },
-                    { symbol: 'GBPJPY', name: 'British Pound / Japanese Yen', price: '199.21', change: '-1.50%', neg: true },
-                    { symbol: 'NAS100', name: 'Nasdaq 100', price: '19,420.00', change: '-1.20%', neg: true },
-                    { symbol: 'USDCHF', name: 'US Dollar / Swiss Franc', price: '0.8945', change: '-1.14%', neg: true },
-                    { symbol: 'XAUUSD', name: 'Gold / US Dollar', price: '2,342.50', change: '-1.29%', neg: true },
-                    { symbol: 'XAUUSD', name: 'Gold / US Dollar', price: '2,342.50', change: '-1.14%', neg: true }
-                  ].map((mover, idx) => (
-                    <div key={idx} className="py-3 flex justify-between items-center first:pt-0 last:pb-0">
-                      <div>
-                        <div className="text-xs font-bold text-white">{mover.symbol}</div>
-                        <div className="text-[10px] text-zinc-500">{mover.name}</div>
-                      </div>
-                      <div className="text-right">
-                        <div className="text-xs font-bold text-white tracking-tight">{mover.price}</div>
-                        <div className="text-[11px] font-semibold text-red-500">{mover.change}</div>
-                      </div>
+                  {liveRates.filter(r => r.status !== 'unavailable' && r.price > 0).length > 0 ? (
+                    [...liveRates]
+                      .filter(r => r.status !== 'unavailable' && r.price > 0)
+                      .sort((a, b) => Math.abs(b.change) - Math.abs(a.change))
+                      .slice(0, 5)
+                      .map((mover, idx) => (
+                        <div key={idx} className="py-3 flex justify-between items-center first:pt-0 last:pb-0">
+                          <div>
+                            <div className="text-xs font-bold text-white">{mover.symbol}</div>
+                            <div className="text-[10px] text-zinc-500">{mover.name}</div>
+                          </div>
+                          <div className="text-right">
+                            <div className="text-xs font-bold text-white tracking-tight">{mover.price.toLocaleString(undefined, { minimumFractionDigits: mover.price > 10 ? 2 : 4 })}</div>
+                            <div className={`text-[11px] font-semibold ${mover.change >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
+                              {mover.change >= 0 ? '+' : ''}{mover.change.toFixed(2)}%
+                            </div>
+                          </div>
+                        </div>
+                      ))
+                  ) : (
+                    <div className="py-8 text-center text-zinc-600 text-xs italic">
+                      Gathering market movement data...
                     </div>
-                  ))}
+                  )}
                 </div>
               </div>
 
@@ -1601,35 +1611,39 @@ export default function App() {
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
-                  {[
-                    { s: 'BTCUSD', c: '-0.07%', p: [100, 80, 90, 70, 75, 50, 48] },
-                    { s: 'ETHUSD', c: '-1.48%', p: [100, 75, 80, 50, 45, 30, 20] },
-                    { s: 'XAUUSD', c: '-0.27%', p: [100, 95, 85, 90, 70, 68, 65] },
-                    { s: 'NAS100', c: '-0.61%', p: [100, 90, 80, 85, 70, 65, 58] }
-                  ].map((trend, idx) => {
-                    const { lineD, fillD } = getSparklinePaths(trend.p, 80, 15);
-                    return (
-                      <div key={idx} className="p-4 rounded-2xl border border-zinc-900 bg-zinc-950/40 relative overflow-hidden flex flex-col justify-between h-20">
-                        <div className="flex justify-between items-center z-10">
-                          <span className="text-xs font-bold text-white tracking-tight">{trend.s}</span>
-                          <span className="text-[10px] font-bold text-red-500">{trend.c}</span>
+                  {liveRates.filter(r => r.status !== 'unavailable' && r.price > 0).length > 0 ? (
+                    liveRates.filter(r => r.status !== 'unavailable' && r.price > 0).slice(0, 4).map((trend, idx) => {
+                      const isBearish = trend.change < 0;
+                      const { lineD, fillD } = getSparklinePaths(trend.history.length > 0 ? trend.history : [10, 10, 10], 80, 15);
+                      return (
+                        <div key={idx} className="p-4 rounded-2xl border border-zinc-900 bg-zinc-950/40 relative overflow-hidden flex flex-col justify-between h-20">
+                          <div className="flex justify-between items-center z-10">
+                            <span className="text-xs font-bold text-white tracking-tight">{trend.symbol}</span>
+                            <span className={`text-[10px] font-bold ${isBearish ? 'text-red-500' : 'text-emerald-500'}`}>
+                              {trend.change >= 0 ? '+' : ''}{trend.change.toFixed(2)}%
+                            </span>
+                          </div>
+                          {/* Mini Sparkline in trend cards */}
+                          <div className="h-4 w-full opacity-60 z-0">
+                            {trend.history.length > 0 && (
+                              <svg className="w-full h-full" viewBox="0 0 80 15" preserveAspectRatio="none">
+                                <defs>
+                                  <linearGradient id={`trend-grad-${idx}`} x1="0" y1="0" x2="0" y2="1">
+                                    <stop offset="0%" stopColor={isBearish ? "#ef4444" : "#22c55e"} stopOpacity="0.2"/>
+                                    <stop offset="100%" stopColor={isBearish ? "#ef4444" : "#22c55e"} stopOpacity="0.0"/>
+                                  </linearGradient>
+                                </defs>
+                                <path d={fillD} fill={`url(#trend-grad-${idx})`} />
+                                <path d={lineD} fill="none" stroke={isBearish ? "#ef4444" : "#22c55e"} strokeWidth="1.2" />
+                              </svg>
+                            )}
+                          </div>
                         </div>
-                        {/* Mini Sparkline in trend cards */}
-                        <div className="h-4 w-full opacity-60 z-0">
-                          <svg className="w-full h-full" viewBox="0 0 80 15" preserveAspectRatio="none">
-                            <defs>
-                              <linearGradient id={`trend-grad-${idx}`} x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="0%" stopColor="#ef4444" stopOpacity="0.2"/>
-                                <stop offset="100%" stopColor="#ef4444" stopOpacity="0.0"/>
-                              </linearGradient>
-                            </defs>
-                            <path d={fillD} fill={`url(#trend-grad-${idx})`} />
-                            <path d={lineD} fill="none" stroke="#ef4444" strokeWidth="1.2" />
-                          </svg>
-                        </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    })
+                  ) : (
+                    <div className="col-span-2 py-4 text-center text-zinc-600 text-[10px]">Awaiting trend data...</div>
+                  )}
                 </div>
               </div>
 
@@ -1641,28 +1655,27 @@ export default function App() {
                 </div>
 
                 <div className="grid grid-cols-4 gap-2">
-                  {[
-                    { s: 'EURUSD', c: '-1.29%', alpha: 'bg-red-800 border-red-700/60' },
-                    { s: 'GBPUSD', c: '-0.99%', alpha: 'bg-red-900/80 border-red-800/40' },
-                    { s: 'USDJPY', c: '-0.96%', alpha: 'bg-red-900/80 border-red-800/40' },
-                    { s: 'USDCHF', c: '-0.56%', alpha: 'bg-red-950 border-red-900/30' },
-                    { s: 'AUDUSD', c: '-0.13%', alpha: 'bg-red-950/60 border-zinc-900' },
-                    { s: 'XAUUSD', c: '-0.42%', alpha: 'bg-red-950 border-red-900/30' },
-                    { s: 'BTCUSD', c: '-0.07%', alpha: 'bg-[#1a0f0f] border-zinc-900' },
-                    { s: 'ETHUSD', c: '-1.48%', alpha: 'bg-red-800 border-red-700/60' },
-                    { s: 'XAUUSD', c: '-0.27%', alpha: 'bg-red-950/60 border-zinc-900' },
-                    { s: 'NAS100', c: '-0.61%', alpha: 'bg-[#401212] border-red-950' },
-                    { s: 'GBPJPY', c: '-0.92%', alpha: 'bg-red-900/80 border-red-800/40' },
-                    { s: 'USDJPY', c: '-0.81%', alpha: 'bg-red-900/70 border-red-900/40' }
-                  ].map((cell, idx) => (
-                    <div
-                      key={idx}
-                      className={`aspect-square rounded-xl border flex flex-col justify-center items-center p-1 text-center transition-all hover:scale-[1.03] ${cell.alpha}`}
-                    >
-                      <span className="text-[9px] font-bold text-white leading-none mb-1">{cell.s}</span>
-                      <span className="text-[8px] font-medium text-zinc-300 leading-none">{cell.c}</span>
-                    </div>
-                  ))}
+                  {liveRates.filter(r => r.status !== 'unavailable' && r.price > 0).length > 0 ? (
+                    liveRates.filter(r => r.status !== 'unavailable' && r.price > 0).slice(0, 12).map((pair, idx) => {
+                      const isBearish = pair.change < 0;
+                      const absChange = Math.abs(pair.change);
+                      const intensity = absChange > 1.5 ? '800' : absChange > 1.0 ? '900/80' : absChange > 0.5 ? '950' : '950/60';
+                      const colorBase = isBearish ? 'red' : 'emerald';
+                      const alphaClass = `bg-${colorBase}-${intensity} border-${colorBase}-${isBearish ? '700/60' : '700/60'}`;
+                      
+                      return (
+                        <div
+                          key={idx}
+                          className={`aspect-square rounded-xl border flex flex-col justify-center items-center p-1 text-center transition-all hover:scale-[1.03] ${alphaClass}`}
+                        >
+                          <span className="text-[9px] font-bold text-white leading-none mb-1">{pair.symbol}</span>
+                          <span className="text-[8px] font-medium text-zinc-100 leading-none">{pair.change >= 0 ? '+' : ''}{pair.change.toFixed(2)}%</span>
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <div className="col-span-4 py-8 text-center text-zinc-600 text-[10px]">Generating heatmap from live data...</div>
+                  )}
                 </div>
               </div>
 
@@ -2369,23 +2382,31 @@ export default function App() {
                           <div className="flex justify-between items-end">
                             {/* Wave graphics */}
                             <div className="h-6 w-24 opacity-60 pointer-events-none">
-                              <svg className="w-full h-full" viewBox="0 0 100 24" preserveAspectRatio="none">
-                                <defs>
-                                  <linearGradient id={`watcher-grad-${pair.symbol}`} x1="0" y1="0" x2="0" y2="1">
-                                    <stop offset="0%" stopColor={isBearish ? "#ef4444" : isBullish ? "#22c55e" : "#a1a1aa"} stopOpacity="0.15"/>
-                                    <stop offset="100%" stopColor={isBearish ? "#ef4444" : isBullish ? "#22c55e" : "#a1a1aa"} stopOpacity="0.0"/>
-                                  </linearGradient>
-                                </defs>
-                                <path d={fillD} fill={`url(#watcher-grad-${pair.symbol})`} />
-                                <path d={lineD} fill="none" stroke={isBearish ? "#b91c1c" : isBullish ? "#15803d" : "#71717a"} strokeWidth="1.5" />
-                              </svg>
+                              {pair.status !== 'unavailable' && pair.history.length > 0 && (
+                                <svg className="w-full h-full" viewBox="0 0 100 24" preserveAspectRatio="none">
+                                  <defs>
+                                    <linearGradient id={`watcher-grad-${pair.symbol}`} x1="0" y1="0" x2="0" y2="1">
+                                      <stop offset="0%" stopColor={isBearish ? "#ef4444" : "#22c55e"} stopOpacity="0.15"/>
+                                      <stop offset="100%" stopColor={isBearish ? "#ef4444" : "#22c55e"} stopOpacity="0.0"/>
+                                    </linearGradient>
+                                  </defs>
+                                  <path d={fillD} fill={`url(#watcher-grad-${pair.symbol})`} />
+                                  <path d={lineD} fill="none" stroke={isBearish ? "#b91c1c" : "#15803d"} strokeWidth="1.5" />
+                                </svg>
+                              )}
                             </div>
 
                             <div className="text-right">
-                              <div className="text-lg font-bold text-white tracking-tight">{(pair.price || 0).toLocaleString(undefined, { minimumFractionDigits: (pair.price || 0) > 10 ? 2 : 4 })}</div>
-                              <div className={`text-xs font-semibold flex items-center justify-end gap-0.5 ${pair.change >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
-                                {pair.change >= 0 ? '+' : ''}{pair.change}%
-                              </div>
+                              {pair.status === 'unavailable' || pair.price === 0 ? (
+                                <div className="text-xs font-bold text-zinc-500 uppercase tracking-wider">Data unavailable</div>
+                              ) : (
+                                <>
+                                  <div className="text-lg font-bold text-white tracking-tight">{(pair.price || 0).toLocaleString(undefined, { minimumFractionDigits: (pair.price || 0) > 10 ? 2 : 4 })}</div>
+                                  <div className={`text-xs font-semibold flex items-center justify-end gap-0.5 ${pair.change >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
+                                    {pair.change >= 0 ? '+' : ''}{pair.change}%
+                                  </div>
+                                </>
+                              )}
                             </div>
                           </div>
 

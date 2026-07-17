@@ -69,10 +69,18 @@ async function fetchWithRetry(url: string, options: RequestInit = {}, maxRetries
   throw new Error(`Fetch failed after ${maxRetries} attempts`);
 }
 
+// Global cache for symbol validation to save Twelve Data credits
+const symbolValidationCache: Record<string, { isValid: boolean; matchedSymbol?: string; instrumentType?: string; reason?: string }> = {};
+
 async function validateSymbolWithTwelveData(symbol: string, apiKey: string): Promise<{ isValid: boolean; matchedSymbol?: string; instrumentType?: string; reason?: string }> {
+  if (symbolValidationCache[symbol]) return symbolValidationCache[symbol];
+  
   try {
     const searchUrl = `https://api.twelvedata.com/symbol_search?symbol=${encodeURIComponent(symbol)}&apikey=${apiKey}`;
     const response = await fetchWithRetry(searchUrl, {}, 2, 500);
+    if (response.status === 429) {
+      return { isValid: false, reason: "429: API credits exhausted" };
+    }
     if (!response.ok) {
       console.warn(`[Symbol Search] API returned HTTP ${response.status} for search.`);
       return { isValid: false, reason: `API returned HTTP ${response.status}` };
@@ -80,7 +88,9 @@ async function validateSymbolWithTwelveData(symbol: string, apiKey: string): Pro
     const data = await response.json();
     if (data.status === "error") {
       console.warn(`[Symbol Search] API returned error status: ${data.message}`);
-      return { isValid: false, reason: data.message };
+      const res = { isValid: false, reason: data.message };
+      if (data.code !== 429) symbolValidationCache[symbol] = res;
+      return res;
     }
     if (data.data && Array.isArray(data.data) && data.data.length > 0) {
       const symbolUpper = symbol.toUpperCase().replace('/', '');
@@ -88,15 +98,23 @@ async function validateSymbolWithTwelveData(symbol: string, apiKey: string): Pro
       const exactMatch = data.data.find((item: any) => 
         item.symbol.toUpperCase().replace('/', '') === symbolUpper
       );
+      
+      let res;
       if (exactMatch) {
-        return { isValid: true, matchedSymbol: exactMatch.symbol, instrumentType: exactMatch.instrument_type };
+        res = { isValid: true, matchedSymbol: exactMatch.symbol, instrumentType: exactMatch.instrument_type };
+      } else {
+        // If we got matches but none are exact, return the first one as matchedSymbol
+        res = { isValid: true, matchedSymbol: data.data[0].symbol, instrumentType: data.data[0].instrument_type };
       }
-      // If we got matches but none are exact, return the first one as matchedSymbol
-      return { isValid: true, matchedSymbol: data.data[0].symbol, instrumentType: data.data[0].instrument_type };
+      
+      symbolValidationCache[symbol] = res;
+      return res;
     }
     // No matching symbols found in Twelve Data database - warn and proceed with original symbol as fallback
     console.warn(`[Symbol Search] No matching symbols found in search results for "${symbol}".`);
-    return { isValid: false, reason: `No matching symbols found for "${symbol}"` };
+    const finalRes = { isValid: false, reason: `No matching symbols found for "${symbol}"` };
+    symbolValidationCache[symbol] = finalRes;
+    return finalRes;
   } catch (err: any) {
     console.error(`[Symbol Search] Error validating symbol ${symbol}:`, err.message || err);
     return { isValid: false, reason: "Error validating symbol" };
@@ -334,6 +352,8 @@ export default async function handler(req: any, res: any) {
     const skipped = [];
     const errors = [];
     
+    let twelveDataExhausted = false;
+
     // Process each active watcher sequentially to respect Twelve Data free limits
     for (const watcher of watchers) {
       // Ensure the endpoint finishes within 30 seconds by stopping early if needed
@@ -411,46 +431,71 @@ export default async function handler(req: any, res: any) {
         const mappedSymbol = convertSymbol(selectedPair);
         const interval = mapTimeframeToInterval(selectedTimeframe);
 
-        // Validate symbol before making requests
-        const validation = await validateSymbolWithTwelveData(mappedSymbol, twelveDataKey);
-        if (!validation.isValid) {
-          console.log("[WATCHER SKIPPED]\nwatcher_id: " + watcher.id + "\nuser_id: " + userId + "\nselected_pair: " + selectedPair + "\nselected_timeframe: " + selectedTimeframe + "\nreason: TwelveData validation failed: " + validation.reason);
-          throw new Error(`TwelveData HTTP Error: 404 (Symbol not found or invalid on Twelve Data)`);
-        }
-        
-        const finalSymbol = validation.matchedSymbol || mappedSymbol;
-        
-        let quoteData = null;
-        let finalEndpoint = "time_series";
-        const timeSeriesUrl = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(finalSymbol)}&interval=${interval}&outputsize=1&apikey=${twelveDataKey}`;
+        let quoteData: any = null;
+        let finalEndpoint = "unknown";
 
-        try {
-          // Bounded fetch using AbortSignal.timeout to prevent hanging
-          const tsRes = await fetchWithRetry(timeSeriesUrl, { signal: AbortSignal.timeout(4000) }, 2, 500);
-          if (tsRes.ok) {
-            const tsData = await tsRes.json();
-            if (tsData.status === "ok" && tsData.values && tsData.values.length > 0) {
-              quoteData = tsData.values[0];
+        if (!twelveDataExhausted) {
+          // Validate symbol before making requests
+          const validation = await validateSymbolWithTwelveData(mappedSymbol, twelveDataKey);
+          
+          if (!validation.isValid) {
+            if (validation.reason?.includes("429")) {
+              twelveDataExhausted = true;
+            } else {
+              console.log("[WATCHER SKIPPED]\nwatcher_id: " + watcher.id + "\nreason: TwelveData validation failed: " + validation.reason);
+              continue;
             }
           }
-        } catch (tsErr) {
-          console.warn(`[Twelve Data API] /time_series error for ${finalSymbol}: ${tsErr.message || tsErr}. Trying fallback /quote.`);
+          
+          if (!twelveDataExhausted) {
+            const finalSymbol = validation.matchedSymbol || mappedSymbol;
+            finalEndpoint = "time_series";
+            const timeSeriesUrl = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(finalSymbol)}&interval=${interval}&outputsize=1&apikey=${twelveDataKey}`;
+
+            try {
+              const tsRes = await fetchWithRetry(timeSeriesUrl, { signal: AbortSignal.timeout(4000) }, 2, 500);
+              if (tsRes.status === 429) {
+                twelveDataExhausted = true;
+              } else if (tsRes.ok) {
+                const tsData = await tsRes.json();
+                if (tsData.status === "error" && tsData.code === 429) {
+                  twelveDataExhausted = true;
+                } else if (tsData.status === "ok" && tsData.values && tsData.values.length > 0) {
+                  quoteData = tsData.values[0];
+                }
+              }
+            } catch (tsErr) {
+              console.warn(`[Twelve Data API] /time_series error for ${finalSymbol}: ${tsErr.message || tsErr}. Trying fallback /quote.`);
+            }
+
+            // Fallback to /quote if /time_series did not work
+            if (!quoteData && !twelveDataExhausted) {
+              finalEndpoint = "quote";
+              const quoteUrl = `https://api.twelvedata.com/quote?symbol=${encodeURIComponent(finalSymbol)}&apikey=${twelveDataKey}`;
+              
+              const qRes = await fetchWithRetry(quoteUrl, { signal: AbortSignal.timeout(4000) }, 2, 500);
+              if (qRes.status === 429) {
+                twelveDataExhausted = true;
+              } else if (qRes.ok) {
+                const qData = await qRes.json();
+                if (qData.status === "error") {
+                  if (qData.code === 429) twelveDataExhausted = true;
+                  else throw new Error(`TwelveData Error: ${qData.message}`);
+                } else {
+                  quoteData = qData;
+                }
+              }
+            }
+          }
         }
 
-        // Fallback to /quote if /time_series did not work
+        // AI Market Watcher must ONLY use Twelve Data. 
+        // If real market data is unavailable, skip the scan.
         if (!quoteData) {
-          finalEndpoint = "quote";
-          const quoteUrl = `https://api.twelvedata.com/quote?symbol=${encodeURIComponent(finalSymbol)}&apikey=${twelveDataKey}`;
-          
-          const qRes = await fetchWithRetry(quoteUrl, { signal: AbortSignal.timeout(4000) }, 2, 500);
-          if (!qRes.ok) {
-            throw new Error(`TwelveData HTTP Error: ${qRes.status}`);
-          }
-          const qData = await qRes.json();
-          if (qData.status === "error") {
-            throw new Error(`TwelveData Error: ${qData.message}`);
-          }
-          quoteData = qData;
+           console.log("Skipped due to unavailable market data.");
+           skipped.push({ userId, reason: "Skipped due to unavailable market data." });
+           watchersSkippedCount++;
+           continue;
         }
 
         const currentPrice = parseFloat(quoteData.close || quoteData.price || "0");
@@ -460,8 +505,8 @@ export default async function handler(req: any, res: any) {
           high: parseFloat(quoteData.high || "0"),
           low: parseFloat(quoteData.low || "0"),
           close: parseFloat(quoteData.close || "0"),
-          bid: quoteData.bid ? parseFloat(quoteData.bid) : currentPrice * 0.9999,
-          ask: quoteData.ask ? parseFloat(quoteData.ask) : currentPrice * 1.0001,
+          bid: quoteData.bid ? parseFloat(quoteData.bid) : null,
+          ask: quoteData.ask ? parseFloat(quoteData.ask) : null,
           volume: quoteData.volume ? parseFloat(quoteData.volume) : 0,
           timestamp: quoteData.timestamp || Math.floor(Date.now() / 1000),
           timeframe: selectedTimeframe

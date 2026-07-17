@@ -2,7 +2,8 @@ import express from "express";
 import path from "path";
 import { createClient } from "@supabase/supabase-js";
 import { GoogleGenAI, Type } from "@google/genai";
-import { convertSymbol } from "./src/lib/market-utils";
+import yahooFinance from 'yahoo-finance2';
+import { convertSymbol, convertSymbolToYahoo } from "./src/lib/market-utils";
 import marketWatcherCronHandler from "./api/cron/market-watcher";
 import adminStatsHandler from "./api/_admin/stats";
 import adminUsersHandler from "./api/_admin/users";
@@ -25,8 +26,9 @@ interface LivePairData {
   basePrice: number;
   currentPrice: number;
   change: number;
-  sentiment: 'Bullish' | 'Bearish';
+  sentiment: 'Bullish' | 'Bearish' | 'Neutral';
   history: number[];
+  status?: 'active' | 'unavailable';
 }
 
 const PAIR_METADATA = [
@@ -127,13 +129,18 @@ function extractActiveStrategyDetails(strategyText: string) {
 
 let pairsCache: Record<string, LivePairData> = {};
 let lastFetchTime = 0;
-const FETCH_COOLDOWN = 10 * 60 * 1000; // 10 minutes cache for external api
+const FETCH_COOLDOWN = 10 * 1000; // 10 seconds cache for UI pipeline
 
 async function updateRatesFromAPI(supabase?: any) {
+  // Respect cache
+  if (Date.now() - lastFetchTime < FETCH_COOLDOWN && Object.keys(pairsCache).length > 0) {
+    return;
+  }
+
   try {
-    const twelveDataKey = process.env.TWELVE_DATA_API_KEY;
+    const yf = yahooFinance;
     
-    // 1. Determine symbols to monitor dynamically from watchers table + default Forex pairs
+    // Determine symbols to monitor dynamically from watchers table + defaults
     const defaultSymbols = PAIR_METADATA.map(p => p.symbol);
     let monitoredSymbols = [...defaultSymbols];
     
@@ -149,188 +156,144 @@ async function updateRatesFromAPI(supabase?: any) {
       }
     }
 
-    if (twelveDataKey) {
-      console.log(`[Rates Update] Fetching dynamic rates for ${monitoredSymbols.length} symbols from Twelve Data...`);
-      
-      const batchSize = 25;
-      for (let i = 0; i < monitoredSymbols.length; i += batchSize) {
-        const batch = monitoredSymbols.slice(i, i + batchSize);
-        const mappedBatch = batch.map(s => convertSymbol(s)).join(',');
-        const url = `https://api.twelvedata.com/quote?symbol=${encodeURIComponent(mappedBatch)}&apikey=${twelveDataKey}`;
-        
-        try {
-          const response = await fetch(url);
-          if (!response.ok) {
-            console.error(`[Rates Update] Twelve Data API batch error: ${response.status}`);
-            continue;
-          }
-          
-          const data = await response.json();
-          const quotes = batch.length === 1 ? { [convertSymbol(batch[0])]: data } : data;
-          
-          batch.forEach(symbol => {
-            const mapped = convertSymbol(symbol);
-            const quote = quotes[mapped];
-            
-            if (!quote || quote.status === 'error') {
-              console.warn(`[Rates Update] Symbol failed ${symbol} (${mapped}):`, quote?.message || 'No data');
-              return;
-            }
-            
-            const currentPrice = parseFloat(quote.close || quote.price || "0");
-            const basePrice = parseFloat(quote.previous_close || quote.open || "0") || currentPrice;
-            const change = parseFloat(quote.percent_change || "0");
-            const name = quote.name || symbol;
+    const processedSymbols = new Set<string>();
 
-            if (!pairsCache[symbol]) {
-              const history: number[] = [];
-              for (let j = 0; j < 7; j++) {
-                const mult = 1 + (Math.random() * 0.002 - 0.001);
-                history.push(Number((currentPrice * mult).toFixed(symbol.includes("JPY") ? 2 : 4)));
+    // 1. PIPELINE 1: Yahoo Finance (Primary for UI)
+    const yahooSymbolMap: Record<string, string> = {};
+    monitoredSymbols.forEach(s => {
+      yahooSymbolMap[convertSymbolToYahoo(s)] = s;
+    });
+    const yahooSymbolsToFetch = Object.keys(yahooSymbolMap);
+
+    try {
+      // Fetch quotes in batch
+      const yahooQuotes = await yf.quote(yahooSymbolsToFetch);
+      const quotesArray = Array.isArray(yahooQuotes) ? yahooQuotes : [yahooQuotes];
+      
+      quotesArray.forEach((quote: any) => {
+        if (!quote || !quote.symbol) return;
+        const originalSymbol = yahooSymbolMap[quote.symbol];
+        if (!originalSymbol) return;
+
+        const currentPrice = quote.regularMarketPrice;
+        if (currentPrice === undefined || currentPrice === null) return;
+
+        const basePrice = quote.regularMarketPreviousClose || currentPrice;
+        const change = quote.regularMarketChangePercent || 0;
+        const name = quote.shortName || quote.longName || originalSymbol;
+
+        pairsCache[originalSymbol] = {
+          symbol: originalSymbol,
+          name,
+          basePrice,
+          currentPrice,
+          change,
+          sentiment: change > 0.05 ? 'Bullish' : (change < -0.05 ? 'Bearish' : 'Neutral'),
+          history: [], 
+          status: 'active'
+        };
+        processedSymbols.add(originalSymbol);
+      });
+    } catch (yfErr) {
+      console.warn("[Rates Update] Yahoo Finance batch failed:", yfErr.message);
+      // Individual fallback if batch fails
+      for (const symbol of monitoredSymbols) {
+        if (processedSymbols.has(symbol)) continue;
+        try {
+          const ySym = convertSymbolToYahoo(symbol);
+          const quote: any = await yf.quote(ySym);
+          if (quote && quote.regularMarketPrice !== undefined) {
+            const currentPrice = quote.regularMarketPrice;
+            const basePrice = quote.regularMarketPreviousClose || currentPrice;
+            const change = quote.regularMarketChangePercent || 0;
+            pairsCache[symbol] = {
+              symbol,
+              name: quote.shortName || quote.longName || symbol,
+              basePrice,
+              currentPrice,
+              change,
+              sentiment: change > 0.05 ? 'Bullish' : (change < -0.05 ? 'Bearish' : 'Neutral'),
+              history: [],
+              status: 'active'
+            };
+            processedSymbols.add(symbol);
+          }
+        } catch (e) {}
+      }
+    }
+
+    // 2. FALLBACK: Exchange Rate API (Forex Only)
+    const remainingForex = monitoredSymbols.filter(s => !processedSymbols.has(s) && PAIR_METADATA.some(p => p.symbol === s));
+    if (remainingForex.length > 0) {
+      try {
+        const erRes = await fetch("https://open.er-api.com/v6/latest/USD");
+        if (erRes.ok) {
+          const erData = await erRes.json();
+          if (erData.result === "success" && erData.rates) {
+            remainingForex.forEach(symbol => {
+              const meta = PAIR_METADATA.find(p => p.symbol === symbol);
+              if (!meta) return;
+
+              let price = 0;
+              if (meta.isUSDQuote) {
+                const rate = erData.rates[meta.base];
+                if (rate) price = 1 / rate;
+              } else {
+                const rate = erData.rates[meta.quote];
+                if (rate) price = rate;
               }
 
-              pairsCache[symbol] = {
-                symbol, name, basePrice, currentPrice, change,
-                sentiment: change >= 0 ? 'Bullish' : 'Bearish',
-                history
-              };
-            } else {
-              pairsCache[symbol] = {
-                ...pairsCache[symbol],
-                basePrice, currentPrice, change,
-                sentiment: change >= 0 ? 'Bullish' : 'Bearish'
-              };
-            }
-          });
-        } catch (batchErr) {
-          console.error(`[Rates Update] Error processing batch starting at ${i}:`, batchErr);
+              if (price > 0) {
+                pairsCache[symbol] = {
+                  symbol,
+                  name: meta.name,
+                  basePrice: price,
+                  currentPrice: price,
+                  change: 0,
+                  sentiment: 'Neutral',
+                  history: [],
+                  status: 'active'
+                };
+                processedSymbols.add(symbol);
+              }
+            });
+          }
+        }
+      } catch (e) {}
+    }
+
+    // 3. Mark unavailable symbols
+    monitoredSymbols.forEach(symbol => {
+      if (!processedSymbols.has(symbol)) {
+        if (pairsCache[symbol]) {
+          pairsCache[symbol].status = 'unavailable';
+        } else {
+          const meta = PAIR_METADATA.find(p => p.symbol === symbol);
+          pairsCache[symbol] = {
+            symbol,
+            name: meta?.name || symbol,
+            basePrice: 0,
+            currentPrice: 0,
+            change: 0,
+            sentiment: 'Neutral',
+            history: [],
+            status: 'unavailable'
+          };
         }
       }
+    });
 
-      // Cleanup cache: remove symbols that are no longer monitored and not in the default list
-      Object.keys(pairsCache).forEach(symbol => {
-        if (!monitoredSymbols.includes(symbol)) {
-          delete pairsCache[symbol];
-        }
-      });
-
-      lastFetchTime = Date.now();
-      return; 
-    }
-
-    // Fallback to legacy Exchange Rate API for Forex if no Twelve Data key
-    console.log("[Rates Update] Using fallback Exchange Rate API for Forex pairs...");
-    const response = await fetch("https://open.er-api.com/v6/latest/USD");
-    if (!response.ok) {
-      throw new Error(`Failed to fetch exchange rates: ${response.statusText}`);
-    }
-    const data = (await response.json()) as ERResponse;
-    if (data.result !== "success" || !data.rates) {
-      throw new Error("Invalid API response format");
-    }
-
-    const rates = data.rates;
-
-    PAIR_METADATA.forEach(pair => {
-      let basePrice = 1;
-      if (pair.isUSDQuote) {
-        const quoteRate = rates[pair.base];
-        if (quoteRate) {
-          basePrice = 1 / quoteRate;
-        }
-      } else {
-        const baseRate = rates[pair.quote];
-        if (baseRate) {
-          basePrice = baseRate;
-        }
-      }
-
-      const cached = pairsCache[pair.symbol];
-      if (!cached) {
-        const history: number[] = [];
-        for (let i = 0; i < 7; i++) {
-          const mult = 1 + (Math.random() * 0.002 - 0.001);
-          history.push(Number((basePrice * mult).toFixed(pair.symbol.includes("JPY") ? 2 : 4)));
-        }
-
-        pairsCache[pair.symbol] = {
-          symbol: pair.symbol,
-          name: pair.name,
-          basePrice: basePrice,
-          currentPrice: basePrice,
-          change: Number((Math.random() * 0.4 - 0.2).toFixed(2)),
-          sentiment: Math.random() > 0.5 ? 'Bullish' : 'Bearish',
-          history: history,
-        };
-      } else {
-        pairsCache[pair.symbol].basePrice = basePrice;
+    // Cleanup cache: remove symbols that are no longer monitored
+    Object.keys(pairsCache).forEach(symbol => {
+      if (!monitoredSymbols.includes(symbol)) {
+        delete pairsCache[symbol];
       }
     });
 
     lastFetchTime = Date.now();
-  } catch (error) {
-    console.error("Error updating dynamic rates:", error);
-    
-    // Seed fallbacks for Forex if empty
-    if (Object.keys(pairsCache).length === 0) {
-      const fallbackRates: Record<string, number> = {
-        EUR: 0.9195, GBP: 0.7853, JPY: 156.42, CAD: 1.3650, AUD: 1.5124, NZD: 1.6340, CHF: 0.8945
-      };
-
-      PAIR_METADATA.forEach(pair => {
-        let basePrice = 1;
-        if (pair.isUSDQuote) {
-          const r = fallbackRates[pair.base];
-          if (r) basePrice = 1 / r;
-        } else {
-          const r = fallbackRates[pair.quote];
-          if (r) basePrice = r;
-        }
-
-        const history: number[] = [];
-        for (let i = 0; i < 7; i++) {
-          const mult = 1 + (Math.random() * 0.002 - 0.001);
-          history.push(Number((basePrice * mult).toFixed(pair.symbol.includes("JPY") ? 2 : 4)));
-        }
-
-        pairsCache[pair.symbol] = {
-          symbol: pair.symbol,
-          name: pair.name,
-          basePrice: basePrice,
-          currentPrice: basePrice,
-          change: Number((Math.random() * 0.4 - 0.2).toFixed(2)),
-          sentiment: Math.random() > 0.5 ? 'Bullish' : 'Bearish',
-          history: history,
-        };
-      });
-      lastFetchTime = Date.now();
-    }
+  } catch (err) {
+    console.error("[Rates Update] Critical failure in UI pipeline:", err);
   }
-}
-
-// Introduce slight realistic ticks
-function tickPrices() {
-  if (Object.keys(pairsCache).length === 0) return;
-
-  Object.keys(pairsCache).forEach(symbol => {
-    const p = pairsCache[symbol];
-    // Slight random walk (-0.03% to +0.03%) to simulate tick updates every request/tick interval
-    const pct = (Math.random() * 0.06 - 0.03) / 100;
-    const oldPrice = p.currentPrice;
-    const newPrice = Number((oldPrice * (1 + pct)).toFixed(symbol.includes("JPY") ? 2 : 4));
-    
-    // Calculate daily change from daily basePrice
-    const change = Number((((newPrice - p.basePrice) / p.basePrice) * 100).toFixed(2));
-    const history = [...p.history.slice(1), newPrice];
-
-    pairsCache[symbol] = {
-      ...p,
-      currentPrice: newPrice,
-      change: change,
-      sentiment: change >= 0 ? 'Bullish' : 'Bearish',
-      history: history,
-    };
-  });
 }
 
 async function startServer() {
@@ -383,10 +346,6 @@ async function startServer() {
       updateRatesFromAPI(supabase);
     }
   }, 60 * 1000);
-
-  setInterval(() => {
-    tickPrices();
-  }, 5000);
 
   // Keep track of user's active watcher key in memory
   let activeWatcherApiKey: string | null = null;
@@ -1111,8 +1070,6 @@ async function startServer() {
 
   // API Endpoint - Returns the current real-time conversion rates
   app.get("/api/live-rates", (req, res) => {
-    // Tick prices on demand as well to ensure latest fresh state
-    tickPrices();
     res.json({
       success: true,
       timestamp: Date.now(),
