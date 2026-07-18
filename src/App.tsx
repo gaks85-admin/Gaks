@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useLiveRates } from './hooks/useLiveRates';
 import { supabase } from './supabaseClient';
 import { getGeminiKey, saveGeminiKey, deleteGeminiKey } from './lib/apiKeys';
+import { toCanonicalSymbol, toDisplaySymbol } from './lib/market-utils';
 
 const Auth = React.lazy(() => import('./components/Auth'));
 const AdminDashboard = React.lazy(() => import('./components/admin/AdminDashboard'));
@@ -1229,7 +1230,7 @@ export default function App() {
 
   // Market Watcher Add Ticker
   const handleAddPair = (symbolToAdd: string, timeframeToWatch: string = 'H1') => {
-    const cleanSymbol = symbolToAdd.trim().toUpperCase();
+    const cleanSymbol = toCanonicalSymbol(symbolToAdd);
     if (!cleanSymbol) return;
 
     // Check if we already have live data for this
@@ -1278,9 +1279,10 @@ export default function App() {
   };
 
   const handleRemovePair = (symbolToRemove: string) => {
+    const canonical = toCanonicalSymbol(symbolToRemove);
     if (isAdmin) {
       setWatchlist(prev => {
-        const updated = prev.filter(w => w.symbol !== symbolToRemove);
+        const updated = prev.filter(w => toCanonicalSymbol(w.symbol) !== canonical);
         localStorage.setItem('gaks_watchlist', JSON.stringify(updated));
         return updated;
       });
@@ -1297,26 +1299,12 @@ export default function App() {
       stopAiMarketWatcher();
     }
     
-    triggerNotification(`${symbolToRemove} removed from watchlist`, 'info');
+    triggerNotification(`${toDisplaySymbol(symbolToRemove)} removed from watchlist`, 'info');
   };
 
   const getFullNameForSymbol = (symbol: string): string => {
     if (!symbol) return 'Unknown Asset';
-    const map: Record<string, string> = {
-      EURUSD: 'Euro / US Dollar',
-      GBPUSD: 'British Pound / US Dollar',
-      XAUUSD: 'Gold / US Dollar',
-      BTCUSD: 'Bitcoin / US Dollar',
-      ETHUSD: 'Ethereum / US Dollar',
-      NAS100: 'Nasdaq 100 Index',
-      US30: 'Dow Jones 30 Index',
-      USDJPY: 'US Dollar / Japanese Yen',
-      USDCHF: 'US Dollar / Swiss Franc',
-      AUDUSD: 'Australian Dollar / US Dollar',
-      EURGBP: 'Euro / British Pound',
-      GBPJPY: 'British Pound / Japanese Yen'
-    };
-    return map[symbol] || `${symbol.slice(0,3)} / ${symbol.slice(3)}`;
+    return toDisplaySymbol(symbol);
   };
 
   // Helper to generate coordinates for sparkline graph
@@ -2231,7 +2219,7 @@ export default function App() {
 
                   {/* Activation Trigger */}
                   {(() => {
-                    const isPairInWatchlist = (watchlist || []).some(w => w && w.symbol && w.symbol.toUpperCase() === (watcherSearch || '').trim().toUpperCase());
+                    const isPairInWatchlist = (watchlist || []).some(w => w && w.symbol && toCanonicalSymbol(w.symbol) === toCanonicalSymbol(watcherSearch || ''));
                     
                     if (isWatcherActive && (isAdmin || isPairInWatchlist)) {
                       return (
@@ -2297,7 +2285,7 @@ export default function App() {
                 <span className="text-[11px] font-bold text-zinc-500 uppercase tracking-wider">Select Symbol to Configure:</span>
                 <div className="flex flex-wrap gap-2">
                   {['EURUSD', 'GBPUSD', 'XAUUSD', 'BTCUSD', 'NAS100', 'US30'].map(symbol => {
-                    const isSelected = watcherSearch.trim().toUpperCase() === symbol;
+                    const isSelected = toCanonicalSymbol(watcherSearch) === symbol;
                     return (
                       <button
                         key={symbol}

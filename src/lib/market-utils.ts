@@ -3,109 +3,95 @@
  */
 
 /**
- * Normalizes symbols for Twelve Data compatibility (Pipeline 2).
- * Supports Forex, Crypto, Metals, and Indices.
- * Optimized for Free Tier compatibility.
+ * Canonicalizes a symbol to a standard internal format (uppercase, alphanumeric only).
+ * Example: "EUR/USD" -> "EURUSD", "BTC-USD" -> "BTCUSD", "XAU/USD" -> "XAUUSD"
  */
-export const convertSymbol = (sym: string): string => {
-  if (!sym) return "";
-  let mapped = sym.trim().toUpperCase().replace(/[-_\s/]/g, '');
+export const toCanonicalSymbol = (symbol: string): string => {
+  if (!symbol) return '';
+  return symbol.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+};
+
+/**
+ * Converts a canonical symbol to a human-friendly display format.
+ */
+export const toDisplaySymbol = (symbol: string): string => {
+  const canonical = toCanonicalSymbol(symbol);
   
-  // Symbol mapping layer for Twelve Data compatibility on free plans
   const mappings: Record<string, string> = {
     'EURUSD': 'EUR/USD',
     'GBPUSD': 'GBP/USD',
     'USDJPY': 'USD/JPY',
-    'USDCAD': 'USD/CAD',
     'AUDUSD': 'AUD/USD',
-    'NZDUSD': 'NZD/USD',
+    'USDCAD': 'USD/CAD',
     'USDCHF': 'USD/CHF',
-    'XAUUSD': 'XAU/USD',
+    'NZDUSD': 'NZD/USD',
     'BTCUSD': 'BTC/USD',
     'ETHUSD': 'ETH/USD',
-    'NAS100': 'QQQ', // Nasdaq 100 ETF for free tier
-    'US30': 'DIA',   // Dow 30 ETF for free tier
-    'SPX500': 'SPY', // S&P 500 ETF for free tier
-    'US500': 'SPY'
+    'XAUUSD': 'XAU/USD',
+    'XAGUSD': 'XAG/USD',
+    'NAS100': 'NAS100',
+    'US30': 'US30',
+    'SPX500': 'SPX500',
+    'GER30': 'GER30',
+    'UK100': 'UK100'
   };
 
-  if (mappings[mapped]) {
-    return mappings[mapped];
-  }
-  
-  // Basic Forex heuristic (6 letters)
-  const commonCurrencies = ["EUR", "USD", "GBP", "JPY", "AUD", "CAD", "CHF", "NZD", "SGD", "HKD", "MXN", "ZAR", "TRY"];
-  if (mapped.length === 6 && /^[A-Z]{6}$/.test(mapped)) {
-    const firstHalf = mapped.slice(0, 3);
-    const secondHalf = mapped.slice(3);
-    if (commonCurrencies.includes(firstHalf) && commonCurrencies.includes(secondHalf)) {
-      return `${firstHalf}/${secondHalf}`;
-    }
+  if (mappings[canonical]) return mappings[canonical];
+
+  // Heuristic for 6-letter Forex pairs not in mapping
+  if (canonical.length === 6 && /^[A-Z]{6}$/.test(canonical)) {
+    return `${canonical.slice(0, 3)}/${canonical.slice(3)}`;
   }
 
-  // Crypto heuristics
-  const commonCryptoCoins = ["BTC", "ETH", "SOL", "ADA", "XRP", "DOT", "DOGE", "LTC", "LINK", "AVAX", "XLM", "UNI", "BCH", "ATOM"];
-  const commonCryptoQuote = ["USD", "USDT", "BTC", "ETH", "EUR", "GBP", "USDC"];
-  
-  for (const coin of commonCryptoCoins) {
-    if (mapped.startsWith(coin)) {
-      const suffix = mapped.slice(coin.length);
-      if (commonCryptoQuote.includes(suffix)) {
-        return `${coin}/${suffix}`;
-      }
-    }
-  }
-  
-  // Generic fallback for 6-letter pairs
-  if (mapped.length === 6 && /^[A-Z]{6}$/.test(mapped)) {
-    return `${mapped.slice(0, 3)}/${mapped.slice(3)}`;
-  }
-  
-  return mapped;
+  return canonical;
 };
 
 /**
- * Normalizes symbols for Yahoo Finance compatibility (Pipeline 1).
+ * Converts a canonical symbol to a Yahoo Finance ticker.
  */
-export const convertSymbolToYahoo = (sym: string): string => {
-  if (!sym) return "";
-  let mapped = sym.trim().toUpperCase().replace(/[-_\s/]/g, '');
+export const toYahooTicker = (symbol: string): string => {
+  const canonical = toCanonicalSymbol(symbol);
   
   const mappings: Record<string, string> = {
     'EURUSD': 'EURUSD=X',
     'GBPUSD': 'GBPUSD=X',
     'USDJPY': 'USDJPY=X',
     'AUDUSD': 'AUDUSD=X',
-    'NZDUSD': 'NZDUSD=X',
     'USDCAD': 'USDCAD=X',
     'USDCHF': 'USDCHF=X',
-    'XAUUSD': 'GC=F',
+    'NZDUSD': 'NZDUSD=X',
     'BTCUSD': 'BTC-USD',
     'ETHUSD': 'ETH-USD',
+    'LTCUSD': 'LTC-USD',
+    'XAUUSD': 'GC=F',
+    'XAGUSD': 'SI=F',
     'NAS100': '^IXIC',
     'US30': '^DJI',
     'SPX500': '^GSPC',
-    'US500': '^GSPC',
-    'NAS': '^IXIC',
-    'NASDAQ': '^IXIC',
-    'SPX': '^GSPC',
-    'DOW': '^DJI'
+    'GER30': '^GDAXI',
+    'UK100': '^FTSE'
   };
 
-  if (mappings[mapped]) return mappings[mapped];
-  
-  // Basic Forex heuristic
-  if (mapped.length === 6 && /^[A-Z]{6}$/.test(mapped)) {
-     return `${mapped}=X`;
-  }
-  
-  // Crypto heuristic
-  if (mapped.endsWith('USD') && mapped.length > 3) {
-    return `${mapped.slice(0, -3)}-USD`;
+  if (mappings[canonical]) return mappings[canonical];
+
+  // Forex fallback
+  if (canonical.length === 6 && /^[A-Z]{6}$/.test(canonical)) {
+    return `${canonical}=X`;
   }
 
-  return mapped;
+  // Crypto fallback
+  if (canonical.endsWith('USD') && canonical.length > 3) {
+    return `${canonical.slice(0, -3)}-USD`;
+  }
+
+  return canonical;
 };
+
+/**
+ * Legacy aliases for backward compatibility
+ */
+export const convertSymbol = toDisplaySymbol;
+export const convertSymbolToYahoo = toYahooTicker;
 
 /**
  * Maps application timeframes to Twelve Data intervals.

@@ -6,7 +6,7 @@ import yahooFinance from 'yahoo-finance2';
 const YahooFinance = (yahooFinance as any).default || yahooFinance;
 const yf = new YahooFinance();
 
-import { convertSymbol, convertSymbolToYahoo } from "./src/lib/market-utils";
+import { toCanonicalSymbol, toDisplaySymbol, toYahooTicker } from "./src/lib/market-utils";
 import marketWatcherCronHandler from "./api/cron/market-watcher";
 import adminStatsHandler from "./api/_admin/stats";
 import adminUsersHandler from "./api/_admin/users";
@@ -140,7 +140,7 @@ async function updateRatesFromAPI(supabase?: any) {
       try {
         const { data: watchers } = await supabase.from('watchers').select('selected_pair');
         if (watchers && watchers.length > 0) {
-          const watcherPairs = watchers.map((w: any) => w.selected_pair.toUpperCase());
+          const watcherPairs = watchers.map((w: any) => toCanonicalSymbol(w.selected_pair));
           monitoredSymbols = Array.from(new Set([...monitoredSymbols, ...watcherPairs]));
         }
       } catch (dbErr) {
@@ -148,12 +148,16 @@ async function updateRatesFromAPI(supabase?: any) {
       }
     }
 
+    // Canonicalize the default set as well
+    monitoredSymbols = monitoredSymbols.map(s => toCanonicalSymbol(s));
+    monitoredSymbols = Array.from(new Set(monitoredSymbols));
+
     const processedSymbols = new Set<string>();
 
     // 1. PIPELINE 1: Yahoo Finance (Primary for UI)
     const yahooSymbolMap: Record<string, string> = {};
     monitoredSymbols.forEach(s => {
-      yahooSymbolMap[convertSymbolToYahoo(s)] = s;
+      yahooSymbolMap[toYahooTicker(s)] = s;
     });
     const yahooSymbolsToFetch = Object.keys(yahooSymbolMap);
 
@@ -178,7 +182,7 @@ async function updateRatesFromAPI(supabase?: any) {
 
         const basePrice = quote.regularMarketPreviousClose || currentPrice;
         const change = quote.regularMarketChangePercent || 0;
-        const name = quote.shortName || quote.longName || originalSymbol;
+        const name = quote.shortName || quote.longName || toDisplaySymbol(originalSymbol);
 
         pairsCache[originalSymbol] = {
           symbol: originalSymbol,
@@ -198,7 +202,7 @@ async function updateRatesFromAPI(supabase?: any) {
       for (const symbol of monitoredSymbols) {
         if (processedSymbols.has(symbol)) continue;
         try {
-          const ySym = convertSymbolToYahoo(symbol);
+          const ySym = toYahooTicker(symbol);
           const quote: any = await yf.quote(ySym);
           if (quote && quote.regularMarketPrice !== undefined) {
             const currentPrice = quote.regularMarketPrice;
@@ -206,7 +210,7 @@ async function updateRatesFromAPI(supabase?: any) {
             const change = quote.regularMarketChangePercent || 0;
             pairsCache[symbol] = {
               symbol,
-              name: quote.shortName || quote.longName || symbol,
+              name: quote.shortName || quote.longName || toDisplaySymbol(symbol),
               basePrice,
               currentPrice,
               change,
@@ -249,7 +253,7 @@ async function updateRatesFromAPI(supabase?: any) {
               if (price > 0) {
                 pairsCache[symbol] = {
                   symbol,
-                  name: `${base} / ${quote}`,
+                  name: toDisplaySymbol(symbol),
                   basePrice: price,
                   currentPrice: price,
                   change: 0,
@@ -273,7 +277,7 @@ async function updateRatesFromAPI(supabase?: any) {
         } else {
           pairsCache[symbol] = {
             symbol,
-            name: symbol,
+            name: toDisplaySymbol(symbol),
             basePrice: 0,
             currentPrice: 0,
             change: 0,
@@ -642,9 +646,9 @@ async function startServer() {
 
         if (activeWatchers && activeWatchers.length > 0) {
           // If they already have an active watcher, and it is NOT for the same pair they are starting/updating now, reject.
-          const currentPair = (req.body.selectedPair || "").trim().toUpperCase();
+          const currentPair = toCanonicalSymbol(req.body.selectedPair || "");
           const hasDifferentActiveWatcher = activeWatchers.some(
-            w => (w.selected_pair || "").trim().toUpperCase() !== currentPair
+            w => toCanonicalSymbol(w.selected_pair || "") !== currentPair
           );
 
           if (hasDifferentActiveWatcher) {
@@ -993,7 +997,7 @@ async function startServer() {
 
       for (const watcherItem of activeWatchers) {
         const symbol = watcherItem.selected_pair;
-        const mappedSymbol = convertSymbol(symbol);
+        const mappedSymbol = toDisplaySymbol(symbol);
         const url = `https://api.twelvedata.com/quote?symbol=${encodeURIComponent(mappedSymbol)}&apikey=${twelveDataKey}`;
         
         try {

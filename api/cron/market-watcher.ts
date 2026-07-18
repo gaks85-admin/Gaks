@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { GoogleGenAI, Type } from '@google/genai';
-import { convertSymbol, mapTimeframeToInterval } from '../../src/lib/market-utils';
+import { toCanonicalSymbol, toDisplaySymbol, mapTimeframeToInterval } from '../../src/lib/market-utils';
 
 const SUPABASE_URL = process.env.VITE_SUPABASE_URL || "https://wkujrqmxivljnuvumfau.supabase.co";
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || "sb_publishable_BheqR2OkNYKqT7bj8xThWA_gGG2hcjf";
@@ -93,10 +93,10 @@ async function validateSymbolWithTwelveData(symbol: string, apiKey: string): Pro
       return res;
     }
     if (data.data && Array.isArray(data.data) && data.data.length > 0) {
-      const symbolUpper = symbol.toUpperCase().replace('/', '');
+      const symbolUpper = toCanonicalSymbol(symbol);
       // Try to find the exact symbol match (ignoring slashes)
       const exactMatch = data.data.find((item: any) => 
-        item.symbol.toUpperCase().replace('/', '') === symbolUpper
+        toCanonicalSymbol(item.symbol) === symbolUpper
       );
       
       let res;
@@ -367,7 +367,7 @@ export default async function handler(req: any, res: any) {
       }
 
       const userId = watcher.user_id;
-      const selectedPair = watcher.selected_pair;
+      const selectedPair = toCanonicalSymbol(watcher.selected_pair || "");
       const symbol = selectedPair;
       const selectedTimeframe = watcher.selected_timeframe || 'H1';
       console.log("[WATCHER START]\nwatcher_id: " + watcher.id + "\nuser_id: " + userId + "\nselected_pair: " + selectedPair + "\nselected_timeframe: " + selectedTimeframe);
@@ -428,7 +428,7 @@ export default async function handler(req: any, res: any) {
         }
 
         // Fetch live market data from Twelve Data
-        const mappedSymbol = convertSymbol(selectedPair);
+        const mappedSymbol = toDisplaySymbol(selectedPair);
         const interval = mapTimeframeToInterval(selectedTimeframe);
 
         let quoteData: any = null;
