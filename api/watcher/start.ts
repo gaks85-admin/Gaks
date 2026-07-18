@@ -446,7 +446,7 @@ export default async function handler(req: any, res: any) {
         risk_percentage: riskPercentage,
         selected_pair: selectedPair,
         selected_timeframe: selectedTimeframe || 'H1',
-        gemini_model: "gemini-2.5-flash",
+        gemini_model: "gemini-1.5-flash",
         scan_interval_minutes: scanInterval,
         updated_at: nowString
       }, { onConflict: "user_id,selected_pair" });
