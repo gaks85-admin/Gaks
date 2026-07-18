@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useLiveRates } from './hooks/useLiveRates';
 import { supabase } from './supabaseClient';
 import { getGeminiKey, saveGeminiKey, deleteGeminiKey } from './lib/apiKeys';
-import { toCanonicalSymbol, toDisplaySymbol } from '../api/_lib/market-utils';
+import { toCanonicalSymbol, toDisplaySymbol } from '../lib/market-utils';
 
 const Auth = React.lazy(() => import('./components/Auth'));
 const AdminDashboard = React.lazy(() => import('./components/admin/AdminDashboard'));

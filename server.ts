@@ -3,7 +3,7 @@ import path from "path";
 import { createClient } from "@supabase/supabase-js";
 import { GoogleGenAI, Type } from "@google/genai";
 
-import { toCanonicalSymbol, toDisplaySymbol } from "./api/_lib/market-utils";
+import { toCanonicalSymbol, toDisplaySymbol } from "./lib/market-utils";
 import marketWatcherCronHandler from "./api/cron/market-watcher";
 import adminStatsHandler from "./api/_admin/stats";
 import adminUsersHandler from "./api/_admin/users";
