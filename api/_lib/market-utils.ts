@@ -47,51 +47,9 @@ export const toDisplaySymbol = (symbol: string): string => {
 };
 
 /**
- * Converts a canonical symbol to a Yahoo Finance ticker.
- */
-export const toYahooTicker = (symbol: string): string => {
-  const canonical = toCanonicalSymbol(symbol);
-  
-  const mappings: Record<string, string> = {
-    'EURUSD': 'EURUSD=X',
-    'GBPUSD': 'GBPUSD=X',
-    'USDJPY': 'USDJPY=X',
-    'AUDUSD': 'AUDUSD=X',
-    'USDCAD': 'USDCAD=X',
-    'USDCHF': 'USDCHF=X',
-    'NZDUSD': 'NZDUSD=X',
-    'BTCUSD': 'BTC-USD',
-    'ETHUSD': 'ETH-USD',
-    'LTCUSD': 'LTC-USD',
-    'XAUUSD': 'GC=F',
-    'XAGUSD': 'SI=F',
-    'NAS100': '^IXIC',
-    'US30': '^DJI',
-    'SPX500': '^GSPC',
-    'GER30': '^GDAXI',
-    'UK100': '^FTSE'
-  };
-
-  if (mappings[canonical]) return mappings[canonical];
-
-  // Forex fallback
-  if (canonical.length === 6 && /^[A-Z]{6}$/.test(canonical)) {
-    return `${canonical}=X`;
-  }
-
-  // Crypto fallback
-  if (canonical.endsWith('USD') && canonical.length > 3) {
-    return `${canonical.slice(0, -3)}-USD`;
-  }
-
-  return canonical;
-};
-
-/**
  * Legacy aliases for backward compatibility
  */
 export const convertSymbol = toDisplaySymbol;
-export const convertSymbolToYahoo = toYahooTicker;
 
 /**
  * Maps application timeframes to Twelve Data intervals.

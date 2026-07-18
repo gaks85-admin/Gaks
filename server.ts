@@ -2,11 +2,8 @@ import express from "express";
 import path from "path";
 import { createClient } from "@supabase/supabase-js";
 import { GoogleGenAI, Type } from "@google/genai";
-import yahooFinance from 'yahoo-finance2';
-const YahooFinance = (yahooFinance as any).default || yahooFinance;
-const yf = new YahooFinance();
 
-import { toCanonicalSymbol, toDisplaySymbol, toYahooTicker } from "./api/_lib/market-utils";
+import { toCanonicalSymbol, toDisplaySymbol } from "./api/_lib/market-utils";
 import marketWatcherCronHandler from "./api/cron/market-watcher";
 import adminStatsHandler from "./api/_admin/stats";
 import adminUsersHandler from "./api/_admin/users";
@@ -131,149 +128,71 @@ async function updateRatesFromAPI(supabase?: any) {
   }
 
   try {
-    // Determine symbols to monitor dynamically from watchers table
-    let monitoredSymbols: string[] = [
-      'EURUSD', 'GBPUSD', 'USDJPY', 'XAUUSD', 'BTCUSD', 'ETHUSD', 'NAS100', 'US30'
-    ]; // Base default set
+    // 1. Fetch latest rates from ExchangeRate-API (USD base)
+    const erResponse = await fetch('https://open.er-api.com/v6/latest/USD');
+    if (!erResponse.ok) {
+      throw new Error(`ExchangeRate-API failed: ${erResponse.statusText}`);
+    }
+    const erData = await erResponse.json();
     
-    if (supabase) {
-      try {
-        const { data: watchers } = await supabase.from('watchers').select('selected_pair');
-        if (watchers && watchers.length > 0) {
-          const watcherPairs = watchers.map((w: any) => toCanonicalSymbol(w.selected_pair));
-          monitoredSymbols = Array.from(new Set([...monitoredSymbols, ...watcherPairs]));
-        }
-      } catch (dbErr) {
-        console.warn("[Rates Update] Could not fetch watcher symbols from DB:", dbErr);
-      }
+    if (erData.result !== 'success' || !erData.rates) {
+      throw new Error('ExchangeRate-API returned invalid data');
     }
 
-    // Canonicalize the default set as well
-    monitoredSymbols = monitoredSymbols.map(s => toCanonicalSymbol(s));
-    monitoredSymbols = Array.from(new Set(monitoredSymbols));
+    const rates = erData.rates;
 
-    const processedSymbols = new Set<string>();
+    // 2. Define the symbols we want to provide to the UI
+    const monitoredSymbols = [
+      'EURUSD', 'GBPUSD', 'USDJPY', 'XAUUSD', 'BTCUSD', 'ETHUSD', 'NAS100', 'US30',
+      'AUDUSD', 'NZDUSD', 'USDCAD', 'USDCHF'
+    ];
 
-    // 1. PIPELINE 1: Yahoo Finance (Primary for UI)
-    const yahooSymbolMap: Record<string, string> = {};
-    monitoredSymbols.forEach(s => {
-      yahooSymbolMap[toYahooTicker(s)] = s;
-    });
-    const yahooSymbolsToFetch = Object.keys(yahooSymbolMap);
-
-    try {
-      console.log(`[Rates Update] Fetching ${yahooSymbolsToFetch.length} symbols from Yahoo Finance...`);
-      // Fetch quotes in batch
-      const yahooQuotes = await yf.quote(yahooSymbolsToFetch);
-      const quotesArray = Array.isArray(yahooQuotes) ? yahooQuotes : [yahooQuotes];
-      
-      console.log(`[Rates Update] Yahoo Response: Received ${quotesArray.length} quotes.`);
-      
-      quotesArray.forEach((quote: any) => {
-        if (!quote || !quote.symbol) return;
-        const originalSymbol = yahooSymbolMap[quote.symbol];
-        if (!originalSymbol) return;
-
-        const currentPrice = quote.regularMarketPrice;
-        if (currentPrice === undefined || currentPrice === null) {
-          console.warn(`[Rates Update] Yahoo Quote for ${quote.symbol} missing price.`);
-          return;
-        }
-
-        const basePrice = quote.regularMarketPreviousClose || currentPrice;
-        const change = quote.regularMarketChangePercent || 0;
-        const name = quote.shortName || quote.longName || toDisplaySymbol(originalSymbol);
-
-        pairsCache[originalSymbol] = {
-          symbol: originalSymbol,
-          name,
-          basePrice,
-          currentPrice,
-          change,
-          sentiment: change > 0.05 ? 'Bullish' : (change < -0.05 ? 'Bearish' : 'Neutral'),
-          history: [], 
-          status: 'active'
-        };
-        processedSymbols.add(originalSymbol);
-      });
-    } catch (yfErr) {
-      console.warn("[Rates Update] Yahoo Finance batch failed:", yfErr.message);
-      // Individual fallback if batch fails
-      for (const symbol of monitoredSymbols) {
-        if (processedSymbols.has(symbol)) continue;
-        try {
-          const ySym = toYahooTicker(symbol);
-          const quote: any = await yf.quote(ySym);
-          if (quote && quote.regularMarketPrice !== undefined) {
-            const currentPrice = quote.regularMarketPrice;
-            const basePrice = quote.regularMarketPreviousClose || currentPrice;
-            const change = quote.regularMarketChangePercent || 0;
-            pairsCache[symbol] = {
-              symbol,
-              name: quote.shortName || quote.longName || toDisplaySymbol(symbol),
-              basePrice,
-              currentPrice,
-              change,
-              sentiment: change > 0.05 ? 'Bullish' : (change < -0.05 ? 'Bearish' : 'Neutral'),
-              history: [],
-              status: 'active'
-            };
-            processedSymbols.add(symbol);
-          }
-        } catch (e) {}
-      }
-    }
-
-    // 2. FALLBACK: Exchange Rate API (Forex Only)
-    const remainingForex = monitoredSymbols.filter(s => !processedSymbols.has(s) && s.length === 6);
-    if (remainingForex.length > 0) {
-      try {
-        const erRes = await fetch("https://open.er-api.com/v6/latest/USD");
-        if (erRes.ok) {
-          const erData = await erRes.json();
-          if (erData.result === "success" && erData.rates) {
-            remainingForex.forEach(symbol => {
-              const base = symbol.slice(0, 3);
-              const quote = symbol.slice(3);
-              
-              let price = 0;
-              if (quote === 'USD') {
-                const rate = erData.rates[base];
-                if (rate) price = 1 / rate;
-              } else if (base === 'USD') {
-                const rate = erData.rates[quote];
-                if (rate) price = rate;
-              } else {
-                // Cross rate
-                const rateBase = erData.rates[base];
-                const rateQuote = erData.rates[quote];
-                if (rateBase && rateQuote) price = rateQuote / rateBase;
-              }
-
-              if (price > 0) {
-                pairsCache[symbol] = {
-                  symbol,
-                  name: toDisplaySymbol(symbol),
-                  basePrice: price,
-                  currentPrice: price,
-                  change: 0,
-                  sentiment: 'Neutral',
-                  history: [],
-                  status: 'active'
-                };
-                processedSymbols.add(symbol);
-              }
-            });
-          }
-        }
-      } catch (e) {}
-    }
-
-    // 3. Mark unavailable symbols
     monitoredSymbols.forEach(symbol => {
-      if (!processedSymbols.has(symbol)) {
-        if (pairsCache[symbol]) {
-          pairsCache[symbol].status = 'unavailable';
+      let currentPrice: number | null = null;
+
+      try {
+        switch (symbol) {
+          case 'EURUSD':
+            currentPrice = rates.EUR ? 1 / rates.EUR : null;
+            break;
+          case 'GBPUSD':
+            currentPrice = rates.GBP ? 1 / rates.GBP : null;
+            break;
+          case 'AUDUSD':
+            currentPrice = rates.AUD ? 1 / rates.AUD : null;
+            break;
+          case 'NZDUSD':
+            currentPrice = rates.NZD ? 1 / rates.NZD : null;
+            break;
+          case 'USDJPY':
+            currentPrice = rates.JPY || null;
+            break;
+          case 'USDCAD':
+            currentPrice = rates.CAD || null;
+            break;
+          case 'USDCHF':
+            currentPrice = rates.CHF || null;
+            break;
+          default:
+            const quote = symbol.substring(0, 3);
+            if (rates[quote]) {
+              currentPrice = 1 / rates[quote];
+            } else if (rates[symbol]) {
+              currentPrice = rates[symbol];
+            }
+        }
+
+        if (currentPrice !== null) {
+          pairsCache[symbol] = {
+            symbol,
+            name: toDisplaySymbol(symbol),
+            currentPrice,
+            basePrice: currentPrice,
+            change: 0,
+            sentiment: 'Neutral',
+            history: [],
+            status: 'active'
+          };
         } else {
           pairsCache[symbol] = {
             symbol,
@@ -286,13 +205,17 @@ async function updateRatesFromAPI(supabase?: any) {
             status: 'unavailable'
           };
         }
-      }
-    });
-
-    // Cleanup cache: remove symbols that are no longer monitored
-    Object.keys(pairsCache).forEach(symbol => {
-      if (!monitoredSymbols.includes(symbol)) {
-        delete pairsCache[symbol];
+      } catch (e) {
+        pairsCache[symbol] = {
+          symbol,
+          name: toDisplaySymbol(symbol),
+          basePrice: 0,
+          currentPrice: 0,
+          change: 0,
+          sentiment: 'Neutral',
+          history: [],
+          status: 'unavailable'
+        };
       }
     });
 
