@@ -3,6 +3,8 @@ import path from "path";
 import { createClient } from "@supabase/supabase-js";
 import { GoogleGenAI, Type } from "@google/genai";
 import yahooFinance from 'yahoo-finance2';
+const yf = new (yahooFinance as any)();
+
 import { convertSymbol, convertSymbolToYahoo } from "./src/lib/market-utils";
 import marketWatcherCronHandler from "./api/cron/market-watcher";
 import adminStatsHandler from "./api/_admin/stats";
@@ -30,16 +32,6 @@ interface LivePairData {
   history: number[];
   status?: 'active' | 'unavailable';
 }
-
-const PAIR_METADATA = [
-  { symbol: "EURUSD", base: "EUR", quote: "USD", name: "Euro / US Dollar", isUSDQuote: true },
-  { symbol: "GBPUSD", base: "GBP", quote: "USD", name: "British Pound / US Dollar", isUSDQuote: true },
-  { symbol: "USDJPY", base: "USD", quote: "JPY", name: "US Dollar / Japanese Yen", isUSDQuote: false },
-  { symbol: "USDCAD", base: "USD", quote: "CAD", name: "US Dollar / Canadian Dollar", isUSDQuote: false },
-  { symbol: "AUDUSD", base: "AUD", quote: "USD", name: "Australian Dollar / US Dollar", isUSDQuote: true },
-  { symbol: "NZDUSD", base: "NZD", quote: "USD", name: "New Zealand Dollar / US Dollar", isUSDQuote: true },
-  { symbol: "USDCHF", base: "USD", quote: "CHF", name: "US Dollar / Swiss Franc", isUSDQuote: false },
-];
 
 const DEFAULT_STRATEGY_TEXT = `# Gaks AI Default Strategy
 
@@ -138,21 +130,20 @@ async function updateRatesFromAPI(supabase?: any) {
   }
 
   try {
-    const yf = yahooFinance;
-    
-    // Determine symbols to monitor dynamically from watchers table + defaults
-    const defaultSymbols = PAIR_METADATA.map(p => p.symbol);
-    let monitoredSymbols = [...defaultSymbols];
+    // Determine symbols to monitor dynamically from watchers table
+    let monitoredSymbols: string[] = [
+      'EURUSD', 'GBPUSD', 'USDJPY', 'XAUUSD', 'BTCUSD', 'ETHUSD', 'NAS100', 'US30'
+    ]; // Base default set
     
     if (supabase) {
       try {
-        const { data: watchers } = await supabase.from('watchers').select('selected_pair').eq('status', 'active');
+        const { data: watchers } = await supabase.from('watchers').select('selected_pair');
         if (watchers && watchers.length > 0) {
           const watcherPairs = watchers.map((w: any) => w.selected_pair.toUpperCase());
           monitoredSymbols = Array.from(new Set([...monitoredSymbols, ...watcherPairs]));
         }
       } catch (dbErr) {
-        console.warn("[Rates Update] Could not fetch watcher symbols from DB, using defaults:", dbErr);
+        console.warn("[Rates Update] Could not fetch watcher symbols from DB:", dbErr);
       }
     }
 
@@ -166,9 +157,12 @@ async function updateRatesFromAPI(supabase?: any) {
     const yahooSymbolsToFetch = Object.keys(yahooSymbolMap);
 
     try {
+      console.log(`[Rates Update] Fetching ${yahooSymbolsToFetch.length} symbols from Yahoo Finance...`);
       // Fetch quotes in batch
       const yahooQuotes = await yf.quote(yahooSymbolsToFetch);
       const quotesArray = Array.isArray(yahooQuotes) ? yahooQuotes : [yahooQuotes];
+      
+      console.log(`[Rates Update] Yahoo Response: Received ${quotesArray.length} quotes.`);
       
       quotesArray.forEach((quote: any) => {
         if (!quote || !quote.symbol) return;
@@ -176,7 +170,10 @@ async function updateRatesFromAPI(supabase?: any) {
         if (!originalSymbol) return;
 
         const currentPrice = quote.regularMarketPrice;
-        if (currentPrice === undefined || currentPrice === null) return;
+        if (currentPrice === undefined || currentPrice === null) {
+          console.warn(`[Rates Update] Yahoo Quote for ${quote.symbol} missing price.`);
+          return;
+        }
 
         const basePrice = quote.regularMarketPreviousClose || currentPrice;
         const change = quote.regularMarketChangePercent || 0;
@@ -223,7 +220,7 @@ async function updateRatesFromAPI(supabase?: any) {
     }
 
     // 2. FALLBACK: Exchange Rate API (Forex Only)
-    const remainingForex = monitoredSymbols.filter(s => !processedSymbols.has(s) && PAIR_METADATA.some(p => p.symbol === s));
+    const remainingForex = monitoredSymbols.filter(s => !processedSymbols.has(s) && s.length === 6);
     if (remainingForex.length > 0) {
       try {
         const erRes = await fetch("https://open.er-api.com/v6/latest/USD");
@@ -231,22 +228,27 @@ async function updateRatesFromAPI(supabase?: any) {
           const erData = await erRes.json();
           if (erData.result === "success" && erData.rates) {
             remainingForex.forEach(symbol => {
-              const meta = PAIR_METADATA.find(p => p.symbol === symbol);
-              if (!meta) return;
-
+              const base = symbol.slice(0, 3);
+              const quote = symbol.slice(3);
+              
               let price = 0;
-              if (meta.isUSDQuote) {
-                const rate = erData.rates[meta.base];
+              if (quote === 'USD') {
+                const rate = erData.rates[base];
                 if (rate) price = 1 / rate;
-              } else {
-                const rate = erData.rates[meta.quote];
+              } else if (base === 'USD') {
+                const rate = erData.rates[quote];
                 if (rate) price = rate;
+              } else {
+                // Cross rate
+                const rateBase = erData.rates[base];
+                const rateQuote = erData.rates[quote];
+                if (rateBase && rateQuote) price = rateQuote / rateBase;
               }
 
               if (price > 0) {
                 pairsCache[symbol] = {
                   symbol,
-                  name: meta.name,
+                  name: `${base} / ${quote}`,
                   basePrice: price,
                   currentPrice: price,
                   change: 0,
@@ -268,10 +270,9 @@ async function updateRatesFromAPI(supabase?: any) {
         if (pairsCache[symbol]) {
           pairsCache[symbol].status = 'unavailable';
         } else {
-          const meta = PAIR_METADATA.find(p => p.symbol === symbol);
           pairsCache[symbol] = {
             symbol,
-            name: meta?.name || symbol,
+            name: symbol,
             basePrice: 0,
             currentPrice: 0,
             change: 0,
