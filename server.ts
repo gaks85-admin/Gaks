@@ -3,7 +3,8 @@ import path from "path";
 import { createClient } from "@supabase/supabase-js";
 import { GoogleGenAI, Type } from "@google/genai";
 import yahooFinance from 'yahoo-finance2';
-const yf = new (yahooFinance as any)();
+const YahooFinance = (yahooFinance as any).default || yahooFinance;
+const yf = new YahooFinance();
 
 import { convertSymbol, convertSymbolToYahoo } from "./src/lib/market-utils";
 import marketWatcherCronHandler from "./api/cron/market-watcher";
