@@ -1,6 +1,6 @@
 
 import yahooFinance from 'yahoo-finance2';
-import { convertSymbolToYahoo } from './src/lib/market-utils';
+import { convertSymbolToYahoo } from './lib/market-utils.js';
 
 const YahooFinance = (yahooFinance as any).default || yahooFinance;
 const yf = new YahooFinance();
