@@ -6,7 +6,7 @@ import yahooFinance from 'yahoo-finance2';
 const YahooFinance = (yahooFinance as any).default || yahooFinance;
 const yf = new YahooFinance();
 
-import { toCanonicalSymbol, toDisplaySymbol, toYahooTicker } from "./lib/market-utils.js";
+import { toCanonicalSymbol, toDisplaySymbol, toYahooTicker } from "./api/_lib/market-utils";
 import marketWatcherCronHandler from "./api/cron/market-watcher";
 import adminStatsHandler from "./api/_admin/stats";
 import adminUsersHandler from "./api/_admin/users";

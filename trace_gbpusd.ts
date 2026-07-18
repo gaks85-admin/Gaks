@@ -1,6 +1,6 @@
 
 import yahooFinance from 'yahoo-finance2';
-import { toCanonicalSymbol, toDisplaySymbol, toYahooTicker } from './lib/market-utils.js';
+import { toCanonicalSymbol, toDisplaySymbol, toYahooTicker } from './api/_lib/market-utils';
 
 const YahooFinance = (yahooFinance as any).default || yahooFinance;
 const yf = new YahooFinance();
