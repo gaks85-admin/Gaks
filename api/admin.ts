@@ -189,9 +189,22 @@ async function health_handler(req: any, res: any) {
       // Step 3 & 4: Send the candle to Gemini and display response
       const startGemini = Date.now();
       let geminiError: string | null = null;
-      if (process.env.GEMINI_API_KEY) {
+      
+      // Fetch user's Gemini API key from Supabase
+      const { data: apiKeyData, error: apiKeyError } = await supabase
+        .from('user_api_keys')
+        .select('api_key')
+        .eq('user_id', user.id)
+        .eq('provider', 'gemini')
+        .maybeSingle();
+      
+      const keyLoadedFromSupabase = !!(apiKeyData && apiKeyData.api_key);
+      const keyLength = apiKeyData?.api_key?.length || 0;
+      console.log(`[Gemini Health Check] Key loaded: ${keyLoadedFromSupabase}. Record ID: ${user.id}. Key non-empty: ${keyLength > 0}`);
+      
+      if (keyLoadedFromSupabase) {
         try {
-          const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+          const ai = new GoogleGenAI({ apiKey: apiKeyData.api_key });
           const prompt = `Reply only with OK`;
           
           const aiResponse = await generateContentWithDiagnostics(ai, {
@@ -206,7 +219,11 @@ async function health_handler(req: any, res: any) {
             status: 'Connected',
             responseTime: Date.now() - startGemini,
             returnedText,
-            message: `Gemini prompt successful. Answer: "${returnedText}"`
+            message: `Gemini prompt successful. Answer: "${returnedText}"`,
+            keyLoadedFromSupabase,
+            keyLength,
+            model: "gemini-2.5-flash",
+            rawResponse: aiResponse
           };
         } catch (err: any) {
           hasError = true;
@@ -215,17 +232,22 @@ async function health_handler(req: any, res: any) {
             status: 'ERROR',
             responseTime: Date.now() - startGemini,
             message: 'Failed to complete prompt with Gemini API.',
-            error: geminiError
+            error: geminiError,
+            keyLoadedFromSupabase,
+            keyLength,
+            fullError: err
           };
         }
       } else {
         hasError = true;
-        geminiError = 'GEMINI_API_KEY is not defined';
+        geminiError = 'Gemini API key missing or not found in Supabase';
         results.gemini = {
           status: 'ERROR',
           responseTime: 0,
-          message: 'Gemini API Key is missing in environment settings.',
-          error: geminiError
+          message: 'Gemini API Key is missing in user settings.',
+          error: geminiError,
+          keyLoadedFromSupabase,
+          keyLength
         };
       }
       await logHealthTest('Gemini', results.gemini.status, results.gemini.responseTime, results.gemini.message, geminiError);
@@ -362,10 +384,23 @@ async function health_handler(req: any, res: any) {
     let geminiLatency = 0;
     let geminiReturnedText = null;
     let geminiErrorMsg = null;
-    if (process.env.GEMINI_API_KEY) {
+    
+    // Fetch admin user's Gemini API key from Supabase
+    const { data: apiKeyData, error: apiKeyError } = await supabase
+      .from('user_api_keys')
+      .select('api_key')
+      .eq('user_id', user.id)
+      .eq('provider', 'gemini')
+      .maybeSingle();
+      
+    const keyLoadedFromSupabase = !!(apiKeyData && apiKeyData.api_key);
+    const keyLength = apiKeyData?.api_key?.length || 0;
+    console.log(`[Gemini Health Check - GET] Key loaded: ${keyLoadedFromSupabase}. Record ID: ${user.id}. Key non-empty: ${keyLength > 0}`);
+
+    if (keyLoadedFromSupabase) {
       try {
         const startGemini = Date.now();
-        const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+        const ai = new GoogleGenAI({ apiKey: apiKeyData.api_key });
         const geminiRes = await generateContentWithDiagnostics(ai, {
           model: "gemini-2.5-flash",
           contents: "Reply only with OK",
@@ -377,6 +412,9 @@ async function health_handler(req: any, res: any) {
         geminiStatus = 'ERROR';
         geminiErrorMsg = err.message || 'Gemini API call failed';
       }
+    } else {
+        geminiStatus = 'ERROR';
+        geminiErrorMsg = 'Gemini API key missing or not found in Supabase';
     }
 
     // Fetch details of Telegram Bot
