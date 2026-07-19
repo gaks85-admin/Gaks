@@ -1,19 +1,10 @@
-import { createClient } from '@supabase/supabase-js';
+import { getSupabase } from '../../lib/supabase-server';
 import { GoogleGenAI } from '@google/genai';
-
-const SUPABASE_URL = "https://wkujrqmxivljnuvumfau.supabase.co";
-const SUPABASE_PUBLIC_KEY = "sb_publishable_BheqR2OkNYKqT7bj8xThWA_gGG2hcjf";
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || SUPABASE_PUBLIC_KEY;
-const supabase = createClient(SUPABASE_URL, supabaseKey, {
-  auth: {
-    persistSession: false,
-    autoRefreshToken: false
-  }
-});
 
 // Helper to log test executions to the system_health_logs table
 async function logHealthTest(service: string, status: string, responseTime: number, message: string, error: string | null) {
   try {
+    const supabase = getSupabase();
     await supabase.from('system_health_logs').insert({
       service,
       status,
@@ -27,6 +18,7 @@ async function logHealthTest(service: string, status: string, responseTime: numb
 }
 
 export default async function handler(req: any, res: any) {
+  const supabase = getSupabase();
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, PATCH, DELETE");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With");

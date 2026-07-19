@@ -1,14 +1,4 @@
-import { createClient } from '@supabase/supabase-js';
-
-const SUPABASE_URL = process.env.VITE_SUPABASE_URL || "https://wkujrqmxivljnuvumfau.supabase.co";
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || "sb_publishable_BheqR2OkNYKqT7bj8xThWA_gGG2hcjf";
-
-const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
-  auth: {
-    persistSession: false,
-    autoRefreshToken: false
-  }
-});
+import { getSupabase } from '../../lib/supabase-server';
 
 async function sendTelegramMessage(chatId: string | number, text: string): Promise<boolean> {
   const token = process.env.TELEGRAM_BOT_TOKEN;
@@ -44,6 +34,7 @@ async function sendTelegramMessage(chatId: string | number, text: string): Promi
 
 async function writeLog(type: string, status: string, reason: string | null) {
   try {
+    const supabase = getSupabase();
     const { error } = await supabase
       .from('notification_logs')
       .insert({
@@ -61,6 +52,7 @@ async function writeLog(type: string, status: string, reason: string | null) {
 }
 
 export default async function handler(req: any, res: any) {
+  const supabase = getSupabase();
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, PATCH, DELETE");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With");

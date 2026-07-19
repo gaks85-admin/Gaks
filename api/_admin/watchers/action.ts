@@ -1,15 +1,5 @@
-import { createClient } from '@supabase/supabase-js';
+import { getSupabase } from '../../../lib/supabase-server';
 import { GoogleGenAI, Type } from '@google/genai';
-
-const SUPABASE_URL = "https://wkujrqmxivljnuvumfau.supabase.co";
-const SUPABASE_PUBLIC_KEY = "sb_publishable_BheqR2OkNYKqT7bj8xThWA_gGG2hcjf";
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || SUPABASE_PUBLIC_KEY;
-const supabase = createClient(SUPABASE_URL, supabaseKey, {
-  auth: {
-    persistSession: false,
-    autoRefreshToken: false
-  }
-});
 
 const DEFAULT_STRATEGY_TEXT = `# Gaks AI Default Strategy
 
@@ -100,6 +90,7 @@ async function getLivePrice(symbol: string): Promise<number> {
 }
 
 export default async function handler(req: any, res: any) {
+  const supabase = getSupabase();
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, PATCH, DELETE");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With");

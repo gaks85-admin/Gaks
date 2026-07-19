@@ -1,6 +1,6 @@
 import express from "express";
 import path from "path";
-import { createClient } from "@supabase/supabase-js";
+import { getSupabase } from "./lib/supabase-server";
 
 import { toCanonicalSymbol, toDisplaySymbol } from "./lib/market-utils";
 import marketWatcherCronHandler from "./api/cron/market-watcher";
@@ -49,17 +49,6 @@ async function startServer() {
 
   app.use(express.json());
 
-  // Initialize Supabase Client
-  const SUPABASE_URL = "https://wkujrqmxivljnuvumfau.supabase.co";
-  const SUPABASE_PUBLIC_KEY = "sb_publishable_BheqR2OkNYKqT7bj8xThWA_gGG2hcjf";
-  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || SUPABASE_PUBLIC_KEY;
-  const supabase = createClient(SUPABASE_URL, supabaseKey, {
-    auth: {
-      persistSession: false,
-      autoRefreshToken: false
-    }
-  });
-
   // Admin Verification Guard Middleware
   async function adminGuard(req: express.Request, res: express.Response, next: express.NextFunction) {
     const authHeader = req.headers.authorization || '';
@@ -70,6 +59,7 @@ async function startServer() {
     }
     
     try {
+      const supabase = getSupabase();
       const { data: { user }, error: authError } = await supabase.auth.getUser(token);
       if (authError || !user) {
         return res.status(401).json({ success: false, error: "Unauthorized: Invalid authentication token." });
