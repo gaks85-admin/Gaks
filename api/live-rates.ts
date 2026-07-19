@@ -1,5 +1,9 @@
-import yahooFinance from 'yahoo-finance2';
+import * as yahooFinanceModule from 'yahoo-finance2';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+
+// Handle both ES and CJS default exports correctly
+const YahooFinanceConstructor = (yahooFinanceModule as any).default || (yahooFinanceModule as any).YahooFinance || yahooFinanceModule;
+const yahooFinance = new (YahooFinanceConstructor as any)();
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
