@@ -1,5 +1,24 @@
-import { getSupabase } from '../../lib/supabase-server';
+import { createClient } from '@supabase/supabase-js';
 import { GoogleGenAI } from '@google/genai';
+
+/**
+ * Self-contained Supabase client initialization.
+ */
+const getSupabase = () => {
+  const url = process.env.VITE_SUPABASE_URL || "https://wkujrqmxivljnuvumfau.supabase.co";
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+  
+  if (!url || !key) {
+    throw new Error('Supabase configuration missing (VITE_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required)');
+  }
+
+  return createClient(url, key, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false
+    }
+  });
+};
 
 // Helper to log test executions to the system_health_logs table
 async function logHealthTest(service: string, status: string, responseTime: number, message: string, error: string | null) {

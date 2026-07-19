@@ -1,5 +1,24 @@
-import { getSupabase } from '../../lib/supabase-server';
+import { createClient } from '@supabase/supabase-js';
 import { GoogleGenAI, Type } from "@google/genai";
+
+/**
+ * Self-contained Supabase client initialization.
+ */
+const getSupabase = () => {
+  const url = process.env.VITE_SUPABASE_URL || "https://wkujrqmxivljnuvumfau.supabase.co";
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+  
+  if (!url || !key) {
+    throw new Error('Supabase configuration missing (VITE_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required)');
+  }
+
+  return createClient(url, key, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false
+    }
+  });
+};
 
 async function sendTelegramMessage(chatId: string | number, text: string): Promise<boolean> {
   const token = process.env.TELEGRAM_BOT_TOKEN;

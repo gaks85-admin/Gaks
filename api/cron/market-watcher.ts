@@ -1,6 +1,68 @@
-import { getSupabase } from '../../lib/supabase-server';
+import { createClient } from '@supabase/supabase-js';
 import { GoogleGenAI, Type } from '@google/genai';
-import { toCanonicalSymbol, toDisplaySymbol, mapTimeframeToInterval } from '../../lib/market-utils';
+
+/**
+ * Self-contained Supabase client initialization.
+ */
+const getSupabase = () => {
+  const url = process.env.VITE_SUPABASE_URL || "https://wkujrqmxivljnuvumfau.supabase.co";
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+  
+  if (!url || !key) {
+    throw new Error('Supabase configuration missing (VITE_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required)');
+  }
+
+  return createClient(url, key, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false
+    }
+  });
+};
+
+/**
+ * Canonicalizes a symbol to a standard internal format (uppercase, alphanumeric only).
+ */
+const toCanonicalSymbol = (symbol: string): string => {
+  if (!symbol) return '';
+  return symbol.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+};
+
+/**
+ * Converts a canonical symbol to a human-friendly display format.
+ */
+const toDisplaySymbol = (symbol: string): string => {
+  const canonical = toCanonicalSymbol(symbol);
+  const mappings: Record<string, string> = {
+    'EURUSD': 'EUR/USD', 'GBPUSD': 'GBP/USD', 'USDJPY': 'USD/JPY', 'AUDUSD': 'AUD/USD',
+    'USDCAD': 'USD/CAD', 'USDCHF': 'USD/CHF', 'NZDUSD': 'NZD/USD', 'BTCUSD': 'BTC/USD',
+    'ETHUSD': 'ETH/USD', 'XAUUSD': 'XAU/USD', 'XAGUSD': 'XAG/USD', 'NAS100': 'NAS100',
+    'US30': 'US30', 'SPX500': 'SPX500', 'GER30': 'GER30', 'UK100': 'UK100'
+  };
+  if (mappings[canonical]) return mappings[canonical];
+  if (canonical.length === 6 && /^[A-Z]{6}$/.test(canonical)) {
+    return `${canonical.slice(0, 3)}/${canonical.slice(3)}`;
+  }
+  return canonical;
+};
+
+/**
+ * Maps application timeframes to Twelve Data intervals.
+ */
+const mapTimeframeToInterval = (tf: string): string => {
+  if (!tf) return '1h';
+  const u = tf.toUpperCase();
+  if (u === 'M1' || u === '1M') return '1min';
+  if (u === 'M5' || u === '5M') return '5min';
+  if (u === 'M15' || u === '15M') return '15min';
+  if (u === 'M30' || u === '30M') return '30min';
+  if (u === 'H1' || u === '1H') return '1h';
+  if (u === 'H2' || u === '2H') return '2h';
+  if (u === 'H4' || u === '4H') return '4h';
+  if (u === 'D1' || u === 'D' || u === 'DAILY') return '1day';
+  if (u === 'W1' || u === 'W' || u === 'WEEKLY') return '1week';
+  return '1h';
+};
 
 async function sendTelegramMessage(chatId: string | number, text: string): Promise<boolean> {
   const token = process.env.TELEGRAM_BOT_TOKEN;
