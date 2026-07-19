@@ -1,6 +1,42 @@
 
 import { createClient } from '@supabase/supabase-js';
 import { GoogleGenAI, Type } from '@google/genai';
+
+
+async function generateContentWithDiagnostics(ai: any, params: any) {
+   const contents = params.contents;
+   let promptText = "";
+   if (typeof contents === "string") promptText = contents;
+   else if (Array.isArray(contents)) promptText = JSON.stringify(contents);
+   else promptText = contents?.toString() || "";
+
+   if (!promptText || promptText.trim().length === 0) {
+      throw new Error("Invalid prompt: prompt is empty or only whitespace.");
+   }
+   
+   console.log(`\n=== GEMINI REQUEST DIAGNOSTIC ===`);
+   const apiKeyPresent = !!process.env.GEMINI_API_KEY;
+   console.log(`API key present: ${apiKeyPresent}`);
+   console.log(`Model: ${params.model}`);
+   console.log(`Request Payload: ${JSON.stringify(params).substring(0, 500)}`);
+   console.log(`Prompt Length: ${promptText.length}`);
+   
+   try {
+      const response = await ai.models.generateContent(params);
+      console.log(`=== GEMINI RESPONSE ===\n${JSON.stringify(response)}\n=======================`);
+      return response;
+   } catch (error: any) {
+      console.error(`=== GEMINI ERROR DIAGNOSTIC ===`);
+      console.error(`Error Message: ${error.message}`);
+      console.error(`Status: ${error.status}`);
+      console.error(`Stack: ${error.stack}`);
+      console.error(`Response Body:`, error.response || error.responseBody || 'None');
+      console.error(`Full Error Object: ${JSON.stringify(error, Object.getOwnPropertyNames(error))}`);
+      console.error(`===============================`);
+      throw error;
+   }
+}
+
 import fs from 'fs';
 import path from 'path';
 import url from 'url';
@@ -156,20 +192,18 @@ async function health_handler(req: any, res: any) {
       if (process.env.GEMINI_API_KEY) {
         try {
           const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-          const candleCtx = eurUsdCandle ? JSON.stringify(eurUsdCandle) : '{"symbol":"EUR/USD","price":1.0850,"open":1.0840,"high":1.0860,"low":1.0830}';
-          const prompt = `Analyze this candle and reply with BUY, SELL or NO SIGNAL with one sentence: ${candleCtx}`;
+          const prompt = `Reply only with OK`;
           
-          const aiResponse = await ai.models.generateContent({
+          const aiResponse = await generateContentWithDiagnostics(ai, {
             model: "gemini-1.5-flash",
             contents: prompt,
             config: {
-              systemInstruction: "You are an AI market watcher testing model responsiveness. Answer concisely."
-            }
+              }
           });
           
           const returnedText = aiResponse.text?.trim() || 'No response';
           results.gemini = {
-            status: 'ONLINE',
+            status: 'Connected',
             responseTime: Date.now() - startGemini,
             returnedText,
             message: `Gemini prompt successful. Answer: "${returnedText}"`
@@ -332,7 +366,7 @@ async function health_handler(req: any, res: any) {
       try {
         const startGemini = Date.now();
         const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-        const geminiRes = await ai.models.generateContent({
+        const geminiRes = await generateContentWithDiagnostics(ai, {
           model: "gemini-1.5-flash",
           contents: "Reply only with OK",
         });
@@ -398,7 +432,7 @@ async function health_handler(req: any, res: any) {
     if (lastWatcherScanAt) {
       const diffHours = (Date.now() - new Date(lastWatcherScanAt).getTime()) / (1000 * 60 * 60);
       if (diffHours > 24) {
-        cronStatus = 'ERROR';
+        cronStatus = (geminiStatus === 'ERROR' || geminiStatus === 'OFFLINE') ? 'Cron failed because Gemini request failed.' : 'ERROR';
       }
       
       // Cron-job.org runs every 5 minutes. Let's calculate the next 5-minute interval
@@ -417,7 +451,7 @@ async function health_handler(req: any, res: any) {
         calculatedNextExecution = now.toISOString();
       }
     } else {
-      cronStatus = 'ERROR';
+      cronStatus = (geminiStatus === 'ERROR' || geminiStatus === 'OFFLINE') ? 'Cron failed because Gemini request failed.' : 'ERROR';
       // Calculate next immediate 5 minute interval
       const now = new Date();
       const minutes = now.getMinutes();
@@ -585,7 +619,7 @@ async function sendTelegramMessage_alert(chatId: string | number, text: string):
       return false;
     }
     return true;
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error sending Telegram message:", error);
     return false;
   }
@@ -1444,7 +1478,7 @@ Live Market Data:
 ${JSON.stringify(collectedData, null, 2)}
 `;
 
-      const aiResponse = await ai.models.generateContent({
+      const aiResponse = await generateContentWithDiagnostics(ai, {
         model: "gemini-1.5-flash",
         contents: promptText,
         config: {

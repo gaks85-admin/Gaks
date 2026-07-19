@@ -1,6 +1,42 @@
 import { createClient } from '@supabase/supabase-js';
 import { GoogleGenAI, Type } from "@google/genai";
 
+
+async function generateContentWithDiagnostics(ai: any, params: any) {
+   const contents = params.contents;
+   let promptText = "";
+   if (typeof contents === "string") promptText = contents;
+   else if (Array.isArray(contents)) promptText = JSON.stringify(contents);
+   else promptText = contents?.toString() || "";
+
+   if (!promptText || promptText.trim().length === 0) {
+      throw new Error("Invalid prompt: prompt is empty or only whitespace.");
+   }
+   
+   console.log(`\n=== GEMINI REQUEST DIAGNOSTIC ===`);
+   const apiKeyPresent = !!process.env.GEMINI_API_KEY;
+   console.log(`API key present: ${apiKeyPresent}`);
+   console.log(`Model: ${params.model}`);
+   console.log(`Request Payload: ${JSON.stringify(params).substring(0, 500)}`);
+   console.log(`Prompt Length: ${promptText.length}`);
+   
+   try {
+      const response = await ai.models.generateContent(params);
+      console.log(`=== GEMINI RESPONSE ===\n${JSON.stringify(response)}\n=======================`);
+      return response;
+   } catch (error: any) {
+      console.error(`=== GEMINI ERROR DIAGNOSTIC ===`);
+      console.error(`Error Message: ${error.message}`);
+      console.error(`Status: ${error.status}`);
+      console.error(`Stack: ${error.stack}`);
+      console.error(`Response Body:`, error.response || error.responseBody || 'None');
+      console.error(`Full Error Object: ${JSON.stringify(error, Object.getOwnPropertyNames(error))}`);
+      console.error(`===============================`);
+      throw error;
+   }
+}
+
+
 /**
  * Self-contained Supabase client initialization.
  */
@@ -538,7 +574,7 @@ Live Market Data (Twelve Data):
 ${JSON.stringify(collectedData, null, 2)}
 `;
 
-    const aiResponse = await ai.models.generateContent({
+    const aiResponse = await generateContentWithDiagnostics(ai, {
       model: "gemini-1.5-flash",
       contents: promptText,
       config: {

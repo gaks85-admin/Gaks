@@ -1,6 +1,42 @@
 import { createClient } from '@supabase/supabase-js';
 import { GoogleGenAI, Type } from '@google/genai';
 
+
+async function generateContentWithDiagnostics(ai: any, params: any) {
+   const contents = params.contents;
+   let promptText = "";
+   if (typeof contents === "string") promptText = contents;
+   else if (Array.isArray(contents)) promptText = JSON.stringify(contents);
+   else promptText = contents?.toString() || "";
+
+   if (!promptText || promptText.trim().length === 0) {
+      throw new Error("Invalid prompt: prompt is empty or only whitespace.");
+   }
+   
+   console.log(`\n=== GEMINI REQUEST DIAGNOSTIC ===`);
+   const apiKeyPresent = !!process.env.GEMINI_API_KEY;
+   console.log(`API key present: ${apiKeyPresent}`);
+   console.log(`Model: ${params.model}`);
+   console.log(`Request Payload: ${JSON.stringify(params).substring(0, 500)}`);
+   console.log(`Prompt Length: ${promptText.length}`);
+   
+   try {
+      const response = await ai.models.generateContent(params);
+      console.log(`=== GEMINI RESPONSE ===\n${JSON.stringify(response)}\n=======================`);
+      return response;
+   } catch (error: any) {
+      console.error(`=== GEMINI ERROR DIAGNOSTIC ===`);
+      console.error(`Error Message: ${error.message}`);
+      console.error(`Status: ${error.status}`);
+      console.error(`Stack: ${error.stack}`);
+      console.error(`Response Body:`, error.response || error.responseBody || 'None');
+      console.error(`Full Error Object: ${JSON.stringify(error, Object.getOwnPropertyNames(error))}`);
+      console.error(`===============================`);
+      throw error;
+   }
+}
+
+
 /**
  * Self-contained Supabase client initialization.
  */
@@ -90,7 +126,7 @@ async function sendTelegramMessage(chatId: string | number, text: string): Promi
       return false;
     }
     return true;
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error sending Telegram message:", error);
     return false;
   }
@@ -583,7 +619,7 @@ Timeframe: ${selectedTimeframe}
 Live Market Data (Twelve Data):
 ${JSON.stringify(marketData, null, 2)}`;
 
-        const aiResponse = await ai.models.generateContent({
+        const aiResponse = await generateContentWithDiagnostics(ai, {
           model: "gemini-1.5-flash",
           contents: promptText,
           config: {
@@ -687,7 +723,7 @@ ${JSON.stringify(marketData, null, 2)}`;
         watchersProcessedCount++;
         results.push({ userId, symbol, signalsFound: signals.length, signalsSent });
 
-      } catch (err) {
+      } catch (err: any) {
         console.log("[WATCHER SKIPPED]\nwatcher_id: " + watcher.id + "\nuser_id: " + userId + "\nselected_pair: " + selectedPair + "\nselected_timeframe: " + selectedTimeframe + "\nreason: Error: " + (err.message || err));
         console.error(`[User ${userId}] Error processing watcher:`, err.message || err);
         errors.push({ userId, error: err.message || "Unknown error" });
@@ -737,14 +773,21 @@ ${JSON.stringify(marketData, null, 2)}`;
       executionTimeMs: totalTime
     });
 
-  } catch (err) {
+  } catch (err: any) {
     const totalTime = Date.now() - startTime;
-    console.error("[Market Watcher Cron] Fatal Error:", err.message || err);
+    console.error("[Market Watcher Cron] Fatal Error Stack:", err.stack || err);
     
+    let errorMsg = err.message || "Unknown error";
+    if (errorMsg.includes("Gemini") || (err.stack && err.stack.includes("Gemini")) || errorMsg.includes("API key not valid") || errorMsg.includes("fetch failed") || errorMsg.includes("Invalid prompt")) {
+       errorMsg = "Cron failed because Gemini request failed.";
+    } else if (err.status && typeof err.status === 'number' && (err.status >= 400 && err.status < 600)) {
+       errorMsg = "Cron failed because Gemini request failed.";
+    }
+
     console.log(JSON.stringify({
       event: "cycle_complete",
       status: "fatal_error",
-      error: err.message || "Unknown error",
+      error: errorMsg,
       totalWatchers: 0,
       processedCount: watchersProcessedCount,
       skippedCount: watchersSkippedCount,
@@ -753,6 +796,6 @@ ${JSON.stringify(marketData, null, 2)}`;
       executionTimeMs: totalTime
     }));
 
-    return res.status(500).json({ success: false, error: "Internal Server Error" });
+    return res.status(500).json({ success: false, error: errorMsg });
   }
 }
