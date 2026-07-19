@@ -112,12 +112,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     
     // 3. Fetch data from Yahoo
     const pairsData = await Promise.all(uniqueSymbols.map(async (symbol) => {
+      const canonical = toCanonicalSymbol(symbol);
       const ticker = symbolToYahooTicker(symbol);
       const displaySymbol = toDisplaySymbol(symbol);
       
+      // Find original if it came from a watcher
+      const original = (watchers || []).find(w => toCanonicalSymbol(w.selected_pair) === canonical)?.selected_pair || symbol;
+
+      console.log(`Original: ${original}`);
+      console.log(`Canonical: ${canonical}`);
+      console.log(`Yahoo: ${ticker}`);
+      console.log(`Fetching: ${ticker}`);
+
       try {
         const quote: any = await yahooFinance.quote(ticker);
         
+        console.log('Success');
+        console.log(`Price: ${quote?.regularMarketPrice}`);
+        console.log(`Yahoo Symbol: ${quote?.symbol}`);
+        console.log(`Short Name: ${quote?.shortName}`);
+
         if (!quote || quote.regularMarketPrice === undefined) {
           return { symbol: displaySymbol, status: 'unavailable' };
         }
@@ -131,8 +145,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           status: 'active'
         };
       } catch (err: any) {
+        console.log('Error:');
+        console.log(err);
         console.error(`[Live Rates] Yahoo error for ${ticker}:`, err.message);
         return { symbol: displaySymbol, status: 'unavailable' };
+      } finally {
+        console.log('--- END ---');
       }
     }));
 
