@@ -1,6 +1,10 @@
-import yahooFinance from 'yahoo-finance2';
+import yahooFinanceRaw from 'yahoo-finance2';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
+
+// Detect if we're in a bundled CJS environment where the default export is nested
+const YahooFinance = (yahooFinanceRaw as any).default || yahooFinanceRaw;
+const yahooFinance = new YahooFinance();
 
 // --- INLINED UTILITIES TO ENSURE SELF-CONTAINED DEPLOYMENT ---
 
