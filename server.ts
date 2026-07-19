@@ -1,4 +1,5 @@
 import express from "express";
+import adminHandler from "./api/admin";
 import path from "path";
 import { createClient } from "@supabase/supabase-js";
 
@@ -26,15 +27,6 @@ import liveRatesHandler from "./api/live-rates";
 import telegramWebhookHandler from "./api/telegram/webhook";
 import watcherStartHandler from "./api/watcher/start";
 import watcherScanHandler from "./api/watcher/scan";
-import adminStatsHandler from "./api/admin/stats";
-import adminUsersHandler from "./api/admin/users";
-import adminUsersActionHandler from "./api/admin/users/action";
-import adminWatchersHandler from "./api/admin/watchers";
-import adminWatchersActionHandler from "./api/admin/watchers/action";
-import adminSignalsHandler from "./api/admin/signals";
-import adminHealthHandler from "./api/admin/health";
-import adminSettingsHandler from "./api/admin/settings";
-import adminSendTestAlertHandler from "./api/admin/send-test-alert";
 
 async function startServer() {
   const app = express();
@@ -68,6 +60,11 @@ async function startServer() {
   app.use(express.json());
 
   // Admin Verification Guard Middleware
+
+
+  app.use("/api/admin", adminGuard);
+  app.all("/api/admin/*", adminHandler as any);
+
   async function adminGuard(req: express.Request, res: express.Response, next: express.NextFunction) {
     const authHeader = req.headers.authorization || '';
     const token = authHeader.startsWith('Bearer ') ? authHeader.substring(7) : authHeader;
@@ -98,18 +95,7 @@ async function startServer() {
   }
 
   // Admin APIs
-  app.get("/api/admin/stats", adminStatsHandler as any);
-  app.get("/api/admin/users", adminUsersHandler as any);
-  app.post("/api/admin/users/action", adminUsersActionHandler as any);
-  app.get("/api/admin/watchers", adminWatchersHandler as any);
-  app.post("/api/admin/watchers/action", adminWatchersActionHandler as any);
-  app.get("/api/admin/signals", adminSignalsHandler as any);
-  app.get("/api/admin/health", adminHealthHandler as any);
-  app.post("/api/admin/health", adminHealthHandler as any);
-  app.get("/api/admin/settings", adminSettingsHandler as any);
-  app.post("/api/admin/settings", adminSettingsHandler as any);
-  app.post("/api/admin/send-test-alert", adminSendTestAlertHandler as any);
-
+                      
   // Watcher APIs
   app.post("/api/watcher/start", watcherStartHandler as any);
   app.post("/api/watcher/scan", watcherScanHandler as any);
