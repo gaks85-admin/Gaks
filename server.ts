@@ -27,6 +27,7 @@ import liveRatesHandler from "./api/live-rates";
 import telegramWebhookHandler from "./api/telegram/webhook";
 import watcherStartHandler from "./api/watcher/start";
 import watcherScanHandler from "./api/watcher/scan";
+import debugGeminiHandler from "./api/debug/gemini";
 
 async function startServer() {
   const app = express();
@@ -110,6 +111,9 @@ async function startServer() {
 
   // Scheduled Cron execution for active market watchers
   app.post("/api/cron/market-watcher", marketWatcherCronHandler as any);
+
+  // Temporary debug endpoint
+  app.all("/api/debug/gemini", debugGeminiHandler as any);
 
   // Catch-all route to serve API list/health indicator since we are an API-only server now
   app.get("/", (req, res) => {

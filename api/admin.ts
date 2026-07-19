@@ -195,7 +195,7 @@ async function health_handler(req: any, res: any) {
           const prompt = `Reply only with OK`;
           
           const aiResponse = await generateContentWithDiagnostics(ai, {
-            model: "gemini-1.5-flash",
+            model: "gemini-2.5-flash",
             contents: prompt,
             config: {
               }
@@ -367,12 +367,12 @@ async function health_handler(req: any, res: any) {
         const startGemini = Date.now();
         const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
         const geminiRes = await generateContentWithDiagnostics(ai, {
-          model: "gemini-1.5-flash",
+          model: "gemini-2.5-flash",
           contents: "Reply only with OK",
         });
         geminiLatency = Date.now() - startGemini;
         geminiReturnedText = geminiRes.text?.trim() || null;
-        geminiStatus = geminiReturnedText === 'OK' ? 'ONLINE' : 'ERROR';
+        geminiStatus = geminiReturnedText === 'OK' ? 'Connected' : 'ERROR';
       } catch (err: any) {
         geminiStatus = 'ERROR';
         geminiErrorMsg = err.message || 'Gemini API call failed';
@@ -808,7 +808,7 @@ function loadSettings() {
   }
   return {
     defaultStrategy: "Gaks AI Default Strategy",
-    defaultGeminiModel: "gemini-1.5-flash",
+    defaultGeminiModel: "gemini-2.5-flash",
     scanInterval: 15,
     maintenanceMode: false
   };
@@ -1479,7 +1479,7 @@ ${JSON.stringify(collectedData, null, 2)}
 `;
 
       const aiResponse = await generateContentWithDiagnostics(ai, {
-        model: "gemini-1.5-flash",
+        model: "gemini-2.5-flash",
         contents: promptText,
         config: {
           responseMimeType: "application/json",
