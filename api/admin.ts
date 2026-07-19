@@ -15,8 +15,6 @@ async function generateContentWithDiagnostics(ai: any, params: any) {
    }
    
    console.log(`\n=== GEMINI REQUEST DIAGNOSTIC ===`);
-   const apiKeyPresent = !!process.env.GEMINI_API_KEY;
-   console.log(`API key present: ${apiKeyPresent}`);
    console.log(`Model: ${params.model}`);
    console.log(`Request Payload: ${JSON.stringify(params).substring(0, 500)}`);
    console.log(`Prompt Length: ${promptText.length}`);
@@ -116,11 +114,12 @@ async function health_handler(req: any, res: any) {
     // CASE A: RUN GEMINI HEALTH TEST (POST REQUEST)
     // ----------------------------------------------------
     if (req.method === 'POST') {
+      // Fetch first available Gemini API key from Supabase
       const { data: apiKeyData, error: apiKeyError } = await supabase
         .from('user_api_keys')
-        .select('api_key')
-        .eq('user_id', user.id)
+        .select('api_key, provider')
         .eq('provider', 'gemini')
+        .limit(1)
         .maybeSingle();
       
       const loadedKeyFromSupabase = !!(apiKeyData && apiKeyData.api_key);
@@ -131,7 +130,7 @@ async function health_handler(req: any, res: any) {
         return res.status(200).json({
           success: false,
           loadedKeyFromSupabase,
-          userId: user.id,
+          userId: user.id, // Keeping user.id for reference, even though key is global
           keyLength,
           model,
           response: null,
@@ -151,6 +150,7 @@ async function health_handler(req: any, res: any) {
           loadedKeyFromSupabase,
           userId: user.id,
           keyLength,
+          provider: apiKeyData.provider,
           model,
           response: aiResponse.text?.trim() || null,
           error: null
@@ -211,17 +211,17 @@ async function health_handler(req: any, res: any) {
     let geminiReturnedText = null;
     let geminiErrorMsg = null;
     
-    // Fetch admin user's Gemini API key from Supabase
+    // Fetch first available Gemini API key from Supabase
     const { data: apiKeyData, error: apiKeyError } = await supabase
       .from('user_api_keys')
       .select('api_key')
-      .eq('user_id', user.id)
       .eq('provider', 'gemini')
+      .limit(1)
       .maybeSingle();
       
     const keyLoadedFromSupabase = !!(apiKeyData && apiKeyData.api_key);
     const keyLength = apiKeyData?.api_key?.length || 0;
-    console.log(`[Gemini Health Check - GET] Key loaded: ${keyLoadedFromSupabase}. Record ID: ${user.id}. Key non-empty: ${keyLength > 0}`);
+    console.log(`[Gemini Health Check - GET] Key loaded: ${keyLoadedFromSupabase}. Key non-empty: ${keyLength > 0}`);
 
     if (keyLoadedFromSupabase) {
       try {
