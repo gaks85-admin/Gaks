@@ -111,6 +111,9 @@ export default async function handler(req: any, res: any) {
     return res.status(405).json({ success: false, error: 'Method Not Allowed' });
   }
 
+  console.log("[Watcher Start] Incoming Request Body:", JSON.stringify(req.body, null, 2));
+  console.log("[Watcher Start] Incoming Request Headers:", JSON.stringify(req.headers, null, 2));
+
   let userId = req.body.userId;
   let selectedPair = req.body.selectedPair;
   let selectedTimeframe = req.body.selectedTimeframe;
@@ -121,10 +124,12 @@ export default async function handler(req: any, res: any) {
 
   if (tokenHeader) {
     try {
+      console.log("[Watcher Start] Validating auth token...");
       const { data: { user }, error: authError } = await supabase.auth.getUser(tokenHeader);
       if (authError || !user) {
         console.warn("[Watcher Start] Bearer token auth validation failed:", authError?.message);
       } else {
+        console.log("[Watcher Start] Auth success. User ID:", user.id);
         userId = user.id;
       }
     } catch (err: any) {
@@ -170,6 +175,7 @@ export default async function handler(req: any, res: any) {
     console.log(`[Watcher Start] Verifying requirements for authenticated user: ${userId}`);
 
     // 2. Retrieve the authenticated user's profile
+    console.log("[Watcher Start] Fetching user profile...");
     const { data: profile, error: profileError } = await supabase
       .from("profiles")
       .select("*")
@@ -179,8 +185,10 @@ export default async function handler(req: any, res: any) {
     if (profileError) {
       console.warn("[Watcher Start] Profile query warning:", profileError.message);
     }
+    console.log("[Watcher Start] Profile result:", JSON.stringify(profile, null, 2));
 
     // 3. Verify Telegram is connected by checking the telegram_connections table
+    console.log("[Watcher Start] Checking telegram connection...");
     let { data: telegramConn, error: telegramError } = await supabase
       .from("telegram_connections")
       .select("*")
@@ -188,16 +196,21 @@ export default async function handler(req: any, res: any) {
       .maybeSingle();
 
     if (!telegramConn) {
-      // Auto-create missing row
+      console.log("[Watcher Start] No telegram connection found. Auto-creating row...");
       const { data: newConn, error: insertError } = await supabase
         .from("telegram_connections")
         .insert({ user_id: userId, connected: false, connection_token: randomUUID(), created_at: new Date().toISOString(), updated_at: new Date().toISOString() })
         .select()
         .single();
       
-      if (!insertError) {
+      if (insertError) {
+        console.error("[Watcher Start] Failed to create telegram_connections row:", insertError.message);
+      } else {
+        console.log("[Watcher Start] Auto-created telegram connection row:", JSON.stringify(newConn, null, 2));
         telegramConn = newConn;
       }
+    } else {
+      console.log("[Watcher Start] Existing telegram connection found:", JSON.stringify(telegramConn, null, 2));
     }
 
     if (telegramError && !telegramConn) {
@@ -207,6 +220,7 @@ export default async function handler(req: any, res: any) {
     telegramChatId = telegramConn?.telegram_chat_id || null;
 
     if (!telegramConn || !telegramConn.connected || !telegramChatId) {
+      console.log("[Watcher Start] Termination: Telegram not connected or missing chatId.");
       return res.status(400).json({
         success: false,
         error: "Telegram is not connected. Please connect your Telegram account first under Gaks AI Settings."
@@ -214,6 +228,7 @@ export default async function handler(req: any, res: any) {
     }
 
     // 4. Verify the user has saved a Gemini API key
+    console.log("[Watcher Start] Fetching Gemini API key...");
     const { data: apiKeyRecord, error: apiKeyError } = await supabase
       .from("user_api_keys")
       .select("*")
@@ -224,8 +239,10 @@ export default async function handler(req: any, res: any) {
     if (apiKeyError) {
       console.warn("[Watcher Start] API Key query error:", apiKeyError.message);
     }
+    console.log("[Watcher Start] API Key Record found:", !!apiKeyRecord);
 
     if (!apiKeyRecord || !apiKeyRecord.api_key) {
+      console.log("[Watcher Start] Termination: Gemini API key missing.");
       await sendTelegramMessage(telegramChatId, "❌ *Market Watcher Activation Failed*\n\nReason: Gemini API key is missing. Please save a valid Gemini API key under AI Settings before activating.");
       return res.status(400).json({
         success: false,
@@ -234,6 +251,7 @@ export default async function handler(req: any, res: any) {
     }
 
     // 5 & 6. Verify Strategy Playbook and Risk settings exist
+    console.log("[Watcher Start] Fetching trading preferences...");
     const { data: prefsRecord, error: prefsError } = await supabase
       .from("trading_preferences")
       .select("*")
@@ -243,11 +261,14 @@ export default async function handler(req: any, res: any) {
     if (prefsError) {
       console.warn("[Watcher Start] Trading preferences query error:", prefsError.message);
     }
+    console.log("[Watcher Start] Trading preferences result:", JSON.stringify(prefsRecord, null, 2));
 
     const strategyDetails = extractActiveStrategyDetails(prefsRecord?.strategy_text || '');
     const activeStrategyText = strategyDetails.text;
+    console.log("[Watcher Start] Strategy extracted:", strategyDetails.name, "ID:", strategyDetails.id);
 
     if (!activeStrategyText.trim()) {
+      console.log("[Watcher Start] Termination: Strategy text is empty.");
       await sendTelegramMessage(telegramChatId, "❌ *Market Watcher Activation Failed*\n\nReason: Active trading strategy is empty. Please configure your strategy first.");
       return res.status(400).json({
         success: false,
@@ -259,6 +280,7 @@ export default async function handler(req: any, res: any) {
     const riskReward = prefsRecord?.risk_reward || '';
 
     if (!preferredRisk.trim() || !riskReward.trim()) {
+      console.log("[Watcher Start] Termination: Risk settings incomplete.");
       await sendTelegramMessage(telegramChatId, "❌ *Market Watcher Activation Failed*\n\nReason: Risk settings are incomplete. Please define and save your Preferred Risk and Risk:Reward Ratio under the Risk & Sizing section first.");
       return res.status(400).json({
         success: false,
@@ -269,11 +291,17 @@ export default async function handler(req: any, res: any) {
     // Limit standard users to only one active watcher, while allowing unlimited active watchers for admins.
     const userRole = (profile?.role === 'admin' || profile?.email?.trim().toLowerCase() === 'gaks6535@gmail.com') ? 'admin' : 'user';
 
-    const { data: existingActiveWatchers } = await supabase
+    console.log("[Watcher Start] Checking existing active watchers...");
+    const { data: existingActiveWatchers, error: watchersFetchError } = await supabase
       .from("watchers")
       .select("*")
       .eq("user_id", userId)
       .eq("status", "active");
+
+    if (watchersFetchError) {
+      console.error("[Watcher Start] Error fetching existing watchers:", watchersFetchError.message);
+    }
+    console.log("[Watcher Start] Active watchers found:", existingActiveWatchers?.length || 0);
 
     if (userRole === 'user' && existingActiveWatchers && existingActiveWatchers.length > 0) {
       const hasDifferentActive = existingActiveWatchers.some(w => w.selected_pair !== selectedPair);
@@ -409,6 +437,7 @@ export default async function handler(req: any, res: any) {
     const scanInterval = 5;
 
     // Ensure the strategy exists in public.strategies table to satisfy foreign key constraint
+    console.log("[Watcher Start] Upserting strategy...");
     const { error: stratError } = await supabase
       .from("strategies")
       .upsert({
@@ -422,38 +451,47 @@ export default async function handler(req: any, res: any) {
 
     if (stratError) {
       console.warn("[Watcher Start] Warning upserting into strategies table:", stratError.message);
+    } else {
+      console.log("[Watcher Start] Strategy upsert successful.");
     }
 
     // Upsert the watcher record for this pair
+    console.log("[Watcher Start] Upserting watcher record...");
+    const watcherData = {
+      user_id: userId,
+      status: "active",
+      strategy_id: strategyDetails.id,
+      started_at: nowString,
+      telegram_chat_id: telegramChatId,
+      account_size: accountSize,
+      risk_percentage: riskPercentage,
+      selected_pair: selectedPair,
+      selected_timeframe: selectedTimeframe || 'H1',
+      gemini_model: "gemini-1.5-flash",
+      scan_interval_minutes: scanInterval,
+      updated_at: nowString
+    };
+    console.log("[Watcher Start] Watcher data payload:", JSON.stringify(watcherData, null, 2));
+
     const { error: watchersError } = await supabase
       .from("watchers")
-      .upsert({
-        user_id: userId,
-        status: "active",
-        strategy_id: strategyDetails.id,
-        started_at: nowString,
-        telegram_chat_id: telegramChatId,
-        account_size: accountSize,
-        risk_percentage: riskPercentage,
-        selected_pair: selectedPair,
-        selected_timeframe: selectedTimeframe || 'H1',
-        gemini_model: "gemini-1.5-flash",
-        scan_interval_minutes: scanInterval,
-        updated_at: nowString
-      }, { onConflict: "user_id,selected_pair" });
+      .upsert(watcherData, { onConflict: "user_id,selected_pair" });
 
     if (watchersError) {
       console.error("[Watcher Start] Failed to write to watchers table:", watchersError.message);
       await sendTelegramMessage(telegramChatId, `❌ *Market Watcher Activation Failed*\n\nReason: Failed to write watcher state to DB: ${watchersError.message}`);
       return res.status(500).json({
         success: false,
-        error: "Failed to write watcher state to DB: " + watchersError.message
+        error: "Failed to write watcher state to DB: " + watchersError.message,
+        details: watchersError
       });
     }
+    console.log("[Watcher Start] Watcher upsert successful.");
 
     // Upsert into legacy market_watchers table for interface backwards-compatibility
     try {
-      await supabase
+      console.log("[Watcher Start] Upserting legacy market_watcher...");
+      const { error: legacyError } = await supabase
         .from("market_watchers")
         .upsert({
           user_id: userId,
@@ -461,8 +499,14 @@ export default async function handler(req: any, res: any) {
           activated_at: nowString,
           updated_at: nowString
         }, { onConflict: "user_id" });
+      
+      if (legacyError) {
+        console.warn("[Watcher Start] Legacy market_watchers table sync error:", legacyError.message);
+      } else {
+        console.log("[Watcher Start] Legacy market_watcher upsert successful.");
+      }
     } catch (err: any) {
-      console.warn("[Watcher Start] Legacy market_watchers table sync error:", err.message);
+      console.warn("[Watcher Start] Legacy market_watchers table sync exception:", err.message);
     }
 
     console.log(`[Watcher Start] AI Market Watcher activated successfully for user ${userId}.`);
@@ -485,12 +529,19 @@ export default async function handler(req: any, res: any) {
 
   } catch (err: any) {
     console.error("[Watcher Start] Unhandled internal exception:", err);
+    console.error("[Watcher Start] Stack Trace:", err.stack);
     if (telegramChatId) {
-      await sendTelegramMessage(telegramChatId, `❌ *Market Watcher Activation Failed*\n\nReason: Internal server error during activation.`);
+      try {
+        await sendTelegramMessage(telegramChatId, `❌ *Market Watcher Activation Failed*\n\nReason: Internal server error during activation: ${err.message || "Unknown error"}`);
+      } catch (tgErr) {
+        console.error("[Watcher Start] Failed to send error notification to Telegram:", tgErr);
+      }
     }
     return res.status(500).json({
       success: false,
-      error: "Internal server error during watcher activation: " + (err.message || "Unknown error")
+      error: "Internal server error during watcher activation: " + (err.message || "Unknown error"),
+      stack: err.stack,
+      details: err
     });
   }
 }
