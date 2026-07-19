@@ -1,76 +1,119 @@
 import * as yahooFinanceModule from 'yahoo-finance2';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { getSupabase } from '../lib/supabase-server';
-import { toCanonicalSymbol, toDisplaySymbol } from '../lib/market-utils';
+import { createClient } from '@supabase/supabase-js';
 
-// Handle both ES and CJS default exports correctly for yahoo-finance2
+// --- INLINED UTILITIES TO ENSURE SELF-CONTAINED DEPLOYMENT ---
+
+/**
+ * Canonicalizes a symbol to a standard internal format (uppercase, alphanumeric only).
+ */
+const toCanonicalSymbol = (symbol: string): string => {
+  if (!symbol) return '';
+  return symbol.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+};
+
+/**
+ * Converts a canonical symbol to a human-friendly display format.
+ */
+const toDisplaySymbol = (symbol: string): string => {
+  const canonical = toCanonicalSymbol(symbol);
+  const mappings: Record<string, string> = {
+    'EURUSD': 'EUR/USD', 'GBPUSD': 'GBP/USD', 'USDJPY': 'USD/JPY', 'AUDUSD': 'AUD/USD',
+    'USDCAD': 'USD/CAD', 'USDCHF': 'USD/CHF', 'NZDUSD': 'NZD/USD', 'BTCUSD': 'BTC/USD',
+    'ETHUSD': 'ETH/USD', 'XAUUSD': 'XAU/USD', 'XAGUSD': 'XAG/USD', 'NAS100': 'NAS100',
+    'US30': 'US30', 'SPX500': 'SPX500', 'GER30': 'GER30', 'UK100': 'UK100'
+  };
+  if (mappings[canonical]) return mappings[canonical];
+  if (canonical.length === 6 && /^[A-Z]{6}$/.test(canonical)) {
+    return `${canonical.slice(0, 3)}/${canonical.slice(3)}`;
+  }
+  return canonical;
+};
+
+/**
+ * Self-contained Supabase client initialization.
+ */
+const getSupabase = () => {
+  const url = process.env.VITE_SUPABASE_URL || "https://wkujrqmxivljnuvumfau.supabase.co";
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+  
+  if (!url || !key) {
+    throw new Error('Supabase configuration missing (URL or Service Role Key)');
+  }
+
+  return createClient(url, key, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false
+    }
+  });
+};
+
+// --- YAHOO FINANCE INITIALIZATION ---
+
 const YahooFinanceConstructor = (yahooFinanceModule as any).default || (yahooFinanceModule as any).YahooFinance || yahooFinanceModule;
 const yahooFinance = new (YahooFinanceConstructor as any)();
 
-/**
- * Default symbols to show on the homepage if no watchers are active.
- * These are the core liquid assets configured by the application.
- */
 const DEFAULT_SYMBOLS = ['EURUSD', 'GBPUSD', 'XAUUSD', 'BTCUSD', 'NAS100', 'US30'];
 
 /**
- * Dynamically converts canonical symbols into Yahoo Finance tickers.
- * Logic is extensible for Forex, Crypto, Metals, and Indices.
+ * Converts symbols into Yahoo Finance tickers.
  */
 const symbolToYahooTicker = (symbol: string): string => {
   const canonical = toCanonicalSymbol(symbol);
   
-  // Crypto mappings (BTCUSD -> BTC-USD)
   if (canonical.endsWith('USD') && (canonical.startsWith('BTC') || canonical.startsWith('ETH') || canonical.startsWith('LTC') || canonical.startsWith('XRP'))) {
     return `${canonical.slice(0, -3)}-USD`;
   }
   
-  // Metals/Futures mappings (XAUUSD -> GC=F, XAGUSD -> SI=F)
   if (canonical === 'XAUUSD') return 'GC=F';
   if (canonical === 'XAGUSD') return 'SI=F';
   
-  // Indices mappings (appropriate Yahoo futures tickers)
   const indexMappings: Record<string, string> = {
-    'NAS100': 'NQ=F', // NASDAQ 100 Futures
-    'US30': 'YM=F',   // Dow Jones Futures
-    'SPX500': 'ES=F',  // S&P 500 Futures
-    'GER30': 'DAX=F', // DAX Futures
-    'UK100': 'Z=F'     // FTSE 100 Futures
+    'NAS100': 'NQ=F',
+    'US30': 'YM=F',
+    'SPX500': 'ES=F',
+    'GER30': 'DAX=F',
+    'UK100': 'Z=F'
   };
   
   if (indexMappings[canonical]) return indexMappings[canonical];
   
-  // Forex mappings (EURUSD -> EURUSD=X)
-  if (canonical.length === 6 && !canonical.includes('USD')) {
-      // Heuristic for other forex pairs if needed
-      return `${canonical}=X`;
-  }
   if (canonical.length === 6) {
     return `${canonical}=X`;
   }
   
-  return canonical; // Fallback for stocks or other assets
+  return canonical;
 };
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  // CORS Headers
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+
   try {
     const supabase = getSupabase();
     
-    // 1. Fetch all active monitored symbols dynamically from the database
+    // 1. Fetch active watchers
     const { data: watchers, error: watcherError } = await supabase
       .from('watchers')
       .select('selected_pair')
       .eq('status', 'active');
       
     if (watcherError) {
-      console.warn('[Live Rates] Database check partial failure (watchers table):', watcherError.message);
+      console.warn('[Live Rates] Watcher fetch partial failure:', watcherError.message);
     }
     
-    // 2. Canonicalize and merge symbols (Defaults + Active Watchers)
+    // 2. Canonicalize and merge
     const watcherSymbols = (watchers || []).map(w => toCanonicalSymbol(w.selected_pair));
     const uniqueSymbols = Array.from(new Set([...DEFAULT_SYMBOLS, ...watcherSymbols])).filter(Boolean);
     
-    // 3. Fetch quotes from Yahoo Finance
+    // 3. Fetch data from Yahoo
     const pairsData = await Promise.all(uniqueSymbols.map(async (symbol) => {
       const ticker = symbolToYahooTicker(symbol);
       const displaySymbol = toDisplaySymbol(symbol);
@@ -79,10 +122,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const quote = await yahooFinance.quote(ticker);
         
         if (!quote || quote.regularMarketPrice === undefined) {
-          return {
-            symbol: displaySymbol,
-            status: 'unavailable'
-          };
+          return { symbol: displaySymbol, status: 'unavailable' };
         }
         
         return {
@@ -94,15 +134,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           status: 'active'
         };
       } catch (err: any) {
-        console.error(`[Live Rates] Error fetching quote for ${ticker} (${symbol}):`, err.message || err);
-        return {
-          symbol: displaySymbol,
-          status: 'unavailable'
-        };
+        console.error(`[Live Rates] Yahoo error for ${ticker}:`, err.message);
+        return { symbol: displaySymbol, status: 'unavailable' };
       }
     }));
 
-    // 4. Return canonical JSON structure expected by the frontend
     return res.status(200).json({
       success: true,
       timestamp: Date.now(),
@@ -110,10 +146,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
     
   } catch (error: any) {
-    console.error('[Live Rates] Critical Pipeline Failure:', error);
+    console.error('[Live Rates] Endpoint Error:', error);
     return res.status(500).json({
       success: false,
-      error: error.message || 'Internal server error fetching live rates'
+      error: error.message || 'Internal server error'
     });
   }
 }
