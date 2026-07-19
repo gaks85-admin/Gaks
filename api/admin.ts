@@ -113,84 +113,9 @@ async function health_handler(req: any, res: any) {
     }
 
     // ----------------------------------------------------
-    // CASE A: RUN FULL SYSTEM TEST (POST REQUEST)
+    // CASE A: RUN GEMINI HEALTH TEST (POST REQUEST)
     // ----------------------------------------------------
     if (req.method === 'POST') {
-      const results: Record<string, any> = {};
-      let hasError = false;
-
-      // Step 1: Verify Supabase database connection
-      const startSupa = Date.now();
-      let dbError: string | null = null;
-      try {
-        const { error: supaErr } = await supabase.from('profiles').select('id').limit(1);
-        if (supaErr) throw supaErr;
-        results.supabase = {
-          status: 'ONLINE',
-          responseTime: Date.now() - startSupa,
-          message: 'Connected to Supabase, profiles table read successfully.'
-        };
-      } catch (err: any) {
-        hasError = true;
-        dbError = err.message || 'Database connection error';
-        results.supabase = {
-          status: 'ERROR',
-          responseTime: Date.now() - startSupa,
-          message: 'Failed to query Supabase profiles table.',
-          error: dbError
-        };
-      }
-      await logHealthTest('Supabase', results.supabase.status, results.supabase.responseTime, results.supabase.message, dbError);
-
-      // Step 2: Fetch a real EURUSD candle (or quote) from Twelve Data
-      const startTwelve = Date.now();
-      let twelveError: string | null = null;
-      let eurUsdCandle: any = null;
-      if (process.env.TWELVE_DATA_API_KEY) {
-        try {
-          const resQuote = await fetch(`https://api.twelvedata.com/quote?symbol=EUR/USD&apikey=${process.env.TWELVE_DATA_API_KEY}`);
-          if (!resQuote.ok) {
-            throw new Error(`Twelve Data API returned status code ${resQuote.status}`);
-          }
-          const quoteData = await resQuote.json();
-          if (quoteData.status === 'error' || quoteData.code >= 400) {
-            throw new Error(quoteData.message || 'Error response from Twelve Data API');
-          }
-          eurUsdCandle = quoteData;
-          results.twelveData = {
-            status: 'ONLINE',
-            responseTime: Date.now() - startTwelve,
-            symbol: 'EUR/USD',
-            price: parseFloat(quoteData.close || quoteData.price || '0'),
-            message: `Successfully fetched EUR/USD quote: ${quoteData.close || quoteData.price}`
-          };
-        } catch (err: any) {
-          hasError = true;
-          twelveError = err.message || 'Twelve Data fetch error';
-          results.twelveData = {
-            status: 'ERROR',
-            responseTime: Date.now() - startTwelve,
-            message: 'Failed to contact Twelve Data API.',
-            error: twelveError
-          };
-        }
-      } else {
-        hasError = true;
-        twelveError = 'TWELVE_DATA_API_KEY is not defined';
-        results.twelveData = {
-          status: 'ERROR',
-          responseTime: 0,
-          message: 'Twelve Data API Key is missing in environment settings.',
-          error: twelveError
-        };
-      }
-      await logHealthTest('Twelve Data', results.twelveData.status, results.twelveData.responseTime, results.twelveData.message, twelveError);
-
-      // Step 3 & 4: Send the candle to Gemini and display response
-      const startGemini = Date.now();
-      let geminiError: string | null = null;
-      
-      // Fetch user's Gemini API key from Supabase
       const { data: apiKeyData, error: apiKeyError } = await supabase
         .from('user_api_keys')
         .select('api_key')
@@ -198,148 +123,49 @@ async function health_handler(req: any, res: any) {
         .eq('provider', 'gemini')
         .maybeSingle();
       
-      const keyLoadedFromSupabase = !!(apiKeyData && apiKeyData.api_key);
+      const loadedKeyFromSupabase = !!(apiKeyData && apiKeyData.api_key);
       const keyLength = apiKeyData?.api_key?.length || 0;
-      console.log(`[Gemini Health Check] Key loaded: ${keyLoadedFromSupabase}. Record ID: ${user.id}. Key non-empty: ${keyLength > 0}`);
-      
-      if (keyLoadedFromSupabase) {
-        try {
-          const ai = new GoogleGenAI({ apiKey: apiKeyData.api_key });
-          const prompt = `Reply only with OK`;
-          
-          const aiResponse = await generateContentWithDiagnostics(ai, {
-            model: "gemini-2.5-flash",
-            contents: prompt,
-            config: {
-              }
-          });
-          
-          const returnedText = aiResponse.text?.trim() || 'No response';
-          results.gemini = {
-            status: 'Connected',
-            responseTime: Date.now() - startGemini,
-            returnedText,
-            message: `Gemini prompt successful. Answer: "${returnedText}"`,
-            keyLoadedFromSupabase,
-            keyLength,
-            model: "gemini-2.5-flash",
-            rawResponse: aiResponse
-          };
-        } catch (err: any) {
-          hasError = true;
-          geminiError = err.message || 'Gemini Generation error';
-          results.gemini = {
-            status: 'ERROR',
-            responseTime: Date.now() - startGemini,
-            message: 'Failed to complete prompt with Gemini API.',
-            error: geminiError,
-            keyLoadedFromSupabase,
-            keyLength,
-            fullError: err
-          };
-        }
-      } else {
-        hasError = true;
-        geminiError = 'Gemini API key missing or not found in Supabase';
-        results.gemini = {
-          status: 'ERROR',
-          responseTime: 0,
-          message: 'Gemini API Key is missing in user settings.',
-          error: geminiError,
-          keyLoadedFromSupabase,
-          keyLength
-        };
+      const model = "gemini-2.5-flash";
+
+      if (!loadedKeyFromSupabase) {
+        return res.status(200).json({
+          success: false,
+          loadedKeyFromSupabase,
+          userId: user.id,
+          keyLength,
+          model,
+          response: null,
+          error: "Gemini API key not found in Supabase."
+        });
       }
-      await logHealthTest('Gemini', results.gemini.status, results.gemini.responseTime, results.gemini.message, geminiError);
 
-      // Step 5: Send a Telegram test message to the Admin only
-      const startTelegram = Date.now();
-      let telegramError: string | null = null;
-      if (process.env.TELEGRAM_BOT_TOKEN) {
-        try {
-          // Find admin Telegram chat ID
-          const { data: adminConn, error: connErr } = await supabase
-            .from('telegram_connections')
-            .select('telegram_chat_id, telegram_username')
-            .eq('user_id', user.id)
-            .eq('connected', true)
-            .maybeSingle();
-
-          if (connErr) throw connErr;
-          
-          if (adminConn && adminConn.telegram_chat_id) {
-            const botToken = process.env.TELEGRAM_BOT_TOKEN;
-            const messageText = `🚨 *Gaks AI System Diagnostic Run* 🚨\n\n` +
-              `*Supabase DB:* OK\n` +
-              `*Twelve Data:* EUR/USD Price = ${results.twelveData?.price || 'Fetch Error'}\n` +
-              `*Gemini:* "${results.gemini?.returnedText || 'Prompt Error'}"\n\n` +
-              `*Overall System Status:* ${hasError ? '🔴 ERROR DETECTED' : '🟢 HEALTHY'}\n` +
-              `*Timestamp:* ${new Date().toUTCString()}`;
-
-            const tgRes = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                chat_id: adminConn.telegram_chat_id,
-                text: messageText,
-                parse_mode: 'Markdown'
-              })
-            });
-
-            if (!tgRes.ok) {
-              const resTxt = await tgRes.text();
-              throw new Error(`Telegram API returned HTTP ${tgRes.status}: ${resTxt}`);
-            }
-
-            const tgBody = await tgRes.json();
-            results.telegram = {
-              status: 'ONLINE',
-              responseTime: Date.now() - startTelegram,
-              telegramResponse: `Sent to user @${adminConn.telegram_username || 'Admin'}`,
-              message: 'Diagnostic broadcast successfully sent to Admin telegram chat.'
-            };
-          } else {
-            // Admin has no telegram connected
-            results.telegram = {
-              status: 'OFFLINE',
-              responseTime: Date.now() - startTelegram,
-              message: 'Telegram bot is online, but admin has not connected their Telegram under Gaks AI Settings.',
-              error: 'Admin Telegram connection row missing.'
-            };
-          }
-        } catch (err: any) {
-          hasError = true;
-          telegramError = err.message || 'Telegram notification error';
-          results.telegram = {
-            status: 'ERROR',
-            responseTime: Date.now() - startTelegram,
-            message: 'Failed to broadcast test notification via Telegram API.',
-            error: telegramError
-          };
-        }
-      } else {
-        hasError = true;
-        telegramError = 'TELEGRAM_BOT_TOKEN is not defined';
-        results.telegram = {
-          status: 'ERROR',
-          responseTime: 0,
-          message: 'Telegram Bot Token is missing in environment settings.',
-          error: telegramError
-        };
+      try {
+        const ai = new GoogleGenAI({ apiKey: apiKeyData.api_key });
+        const aiResponse = await generateContentWithDiagnostics(ai, {
+          model,
+          contents: "Reply only with OK",
+        });
+        
+        return res.status(200).json({
+          success: true,
+          loadedKeyFromSupabase,
+          userId: user.id,
+          keyLength,
+          model,
+          response: aiResponse.text?.trim() || null,
+          error: null
+        });
+      } catch (err: any) {
+        return res.status(200).json({
+          success: false,
+          loadedKeyFromSupabase,
+          userId: user.id,
+          keyLength,
+          model,
+          response: null,
+          error: err.message || "Gemini API call failed"
+        });
       }
-      await logHealthTest('Telegram', results.telegram.status, results.telegram.responseTime, results.telegram.message, telegramError);
-
-      // Step 6: Return checklist of all subsystems and overall status
-      const overallStatus = hasError ? 'SYSTEM ERROR' : 'SYSTEM HEALTHY';
-      
-      // Log overall diagnostic outcome
-      await logHealthTest('Market Watcher', overallStatus === 'SYSTEM HEALTHY' ? 'Healthy' : 'Error', Date.now() - startSupa, `Diagnostic checklist outcome: ${overallStatus}`, null);
-
-      return res.status(200).json({
-        success: true,
-        overallStatus,
-        results
-      });
     }
 
     // ----------------------------------------------------
