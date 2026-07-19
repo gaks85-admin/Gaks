@@ -5,10 +5,6 @@
   "outputDirectory": "dist",
   "rewrites": [
     {
-      "source": "/api/admin/:path*",
-      "destination": "/api/admin"
-    },
-    {
       "source": "/api/telegram-webhook",
       "destination": "/api/telegram/webhook"
     },
