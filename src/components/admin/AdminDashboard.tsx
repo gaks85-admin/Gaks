@@ -1903,7 +1903,7 @@ const SystemHealthPage = ({ fetchWithAuth }: { fetchWithAuth: any }) => {
 const SettingsPage = ({ fetchWithAuth, showToast }: { fetchWithAuth: any; showToast: any }) => {
   const [settings, setSettings] = useState<any>({
     defaultStrategy: "",
-    defaultGeminiModel: "gemini-2.5-flash",
+    defaultGeminiModel: "gemini-1.5-flash",
     scanInterval: 15,
     maintenanceMode: false
   });
@@ -1976,8 +1976,8 @@ const SettingsPage = ({ fetchWithAuth, showToast }: { fetchWithAuth: any; showTo
             onChange={e => setSettings((prev: any) => ({ ...prev, defaultGeminiModel: e.target.value }))}
             className="w-full bg-[#0c0c0e] border border-zinc-900 text-xs font-semibold rounded-xl px-4 py-3 focus:outline-none focus:border-zinc-800 text-zinc-300"
           >
-            <option value="gemini-2.5-flash">Gemini 2.5 Flash (Default / High Speed)</option>
-            <option value="gemini-2.5-pro">Gemini 2.5 Pro (Deep Reasoning)</option>
+            <option value="gemini-1.5-flash">Gemini 1.5 Flash (Default / High Speed)</option>
+            <option value="gemini-1.5-pro">Gemini 1.5 Pro (Deep Reasoning)</option>
             <option value="gemini-1.5-flash">Gemini 1.5 Flash (Legacy)</option>
             <option value="gemini-1.5-pro">Gemini 1.5 Pro (Legacy)</option>
           </select>

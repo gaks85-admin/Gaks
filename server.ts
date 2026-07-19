@@ -1,8 +1,26 @@
 import express from "express";
 import path from "path";
-import { getSupabase } from "./lib/supabase-server";
+import { createClient } from "@supabase/supabase-js";
 
-import { toCanonicalSymbol, toDisplaySymbol } from "./lib/market-utils";
+/**
+ * Self-contained Supabase client initialization.
+ */
+const getSupabase = () => {
+  const url = process.env.VITE_SUPABASE_URL || "https://wkujrqmxivljnuvumfau.supabase.co";
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+  
+  if (!url || !key) {
+    throw new Error('Supabase configuration missing (VITE_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required)');
+  }
+
+  return createClient(url, key, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false
+    }
+  });
+};
+
 import marketWatcherCronHandler from "./api/cron/market-watcher";
 import liveRatesHandler from "./api/live-rates";
 import telegramWebhookHandler from "./api/telegram/webhook";

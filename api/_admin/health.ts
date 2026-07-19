@@ -155,7 +155,7 @@ export default async function handler(req: any, res: any) {
           const prompt = `Analyze this candle and reply with BUY, SELL or NO SIGNAL with one sentence: ${candleCtx}`;
           
           const aiResponse = await ai.models.generateContent({
-            model: "gemini-3.5-flash",
+            model: "gemini-1.5-flash",
             contents: prompt,
             config: {
               systemInstruction: "You are an AI market watcher testing model responsiveness. Answer concisely."
@@ -328,7 +328,7 @@ export default async function handler(req: any, res: any) {
         const startGemini = Date.now();
         const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
         const geminiRes = await ai.models.generateContent({
-          model: "gemini-3.5-flash",
+          model: "gemini-1.5-flash",
           contents: "Reply only with OK",
         });
         geminiLatency = Date.now() - startGemini;

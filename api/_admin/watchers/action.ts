@@ -318,7 +318,7 @@ ${JSON.stringify(collectedData, null, 2)}
 `;
 
       const aiResponse = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
+        model: "gemini-1.5-flash",
         contents: promptText,
         config: {
           responseMimeType: "application/json",
