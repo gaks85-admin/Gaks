@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useLiveRates } from './hooks/useLiveRates';
 import { supabase } from './supabaseClient';
 import { getGeminiKey, saveGeminiKey, deleteGeminiKey } from './lib/apiKeys';
-import { toCanonicalSymbol, toDisplaySymbol } from '../lib/market-utils';
+import { toCanonicalSymbol, toDisplaySymbol, normalizeSymbol } from '../lib/market-utils';
 
 const Auth = React.lazy(() => import('./components/Auth'));
 const AdminDashboard = React.lazy(() => import('./components/admin/AdminDashboard'));
@@ -281,7 +281,7 @@ export default function App() {
 
       if (data && data.length > 0) {
         const mapped: WatchlistItem[] = data.map((item: any) => ({
-          symbol: item.selected_pair,
+          symbol: normalizeSymbol(item.selected_pair),
           name: getFullNameForSymbol(item.selected_pair),
           price: 0, // Will be updated by live rates or scan
           change: 0,
@@ -539,14 +539,14 @@ export default function App() {
         if (prevWatchlist.length === 0) return prevWatchlist;
         
         const hasUpdates = prevWatchlist.some(item => {
-          const live = liveRates.find(r => r.symbol === item.symbol);
+          const live = liveRates.find(r => normalizeSymbol(r.symbol) === normalizeSymbol(item.symbol));
           return live && (live.price !== item.price || live.change !== item.change);
         });
 
         if (!hasUpdates) return prevWatchlist;
 
         const updated = prevWatchlist.map(item => {
-          const live = liveRates.find(r => r.symbol === item.symbol);
+          const live = liveRates.find(r => normalizeSymbol(r.symbol) === normalizeSymbol(item.symbol));
           if (live) {
             return {
               ...item,
@@ -1230,11 +1230,11 @@ export default function App() {
 
   // Market Watcher Add Ticker
   const handleAddPair = (symbolToAdd: string, timeframeToWatch: string = 'H1') => {
-    const cleanSymbol = toCanonicalSymbol(symbolToAdd);
+    const cleanSymbol = normalizeSymbol(symbolToAdd);
     if (!cleanSymbol) return;
 
     // Check if we already have live data for this
-    const live = liveRates.find(r => r.symbol === cleanSymbol);
+    const live = liveRates.find(r => normalizeSymbol(r.symbol) === normalizeSymbol(cleanSymbol));
 
     const newPair: WatchlistItem = {
       symbol: cleanSymbol,
@@ -1253,8 +1253,8 @@ export default function App() {
     setWatchlist(prev => {
       let updatedWatchlist;
       if (isAdmin) {
-        if (prev.some(w => w.symbol === cleanSymbol)) {
-          updatedWatchlist = prev.map(w => w.symbol === cleanSymbol ? { ...w, timeframe: timeframeToWatch } : w);
+        if (prev.some(w => normalizeSymbol(w.symbol) === normalizeSymbol(cleanSymbol))) {
+          updatedWatchlist = prev.map(w => normalizeSymbol(w.symbol) === normalizeSymbol(cleanSymbol) ? { ...w, timeframe: timeframeToWatch } : w);
         } else {
           updatedWatchlist = [...prev, newPair];
         }
@@ -1279,10 +1279,10 @@ export default function App() {
   };
 
   const handleRemovePair = (symbolToRemove: string) => {
-    const canonical = toCanonicalSymbol(symbolToRemove);
+    const canonical = normalizeSymbol(symbolToRemove);
     if (isAdmin) {
       setWatchlist(prev => {
-        const updated = prev.filter(w => toCanonicalSymbol(w.symbol) !== canonical);
+        const updated = prev.filter(w => normalizeSymbol(w.symbol) !== canonical);
         localStorage.setItem('gaks_watchlist', JSON.stringify(updated));
         return updated;
       });
@@ -2219,7 +2219,7 @@ export default function App() {
 
                   {/* Activation Trigger */}
                   {(() => {
-                    const isPairInWatchlist = (watchlist || []).some(w => w && w.symbol && toCanonicalSymbol(w.symbol) === toCanonicalSymbol(watcherSearch || ''));
+                    const isPairInWatchlist = (watchlist || []).some(w => w && w.symbol && normalizeSymbol(w.symbol) === normalizeSymbol(watcherSearch || ''));
                     
                     if (isWatcherActive && (isAdmin || isPairInWatchlist)) {
                       return (
@@ -2285,7 +2285,7 @@ export default function App() {
                 <span className="text-[11px] font-bold text-zinc-500 uppercase tracking-wider">Select Symbol to Configure:</span>
                 <div className="flex flex-wrap gap-2">
                   {['EURUSD', 'GBPUSD', 'XAUUSD', 'BTCUSD', 'NAS100', 'US30'].map(symbol => {
-                    const isSelected = toCanonicalSymbol(watcherSearch) === symbol;
+                    const isSelected = normalizeSymbol(watcherSearch) === normalizeSymbol(symbol);
                     return (
                       <button
                         key={symbol}

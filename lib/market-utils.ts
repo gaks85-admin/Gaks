@@ -12,6 +12,31 @@ export const toCanonicalSymbol = (symbol: string): string => {
 };
 
 /**
+ * Normalizes any variation of a symbol into a standard 6-character or identifying format.
+ * This is used for comparison between different sources (Yahoo, internal, etc.)
+ */
+export const normalizeSymbol = (symbol: string): string => {
+  if (!symbol) return '';
+  
+  let s = symbol.trim().toUpperCase();
+  
+  // Specific Yahoo/Common mappings
+  if (s === 'GC=F' || s === 'XAU/USD' || s === 'XAUUSD') return 'XAUUSD';
+  if (s === 'SI=F' || s === 'XAG/USD' || s === 'XAGUSD') return 'XAGUSD';
+  if (s === 'NQ=F' || s === 'NAS100') return 'NAS100';
+  if (s === 'YM=F' || s === 'US30') return 'US30';
+  if (s === 'ES=F' || s === 'SPX500') return 'SPX500';
+  if (s === 'DAX=F' || s === 'GER30') return 'GER30';
+  if (s === 'Z=F' || s === 'UK100') return 'UK100';
+  
+  // Strip common suffixes
+  s = s.replace('=X', '').replace('-USD', '').replace('=F', '');
+  
+  // Final alphanumeric cleanup
+  return s.replace(/[^A-Z0-9]/g, '');
+};
+
+/**
  * Converts a canonical symbol to a human-friendly display format.
  */
 export const toDisplaySymbol = (symbol: string): string => {

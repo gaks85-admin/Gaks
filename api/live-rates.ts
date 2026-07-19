@@ -1,4 +1,4 @@
-import * as yahooFinanceModule from 'yahoo-finance2';
+import yahooFinance from 'yahoo-finance2';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 
@@ -50,9 +50,6 @@ const getSupabase = () => {
 };
 
 // --- YAHOO FINANCE INITIALIZATION ---
-
-const YahooFinanceConstructor = (yahooFinanceModule as any).default || (yahooFinanceModule as any).YahooFinance || yahooFinanceModule;
-const yahooFinance = new (YahooFinanceConstructor as any)();
 
 const DEFAULT_SYMBOLS = ['EURUSD', 'GBPUSD', 'XAUUSD', 'BTCUSD', 'NAS100', 'US30'];
 
@@ -119,7 +116,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const displaySymbol = toDisplaySymbol(symbol);
       
       try {
-        const quote = await yahooFinance.quote(ticker);
+        const quote: any = await yahooFinance.quote(ticker);
         
         if (!quote || quote.regularMarketPrice === undefined) {
           return { symbol: displaySymbol, status: 'unavailable' };
