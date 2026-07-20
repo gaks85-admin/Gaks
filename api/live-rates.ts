@@ -115,48 +115,58 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const uniqueSymbols = Array.from(new Set([...DEFAULT_SYMBOLS, ...watcherSymbols])).filter(Boolean);
     
     // 3. Fetch data from Yahoo
-    const pairsData = await Promise.all(uniqueSymbols.map(async (symbol) => {
+    const pairsData = [];
+    for (const symbol of uniqueSymbols) {
       const canonical = toCanonicalSymbol(symbol);
       const ticker = symbolToYahooTicker(symbol);
       const displaySymbol = toDisplaySymbol(symbol);
       
-      // Find original if it came from a watcher
-      const original = (watchers || []).find(w => toCanonicalSymbol(w.selected_pair) === canonical)?.selected_pair || symbol;
+      let attempt = 1;
+      let quoteData = null;
+      let status = 'unavailable';
 
-      console.log(`Original: ${original}`);
-      console.log(`Canonical: ${canonical}`);
-      console.log(`Yahoo: ${ticker}`);
-      console.log(`Fetching: ${ticker}`);
+      while (attempt <= 3) {
+        try {
+          const start = Date.now();
+          const quote: any = await yahooFinance.quote(ticker);
+          const latency = Date.now() - start;
+          
+          console.log(`Attempt ${attempt} for ${ticker}: Success, latency: ${latency}ms`);
 
-      try {
-        const quote: any = await yahooFinance.quote(ticker);
-        
-        console.log('Success');
-        console.log(`Price: ${quote?.regularMarketPrice}`);
-        console.log(`Yahoo Symbol: ${quote?.symbol}`);
-        console.log(`Short Name: ${quote?.shortName}`);
-
-        if (!quote || quote.regularMarketPrice === undefined) {
-          return { symbol: displaySymbol, status: 'unavailable' };
+          if (quote && quote.regularMarketPrice !== undefined) {
+            quoteData = {
+              symbol: displaySymbol,
+              name: displaySymbol,
+              currentPrice: quote.regularMarketPrice,
+              basePrice: quote.regularMarketPreviousClose || quote.regularMarketPrice,
+              change: quote.regularMarketChangePercent || 0,
+              status: 'active'
+            };
+            status = 'active';
+            break; // Success
+          }
+        } catch (err: any) {
+          const errMsg = err.message || '';
+          const isRetryable = errMsg.includes('ECONNRESET') || 
+                              errMsg.includes('connection termination') ||
+                              errMsg.includes('network') ||
+                              errMsg.includes('timeout') ||
+                              (err.status >= 500);
+          
+          console.log(`Attempt ${attempt} for ${ticker}: ${errMsg}. Retryable: ${isRetryable}`);
+          
+          if (isRetryable && attempt < 3) {
+            const delay = attempt === 1 ? 300 : 600;
+            await new Promise(resolve => setTimeout(resolve, delay));
+            attempt++;
+            continue;
+          }
         }
-        
-        return {
-          symbol: displaySymbol,
-          name: displaySymbol,
-          currentPrice: quote.regularMarketPrice,
-          basePrice: quote.regularMarketPreviousClose || quote.regularMarketPrice,
-          change: quote.regularMarketChangePercent || 0,
-          status: 'active'
-        };
-      } catch (err: any) {
-        console.log('Error:');
-        console.log(err);
-        console.error(`[Live Rates] Yahoo error for ${ticker}:`, err.message);
-        return { symbol: displaySymbol, status: 'unavailable' };
-      } finally {
-        console.log('--- END ---');
+        break; // Failed or not retryable
       }
-    }));
+      
+      pairsData.push(quoteData || { symbol: displaySymbol, status: 'unavailable' });
+    }
 
     return res.status(200).json({
       success: true,
