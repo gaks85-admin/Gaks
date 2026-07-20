@@ -1,4 +1,7 @@
 import { supabase } from '../supabaseClient';
+import { runGeminiRequest } from './geminiWrapper';
+import { GoogleGenAI } from '@google/genai';
+import { sendTelegramMessage } from './telegramWrapper';
 
 export interface UserApiKey {
   id?: string;
@@ -64,6 +67,14 @@ export async function saveGeminiKey(key: string): Promise<{ success: boolean; er
 
     const userId = session.user.id;
 
+    // Test the new key immediately
+    try {
+        const ai = new GoogleGenAI({ apiKey: trimmedKey });
+        await ai.models.generateContent({ model: "gemini-2.5-flash", contents: "Reply only with OK" });
+    } catch (err: any) {
+        return { success: false, error: "Validation failed: " + err.message };
+    }
+
     // Check if key already exists
     const { data: existingKey, error: checkError } = await supabase
       .from('user_api_keys')
@@ -77,14 +88,20 @@ export async function saveGeminiKey(key: string): Promise<{ success: boolean; er
     }
 
     let result;
+    const commonFields = {
+        api_key: trimmedKey,
+        updated_at: new Date().toISOString(),
+        status: 'active',
+        last_success_at: new Date().toISOString(),
+        last_error: null,
+        telegram_notified: false
+    };
+
     if (existingKey?.id) {
       // Update existing
       result = await supabase
         .from('user_api_keys')
-        .update({
-          api_key: trimmedKey,
-          updated_at: new Date().toISOString()
-        })
+        .update(commonFields)
         .eq('id', existingKey.id);
     } else {
       // Insert new
@@ -93,9 +110,8 @@ export async function saveGeminiKey(key: string): Promise<{ success: boolean; er
         .insert({
           user_id: userId,
           provider: 'gemini',
-          api_key: trimmedKey,
           created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
+          ...commonFields
         });
     }
 
@@ -108,6 +124,17 @@ export async function saveGeminiKey(key: string): Promise<{ success: boolean; er
 
     // Keep localStorage in sync
     localStorage.setItem(`gaks_gemini_key_${userId}`, trimmedKey);
+
+    // Resume all paused watchers
+    await supabase.from('watchers').update({ status: 'active', updated_at: new Date().toISOString() }).eq('user_id', userId).eq('status', 'paused');
+
+    // Send Telegram: ✅ Gaks AI ... (Need to fetch chatId for the user)
+    const { data: conn } = await supabase.from('telegram_connections').select('telegram_chat_id').eq('user_id', userId).maybeSingle();
+    if (conn && conn.telegram_chat_id) {
+        const message = "✅ Gaks AI\n\nYour Gemini API key has been verified successfully.\n\nYour Market Watcher has been resumed.";
+        await sendTelegramMessage(conn.telegram_chat_id, message);
+    }
+
     return { success: true };
   } catch (err: any) {
     console.error("Exception in saveGeminiKey:", err);

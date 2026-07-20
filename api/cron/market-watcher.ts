@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
-import { GoogleGenAI, Type } from '@google/genai';
+import { Type } from '@google/genai';
+import { runGeminiRequest } from '../../src/lib/geminiWrapper';
 
 
 async function generateContentWithDiagnostics(ai: any, params: any) {
@@ -602,8 +603,6 @@ export default async function handler(req: any, res: any) {
         };
 
         // Analyze market data with Gemini
-        const ai = new GoogleGenAI({ apiKey: apiKeyRecord.api_key });
-        
         const promptText = `You are an expert AI trading assistant.
 Analyze the following live market data against the user's trading strategy.
 Return a structured JSON list of trading signals. Only generate a signal if the setup strongly matches the strategy.
@@ -619,38 +618,34 @@ Timeframe: ${selectedTimeframe}
 Live Market Data (Twelve Data):
 ${JSON.stringify(marketData, null, 2)}`;
 
-        const aiResponse = await generateContentWithDiagnostics(ai, {
-          model: "gemini-2.5-flash",
-          contents: promptText,
-          config: {
+        const aiResponseText = await runGeminiRequest(supabase, userId, promptText, "gemini-2.5-flash", {
             responseMimeType: "application/json",
             responseSchema: {
-              type: Type.OBJECT,
-              properties: {
+                type: Type.OBJECT,
+                properties: {
                 signals: {
-                  type: Type.ARRAY,
-                  items: {
+                    type: Type.ARRAY,
+                    items: {
                     type: Type.OBJECT,
                     properties: {
-                      pair: { type: Type.STRING },
-                      direction: { type: Type.STRING },
-                      entryPrice: { type: Type.NUMBER },
-                      stopLoss: { type: Type.NUMBER },
-                      takeProfit: { type: Type.NUMBER },
-                      riskRewardRatio: { type: Type.STRING },
-                      confidenceScore: { type: Type.NUMBER },
-                      aiReasoning: { type: Type.STRING }
+                        pair: { type: Type.STRING },
+                        direction: { type: Type.STRING },
+                        entryPrice: { type: Type.NUMBER },
+                        stopLoss: { type: Type.NUMBER },
+                        takeProfit: { type: Type.NUMBER },
+                        riskRewardRatio: { type: Type.STRING },
+                        confidenceScore: { type: Type.NUMBER },
+                        aiReasoning: { type: Type.STRING }
                     },
                     required: ["pair", "direction", "entryPrice", "stopLoss", "takeProfit", "riskRewardRatio", "confidenceScore", "aiReasoning"]
-                  }
+                    }
                 }
-              },
-              required: ["signals"]
+                },
+                required: ["signals"]
             }
-          }
         });
 
-        const parsedResult = JSON.parse(aiResponse.text || '{"signals": []}');
+        const parsedResult = JSON.parse(aiResponseText || '{"signals": []}');
         const signals = parsedResult.signals || [];
         signalsGeneratedCount += signals.length;
         let signalsSent = 0;

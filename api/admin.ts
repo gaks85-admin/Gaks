@@ -1,6 +1,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import { GoogleGenAI, Type } from '@google/genai';
+import { runGeminiRequest } from '../src/lib/geminiWrapper';
 
 
 async function generateContentWithDiagnostics(ai: any, params: any) {
@@ -110,56 +111,34 @@ async function health_handler(req: any, res: any) {
       return res.status(403).json({ success: false, error: "Unauthorized: Insufficient privileges." });
     }
 
-    // ----------------------------------------------------
+// ----------------------------------------------------
     // CASE A: RUN GEMINI HEALTH TEST (POST REQUEST)
     // ----------------------------------------------------
     if (req.method === 'POST') {
       const model = "gemini-2.5-flash";
 
-      // Fetch authenticated user's Gemini API key from Supabase for testing
-      const { data: apiKeyData, error: apiKeyError } = await supabase
-        .from('user_api_keys')
-        .select('api_key, provider')
-        .eq('user_id', user.id)
-        .eq('provider', 'gemini')
-        .maybeSingle();
-      
-      // Fetch diagnostics query as requested
-      const { data: keysData, error: keysError } = await supabase
-        .from('user_api_keys')
-        .select('user_id, provider')
-        .eq('user_id', user.id);
-
-      const debug: any = {
-        authenticated: true,
-        authenticatedUserId: user.id,
-        rowsFound: keysData ? keysData.length : 0,
-        provider: (keysData && keysData.length > 0) ? keysData[0].provider : null,
-        databaseError: keysError ? keysError.message : null,
-        geminiKeyFound: !!(apiKeyData && apiKeyData.api_key),
-        keyLength: apiKeyData?.api_key?.length || 0,
-        model,
-        geminiResponse: null,
-        geminiError: null
-      };
-      
-      if (!debug.geminiKeyFound) {
-        debug.geminiError = "No Gemini key found for authenticated user.";
-        return res.status(200).json({ success: false, geminiDebug: debug });
-      }
-
       try {
-        const ai = new GoogleGenAI({ apiKey: apiKeyData.api_key });
-        const aiResponse = await generateContentWithDiagnostics(ai, {
-          model,
-          contents: "Reply only with OK",
-        });
+        const responseText = await runGeminiRequest(supabase, user.id, "Reply only with OK", model);
         
-        debug.geminiResponse = aiResponse.text?.trim() || null;
-        return res.status(200).json({ success: true, geminiDebug: debug });
+        return res.status(200).json({ 
+            success: true, 
+            geminiDebug: {
+                authenticated: true,
+                authenticatedUserId: user.id,
+                model,
+                geminiResponse: responseText
+            } 
+        });
       } catch (err: any) {
-        debug.geminiError = err.message || "Gemini API call failed";
-        return res.status(200).json({ success: false, geminiDebug: debug });
+        return res.status(200).json({ 
+            success: false, 
+            geminiDebug: {
+                authenticated: true,
+                authenticatedUserId: user.id,
+                model,
+                geminiError: err.message || "Gemini API call failed"
+            } 
+        });
       }
     }
 
