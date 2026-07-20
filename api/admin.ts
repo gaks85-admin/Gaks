@@ -114,28 +114,38 @@ async function health_handler(req: any, res: any) {
     // CASE A: RUN GEMINI HEALTH TEST (POST REQUEST)
     // ----------------------------------------------------
     if (req.method === 'POST') {
-      // Fetch first available Gemini API key from Supabase
+      const model = "gemini-2.5-flash";
+
+      // Fetch authenticated user's Gemini API key from Supabase for testing
       const { data: apiKeyData, error: apiKeyError } = await supabase
         .from('user_api_keys')
         .select('api_key, provider')
+        .eq('user_id', user.id)
         .eq('provider', 'gemini')
-        .limit(1)
         .maybeSingle();
       
-      const loadedKeyFromSupabase = !!(apiKeyData && apiKeyData.api_key);
-      const keyLength = apiKeyData?.api_key?.length || 0;
-      const model = "gemini-2.5-flash";
+      // Fetch diagnostics query as requested
+      const { data: keysData, error: keysError } = await supabase
+        .from('user_api_keys')
+        .select('user_id, provider')
+        .eq('user_id', user.id);
 
-      if (!loadedKeyFromSupabase) {
-        return res.status(200).json({
-          success: false,
-          loadedKeyFromSupabase,
-          userId: user.id, // Keeping user.id for reference, even though key is global
-          keyLength,
-          model,
-          response: null,
-          error: "Gemini API key not found in Supabase."
-        });
+      const debug: any = {
+        authenticated: true,
+        authenticatedUserId: user.id,
+        rowsFound: keysData ? keysData.length : 0,
+        provider: (keysData && keysData.length > 0) ? keysData[0].provider : null,
+        databaseError: keysError ? keysError.message : null,
+        geminiKeyFound: !!(apiKeyData && apiKeyData.api_key),
+        keyLength: apiKeyData?.api_key?.length || 0,
+        model,
+        geminiResponse: null,
+        geminiError: null
+      };
+      
+      if (!debug.geminiKeyFound) {
+        debug.geminiError = "No Gemini key found for authenticated user.";
+        return res.status(200).json({ success: false, geminiDebug: debug });
       }
 
       try {
@@ -145,26 +155,11 @@ async function health_handler(req: any, res: any) {
           contents: "Reply only with OK",
         });
         
-        return res.status(200).json({
-          success: true,
-          loadedKeyFromSupabase,
-          userId: user.id,
-          keyLength,
-          provider: apiKeyData.provider,
-          model,
-          response: aiResponse.text?.trim() || null,
-          error: null
-        });
+        debug.geminiResponse = aiResponse.text?.trim() || null;
+        return res.status(200).json({ success: true, geminiDebug: debug });
       } catch (err: any) {
-        return res.status(200).json({
-          success: false,
-          loadedKeyFromSupabase,
-          userId: user.id,
-          keyLength,
-          model,
-          response: null,
-          error: err.message || "Gemini API call failed"
-        });
+        debug.geminiError = err.message || "Gemini API call failed";
+        return res.status(200).json({ success: false, geminiDebug: debug });
       }
     }
 
