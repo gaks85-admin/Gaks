@@ -116,7 +116,13 @@ export async function runGeminiRequest(
           JSON.stringify(geminiResponse, null, 2)
         );
 
-        return geminiResponse.text;
+        if (typeof geminiResponse.text === 'function') {
+            return await (geminiResponse.text as any)();
+        } else if (typeof geminiResponse.text === 'string') {
+            return geminiResponse.text;
+        } else {
+            return (geminiResponse as any).candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+        }
     } catch (error: any) {
         const errorType = classifyGeminiError(error);
         console.error(`[Gemini API Request Error] Request failed: ${errorType}`, error);
