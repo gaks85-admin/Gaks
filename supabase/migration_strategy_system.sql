@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS public.strategies (
   name TEXT NOT NULL,
   text TEXT NOT NULL,
   is_default BOOLEAN DEFAULT false NOT NULL,
+  parsed_strategy JSONB,
   created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
   updated_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
 );

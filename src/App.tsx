@@ -3,6 +3,7 @@ import { useLiveRates } from './hooks/useLiveRates';
 import { supabase } from './supabaseClient';
 import { getGeminiKey, saveGeminiKey, deleteGeminiKey } from './lib/apiKeys';
 import { toCanonicalSymbol, toDisplaySymbol, normalizeSymbol } from '../lib/market-utils';
+import { parseUserStrategy } from "./lib/strategy-parser";
 
 const Auth = React.lazy(() => import('./components/Auth'));
 const AdminDashboard = React.lazy(() => import('./components/admin/AdminDashboard'));
@@ -612,6 +613,40 @@ export default function App() {
     
     if (session?.user) {
       try {
+        console.log(`[Strategy Parser] Strategy received: ${selectedStrat.name}`);
+        let parsedJson = null;
+        const geminiKey = await getGeminiKey();
+        
+        if (geminiKey) {
+          try {
+            parsedJson = await parseUserStrategy(selectedStrat.text, geminiKey);
+            console.log("[Strategy Parser] Parsed JSON:", parsedJson);
+          } catch (parseError) {
+            console.error("[Strategy Parser] Parse failed:", parseError);
+          }
+        } else {
+          console.warn("[Strategy Parser] No Gemini API key found. Skipping parsing.");
+        }
+
+        // Upsert to strategies table
+        const { error: stratError } = await supabase
+          .from('strategies')
+          .upsert({
+            id: selectedStrat.id,
+            user_id: session.user.id,
+            name: selectedStrat.name,
+            text: selectedStrat.text,
+            is_default: selectedStrat.isDefault || false,
+            parsed_strategy: parsedJson,
+            updated_at: new Date().toISOString()
+          });
+          
+        if (stratError) {
+           console.error("[Strategy Parser] Error saving strategy to public.strategies:", stratError.message);
+        } else {
+           console.log("[Strategy Parser] Save successful.");
+        }
+
         const { error } = await supabase
           .from('trading_preferences')
           .upsert({
