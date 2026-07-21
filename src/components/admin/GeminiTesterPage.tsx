@@ -135,12 +135,17 @@ export default function GeminiTesterPage() {
             )}
             
             {result.success && result.fullResponseObject && (
-              <div className="bg-black/50 border border-zinc-800 p-4 rounded-lg space-y-2">
-                <div className="text-xs text-zinc-500 uppercase font-bold tracking-wider">Full Response Object</div>
-                <pre className="font-mono text-xs text-zinc-400 break-words whitespace-pre-wrap max-h-60 overflow-y-auto custom-scrollbar">
-                  {JSON.stringify(result.fullResponseObject, null, 2)}
-                </pre>
-              </div>
+              <details className="bg-black/50 border border-zinc-800 p-4 rounded-lg group">
+                <summary className="text-xs text-zinc-500 uppercase font-bold tracking-wider cursor-pointer list-none flex items-center justify-between">
+                  <span>Full Response Object</span>
+                  <span className="text-zinc-600 group-open:rotate-180 transition-transform">▼</span>
+                </summary>
+                <div className="pt-4">
+                  <pre className="font-mono text-xs text-zinc-400 break-words whitespace-pre-wrap max-h-60 overflow-y-auto custom-scrollbar">
+                    {JSON.stringify(result.fullResponseObject, null, 2)}
+                  </pre>
+                </div>
+              </details>
             )}
           </div>
         )}
