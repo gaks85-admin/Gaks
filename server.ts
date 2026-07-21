@@ -28,6 +28,7 @@ import telegramWebhookHandler from "./api/telegram/webhook";
 import watcherStartHandler from "./api/watcher/start";
 import watcherScanHandler from "./api/watcher/scan";
 import debugGeminiHandler from "./api/debug/gemini";
+import testKeyHandler from "./api/debug/test-key";
 
 async function startServer() {
   const app = express();
@@ -114,6 +115,7 @@ async function startServer() {
 
   // Temporary debug endpoint
   app.all("/api/debug/gemini", debugGeminiHandler as any);
+  app.post("/api/debug/test-key", testKeyHandler as any);
 
   // Catch-all route to serve API list/health indicator since we are an API-only server now
   app.get("/", (req, res) => {
