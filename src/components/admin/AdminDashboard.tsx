@@ -6,6 +6,8 @@ import {
 } from 'lucide-react';
 import { supabase } from '../../supabaseClient';
 
+import GeminiTesterPage from './GeminiTesterPage';
+
 interface ToastState {
   message: string;
   type: 'success' | 'error';
@@ -2041,7 +2043,7 @@ const SettingsPage = ({ fetchWithAuth, showToast }: { fetchWithAuth: any; showTo
 // Main Admin Component
 // ----------------------------------------------------
 export default function AdminDashboard({ userProfile, session, authLoading }: { userProfile: any, session: any, authLoading: boolean }) {
-  const [activeAdminTab, setActiveAdminTab] = useState<'dashboard' | 'users' | 'watchers' | 'signals' | 'health' | 'settings'>('dashboard');
+  const [activeAdminTab, setActiveAdminTab] = useState<'dashboard' | 'users' | 'watchers' | 'signals' | 'health' | 'settings' | 'gemini-tester'>('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [toast, setToast] = useState<ToastState | null>(null);
 
@@ -2132,6 +2134,7 @@ export default function AdminDashboard({ userProfile, session, authLoading }: { 
     { id: 'signals', label: 'Signals', icon: Zap },
     { id: 'health', label: 'System Health', icon: Activity },
     { id: 'settings', label: 'Settings', icon: SettingsIcon },
+    { id: 'gemini-tester', label: 'Developer Tools', icon: Terminal },
   ];
 
   return (
@@ -2176,6 +2179,7 @@ export default function AdminDashboard({ userProfile, session, authLoading }: { 
           {activeAdminTab === 'signals' && <SignalsPage fetchWithAuth={fetchWithAuth} />}
           {activeAdminTab === 'health' && <SystemHealthPage fetchWithAuth={fetchWithAuth} />}
           {activeAdminTab === 'settings' && <SettingsPage fetchWithAuth={fetchWithAuth} showToast={showToast} />}
+          {activeAdminTab === 'gemini-tester' && <GeminiTesterPage />}
         </div>
       </div>
 

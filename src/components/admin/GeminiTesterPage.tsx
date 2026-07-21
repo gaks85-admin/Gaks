@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Shield, Key, AlertCircle, CheckCircle2 } from 'lucide-react';
 
-export default function DebugPage() {
+export default function GeminiTesterPage() {
   const [apiKey, setApiKey] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [result, setResult] = useState<any>(null);
@@ -42,7 +42,7 @@ export default function DebugPage() {
   };
 
   return (
-    <div className="min-h-screen bg-black text-white p-6 md:p-12 pb-32">
+    <div className="p-6 md:p-12">
       <div className="max-w-2xl mx-auto space-y-6">
         <div className="flex items-center gap-3 border-b border-zinc-800 pb-4">
           <Shield className="w-8 h-8 text-yellow-500" />
