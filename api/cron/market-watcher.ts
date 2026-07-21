@@ -764,6 +764,18 @@ ${JSON.stringify(marketData, null, 2)}`;
 
         const parsedResult = JSON.parse(aiResponseText || '{"signals": []}');
         const signals = parsedResult.signals || [];
+
+        console.log(
+            `[Gemini API Response Received]\n` +
+            `watcher_id: ${watcher.id}\n` +
+            `pair: ${selectedPair}\n` +
+            `timeframe: ${selectedTimeframe}\n` +
+            `raw Gemini response: ${aiResponseText}\n` +
+            `parsed recommendation: ${JSON.stringify(signals)}\n` +
+            `confidence: ${signals.map((s: any) => s.confidenceScore).join(", ") || "N/A"}\n` +
+            `reason: ${signals.map((s: any) => s.aiReasoning).join(" | ") || "N/A"}`
+        );
+
         signalsGeneratedCount += signals.length;
         let signalsSent = 0;
 
