@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { GoogleGenAI, Type } from '@google/genai';
+import { analyzeMarket, Candle } from '../../src/lib/strategy-engine';
 
 // --- Inlined Gemini Wrapper ---
 
@@ -612,6 +613,25 @@ export default async function handler(req: any, res: any) {
           continue;
         }
         const telegramChatId = telegramConn.telegram_chat_id;
+        // Fetch parsed_strategy
+        let parsed_strategy: any = null;
+        if (watcher.strategy_id) {
+          const { data: strategyRecord } = await supabase
+            .from("strategies")
+            .select("parsed_strategy")
+            .eq("id", watcher.strategy_id)
+            .maybeSingle();
+          parsed_strategy = strategyRecord?.parsed_strategy;
+        }
+
+        if (!parsed_strategy) {
+          console.log("[WATCHER SKIPPED]\nwatcher_id: " + watcher.id + "\nreason: No parsed strategy available.");
+          skipped.push({ userId, reason: "No parsed strategy available" });
+          watchersSkippedCount++;
+          continue;
+        }
+
+
 
         // Fetch Trading Preferences & Gemini API Key in parallel
         const [{ data: prefsRecord }, { data: apiKeyRecord }] = await Promise.all([
@@ -650,6 +670,7 @@ export default async function handler(req: any, res: any) {
         const interval = mapTimeframeToInterval(selectedTimeframe);
 
         let quoteData: any = null;
+        let candleData: Candle[] = [];
         let finalEndpoint = "unknown";
 
         if (!twelveDataExhausted) {
@@ -680,6 +701,14 @@ export default async function handler(req: any, res: any) {
                   twelveDataExhausted = true;
                 } else if (tsData.status === "ok" && tsData.values && tsData.values.length > 0) {
                   quoteData = tsData.values[0];
+                  candleData = tsData.values.map((v: any) => ({
+                    timestamp: v.datetime,
+                    open: parseFloat(v.open),
+                    high: parseFloat(v.high),
+                    low: parseFloat(v.low),
+                    close: parseFloat(v.close),
+                    volume: v.volume ? parseFloat(v.volume) : undefined
+                  })).reverse();
                 }
               }
             } catch (tsErr) {
@@ -701,93 +730,55 @@ export default async function handler(req: any, res: any) {
                   else throw new Error(`TwelveData Error: ${qData.message}`);
                 } else {
                   quoteData = qData;
+                  candleData = [{
+                    timestamp: qData.timestamp || Math.floor(Date.now() / 1000),
+                    open: parseFloat(qData.open),
+                    high: parseFloat(qData.high),
+                    low: parseFloat(qData.low),
+                    close: parseFloat(qData.close),
+                    volume: qData.volume ? parseFloat(qData.volume) : undefined
+                  }];
                 }
               }
             }
           }
         }
-
-        // AI Market Watcher must ONLY use Twelve Data. 
-        // If real market data is unavailable, skip the scan.
-        if (!quoteData) {
-           console.log("Skipped due to unavailable market data.");
-           skipped.push({ userId, reason: "Skipped due to unavailable market data." });
+        if (candleData.length < 2) {
+           console.log("Skipped due to insufficient market data (need at least 2 candles).");
+           skipped.push({ userId, reason: "Skipped due to insufficient market data." });
            watchersSkippedCount++;
            continue;
         }
 
-        const currentPrice = parseFloat(quoteData.close || quoteData.price || "0");
-        const marketData = {
-          current_price: currentPrice,
-          open: parseFloat(quoteData.open || "0"),
-          high: parseFloat(quoteData.high || "0"),
-          low: parseFloat(quoteData.low || "0"),
-          close: parseFloat(quoteData.close || "0"),
-          bid: quoteData.bid ? parseFloat(quoteData.bid) : null,
-          ask: quoteData.ask ? parseFloat(quoteData.ask) : null,
-          volume: quoteData.volume ? parseFloat(quoteData.volume) : 0,
-          timestamp: quoteData.timestamp || Math.floor(Date.now() / 1000),
-          timeframe: selectedTimeframe
+        const analysis = analyzeMarket(candleData, parsed_strategy);
+
+        if (analysis.signal === 'NO_TRADE') {
+            await supabase
+              .from("watchers")
+              .update({ 
+                 last_scan_at: new Date().toISOString(),
+                 updated_at: new Date().toISOString()
+              })
+              .eq("id", watcher.id);
+            console.log(`No setup found for ${mappedSymbol}`);
+            watchersProcessedCount++;
+            continue;
+        }
+
+        const signal = {
+            pair: mappedSymbol,
+            direction: analysis.signal,
+            entryPrice: analysis.entryPrice,
+            stopLoss: analysis.stopLoss,
+            takeProfit: analysis.takeProfit,
+            riskRewardRatio: analysis.riskReward ? analysis.riskReward.toFixed(2) : "N/A",
+            confidenceScore: analysis.confidence,
+            aiReasoning: analysis.reasoning.join(" | ")
         };
-
-        // Analyze market data with Gemini
-        const promptText = `You are an expert AI trading assistant.
-Analyze the following live market data against the user's trading strategy.
-Return a structured JSON list of trading signals. Only generate a signal if the setup strongly matches the strategy.
-If no valid setups are found, return an empty array for signals.
-
-User's Trading Strategy:
-${strategyText}
-
-Account Size: $${accountSize}
-Risk Percentage per trade: ${riskPercentage}%
-Timeframe: ${selectedTimeframe}
-
-Live Market Data (Twelve Data):
-${JSON.stringify(marketData, null, 2)}`;
-
-        const aiResponseText = await runGeminiRequest(supabase, userId, promptText, "gemini-2.5-flash", {
-            responseMimeType: "application/json",
-            responseSchema: {
-                type: Type.OBJECT,
-                properties: {
-                signals: {
-                    type: Type.ARRAY,
-                    items: {
-                    type: Type.OBJECT,
-                    properties: {
-                        pair: { type: Type.STRING },
-                        direction: { type: Type.STRING },
-                        entryPrice: { type: Type.NUMBER },
-                        stopLoss: { type: Type.NUMBER },
-                        takeProfit: { type: Type.NUMBER },
-                        riskRewardRatio: { type: Type.STRING },
-                        confidenceScore: { type: Type.NUMBER },
-                        aiReasoning: { type: Type.STRING }
-                    },
-                    required: ["pair", "direction", "entryPrice", "stopLoss", "takeProfit", "riskRewardRatio", "confidenceScore", "aiReasoning"]
-                    }
-                }
-                },
-                required: ["signals"]
-            }
-        });
-
-        const parsedResult = JSON.parse(aiResponseText || '{"signals": []}');
-        const signals = parsedResult.signals || [];
-
-        console.log(
-            `[Gemini API Response Received]\n` +
-            `watcher_id: ${watcher.id}\n` +
-            `pair: ${selectedPair}\n` +
-            `timeframe: ${selectedTimeframe}\n` +
-            `parsed recommendation: ${JSON.stringify(signals)}\n` +
-            `confidence: ${signals.map((s: any) => s.confidenceScore).join(", ") || "N/A"}\n` +
-            `reason: ${signals.map((s: any) => s.aiReasoning).join(" | ") || "N/A"}`
-        );
-
+        const signals = [signal];
         signalsGeneratedCount += signals.length;
-        let signalsSent = 0;
+        
+        let signalsSent = 0;;
 
         // Send Telegram Message if valid signals found
         if (signals.length > 0) {

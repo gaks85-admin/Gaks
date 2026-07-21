@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { GoogleGenAI, Type } from "@google/genai";
+import { analyzeMarket, Candle } from "../../src/lib/strategy-engine";
 
 
 async function generateContentWithDiagnostics(ai: any, params: any) {
@@ -308,25 +309,24 @@ export default async function handler(req: any, res: any) {
         error: "Account size and risk percentage must be defined in your trading preferences or watcher configuration."
       });
     }
-
-    // Load Gemini API Key
-    const { data: apiKeyRecord, error: apiKeyError } = await supabase
-      .from("user_api_keys")
-      .select("*")
-      .eq("user_id", userId)
-      .eq("provider", "gemini")
-      .maybeSingle();
-
-    if (apiKeyError) {
-      console.warn("[Watcher Scan] Gemini API key query error:", apiKeyError.message);
+    // Fetch parsed_strategy
+    let parsed_strategy: any = null;
+    if (watcher.strategy_id) {
+      const { data: strategyRecord } = await supabase
+        .from("strategies")
+        .select("parsed_strategy")
+        .eq("id", watcher.strategy_id)
+        .maybeSingle();
+      parsed_strategy = strategyRecord?.parsed_strategy;
     }
 
-    if (!apiKeyRecord || !apiKeyRecord.api_key) {
+    if (!parsed_strategy) {
       return res.status(400).json({
         success: false,
-        error: "Gemini API key is missing. Please save a valid Gemini API key under AI Settings first."
+        error: "No parsed strategy available for this watcher."
       });
     }
+
 
     // Check for selected pair
     const selectedPair = watcher.selected_pair;
@@ -440,6 +440,7 @@ export default async function handler(req: any, res: any) {
     console.log(`[Symbol Validation] Symbol is valid. Resolved to: ${finalSymbol} (Type: ${validation.instrumentType || 'Unknown'})`);
     
     let quoteData: any = null;
+    let candleData: Candle[] = [];
     let finalEndpoint = "time_series";
     const timeSeriesUrl = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(finalSymbol)}&interval=${interval}&outputsize=1&apikey=${twelveDataKey}`;
     const maskedTimeSeriesUrl = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(finalSymbol)}&interval=${interval}&outputsize=1&apikey=HIDDEN`;
@@ -460,6 +461,14 @@ export default async function handler(req: any, res: any) {
         const tsData = await tsRes.json();
         if (tsData.status === "ok" && tsData.values && tsData.values.length > 0) {
           quoteData = tsData.values[0];
+          candleData = tsData.values.map((v: any) => ({
+            timestamp: v.datetime,
+            open: parseFloat(v.open),
+            high: parseFloat(v.high),
+            low: parseFloat(v.low),
+            close: parseFloat(v.close),
+            volume: v.volume ? parseFloat(v.volume) : undefined
+          })).reverse();
           console.log(`[Twelve Data API] Successfully fetched candles from /time_series for ${finalSymbol}`);
         } else {
           console.warn(`[Twelve Data API] /time_series returned status: ${tsData.status || "error"}, message: ${tsData.message || "Unknown error"}. Falling back to /quote.`);
@@ -493,6 +502,14 @@ export default async function handler(req: any, res: any) {
           const qData = await qRes.json();
           if (qData.status !== "error") {
             quoteData = qData;
+            candleData = [{
+              timestamp: qData.timestamp || Math.floor(Date.now() / 1000),
+              open: parseFloat(qData.open),
+              high: parseFloat(qData.high),
+              low: parseFloat(qData.low),
+              close: parseFloat(qData.close),
+              volume: qData.volume ? parseFloat(qData.volume) : undefined
+            }];
             console.log(`[Twelve Data API] Successfully fetched quote from /quote for ${finalSymbol}`);
           } else {
             return res.status(400).json({
@@ -554,64 +571,29 @@ export default async function handler(req: any, res: any) {
         error: `Failed to fetch live market data for ${symbol}: ${fetchErr.message || "Network error"}`
       });
     }
-
-    // 10 & 11. Perform AI analysis with Gemini
-    const ai = new GoogleGenAI({ apiKey: apiKeyRecord.api_key });
-
-    const promptText = `
-You are an expert AI trading assistant.
-Analyze the following live market data against the user's trading strategy.
-Return a structured JSON list of trading signals. Only generate a signal if the setup strongly matches the strategy.
-If no valid setups are found, return an empty array for signals.
-
-User's Trading Strategy:
-${strategyText}
-
-Account Size: $${accountSize}
-Risk Percentage per trade: ${riskPercentage}%
-
-Live Market Data (Twelve Data):
-${JSON.stringify(collectedData, null, 2)}
-`;
-
-    const aiResponse = await generateContentWithDiagnostics(ai, {
-      model: "gemini-2.5-flash",
-      contents: promptText,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            signals: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  pair: { type: Type.STRING, description: "The trading pair symbol (e.g., EUR/USD)" },
-                  direction: { type: Type.STRING, description: "BUY or SELL" },
-                  entryPrice: { type: Type.NUMBER, description: "Suggested entry price" },
-                  stopLoss: { type: Type.NUMBER, description: "Suggested stop loss price" },
-                  takeProfit: { type: Type.NUMBER, description: "Suggested take profit price" },
-                  riskRewardRatio: { type: Type.STRING, description: "Risk/Reward ratio (e.g., '1:2.5')" },
-                  confidenceScore: { type: Type.NUMBER, description: "Confidence score from 0 to 100" },
-                  aiReasoning: { type: Type.STRING, description: "Brief explanation of why this setup matches the strategy" },
-                },
-                required: ["pair", "direction", "entryPrice", "stopLoss", "takeProfit", "riskRewardRatio", "confidenceScore", "aiReasoning"]
-              }
-            }
-          },
-          required: ["signals"]
-        }
-      }
-    });
-
-    const resultText = aiResponse.text;
-    if (!resultText) {
-      throw new Error("Gemini returned an empty response.");
+    if (candleData.length < 2) {
+      return res.status(400).json({
+        success: false,
+        error: "Insufficient market data (need at least 2 candles)."
+      });
     }
 
-    const parsedResult = JSON.parse(resultText);
-    const signals = parsedResult.signals || [];
+    const analysis = analyzeMarket(candleData, parsed_strategy);
+    const signals = [];
+
+    if (analysis.signal !== 'NO_TRADE') {
+      signals.push({
+        pair: symbol,
+        direction: analysis.signal,
+        entryPrice: analysis.entryPrice,
+        stopLoss: analysis.stopLoss,
+        takeProfit: analysis.takeProfit,
+        riskRewardRatio: analysis.riskReward ? analysis.riskReward.toFixed(2) : "N/A",
+        confidenceScore: analysis.confidence,
+        aiReasoning: analysis.reasoning.join(" | ")
+      });
+    }
+
     let telegramDelivered = false;
 
     // Send Telegram notifications for any valid signals
