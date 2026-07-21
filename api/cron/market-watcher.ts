@@ -105,13 +105,18 @@ export async function runGeminiRequest(
     const ai = new GoogleGenAI({ apiKey: apiKeyData.api_key });
 
     try {
-        const response = await ai.models.generateContent({
+        const geminiResponse = await ai.models.generateContent({
             model: model,
             contents: prompt,
             config: config
         });
 
-        return response.text;
+        console.log(
+          "[FULL GEMINI RESPONSE]\n" +
+          JSON.stringify(geminiResponse, null, 2)
+        );
+
+        return geminiResponse.text;
     } catch (error: any) {
         const errorType = classifyGeminiError(error);
         console.error(`[Gemini API Request Error] Request failed: ${errorType}`, error);
@@ -770,7 +775,6 @@ ${JSON.stringify(marketData, null, 2)}`;
             `watcher_id: ${watcher.id}\n` +
             `pair: ${selectedPair}\n` +
             `timeframe: ${selectedTimeframe}\n` +
-            `raw Gemini response: ${aiResponseText}\n` +
             `parsed recommendation: ${JSON.stringify(signals)}\n` +
             `confidence: ${signals.map((s: any) => s.confidenceScore).join(", ") || "N/A"}\n` +
             `reason: ${signals.map((s: any) => s.aiReasoning).join(" | ") || "N/A"}`
