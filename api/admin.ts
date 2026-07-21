@@ -1636,6 +1636,114 @@ async function watchers_handler(req: any, res: any) {
   }
 }
 
+// --- api/admin/inspector/candles.ts ---
+
+async function fetchWithRetry(url: string, options: RequestInit = {}, maxRetries = 3, baseDelayMs = 1000): Promise<Response> {
+  let attempt = 0;
+  while (attempt < maxRetries) {
+    attempt++;
+    try {
+      const response = await fetch(url, options);
+      if (response.ok) return response;
+      if (response.status === 404 || response.status === 400) return response;
+      console.warn(`[Fetch Retry] Attempt ${attempt} returned status ${response.status}. Retrying...`);
+    } catch (err: any) {
+      if (attempt >= maxRetries) throw err;
+      console.warn(`[Fetch Retry] Attempt ${attempt} threw network error: ${err.message || err}. Retrying...`);
+    }
+    await new Promise(resolve => setTimeout(resolve, baseDelayMs * Math.pow(2, attempt - 1)));
+  }
+  throw new Error(`Fetch failed after ${maxRetries} attempts`);
+}
+
+function convertSymbolForTwelveData(sym: string): string {
+  if (!sym) return "";
+  let mapped = sym.trim().toUpperCase().replace(/[-_\s/]/g, '');
+  const mappings: Record<string, string> = {
+    'EURUSD': 'EUR/USD', 'GBPUSD': 'GBP/USD', 'XAUUSD': 'XAU/USD', 'BTCUSD': 'BTC/USD',
+    'NAS100': 'QQQ', 'US30': 'DIA', 'SPX500': 'SPY', 'US500': 'SPY'
+  };
+  if (mappings[mapped]) return mappings[mapped];
+  if (mapped.length === 6) return `${mapped.slice(0, 3)}/${mapped.slice(3)}`;
+  return mapped;
+}
+
+function mapTimeframeToInterval(tf: string): string {
+  const u = tf.toUpperCase();
+  if (u === 'M1' || u === '1M') return '1min';
+  if (u === 'M5' || u === '5M') return '5min';
+  if (u === 'M15' || u === '15M') return '15min';
+  if (u === 'M30' || u === '30M') return '30min';
+  if (u === 'H1' || u === '1H') return '1h';
+  if (u === 'H2' || u === '2H') return '2h';
+  if (u === 'H4' || u === '4H') return '4h';
+  if (u === 'D1' || u === 'D' || u === 'DAILY') return '1day';
+  return '1h';
+}
+
+async function inspector_candles_handler(req: any, res: any) {
+  const supabase = getSupabase();
+  const urlParams = url.parse(req.url || '', true).query;
+  const symbol = urlParams.symbol as string;
+  const timeframe = urlParams.timeframe as string || 'H1';
+
+  if (!symbol) return res.status(400).json({ success: false, error: "Symbol is required" });
+
+  try {
+    const twelveDataKey = process.env.TWELVE_DATA_API_KEY;
+    if (!twelveDataKey) return res.status(500).json({ success: false, error: "Twelve Data API key missing" });
+
+    const mappedSymbol = convertSymbolForTwelveData(symbol);
+    const interval = mapTimeframeToInterval(timeframe);
+    const tsUrl = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(mappedSymbol)}&interval=${interval}&outputsize=50&apikey=${twelveDataKey}`;
+
+    const tsRes = await fetchWithRetry(tsUrl, {}, 3, 1000);
+    const tsData = await tsRes.json();
+
+    if (tsData.status !== "ok") {
+      return res.status(400).json({ success: false, error: tsData.message || "Twelve Data error" });
+    }
+
+    const candles = tsData.values.map((v: any) => ({
+      timestamp: v.datetime,
+      open: parseFloat(v.open),
+      high: parseFloat(v.high),
+      low: parseFloat(v.low),
+      close: parseFloat(v.close),
+      volume: v.volume ? parseFloat(v.volume) : undefined
+    })).reverse();
+
+    return res.status(200).json({ success: true, candles, currentPrice: candles[candles.length - 1]?.close, timeframe });
+  } catch (err: any) {
+    console.error("Inspector candles fetch error:", err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+}
+
+async function inspector_watcher_details_handler(req: any, res: any) {
+  const supabase = getSupabase();
+  const urlParams = url.parse(req.url || '', true).query;
+  const watcherId = urlParams.watcherId as string;
+
+  if (!watcherId) return res.status(400).json({ success: false, error: "Watcher ID is required" });
+
+  try {
+    const { data: watcher, error: wErr } = await supabase.from('watchers').select('*').eq('id', watcherId).maybeSingle();
+    if (wErr || !watcher) return res.status(404).json({ success: false, error: "Watcher not found" });
+
+    let parsed_strategy = null;
+    if (watcher.strategy_id) {
+      const { data: strat } = await supabase.from('strategies').select('parsed_strategy').eq('id', watcher.strategy_id).maybeSingle();
+      parsed_strategy = strat?.parsed_strategy;
+    }
+
+    return res.status(200).json({ success: true, watcher, parsed_strategy });
+  } catch (err: any) {
+    console.error("Inspector watcher details error:", err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+}
+
 
 
 export default async function handler(req: any, res: any) {
@@ -1658,6 +1766,12 @@ export default async function handler(req: any, res: any) {
     }
     if (pathname.endsWith('/watchers')) {
       return watchers_handler(req, res);
+    }
+    if (pathname.endsWith('/inspector/candles')) {
+      return inspector_candles_handler(req, res);
+    }
+    if (pathname.endsWith('/inspector/watcher-details')) {
+      return inspector_watcher_details_handler(req, res);
     }
     if (pathname.endsWith('/signals')) {
       return signals_handler(req, res);

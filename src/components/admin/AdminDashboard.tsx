@@ -7,6 +7,7 @@ import {
 import { supabase } from '../../supabaseClient';
 
 import GeminiTesterPage from './GeminiTesterPage';
+import StrategyEngineInspectorPage from './StrategyEngineInspectorPage';
 
 interface ToastState {
   message: string;
@@ -2043,7 +2044,7 @@ const SettingsPage = ({ fetchWithAuth, showToast }: { fetchWithAuth: any; showTo
 // Main Admin Component
 // ----------------------------------------------------
 export default function AdminDashboard({ userProfile, session, authLoading }: { userProfile: any, session: any, authLoading: boolean }) {
-  const [activeAdminTab, setActiveAdminTab] = useState<'dashboard' | 'users' | 'watchers' | 'signals' | 'health' | 'settings' | 'gemini-tester'>('dashboard');
+  const [activeAdminTab, setActiveAdminTab] = useState<'dashboard' | 'users' | 'watchers' | 'signals' | 'health' | 'settings' | 'gemini-tester' | 'inspector'>('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [toast, setToast] = useState<ToastState | null>(null);
 
@@ -2132,6 +2133,7 @@ export default function AdminDashboard({ userProfile, session, authLoading }: { 
     { id: 'users', label: 'Users', icon: Users },
     { id: 'watchers', label: 'Watchers', icon: Eye },
     { id: 'signals', label: 'Signals', icon: Zap },
+    { id: 'inspector', label: 'Strategy Inspector', icon: Terminal },
     { id: 'health', label: 'System Health', icon: Activity },
     { id: 'settings', label: 'Settings', icon: SettingsIcon },
     { id: 'gemini-tester', label: 'Developer Tools', icon: Terminal },
@@ -2177,6 +2179,7 @@ export default function AdminDashboard({ userProfile, session, authLoading }: { 
           {activeAdminTab === 'users' && <UsersPage fetchWithAuth={fetchWithAuth} showToast={showToast} />}
           {activeAdminTab === 'watchers' && <WatchersPage fetchWithAuth={fetchWithAuth} showToast={showToast} />}
           {activeAdminTab === 'signals' && <SignalsPage fetchWithAuth={fetchWithAuth} />}
+          {activeAdminTab === 'inspector' && <StrategyEngineInspectorPage fetchWithAuth={fetchWithAuth} />}
           {activeAdminTab === 'health' && <SystemHealthPage fetchWithAuth={fetchWithAuth} />}
           {activeAdminTab === 'settings' && <SettingsPage fetchWithAuth={fetchWithAuth} showToast={showToast} />}
           {activeAdminTab === 'gemini-tester' && <GeminiTesterPage />}
