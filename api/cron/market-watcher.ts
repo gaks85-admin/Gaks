@@ -49,7 +49,11 @@ export async function runGeminiRequest(
         .maybeSingle();
 
     if (apiKeyError) {
-        console.error(`[Gemini API Key Lookup Audit] Supabase query error:`, apiKeyError);
+        console.error("[Gemini API Key Lookup Audit] Supabase query error:", JSON.stringify(apiKeyError, null, 2));
+        console.log("error.code =", apiKeyError?.code);
+        console.log("error.message =", apiKeyError?.message);
+        console.log("error.details =", apiKeyError?.details);
+        console.log("error.hint =", apiKeyError?.hint);
     }
 
     // 2. Schema Comparison & Audit Verification
@@ -69,7 +73,11 @@ export async function runGeminiRequest(
             .eq('user_id', userId);
 
         if (anyKeyError) {
-            console.error(`[Gemini API Key Lookup Audit] Error running any-key query:`, anyKeyError);
+            console.error("[Gemini API Key Lookup Audit] Error running any-key query:", JSON.stringify(anyKeyError, null, 2));
+            console.log("error.code =", anyKeyError?.code);
+            console.log("error.message =", anyKeyError?.message);
+            console.log("error.details =", anyKeyError?.details);
+            console.log("error.hint =", anyKeyError?.hint);
         }
 
         if (!anyKeyData || anyKeyData.length === 0) {
