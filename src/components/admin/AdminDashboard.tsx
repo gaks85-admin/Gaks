@@ -2,12 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { 
   LayoutDashboard, Users, Eye, Zap, Activity, Settings as SettingsIcon, 
   Shield, Menu, X, Key, MessageSquare, Clock, Heart, Search, RefreshCw, 
-  Play, Pause, Trash2, AlertTriangle, CheckCircle2, Power, Terminal, Sliders, Check, ExternalLink, Send, Plus
+  Play, Pause, Trash2, AlertTriangle, CheckCircle2, Power, Terminal, Sliders, Check, ExternalLink, Send, Plus,
+  ShieldCheck
 } from 'lucide-react';
 import { supabase } from '../../supabaseClient';
 
 import GeminiTesterPage from './GeminiTesterPage';
 import StrategyEngineInspectorPage from './StrategyEngineInspectorPage';
+import SystemValidationPage from './SystemValidationPage';
 
 interface ToastState {
   message: string;
@@ -2044,7 +2046,7 @@ const SettingsPage = ({ fetchWithAuth, showToast }: { fetchWithAuth: any; showTo
 // Main Admin Component
 // ----------------------------------------------------
 export default function AdminDashboard({ userProfile, session, authLoading }: { userProfile: any, session: any, authLoading: boolean }) {
-  const [activeAdminTab, setActiveAdminTab] = useState<'dashboard' | 'users' | 'watchers' | 'signals' | 'health' | 'settings' | 'gemini-tester' | 'inspector'>('dashboard');
+  const [activeAdminTab, setActiveAdminTab] = useState<'dashboard' | 'users' | 'watchers' | 'signals' | 'health' | 'settings' | 'gemini-tester' | 'inspector' | 'validation'>('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [toast, setToast] = useState<ToastState | null>(null);
 
@@ -2134,6 +2136,7 @@ export default function AdminDashboard({ userProfile, session, authLoading }: { 
     { id: 'watchers', label: 'Watchers', icon: Eye },
     { id: 'signals', label: 'Signals', icon: Zap },
     { id: 'inspector', label: 'Strategy Inspector', icon: Terminal },
+    { id: 'validation', label: 'System Validation', icon: ShieldCheck },
     { id: 'health', label: 'System Health', icon: Activity },
     { id: 'settings', label: 'Settings', icon: SettingsIcon },
     { id: 'gemini-tester', label: 'Developer Tools', icon: Terminal },
@@ -2180,6 +2183,7 @@ export default function AdminDashboard({ userProfile, session, authLoading }: { 
           {activeAdminTab === 'watchers' && <WatchersPage fetchWithAuth={fetchWithAuth} showToast={showToast} />}
           {activeAdminTab === 'signals' && <SignalsPage fetchWithAuth={fetchWithAuth} />}
           {activeAdminTab === 'inspector' && <StrategyEngineInspectorPage fetchWithAuth={fetchWithAuth} />}
+          {activeAdminTab === 'validation' && <SystemValidationPage fetchWithAuth={fetchWithAuth} />}
           {activeAdminTab === 'health' && <SystemHealthPage fetchWithAuth={fetchWithAuth} />}
           {activeAdminTab === 'settings' && <SettingsPage fetchWithAuth={fetchWithAuth} showToast={showToast} />}
           {activeAdminTab === 'gemini-tester' && <GeminiTesterPage />}

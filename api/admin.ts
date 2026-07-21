@@ -1732,12 +1732,17 @@ async function inspector_watcher_details_handler(req: any, res: any) {
     if (wErr || !watcher) return res.status(404).json({ success: false, error: "Watcher not found" });
 
     let parsed_strategy = null;
+    let raw_strategy_text = null;
+
     if (watcher.strategy_id) {
       const { data: strat } = await supabase.from('strategies').select('parsed_strategy').eq('id', watcher.strategy_id).maybeSingle();
       parsed_strategy = strat?.parsed_strategy;
     }
 
-    return res.status(200).json({ success: true, watcher, parsed_strategy });
+    const { data: prefs } = await supabase.from('trading_preferences').select('strategy_text').eq('user_id', watcher.user_id).maybeSingle();
+    raw_strategy_text = prefs?.strategy_text;
+
+    return res.status(200).json({ success: true, watcher, parsed_strategy, raw_strategy_text });
   } catch (err: any) {
     console.error("Inspector watcher details error:", err);
     return res.status(500).json({ success: false, error: err.message });
