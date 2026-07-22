@@ -295,61 +295,27 @@ export default async function handler(req: any, res: any) {
     // 4. Verify the user has saved a Gemini API key
     const tableName = 'user_api_keys';
     const providerFilter = 'gemini';
-    const statusFilter = 'active';
 
     console.log(`[Gemini API Key Lookup Audit] Executing lookup in watcher start:`);
     console.log(`- Table Name: ${tableName}`);
     console.log(`- user_id: ${userId}`);
     console.log(`- provider: ${providerFilter}`);
-    console.log(`- status filter: ${statusFilter}`);
-    console.log(`- Supabase JS Query: supabase.from('${tableName}').select('api_key, id, telegram_notified, status').eq('user_id', '${userId}').eq('provider', '${providerFilter}').eq('status', '${statusFilter}').maybeSingle()`);
-    console.log(`- Exact SQL Query: SELECT api_key, id, telegram_notified, status FROM public.${tableName} WHERE user_id = '${userId}' AND provider = '${providerFilter}' AND status = '${statusFilter}' LIMIT 1;`);
+    console.log(`- Supabase JS Query: supabase.from('${tableName}').select('api_key, id').eq('user_id', '${userId}').eq('provider', '${providerFilter}').maybeSingle()`);
 
-    // 1. Attempt the query with the active status filter
+    // 1. Attempt the query for Gemini API key
     const { data: apiKeyRecord, error: apiKeyError } = await supabase
       .from(tableName)
-      .select("api_key, id, telegram_notified, status")
+      .select("api_key, id")
       .eq("user_id", userId)
       .eq("provider", providerFilter)
-      .eq("status", statusFilter)
       .maybeSingle();
 
     if (apiKeyError) {
       console.error(`[Gemini API Key Lookup Audit] Supabase query error:`, apiKeyError);
     }
 
-    // 2. Schema Comparison & Audit Verification
-    console.log(`[Gemini API Key Lookup Audit] Comparing query filters against actual schema of '${tableName}':`);
-    console.log(`- Correct Table Queried: Yes ('${tableName}')`);
-    console.log(`- Correct user_id Used: Yes ('${userId}')`);
-    console.log(`- Provider matches stored schema type: Yes ('${providerFilter}' matches TEXT column 'provider')`);
-    console.log(`- Status filter matches stored schema type: Yes ('${statusFilter}' matches TEXT column 'status')`);
-
     if (!apiKeyRecord || !apiKeyRecord.api_key) {
-      console.log(`[Gemini API Key Lookup Audit] Row NOT found with status='${statusFilter}'. Investigating the exact reason...`);
-      
-      // Discrepancy investigation query (without status filter)
-      const { data: rawKeyData, error: rawKeyError } = await supabase
-        .from(tableName)
-        .select('id, user_id, provider, status, api_key')
-        .eq('user_id', userId)
-        .eq('provider', providerFilter)
-        .maybeSingle();
-
-      if (rawKeyError) {
-        console.error(`[Gemini API Key Lookup Audit] Error running discrepancy query:`, rawKeyError);
-      }
-
-      if (!rawKeyData) {
-        console.log(`[Gemini API Key Lookup Audit] LOG EXACT WHY: No row exists at all in the '${tableName}' table for user_id='${userId}' and provider='${providerFilter}'.`);
-      } else {
-        console.log(`[Gemini API Key Lookup Audit] LOG EXACT WHY: A row exists in '${tableName}', but failed validation checks:`);
-        console.log(`  - Row ID: ${rawKeyData.id}`);
-        console.log(`  - User ID matches: ${rawKeyData.user_id === userId ? 'YES' : `NO (stored: ${rawKeyData.user_id})`}`);
-        console.log(`  - Provider matches: ${rawKeyData.provider === providerFilter ? 'YES' : `NO (stored: ${rawKeyData.provider})`}`);
-        console.log(`  - Status matches: ${rawKeyData.status === statusFilter ? 'YES' : `NO (stored status is '${rawKeyData.status}', but we filtered for '${statusFilter}')`}`);
-        console.log(`  - Has API Key Value: ${!!rawKeyData.api_key ? 'YES' : 'NO (api_key is empty/null)'}`);
-      }
+      console.log(`[Gemini API Key Lookup Audit] LOG EXACT WHY: No row exists or api_key is missing in '${tableName}' for user_id='${userId}' and provider='${providerFilter}'.`);
 
       console.log("[Watcher Start] Termination: Gemini API key missing.");
       await sendTelegramMessage(telegramChatId, "❌ *Market Watcher Activation Failed*\n\nReason: Gemini API key is missing. Please save a valid Gemini API key under AI Settings before activating.");
@@ -366,7 +332,7 @@ export default async function handler(req: any, res: any) {
       });
     }
 
-    console.log(`[Gemini API Key Lookup Audit] Success: Active API key successfully retrieved for user_id='${userId}'.`);
+    console.log(`[Gemini API Key Lookup Audit] Success: API key successfully retrieved for user_id='${userId}'.`);
 
     // 5 & 6. Verify Strategy Playbook and Risk settings exist
     console.log("[Watcher Start] Fetching trading preferences...");
