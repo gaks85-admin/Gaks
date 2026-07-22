@@ -136,6 +136,13 @@ export default async function handler(req: any, res: any) {
   }
 
   if (req.method !== 'POST') {
+    console.log("[Watcher Activation] FAILED at Step 0:", {
+      step: 0,
+      reason: 'Method Not Allowed',
+      user_id: userId,
+      selected_pair: selectedPair,
+      selected_timeframe: selectedTimeframe
+    });
     return res.status(405).json({ success: false, error: 'Method Not Allowed' });
   }
 
@@ -168,6 +175,13 @@ export default async function handler(req: any, res: any) {
   }
 
   if (!userId) {
+    console.log("[Watcher Activation] FAILED at Step 1:", {
+      step: 1,
+      reason: "Authentication failed. You must be authenticated to start the AI Market Watcher.",
+      user_id: userId,
+      selected_pair: selectedPair,
+      selected_timeframe: selectedTimeframe
+    });
     return res.status(401).json({
       success: false,
       error: "Authentication failed. You must be authenticated to start the AI Market Watcher."
@@ -175,6 +189,13 @@ export default async function handler(req: any, res: any) {
   }
   
   if (!selectedPair) {
+    console.log("[Watcher Activation] FAILED at Step 2:", {
+      step: 2,
+      reason: "Please select a trading pair to monitor before activating the Market Watcher.",
+      user_id: userId,
+      selected_pair: selectedPair,
+      selected_timeframe: selectedTimeframe
+    });
     return res.status(400).json({
       success: false,
       error: "Please select a trading pair to monitor before activating the Market Watcher."
@@ -193,6 +214,13 @@ export default async function handler(req: any, res: any) {
   };
 
   if (!isSupportedSymbol(selectedPair)) {
+    console.log("[Watcher Activation] FAILED at Step 3:", {
+      step: 3,
+      reason: `Symbol "${selectedPair}" is not supported.`,
+      user_id: userId,
+      selected_pair: selectedPair,
+      selected_timeframe: selectedTimeframe
+    });
     return res.status(400).json({
       success: false,
       error: `Symbol "${selectedPair}" is not supported. Please choose one of our supported pairs: EURUSD, GBPUSD, XAUUSD, BTCUSD, NAS100, US30.`
@@ -251,6 +279,13 @@ export default async function handler(req: any, res: any) {
 
     if (!telegramConn || !telegramConn.connected || !telegramChatId) {
       console.log("[Watcher Start] Termination: Telegram not connected or missing chatId.");
+      console.log("[Watcher Activation] FAILED at Step 4:", {
+        step: 4,
+        reason: "Telegram is not connected. Please connect your Telegram account first under Gaks AI Settings.",
+        user_id: userId,
+        selected_pair: selectedPair,
+        selected_timeframe: selectedTimeframe
+      });
       return res.status(400).json({
         success: false,
         error: "Telegram is not connected. Please connect your Telegram account first under Gaks AI Settings."
@@ -318,6 +353,13 @@ export default async function handler(req: any, res: any) {
 
       console.log("[Watcher Start] Termination: Gemini API key missing.");
       await sendTelegramMessage(telegramChatId, "❌ *Market Watcher Activation Failed*\n\nReason: Gemini API key is missing. Please save a valid Gemini API key under AI Settings before activating.");
+      console.log("[Watcher Activation] FAILED at Step 5:", {
+        step: 5,
+        reason: "Gemini API key is missing. Please save a valid Gemini API key under AI Settings before activating.",
+        user_id: userId,
+        selected_pair: selectedPair,
+        selected_timeframe: selectedTimeframe
+      });
       return res.status(400).json({
         success: false,
         error: "Gemini API key is missing. Please save a valid Gemini API key under AI Settings before activating."
@@ -346,6 +388,13 @@ export default async function handler(req: any, res: any) {
     if (!activeStrategyText.trim()) {
       console.log("[Watcher Start] Termination: Strategy text is empty.");
       await sendTelegramMessage(telegramChatId, "❌ *Market Watcher Activation Failed*\n\nReason: Active trading strategy is empty. Please configure your strategy first.");
+      console.log("[Watcher Activation] FAILED at Step 6:", {
+        step: 6,
+        reason: "Active trading strategy is empty. Please configure your strategy first.",
+        user_id: userId,
+        selected_pair: selectedPair,
+        selected_timeframe: selectedTimeframe
+      });
       return res.status(400).json({
         success: false,
         error: "Active trading strategy is empty. Please configure your strategy first."
@@ -358,6 +407,13 @@ export default async function handler(req: any, res: any) {
     if (!preferredRisk.trim() || !riskReward.trim()) {
       console.log("[Watcher Start] Termination: Risk settings incomplete.");
       await sendTelegramMessage(telegramChatId, "❌ *Market Watcher Activation Failed*\n\nReason: Risk settings are incomplete. Please define and save your Preferred Risk and Risk:Reward Ratio under the Risk & Sizing section first.");
+      console.log("[Watcher Activation] FAILED at Step 7:", {
+        step: 7,
+        reason: "Risk settings are incomplete. Please define and save your Preferred Risk and Risk:Reward Ratio under the Risk & Sizing section first.",
+        user_id: userId,
+        selected_pair: selectedPair,
+        selected_timeframe: selectedTimeframe
+      });
       return res.status(400).json({
         success: false,
         error: "Risk settings are incomplete. Please define and save your Preferred Risk and Risk:Reward Ratio under the Risk & Sizing section first."
@@ -383,6 +439,13 @@ export default async function handler(req: any, res: any) {
       const hasDifferentActive = existingActiveWatchers.some(w => w.selected_pair !== selectedPair);
       if (hasDifferentActive) {
         await sendTelegramMessage(telegramChatId, "❌ *Market Watcher Activation Failed*\n\nReason: You can monitor only one trading pair at a time.");
+        console.log("[Watcher Activation] FAILED at Step 8:", {
+          step: 8,
+          reason: "You can monitor only one trading pair at a time.",
+          user_id: userId,
+          selected_pair: selectedPair,
+          selected_timeframe: selectedTimeframe
+        });
         return res.status(400).json({
           success: false,
           error: "You can monitor only one trading pair at a time."
@@ -458,6 +521,13 @@ export default async function handler(req: any, res: any) {
               item.symbol.toUpperCase().replace('/', '') === symbolUpper
             );
             if (!hasMatch && searchData.data.length === 0) {
+              console.log("[Watcher Activation] FAILED at Step 9:", {
+                step: 9,
+                reason: `TwelveData HTTP Error: 404. The symbol "${selectedPair}" was not found or is invalid on Twelve Data.`,
+                user_id: userId,
+                selected_pair: selectedPair,
+                selected_timeframe: selectedTimeframe
+              });
               return res.status(400).json({
                 success: false,
                 error: `TwelveData HTTP Error: 404. The symbol "${selectedPair}" was not found or is invalid on Twelve Data. Please use standard tickers like EURUSD, BTCUSD, AAPL.`
@@ -470,6 +540,13 @@ export default async function handler(req: any, res: any) {
         const quoteUrl = `https://api.twelvedata.com/quote?symbol=${encodeURIComponent(mappedSymbol)}&apikey=${twelveDataKey}`;
         const quoteRes = await fetch(quoteUrl);
         if (quoteRes.status === 404) {
+          console.log("[Watcher Activation] FAILED at Step 10:", {
+            step: 10,
+            reason: `TwelveData HTTP Error: 404. Symbol "${selectedPair}" is not recognized or not supported by Twelve Data.`,
+            user_id: userId,
+            selected_pair: selectedPair,
+            selected_timeframe: selectedTimeframe
+          });
           return res.status(400).json({
             success: false,
             error: `TwelveData HTTP Error: 404. Symbol "${selectedPair}" is not recognized or not supported by Twelve Data. Please try another symbol.`
@@ -477,6 +554,13 @@ export default async function handler(req: any, res: any) {
         } else if (quoteRes.ok) {
           const quoteData = await quoteRes.json();
           if (quoteData.status === "error") {
+            console.log("[Watcher Activation] FAILED at Step 11:", {
+              step: 11,
+              reason: `TwelveData Error: ${quoteData.message || "Invalid symbol on Twelve Data."}`,
+              user_id: userId,
+              selected_pair: selectedPair,
+              selected_timeframe: selectedTimeframe
+            });
             return res.status(400).json({
               success: false,
               error: `TwelveData Error: ${quoteData.message || "Invalid symbol on Twelve Data."}`
@@ -549,6 +633,7 @@ export default async function handler(req: any, res: any) {
     };
     console.log("[Watcher Start] Watcher data payload:", JSON.stringify(watcherData, null, 2));
 
+    console.log("[Watcher Activation] Reached UPSERT");
     const { error: watchersError } = await supabase
       .from("watchers")
       .upsert(watcherData, { onConflict: "user_id,selected_pair" });
@@ -556,6 +641,13 @@ export default async function handler(req: any, res: any) {
     if (watchersError) {
       console.error("[Watcher Start] Failed to write to watchers table:", watchersError.message);
       await sendTelegramMessage(telegramChatId, `❌ *Market Watcher Activation Failed*\n\nReason: Failed to write watcher state to DB: ${watchersError.message}`);
+      console.log("[Watcher Activation] FAILED at Step 12:", {
+        step: 12,
+        reason: "Failed to write watcher state to DB: " + watchersError.message,
+        user_id: userId,
+        selected_pair: selectedPair,
+        selected_timeframe: selectedTimeframe
+      });
       return res.status(500).json({
         success: false,
         error: "Failed to write watcher state to DB: " + watchersError.message,
@@ -563,6 +655,7 @@ export default async function handler(req: any, res: any) {
       });
     }
     console.log("[Watcher Start] Watcher upsert successful.");
+    console.log("[Watcher Activation] Watcher created successfully");
 
     // Upsert into legacy market_watchers table for interface backwards-compatibility
     try {
@@ -613,6 +706,12 @@ export default async function handler(req: any, res: any) {
         console.error("[Watcher Start] Failed to send error notification to Telegram:", tgErr);
       }
     }
+    console.log("[Watcher Activation] FAILED at Catch Block:", {
+      reason: err.message || "Internal server error during watcher activation",
+      user_id: userId,
+      selected_pair: selectedPair,
+      selected_timeframe: selectedTimeframe
+    });
     return res.status(500).json({
       success: false,
       error: "Internal server error during watcher activation: " + (err.message || "Unknown error"),
