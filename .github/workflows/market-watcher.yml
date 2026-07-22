@@ -2,17 +2,18 @@ name: Market Watcher Cron
 
 on:
   schedule:
-    - cron: '*/5 * * * *' # Run every 5 minutes
-  workflow_dispatch: # Allow manual triggering
+    - cron: '*/5 * * * *'
+  workflow_dispatch: {}
 
 jobs:
   run-market-watcher:
     runs-on: ubuntu-latest
     steps:
-      - name: Cron Started
-        run: echo "LOG: Cron started"
+      - name: "Cron Started"
+        run: |
+          echo "LOG: Cron started"
 
-      - name: Trigger Market Watcher Serverless API
+      - name: "Trigger Market Watcher Serverless API"
         id: trigger_api
         run: |
           echo "LOG: Triggering Market Watcher Serverless API..."
