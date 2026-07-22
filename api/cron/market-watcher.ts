@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { GoogleGenAI, Type } from '@google/genai';
-import { analyzeMarket, Candle } from '../../src/lib/strategy-engine';
+import { analyzeMarket, Candle } from '../../src/lib/strategy-engine.js';
 
 // --- Inlined Gemini Wrapper ---
 
@@ -383,6 +383,12 @@ function extractStrategyTextById(strategyTextRaw: string, strategyId?: string): 
 }
 
 export default async function handler(req: any, res: any) {
+  console.log({
+    NODE_ENV: process.env.NODE_ENV,
+    VERCEL_ENV: process.env.VERCEL_ENV,
+    VERCEL_URL: process.env.VERCEL_URL,
+    githubExists: !!process.env.GITHUB_TOKEN,
+  });
   console.log("LOG: Cron started");
   const startTime = Date.now();
   const requestTimestamp = new Date().toISOString();

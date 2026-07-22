@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { GoogleGenAI, Type } from "@google/genai";
-import { analyzeMarket, Candle } from "../../src/lib/strategy-engine";
+import { analyzeMarket, Candle } from "../../src/lib/strategy-engine.js";
 
 
 async function generateContentWithDiagnostics(ai: any, params: any) {
