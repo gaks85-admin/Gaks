@@ -52,6 +52,7 @@ export async function getGeminiKey(): Promise<string | null> {
  * Validates the value to prevent duplicates or empty entries.
  */
 export async function saveGeminiKey(key: string): Promise<{ success: boolean; error?: string }> {
+  console.log("[Gemini Save] Function called");
   const trimmedKey = key.trim();
   if (!trimmedKey) {
     return { success: false, error: "API key cannot be empty." };
@@ -60,10 +61,12 @@ export async function saveGeminiKey(key: string): Promise<{ success: boolean; er
   try {
     const { data: { session }, error: sessionError } = await supabase.auth.getSession();
     if (sessionError || !session?.user) {
+      console.warn("[Gemini Save] No session error or session user", sessionError);
       return { success: false, error: "You must be logged in to save API keys." };
     }
 
     const userId = session.user.id;
+    console.log("[Gemini Save] userId =", userId);
 
     // Test the new key immediately
     try {
@@ -98,29 +101,45 @@ export async function saveGeminiKey(key: string): Promise<{ success: boolean; er
 
     if (existingKey?.id) {
       // Update existing
+      const payload = {
+        ...commonFields
+      };
+      console.log("[Gemini Save] Update payload =", payload);
+      console.log("[Gemini Save] About to insert");
       result = await supabase
         .from('user_api_keys')
-        .update(commonFields)
+        .update(payload)
         .eq('id', existingKey.id);
+      console.log("[Gemini Save] Insert result =", result);
     } else {
       // Insert new
+      const payload = {
+        user_id: userId,
+        provider: 'gemini',
+        created_at: new Date().toISOString(),
+        ...commonFields
+      };
+      console.log("[Gemini Save] Insert payload =", payload);
+      console.log("[Gemini Save] About to insert");
       result = await supabase
         .from('user_api_keys')
-        .insert({
-          user_id: userId,
-          provider: 'gemini',
-          created_at: new Date().toISOString(),
-          ...commonFields
-        });
+        .insert(payload);
+      console.log("[Gemini Save] Insert result =", result);
     }
 
     if (result.error) {
-      console.error("Could not save API key to database:", result.error.message);
+      console.error("[Gemini Save] Insert failed", result.error);
       return {
         success: false,
-        error: result.error.message
+        error: result.error.message || JSON.stringify(result.error)
       };
     }
+
+    const verify = await supabase
+      .from("user_api_keys")
+      .select("*");
+
+    console.log("[Gemini Save] Verify rows", verify.data);
 
     console.log("[Gemini Save] Saved key successfully", {
       userId,
