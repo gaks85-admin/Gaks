@@ -304,14 +304,24 @@ export default async function handler(req: any, res: any) {
 
     // 1. Attempt the query for Gemini API key
     console.log("[Watcher] Logged in user:", userId);
+    console.log("[Watcher] userId:", userId);
+    console.log("[Watcher] selectedPair:", selectedPair);
+    console.log("[Watcher] selectedTimeframe:", selectedTimeframe);
+
     const { data: apiKeyRecord, error: apiKeyError } = await supabase
       .from(tableName)
       .select("api_key, id")
       .eq("user_id", userId)
       .eq("provider", providerFilter)
       .maybeSingle();
+
     console.log("[Watcher] apiKeyError:", apiKeyError);
     console.log("[Watcher] apiKeyRecord:", apiKeyRecord);
+
+    const { data: allKeys } = await supabase
+      .from("user_api_keys")
+      .select("*");
+    console.log("[ALL USER API KEYS]", allKeys);
 
     if (apiKeyError || !apiKeyRecord || !apiKeyRecord.api_key) {
       const errReason = apiKeyError 
