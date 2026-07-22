@@ -313,25 +313,41 @@ export default async function handler(req: any, res: any) {
     console.log("[Watcher] apiKeyError:", apiKeyError);
     console.log("[Watcher] apiKeyRecord:", apiKeyRecord);
 
-    if (apiKeyError) {
-      console.error(`[Gemini API Key Lookup Audit] Supabase query error:`, apiKeyError);
-    }
+    if (apiKeyError || !apiKeyRecord || !apiKeyRecord.api_key) {
+      const errReason = apiKeyError 
+        ? `Supabase query error: ${apiKeyError.message}` 
+        : `No row exists or api_key is missing in '${tableName}' for user_id='${userId}' and provider='${providerFilter}'.`;
 
-    if (!apiKeyRecord || !apiKeyRecord.api_key) {
-      console.log(`[Gemini API Key Lookup Audit] LOG EXACT WHY: No row exists or api_key is missing in '${tableName}' for user_id='${userId}' and provider='${providerFilter}'.`);
+      console.log(`[Gemini API Key Lookup Audit] LOG EXACT WHY: ${errReason}`);
+      console.log("[Watcher Start] Termination: Gemini API key lookup failed or key missing.");
 
-      console.log("[Watcher Start] Termination: Gemini API key missing.");
-      await sendTelegramMessage(telegramChatId, "❌ *Market Watcher Activation Failed*\n\nReason: Gemini API key is missing. Please save a valid Gemini API key under AI Settings before activating.");
-      console.log("[Watcher Activation] FAILED at Step 5:", {
+      const failedStepLog = {
         step: 5,
-        reason: "Gemini API key is missing. Please save a valid Gemini API key under AI Settings before activating.",
+        reason: errReason,
+        apiKeyError: apiKeyError || null,
+        apiKeyRecord: apiKeyRecord || null,
         user_id: userId,
         selected_pair: selectedPair,
         selected_timeframe: selectedTimeframe
-      });
+      };
+
+      console.log("[Watcher Activation] FAILED at Step 5:", failedStepLog);
+
+      await sendTelegramMessage(
+        telegramChatId, 
+        `❌ *Market Watcher Activation Failed*\n\nStep 5 Error: ${errReason}\napiKeyError: ${JSON.stringify(apiKeyError)}\napiKeyRecord: ${JSON.stringify(apiKeyRecord)}`
+      );
+
       return res.status(400).json({
         success: false,
-        error: "Gemini API key is missing. Please save a valid Gemini API key under AI Settings before activating."
+        error: errReason,
+        step: 5,
+        failedAtStep: "Step 5",
+        apiKeyError: apiKeyError || null,
+        apiKeyRecord: apiKeyRecord || null,
+        user_id: userId,
+        selected_pair: selectedPair,
+        selected_timeframe: selectedTimeframe
       });
     }
 
