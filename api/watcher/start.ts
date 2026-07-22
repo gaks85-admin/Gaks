@@ -303,12 +303,15 @@ export default async function handler(req: any, res: any) {
     console.log(`- Supabase JS Query: supabase.from('${tableName}').select('api_key, id').eq('user_id', '${userId}').eq('provider', '${providerFilter}').maybeSingle()`);
 
     // 1. Attempt the query for Gemini API key
+    console.log("[Watcher] Logged in user:", userId);
     const { data: apiKeyRecord, error: apiKeyError } = await supabase
       .from(tableName)
       .select("api_key, id")
       .eq("user_id", userId)
       .eq("provider", providerFilter)
       .maybeSingle();
+    console.log("[Watcher] apiKeyError:", apiKeyError);
+    console.log("[Watcher] apiKeyRecord:", apiKeyRecord);
 
     if (apiKeyError) {
       console.error(`[Gemini API Key Lookup Audit] Supabase query error:`, apiKeyError);
