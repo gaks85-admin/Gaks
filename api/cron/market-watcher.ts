@@ -414,13 +414,7 @@ export default async function handler(req: any, res: any) {
   const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY;
   const telegramBotToken = process.env.TELEGRAM_BOT_TOKEN;
 
-  console.log("LOG: Environment variables loaded", {
-    TWELVE_DATA_API_KEY: !!twelveDataKey,
-    CRON_SECRET: !!cronSecretRaw,
-    VITE_SUPABASE_URL: !!supabaseUrl,
-    SUPABASE_KEY: !!supabaseKey,
-    TELEGRAM_BOT_TOKEN: !!telegramBotToken
-  });
+  console.log("LOG: Environment variables loaded");
 
   // 2. Supabase Connection
   let supabase: any;
@@ -774,12 +768,15 @@ export default async function handler(req: any, res: any) {
     const totalTime = Date.now() - startTime;
     console.error("LOG FATAL ERROR: Cron failed");
     console.error(`Exception: ${err.message}`);
+    console.error(`Filename: ${__filename}`);
+    console.error(`Line: ${err.lineNumber || 'N/A'}`);
     console.error(`Stack: ${err.stack}`);
     
     return res.status(500).json({ 
       success: false, 
       error: err.message,
-      stack: err.stack 
+      stack: err.stack,
+      filename: __filename
     });
   }
 }

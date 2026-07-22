@@ -10,8 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: "Cron Started"
-        run: |
-          echo "LOG: Cron started"
+        run: echo "LOG: Cron started"
 
       - name: "Trigger Market Watcher Serverless API"
         id: trigger_api
