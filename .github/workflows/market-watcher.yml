@@ -9,9 +9,27 @@ jobs:
   run-market-watcher:
     runs-on: ubuntu-latest
     steps:
+      - name: Cron Started
+        run: echo "LOG: Cron started"
+
       - name: Trigger Market Watcher Serverless API
+        id: trigger_api
         run: |
-          curl -X POST https://gaks-ai.vercel.app/api/cron/market-watcher \
+          echo "LOG: Triggering Market Watcher Serverless API..."
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST https://gaks-ai.vercel.app/api/cron/market-watcher \
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
-            -H "Content-Type: application/json" \
-            --fail
+            -H "Content-Type: application/json")
+          
+          HTTP_STATUS=$(echo "$RESPONSE" | tail -n1)
+          BODY=$(echo "$RESPONSE" | sed '$d')
+          
+          echo "API Response Body:"
+          echo "$BODY"
+          echo "HTTP Status: $HTTP_STATUS"
+          
+          if [ "$HTTP_STATUS" -ne 200 ]; then
+            echo "LOG ERROR: API call failed with status $HTTP_STATUS"
+            exit 1
+          fi
+          
+          echo "LOG: Cron completed"

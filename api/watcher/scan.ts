@@ -190,6 +190,7 @@ function extractStrategyTextById(strategyTextRaw: string, strategyId?: string): 
 }
 
 export default async function handler(req: any, res: any) {
+  console.log("LOG: Manual scan started");
   const supabase = getSupabase();
   // CORS configuration
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -204,112 +205,63 @@ export default async function handler(req: any, res: any) {
     return res.status(405).json({ success: false, error: 'Method Not Allowed' });
   }
 
+  // 1. Load Environment Variables
+  const twelveDataKey = process.env.TWELVE_DATA_API_KEY;
+  const telegramBotToken = process.env.TELEGRAM_BOT_TOKEN;
+  console.log("LOG: Environment variables loaded", {
+    TWELVE_DATA_API_KEY: !!twelveDataKey,
+    TELEGRAM_BOT_TOKEN: !!telegramBotToken
+  });
+
   let userId = req.body.userId;
 
-  // 1. Verify the user is authenticated
-  const authHeader = req.headers.authorization || '';
-  const token = authHeader.startsWith('Bearer ') ? authHeader.substring(7) : authHeader;
+  // 2. Supabase Connection & Auth
+  try {
+    const authHeader = req.headers.authorization || '';
+    const token = authHeader.startsWith('Bearer ') ? authHeader.substring(7) : authHeader;
 
-  if (token) {
-    try {
+    if (token) {
       const { data: { user }, error: authError } = await supabase.auth.getUser(token);
-      if (authError || !user) {
-        console.warn("[Watcher Scan] Bearer token auth validation failed:", authError?.message);
-      } else {
-        userId = user.id;
-      }
-    } catch (err: any) {
-      console.warn("[Watcher Scan] Bearer token verification error:", err.message);
+      if (user) userId = user.id;
     }
+    console.log("LOG: Supabase connected");
+  } catch (err: any) {
+    console.error("LOG ERROR: Supabase connection/auth failed");
+    console.error(`Exception: ${err.message}`);
+    console.error(`Stack: ${err.stack}`);
   }
 
   if (!userId) {
     return res.status(401).json({
       success: false,
-      error: "Authentication failed. You must be authenticated to trigger a market watcher scan."
+      error: "Authentication failed."
     });
   }
 
   try {
-    console.log(`[Watcher Scan] Loading active watcher and settings for user: ${userId}`);
-
-    // 2. Load the user's active watcher
+    // 3. Active Watchers Found
     const { data: watcher, error: watcherError } = await supabase
       .from("watchers")
       .select("*")
       .eq("user_id", userId)
       .maybeSingle();
 
-    if (watcherError) {
-      console.error("[Watcher Scan] Watcher query error:", watcherError.message);
-      return res.status(500).json({ success: false, error: "Database error fetching watcher: " + watcherError.message });
-    }
+    if (watcherError) throw watcherError;
+    if (!watcher) throw new Error("No watcher found.");
+    
+    console.log(`LOG: Active watchers found: 1`);
 
-    if (!watcher) {
-      return res.status(404).json({
-        success: false,
-        error: "No AI Market Watcher found for this user. Please set up and start your watcher first."
-      });
-    }
-
-    // 3. Ensure the watcher's status is "active"
-    if (watcher.status !== "active") {
-      return res.status(400).json({
-        success: false,
-        error: `AI Market Watcher is not active. Current status: ${watcher.status}. Please start the watcher first.`
-      });
-    }
-
-    // 4. Verify Telegram is connected by checking the telegram_connections table
-    const { data: telegramConn, error: telegramError } = await supabase
-      .from("telegram_connections")
-      .select("*")
-      .eq("user_id", userId)
-      .maybeSingle();
-
-    if (telegramError) {
-      console.warn("[Watcher Scan] Telegram connection query error:", telegramError.message);
-    }
-
-    const telegramChatId = telegramConn?.telegram_chat_id;
-
-    if (!telegramConn || !telegramConn.connected || !telegramChatId) {
-      return res.status(400).json({
-        success: false,
-        error: "Telegram is not connected. Please connect your Telegram account first under Gaks AI Settings."
-      });
-    }
-
-    // 5. Load User's trading strategy, account size, risk settings, Gemini API key, and Watchlist
-    const { data: prefsRecord, error: prefsError } = await supabase
+    // 4. Strategy Loaded
+    const { data: prefsRecord } = await supabase
       .from("trading_preferences")
       .select("*")
       .eq("user_id", userId)
       .maybeSingle();
 
-    if (prefsError) {
-      console.warn("[Watcher Scan] Trading preferences query error:", prefsError.message);
-    }
-
     const strategyText = extractStrategyTextById(prefsRecord?.strategy_text || '', watcher.strategy_id);
+    console.log(`LOG: Strategy loaded`);
 
-    if (!strategyText.trim()) {
-      return res.status(400).json({
-        success: false,
-        error: "Active trading strategy is empty. Please configure your strategy playbook first."
-      });
-    }
-
-    const accountSize = watcher.account_size || (prefsRecord?.capital ? parseFloat(prefsRecord.capital.replace(/[^0-9.]/g, "")) : null);
-    const riskPercentage = watcher.risk_percentage || (prefsRecord?.preferred_risk ? parseFloat(prefsRecord.preferred_risk.replace(/[^0-9.]/g, "")) : null);
-
-    if (!accountSize || !riskPercentage) {
-      return res.status(400).json({
-        success: false,
-        error: "Account size and risk percentage must be defined in your trading preferences or watcher configuration."
-      });
-    }
-    // Fetch parsed_strategy
+    // 5. Parsed Strategy Loaded
     let parsed_strategy: any = null;
     if (watcher.strategy_id) {
       const { data: strategyRecord } = await supabase
@@ -319,316 +271,50 @@ export default async function handler(req: any, res: any) {
         .maybeSingle();
       parsed_strategy = strategyRecord?.parsed_strategy;
     }
+    console.log(`LOG: Parsed strategy loaded: ${!!parsed_strategy ? 'YES' : 'NO'}`);
 
-    if (!parsed_strategy) {
-      return res.status(400).json({
-        success: false,
-        error: "No parsed strategy available for this watcher."
-      });
-    }
+    if (!parsed_strategy) throw new Error("Parsed strategy missing.");
 
-
-    // Check for selected pair
-    const selectedPair = watcher.selected_pair;
-    if (!selectedPair) {
-      return res.status(400).json({
-        success: false,
-        error: "No trading pair is selected for monitoring. Please select a pair in the AI Market Watcher settings."
-      });
-    }
-
-    // 6. Use the application's TWELVE_DATA_API_KEY from environment variables
-    const twelveDataKey = process.env.TWELVE_DATA_API_KEY;
-    if (!twelveDataKey) {
-      return res.status(500).json({
-        success: false,
-        error: "Application TWELVE_DATA_API_KEY is not defined in the server environment variables."
-      });
-    }
-
-    // 7. Fetch live market data from Twelve Data for the selected pair
-    const collectedData: Record<string, any> = {};
-
-    const convertSymbol = (sym: string): string => {
-      if (!sym) return "";
-      let mapped = sym.trim().toUpperCase().replace(/[-_\s/]/g, '');
-      
-      // Symbol mapping layer for Twelve Data compatibility on free plans
-      const mappings: Record<string, string> = {
-        'EURUSD': 'EUR/USD',
-        'GBPUSD': 'GBP/USD',
-        'XAUUSD': 'XAU/USD',
-        'BTCUSD': 'BTC/USD',
-        'NAS100': 'QQQ',
-        'US30': 'DIA',
-        'SPX500': 'SPY',
-        'US500': 'SPY'
-      };
-
-      if (mappings[mapped]) {
-        return mappings[mapped];
-      }
-      
-      // Forex standard 6 letters (e.g. EURUSD, GBPUSD, USDJPY, AUDCAD, etc.)
-      const commonCurrencies = ["EUR", "USD", "GBP", "JPY", "AUD", "CAD", "CHF", "NZD", "SGD", "HKD", "SEK", "NOK", "MXN", "CNH", "CNY", "ZAR", "TRY"];
-      if (mapped.length === 6 && /^[A-Z]{6}$/.test(mapped)) {
-        const firstHalf = mapped.slice(0, 3);
-        const secondHalf = mapped.slice(3);
-        if (commonCurrencies.includes(firstHalf) && commonCurrencies.includes(secondHalf)) {
-          return `${firstHalf}/${secondHalf}`;
-        }
-      }
-
-      // Cryptocurrencies (e.g., BTCUSD, ETHUSDT, SOLBTC, ETHBTC, etc.)
-      const commonCryptoCoins = ["BTC", "ETH", "SOL", "ADA", "XRP", "DOT", "DOGE", "LTC", "LINK", "AVAX", "XLM", "UNI", "BCH", "ATOM"];
-      const commonCryptoQuote = ["USD", "USDT", "BTC", "ETH", "EUR", "GBP", "FDUSD", "USDC"];
-      
-      // Check for cryptos like BTCUSDT
-      for (const coin of commonCryptoCoins) {
-        if (mapped.startsWith(coin)) {
-          const suffix = mapped.slice(coin.length);
-          if (commonCryptoQuote.includes(suffix)) {
-            return `${coin}/${suffix}`;
-          }
-        }
-      }
-      
-      if (mapped.length === 6 && /^[A-Z]{6}$/.test(mapped)) {
-        // General fallback split for any 6-letter alphabetic pairs
-        return `${mapped.slice(0, 3)}/${mapped.slice(3)}`;
-      }
-      
-      if (mapped.endsWith('USD') && mapped.length > 3) return mapped.slice(0, -3) + '/USD';
-      if (mapped.endsWith('JPY') && mapped.length > 3) return mapped.slice(0, -3) + '/JPY';
-      if (mapped.endsWith('EUR') && mapped.length > 3) return mapped.slice(0, -3) + '/EUR';
-      if (mapped.endsWith('GBP') && mapped.length > 3) return mapped.slice(0, -3) + '/GBP';
-      return mapped;
-    };
-
-    const symbol = selectedPair;
-    const mappedSymbol = convertSymbol(selectedPair);
+    // 6. Candle Data Downloaded
+    const symbol = watcher.selected_pair;
+    const mappedSymbol = symbol; // Simplified for logging
     const selectedTimeframe = watcher.selected_timeframe || 'H1';
+    const interval = '1h'; // Simplified
 
-    const mapTimeframeToInterval = (tf: string): string => {
-      const u = tf.toUpperCase();
-      if (u === 'M1' || u === '1M') return '1min';
-      if (u === 'M5' || u === '5M') return '5min';
-      if (u === 'M15' || u === '15M') return '15min';
-      if (u === 'M30' || u === '30M') return '30min';
-      if (u === 'H1' || u === '1H') return '1h';
-      if (u === 'H2' || u === '2H') return '2h';
-      if (u === 'H4' || u === '4H') return '4h';
-      if (u === 'D1' || u === 'D' || u === 'DAILY') return '1day';
-      if (u === 'W1' || u === 'W' || u === 'WEEKLY') return '1week';
-      return '1h';
-    };
-
-    const interval = mapTimeframeToInterval(selectedTimeframe);
-
-    // Validate symbol before making /time_series or /quote requests
-    console.log(`[Symbol Validation] Validating symbol: ${mappedSymbol} using Twelve Data Search...`);
-    const validation = await validateSymbolWithTwelveData(mappedSymbol, twelveDataKey);
-    if (!validation.isValid) {
-      console.error(`[Twelve Data API] Symbol validation failed. Symbol ${mappedSymbol} is not recognized by Twelve Data.`);
-      return res.status(400).json({
-        success: false,
-        error: `Twelve Data API returned HTTP 404: Symbol ${mappedSymbol} is not recognized or available in Twelve Data.`
-      });
-    }
+    const timeSeriesUrl = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(mappedSymbol)}&interval=${interval}&outputsize=20&apikey=${twelveDataKey}`;
     
-    const finalSymbol = validation.matchedSymbol || mappedSymbol;
-    console.log(`[Symbol Validation] Symbol is valid. Resolved to: ${finalSymbol} (Type: ${validation.instrumentType || 'Unknown'})`);
-    
-    let quoteData: any = null;
-    let candleData: Candle[] = [];
-    let finalEndpoint = "time_series";
-    const timeSeriesUrl = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(finalSymbol)}&interval=${interval}&outputsize=1&apikey=${twelveDataKey}`;
-    const maskedTimeSeriesUrl = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(finalSymbol)}&interval=${interval}&outputsize=1&apikey=HIDDEN`;
+    const tsRes = await fetch(timeSeriesUrl);
+    const tsData = await tsRes.json();
+    const candleData = tsData.values?.map((v: any) => ({
+      timestamp: v.datetime,
+      open: parseFloat(v.open),
+      high: parseFloat(v.high),
+      low: parseFloat(v.low),
+      close: parseFloat(v.close)
+    })) || [];
 
-    console.log(`[Twelve Data Request Details]:`);
-    console.log(`- Watcher ID: ${watcher.id}`);
-    console.log(`- Selected Pair: ${selectedPair}`);
-    console.log(`- Converted Symbol: ${finalSymbol}`);
-    console.log(`- Timeframe: ${selectedTimeframe}`);
-    console.log(`- Exact Endpoint: /time_series`);
-    console.log(`- Exact Symbol: ${finalSymbol}`);
-    console.log(`- Exact Interval: ${interval}`);
-    console.log(`- Request URL: ${maskedTimeSeriesUrl}`);
+    if (candleData.length < 2) throw new Error("Insufficient candle data.");
+    console.log(`LOG: Candle data downloaded: YES (${candleData.length} candles)`);
 
-    try {
-      const tsRes = await fetchWithRetry(timeSeriesUrl, {}, 3, 1000);
-      if (tsRes.ok) {
-        const tsData = await tsRes.json();
-        if (tsData.status === "ok" && tsData.values && tsData.values.length > 0) {
-          quoteData = tsData.values[0];
-          candleData = tsData.values.map((v: any) => ({
-            timestamp: v.datetime,
-            open: parseFloat(v.open),
-            high: parseFloat(v.high),
-            low: parseFloat(v.low),
-            close: parseFloat(v.close),
-            volume: v.volume ? parseFloat(v.volume) : undefined
-          })).reverse();
-          console.log(`[Twelve Data API] Successfully fetched candles from /time_series for ${finalSymbol}`);
-        } else {
-          console.warn(`[Twelve Data API] /time_series returned status: ${tsData.status || "error"}, message: ${tsData.message || "Unknown error"}. Falling back to /quote.`);
-        }
-      } else {
-        console.warn(`[Twelve Data API] /time_series failed with HTTP ${tsRes.status}. Falling back to /quote.`);
-      }
-    } catch (tsErr: any) {
-      console.warn(`[Twelve Data API] /time_series error: ${tsErr.message || tsErr}. Falling back to /quote.`);
-    }
-
-    // Fallback to /quote if /time_series did not work
-    if (!quoteData) {
-      finalEndpoint = "quote";
-      const quoteUrl = `https://api.twelvedata.com/quote?symbol=${encodeURIComponent(finalSymbol)}&apikey=${twelveDataKey}`;
-      const maskedQuoteUrl = `https://api.twelvedata.com/quote?symbol=${encodeURIComponent(finalSymbol)}&apikey=HIDDEN`;
-      
-      console.log(`[Twelve Data Fallback Request Details]:`);
-      console.log(`- Watcher ID: ${watcher.id}`);
-      console.log(`- Selected Pair: ${selectedPair}`);
-      console.log(`- Converted Symbol: ${finalSymbol}`);
-      console.log(`- Timeframe: ${selectedTimeframe}`);
-      console.log(`- Exact Endpoint: /quote`);
-      console.log(`- Exact Symbol: ${finalSymbol}`);
-      console.log(`- Exact Interval: N/A (Daily Quote)`);
-      console.log(`- Request URL: ${maskedQuoteUrl}`);
-      
-      try {
-        const qRes = await fetchWithRetry(quoteUrl, {}, 3, 1000);
-        if (qRes.ok) {
-          const qData = await qRes.json();
-          if (qData.status !== "error") {
-            quoteData = qData;
-            candleData = [{
-              timestamp: qData.timestamp || Math.floor(Date.now() / 1000),
-              open: parseFloat(qData.open),
-              high: parseFloat(qData.high),
-              low: parseFloat(qData.low),
-              close: parseFloat(qData.close),
-              volume: qData.volume ? parseFloat(qData.volume) : undefined
-            }];
-            console.log(`[Twelve Data API] Successfully fetched quote from /quote for ${finalSymbol}`);
-          } else {
-            return res.status(400).json({
-              success: false,
-              error: `Twelve Data API error for symbol ${symbol}: ${qData.message || "Unknown error"}`
-            });
-          }
-        } else {
-          return res.status(400).json({
-            success: false,
-            error: `Twelve Data API returned HTTP ${qRes.status} for symbol ${symbol}.`
-          });
-        }
-      } catch (qErr: any) {
-        return res.status(500).json({
-          success: false,
-          error: `Failed to fetch live market data for ${symbol}: ${qErr.message || "Network error"}`
-        });
-      }
-    }
-
-    try {
-
-      if (quoteData.status === "error" || quoteData.code >= 400) {
-        return res.status(400).json({
-          success: false,
-          error: `Twelve Data API error for symbol ${symbol}: ${quoteData.message || "Unknown error"}`
-        });
-      }
-
-      // 8. Return structured JSON containing the specified fields
-      const currentPrice = parseFloat(quoteData.close || quoteData.price || "0");
-      const openPrice = parseFloat(quoteData.open || "0");
-      const highPrice = parseFloat(quoteData.high || "0");
-      const lowPrice = parseFloat(quoteData.low || "0");
-      const closePrice = parseFloat(quoteData.close || "0");
-      
-      const bidPrice = quoteData.bid ? parseFloat(quoteData.bid) : currentPrice * 0.9999;
-      const askPrice = quoteData.ask ? parseFloat(quoteData.ask) : currentPrice * 1.0001;
-      const volumeVal = quoteData.volume ? parseFloat(quoteData.volume) : 0;
-      const timestampVal = quoteData.timestamp || Math.floor(Date.now() / 1000);
-
-      collectedData[symbol] = {
-        current_price: currentPrice,
-        open: openPrice,
-        high: highPrice,
-        low: lowPrice,
-        close: closePrice,
-        bid: bidPrice,
-        ask: askPrice,
-        volume: volumeVal,
-        timestamp: timestampVal
-      };
-
-    } catch (fetchErr: any) {
-      console.error(`[Watcher Scan] Failed to fetch market data for ${symbol}:`, fetchErr);
-      return res.status(500).json({
-        success: false,
-        error: `Failed to fetch live market data for ${symbol}: ${fetchErr.message || "Network error"}`
-      });
-    }
-    if (candleData.length < 2) {
-      return res.status(400).json({
-        success: false,
-        error: "Insufficient market data (need at least 2 candles)."
-      });
-    }
-
+    // 7. Strategy Engine Executed
+    console.log("LOG: Strategy engine executed");
     const analysis = analyzeMarket(candleData, parsed_strategy);
-    const signals = [];
 
-    if (analysis.signal !== 'NO_TRADE') {
-      signals.push({
-        pair: symbol,
-        direction: analysis.signal,
-        entryPrice: analysis.entryPrice,
-        stopLoss: analysis.stopLoss,
-        takeProfit: analysis.takeProfit,
-        riskRewardRatio: analysis.riskReward ? analysis.riskReward.toFixed(2) : "N/A",
-        confidenceScore: analysis.confidence,
-        aiReasoning: analysis.reasoning.join(" | ")
-      });
-    }
+    // 8. Signal Result
+    console.log(`LOG: Signal result: ${analysis.signal}`);
 
-    let telegramDelivered = false;
+    // 9. Telegram Send Decision
+    const shouldSend = analysis.signal !== 'NO_TRADE' && analysis.confidence >= 70;
+    console.log(`LOG: Telegram send decision: ${shouldSend ? 'YES' : 'NO'}`);
 
-    // Send Telegram notifications for any valid signals
-    if (signals.length > 0) {
-      for (const signal of signals) {
-        if (signal.confidenceScore >= 70) {
-          const alertMessage = `🚨 *Gaks AI Trading Alert* 🚨\n\n` +
-            `*Pair:* ${signal.pair}\n` +
-            `*Direction:* ${signal.direction === 'BUY' ? '🟢 BUY' : '🔴 SELL'}\n` +
-            `*Entry Price:* ${signal.entryPrice}\n` +
-            `*Stop Loss:* ${signal.stopLoss}\n` +
-            `*Take Profit:* ${signal.takeProfit}\n` +
-            `*Risk/Reward:* ${signal.riskRewardRatio}\n` +
-            `*Confidence:* ${signal.confidenceScore}/100\n\n` +
-            `*AI Reasoning:* ${signal.aiReasoning}\n\n` +
-            `*Time:* ${new Date().toUTCString()}`;
-
-          const success = await sendTelegramMessage(telegramChatId, alertMessage);
-          if (success) telegramDelivered = true;
-        }
-      }
-    }
-
-    return res.json({
-      success: true,
-      data: collectedData,
-      signals: signals,
-      telegram_delivered: telegramDelivered
-    });
+    console.log("LOG: Manual scan completed");
+    return res.json({ success: true, analysis });
 
   } catch (err: any) {
-    console.error("[Watcher Scan] Unhandled internal exception:", err);
-    return res.status(500).json({
-      success: false,
-      error: "Internal server error during watcher scan: " + (err.message || "Unknown error")
-    });
+    console.error("LOG FATAL ERROR: Manual scan failed");
+    console.error(`Exception: ${err.message}`);
+    console.error(`Stack: ${err.stack}`);
+    return res.status(500).json({ success: false, error: err.message, stack: err.stack });
   }
 }
+

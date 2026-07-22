@@ -383,7 +383,7 @@ function extractStrategyTextById(strategyTextRaw: string, strategyId?: string): 
 }
 
 export default async function handler(req: any, res: any) {
-  const supabase = getSupabase();
+  console.log("LOG: Cron started");
   const startTime = Date.now();
   const requestTimestamp = new Date().toISOString();
 
@@ -407,19 +407,42 @@ export default async function handler(req: any, res: any) {
     return res.status(405).json({ success: false, error: "Method Not Allowed. Use POST." });
   }
 
+  // 1. Load Environment Variables
+  const twelveDataKey = process.env.TWELVE_DATA_API_KEY;
+  const cronSecretRaw = process.env.CRON_SECRET;
+  const supabaseUrl = process.env.VITE_SUPABASE_URL;
+  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+  const telegramBotToken = process.env.TELEGRAM_BOT_TOKEN;
+
+  console.log("LOG: Environment variables loaded", {
+    TWELVE_DATA_API_KEY: !!twelveDataKey,
+    CRON_SECRET: !!cronSecretRaw,
+    VITE_SUPABASE_URL: !!supabaseUrl,
+    SUPABASE_KEY: !!supabaseKey,
+    TELEGRAM_BOT_TOKEN: !!telegramBotToken
+  });
+
+  // 2. Supabase Connection
+  let supabase: any;
+  try {
+    supabase = getSupabase();
+    console.log("LOG: Supabase connected");
+  } catch (err: any) {
+    console.error("LOG ERROR: Supabase connection failed");
+    console.error(`Exception: ${err.message}`);
+    console.error(`Stack: ${err.stack}`);
+    return res.status(500).json({ success: false, error: "Supabase connection failed" });
+  }
+
   // Debug logging immediately before the authorization check
   console.log("DEBUG CRON AUTH:", {
     method: req.method,
     headers: req.headers,
-    rawHeaders: (req as any).rawHeaders || null,
     authorization: req.headers.authorization || req.headers['authorization'] || null,
-    authHeaderExists: !!(req.headers.authorization || req.headers['authorization']),
-    authHeaderLength: (req.headers.authorization || req.headers['authorization'])?.length ?? 0
   });
 
   // Protect the endpoint using a CRON_SECRET
   const authHeader = req.headers.authorization || req.headers['authorization'];
-  const cronSecretRaw = process.env.CRON_SECRET;
   
   // Robust parsing of Bearer token
   let token: string | null = null;
@@ -435,17 +458,6 @@ export default async function handler(req: any, res: any) {
   // Clean quotes or whitespace
   const cleanToken = token ? token.replace(/^['"]|['"]$/g, '').trim() : "";
   const cleanCronSecret = cronSecretRaw ? cronSecretRaw.trim().replace(/^['"]|['"]$/g, '').trim() : "";
-
-  // Log the debug information WITHOUT exposing secrets
-  console.log(JSON.stringify({
-    event: "debug_auth_info",
-    authorizationHeaderPresent: !!authHeader,
-    authorizationHeaderLength: authHeader ? authHeader.length : 0,
-    startsWithBearer: !!(authHeader && authHeader.trim().toLowerCase().startsWith("bearer ")),
-    cronSecretPresent: !!process.env.CRON_SECRET,
-    cronSecretLength: process.env.CRON_SECRET ? process.env.CRON_SECRET.length : 0,
-    tokenMatches: cleanToken === cleanCronSecret
-  }));
 
   let authorized = true;
   let authFailureReason = "";
@@ -463,107 +475,39 @@ export default async function handler(req: any, res: any) {
     }
   }
 
-  // Structured Log: Request Received
-  console.log(JSON.stringify({
-    event: "request_received",
-    timestamp: requestTimestamp,
-    method: req.method,
-    url: req.url || "/api/cron/market-watcher",
-    authHeaderPresent: !!authHeader
-  }));
-
-  // Structured Log: Authentication Result
-  console.log(JSON.stringify({
-    event: "authentication_result",
-    success: authorized,
-    reason: authFailureReason || "Passed"
-  }));
-
   if (!authorized) {
-    const totalTime = Date.now() - startTime;
-    console.log(JSON.stringify({
-      event: "cycle_complete",
-      status: "unauthorized",
-      totalWatchers: 0,
-      processedCount: 0,
-      skippedCount: 0,
-      geminiAnalysesCount: 0,
-      telegramMessagesSentCount: 0,
-      executionTimeMs: totalTime
-    }));
+    console.warn(`LOG: Unauthorized access attempt: ${authFailureReason}`);
     return res.status(401).json({
       success: false,
-      receivedAuthorization: req.headers.authorization || null,
-      method: req.method,
-      headersPresent: Object.keys(req.headers)
+      error: "Unauthorized",
+      reason: authFailureReason
     });
   }
 
   try {
-    const twelveDataKey = process.env.TWELVE_DATA_API_KEY;
     if (!twelveDataKey) {
-      console.error("Missing TWELVE_DATA_API_KEY environment variable.");
-      const totalTime = Date.now() - startTime;
-      console.log(JSON.stringify({
-        event: "cycle_complete",
-        status: "config_error",
-        error: "Missing TWELVE_DATA_API_KEY",
-        totalWatchers: 0,
-        processedCount: 0,
-        skippedCount: 0,
-        geminiAnalysesCount: 0,
-        telegramMessagesSentCount: 0,
-        executionTimeMs: totalTime
-      }));
-      return res.status(500).json({ success: false, error: "Internal Server Error" });
+      throw new Error("Missing TWELVE_DATA_API_KEY environment variable.");
     }
 
-    // Read all active watchers
+    // 3. Active Watchers Found
     const { data: watchers, error: fetchError } = await supabase
       .from("watchers")
       .select("*")
       .eq("status", "active");
       
     if (fetchError) {
-      console.error("[Market Watcher Cron] Failed to fetch active watchers:", fetchError);
-      const totalTime = Date.now() - startTime;
-      console.log(JSON.stringify({
-        event: "cycle_complete",
-        status: "database_error",
-        error: fetchError.message || "Database error",
-        totalWatchers: 0,
-        processedCount: 0,
-        skippedCount: 0,
-        geminiAnalysesCount: 0,
-        telegramMessagesSentCount: 0,
-        executionTimeMs: totalTime
-      }));
-      return res.status(500).json({ success: false, error: "Internal Server Error" });
+      throw fetchError;
     }
 
-    // Structured Log: Number of Watchers
-    console.log(JSON.stringify({
-      event: "watchers_fetched",
-      total: watchers ? watchers.length : 0
-    }));
+    console.log(`LOG: Active watchers found: ${watchers ? watchers.length : 0}`);
     
     if (!watchers || watchers.length === 0) {
-      const totalTime = Date.now() - startTime;
-      console.log(JSON.stringify({
-        event: "cycle_complete",
-        status: "success",
-        totalWatchers: 0,
-        processedCount: 0,
-        skippedCount: 0,
-        geminiAnalysesCount: 0,
-        telegramMessagesSentCount: 0,
-        executionTimeMs: totalTime
-      }));
+      console.log("LOG: Cron completed (No active watchers)");
       return res.status(200).json({
         success: true,
         processed: 0,
         signalsSent: 0,
-        executionTimeMs: totalTime
+        executionTimeMs: Date.now() - startTime
       });
     }
 
@@ -577,11 +521,7 @@ export default async function handler(req: any, res: any) {
     for (const watcher of watchers) {
       // Ensure the endpoint finishes within 30 seconds by stopping early if needed
       if (Date.now() - startTime > 25000) {
-        console.warn(JSON.stringify({
-          event: "timeout_approaching",
-          message: "Approaching 30s timeout limit. Terminating loop to guarantee graceful JSON response.",
-          elapsedMs: Date.now() - startTime
-        }));
+        console.warn("LOG: Approaching 30s timeout limit. Stopping early.");
         break;
       }
 
@@ -589,31 +529,33 @@ export default async function handler(req: any, res: any) {
       const selectedPair = toCanonicalSymbol(watcher.selected_pair || "");
       const symbol = selectedPair;
       const selectedTimeframe = watcher.selected_timeframe || 'H1';
-      console.log("[WATCHER START]\nwatcher_id: " + watcher.id + "\nuser_id: " + userId + "\nselected_pair: " + selectedPair + "\nselected_timeframe: " + selectedTimeframe);
+      console.log(`--- Processing Watcher ${watcher.id} (${selectedPair}) ---`);
       
       if (!selectedPair) {
-        console.log("[WATCHER SKIPPED]\nwatcher_id: " + watcher.id + "\nuser_id: " + userId + "\nselected_pair: " + selectedPair + "\nselected_timeframe: " + selectedTimeframe + "\nreason: Missing selected_pair");
+        console.log(`LOG: Watcher ${watcher.id} skipped - No selected pair`);
         skipped.push({ userId, reason: "No selected pair" });
         watchersSkippedCount++;
         continue;
       }
 
       try {
-        // Check Telegram connection
-        const { data: telegramConn } = await supabase
-          .from("telegram_connections")
-          .select("telegram_chat_id, connected")
-          .eq("user_id", userId)
-          .maybeSingle();
+        // 4. Strategy Loaded
+        const [{ data: prefsRecord }, { data: apiKeyRecord }] = await Promise.all([
+          supabase.from("trading_preferences").select("*").eq("user_id", userId).maybeSingle(),
+          supabase.from("user_api_keys").select("*").eq("user_id", userId).eq("provider", "gemini").maybeSingle()
+        ]);
 
-        if (!telegramConn || !telegramConn.connected || !telegramConn.telegram_chat_id) {
-          console.log("[WATCHER SKIPPED]\nwatcher_id: " + watcher.id + "\nuser_id: " + userId + "\nselected_pair: " + selectedPair + "\nselected_timeframe: " + selectedTimeframe + "\nreason: Telegram not connected");
-          skipped.push({ userId, reason: "Telegram not connected" });
+        const strategyText = extractStrategyTextById(prefsRecord?.strategy_text || '', watcher.strategy_id);
+        console.log(`LOG: Strategy loaded for ${selectedPair}`);
+
+        if (!strategyText.trim()) {
+          console.log(`LOG: Watcher ${watcher.id} skipped - Strategy text empty`);
+          skipped.push({ userId, reason: "Strategy text empty" });
           watchersSkippedCount++;
           continue;
         }
-        const telegramChatId = telegramConn.telegram_chat_id;
-        // Fetch parsed_strategy
+
+        // 5. Parsed Strategy Loaded
         let parsed_strategy: any = null;
         if (watcher.strategy_id) {
           const { data: strategyRecord } = await supabase
@@ -625,71 +567,67 @@ export default async function handler(req: any, res: any) {
         }
 
         if (!parsed_strategy) {
-          console.log("[WATCHER SKIPPED]\nwatcher_id: " + watcher.id + "\nreason: No parsed strategy available.");
+          console.log(`LOG: Watcher ${watcher.id} skipped - Parsed strategy loaded: NO`);
           skipped.push({ userId, reason: "No parsed strategy available" });
           watchersSkippedCount++;
           continue;
         }
+        console.log(`LOG: Parsed strategy loaded for ${selectedPair}: YES`);
 
+        // Check Telegram connection
+        const { data: telegramConn } = await supabase
+          .from("telegram_connections")
+          .select("telegram_chat_id, connected")
+          .eq("user_id", userId)
+          .maybeSingle();
 
-
-        // Fetch Trading Preferences & Gemini API Key in parallel
-        const [{ data: prefsRecord }, { data: apiKeyRecord }] = await Promise.all([
-          supabase.from("trading_preferences").select("*").eq("user_id", userId).maybeSingle(),
-          supabase.from("user_api_keys").select("*").eq("user_id", userId).eq("provider", "gemini").maybeSingle()
-        ]);
-
-        const strategyText = extractStrategyTextById(prefsRecord?.strategy_text || '', watcher.strategy_id);
-
-        if (!strategyText.trim()) {
-          console.log("[WATCHER SKIPPED]\nwatcher_id: " + watcher.id + "\nuser_id: " + userId + "\nselected_pair: " + selectedPair + "\nselected_timeframe: " + selectedTimeframe + "\nreason: Strategy text empty");
-          skipped.push({ userId, reason: "Strategy text empty" });
+        if (!telegramConn || !telegramConn.connected || !telegramConn.telegram_chat_id) {
+          console.log(`LOG: Watcher ${watcher.id} skipped - Telegram not connected`);
+          skipped.push({ userId, reason: "Telegram not connected" });
           watchersSkippedCount++;
           continue;
         }
+        const telegramChatId = telegramConn.telegram_chat_id;
 
         const accountSize = watcher.account_size || (prefsRecord?.capital ? parseFloat(prefsRecord.capital.replace(/[^0-9.]/g, "")) : null);
         const riskPercentage = watcher.risk_percentage || (prefsRecord?.preferred_risk ? parseFloat(prefsRecord.preferred_risk.replace(/[^0-9.]/g, "")) : null);
 
         if (!accountSize || !riskPercentage) {
-          console.log("[WATCHER SKIPPED]\nwatcher_id: " + watcher.id + "\nuser_id: " + userId + "\nselected_pair: " + selectedPair + "\nselected_timeframe: " + selectedTimeframe + "\nreason: Account size or risk percentage not defined");
+          console.log(`LOG: Watcher ${watcher.id} skipped - Account size/risk not defined`);
           skipped.push({ userId, reason: "Account size or risk percentage not defined" });
           watchersSkippedCount++;
           continue;
         }
 
         if (!apiKeyRecord || !apiKeyRecord.api_key) {
-          console.log("[WATCHER SKIPPED]\nwatcher_id: " + watcher.id + "\nuser_id: " + userId + "\nselected_pair: " + selectedPair + "\nselected_timeframe: " + selectedTimeframe + "\nreason: Gemini API Key missing");
+          console.log(`LOG: Watcher ${watcher.id} skipped - Gemini API Key missing`);
           skipped.push({ userId, reason: "Gemini API Key missing" });
           watchersSkippedCount++;
           continue;
         }
 
-        // Fetch live market data from Twelve Data
+        // 6. Candle Data Downloaded
         const mappedSymbol = toDisplaySymbol(selectedPair);
         const interval = mapTimeframeToInterval(selectedTimeframe);
 
         let quoteData: any = null;
         let candleData: Candle[] = [];
-        let finalEndpoint = "unknown";
 
         if (!twelveDataExhausted) {
-          // Validate symbol before making requests
           const validation = await validateSymbolWithTwelveData(mappedSymbol, twelveDataKey);
           
           if (!validation.isValid) {
             if (validation.reason?.includes("429")) {
               twelveDataExhausted = true;
             } else {
-              console.log("[WATCHER SKIPPED]\nwatcher_id: " + watcher.id + "\nreason: TwelveData validation failed: " + validation.reason);
+              console.log(`LOG: Watcher ${watcher.id} skipped - TwelveData validation failed: ${validation.reason}`);
               continue;
             }
           }
           
           if (!twelveDataExhausted) {
             const finalSymbol = validation.matchedSymbol || mappedSymbol;
-            finalEndpoint = "time_series";
-            const timeSeriesUrl = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(finalSymbol)}&interval=${interval}&outputsize=1&apikey=${twelveDataKey}`;
+            const timeSeriesUrl = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(finalSymbol)}&interval=${interval}&outputsize=20&apikey=${twelveDataKey}`;
 
             try {
               const tsRes = await fetchWithRetry(timeSeriesUrl, { signal: AbortSignal.timeout(4000) }, 2, 500);
@@ -712,45 +650,25 @@ export default async function handler(req: any, res: any) {
                 }
               }
             } catch (tsErr) {
-              console.warn(`[Twelve Data API] /time_series error for ${finalSymbol}: ${tsErr.message || tsErr}. Trying fallback /quote.`);
-            }
-
-            // Fallback to /quote if /time_series did not work
-            if (!quoteData && !twelveDataExhausted) {
-              finalEndpoint = "quote";
-              const quoteUrl = `https://api.twelvedata.com/quote?symbol=${encodeURIComponent(finalSymbol)}&apikey=${twelveDataKey}`;
-              
-              const qRes = await fetchWithRetry(quoteUrl, { signal: AbortSignal.timeout(4000) }, 2, 500);
-              if (qRes.status === 429) {
-                twelveDataExhausted = true;
-              } else if (qRes.ok) {
-                const qData = await qRes.json();
-                if (qData.status === "error") {
-                  if (qData.code === 429) twelveDataExhausted = true;
-                  else throw new Error(`TwelveData Error: ${qData.message}`);
-                } else {
-                  quoteData = qData;
-                  candleData = [{
-                    timestamp: qData.timestamp || Math.floor(Date.now() / 1000),
-                    open: parseFloat(qData.open),
-                    high: parseFloat(qData.high),
-                    low: parseFloat(qData.low),
-                    close: parseFloat(qData.close),
-                    volume: qData.volume ? parseFloat(qData.volume) : undefined
-                  }];
-                }
-              }
+              console.warn(`[Twelve Data API] error for ${finalSymbol}: ${tsErr.message || tsErr}`);
             }
           }
         }
+
         if (candleData.length < 2) {
-           console.log("Skipped due to insufficient market data (need at least 2 candles).");
-           skipped.push({ userId, reason: "Skipped due to insufficient market data." });
+           console.log(`LOG: Watcher ${watcher.id} skipped - Candle data downloaded: NO (insufficient data)`);
+           skipped.push({ userId, reason: "Insufficient market data." });
            watchersSkippedCount++;
            continue;
         }
+        console.log(`LOG: Candle data downloaded for ${selectedPair}: YES (${candleData.length} candles)`);
 
+        // 7. Strategy Engine Executed
+        console.log(`LOG: Strategy engine executed for ${selectedPair}`);
         const analysis = analyzeMarket(candleData, parsed_strategy);
+
+        // 8. Signal Result
+        console.log(`LOG: Signal result for ${selectedPair}: ${analysis.signal} (Confidence: ${analysis.confidence}%)`);
 
         if (analysis.signal === 'NO_TRADE') {
             await supabase
@@ -760,7 +678,6 @@ export default async function handler(req: any, res: any) {
                  updated_at: new Date().toISOString()
               })
               .eq("id", watcher.id);
-            console.log(`No setup found for ${mappedSymbol}`);
             watchersProcessedCount++;
             continue;
         }
@@ -775,62 +692,50 @@ export default async function handler(req: any, res: any) {
             confidenceScore: analysis.confidence,
             aiReasoning: analysis.reasoning.join(" | ")
         };
-        const signals = [signal];
-        signalsGeneratedCount += signals.length;
+
+        // 9. Telegram Send Decision
+        const shouldSendTelegram = signal.confidenceScore >= 70;
+        console.log(`LOG: Telegram send decision for ${selectedPair}: ${shouldSendTelegram ? 'YES' : 'NO'}`);
         
-        let signalsSent = 0;;
+        if (shouldSendTelegram) {
+          const signalHash = `${signal.pair}_${signal.direction}_${signal.entryPrice}`;
+          
+          // Check for duplicate
+          if (watcher.last_signal_data === signalHash) {
+            console.log(`LOG: Telegram send decision for ${selectedPair}: NO (Duplicate signal detected)`);
+            continue;
+          }
 
-        // Send Telegram Message if valid signals found
-        if (signals.length > 0) {
-          for (const signal of signals) {
-            if (signal.confidenceScore >= 70) {
-              const signalHash = `${signal.pair}_${signal.direction}_${signal.entryPrice}`;
-              
-              // 1. Local Cache check
-              if (watcher.last_signal_data === signalHash) {
-                console.log("[WATCHER SKIPPED]\nwatcher_id: " + watcher.id + "\nuser_id: " + userId + "\nselected_pair: " + selectedPair + "\nselected_timeframe: " + selectedTimeframe + "\nreason: Duplicate signal detected");
-                console.log(`[User ${userId}] Duplicate signal detected for ${signal.pair} (checked local state). Skipping alert.`);
-                continue;
-              }
+          // Atomic update to register signal
+          const { data: updatedRows, error: updateError } = await supabase
+            .from("watchers")
+            .update({ last_signal_data: signalHash })
+            .eq("id", watcher.id)
+            .or(`last_signal_data.is.null,last_signal_data.neq.${signalHash}`)
+            .select();
 
-              // 2. Atomic test-and-set in Database to prevent concurrent races
-              const { data: updatedRows, error: updateError } = await supabase
-                .from("watchers")
-                .update({ last_signal_data: signalHash })
-                .eq("id", watcher.id)
-                .or(`last_signal_data.is.null,last_signal_data.neq.${signalHash}`)
-                .select();
+          if (updateError || !updatedRows || updatedRows.length === 0) {
+            console.log(`LOG: Telegram send decision for ${selectedPair}: NO (Failed to register signal or race condition)`);
+            continue;
+          }
 
-              if (updateError) {
-                console.log("[WATCHER SKIPPED]\nwatcher_id: " + watcher.id + "\nuser_id: " + userId + "\nselected_pair: " + selectedPair + "\nselected_timeframe: " + selectedTimeframe + "\nreason: Atomic update error: " + updateError.message);
-                console.error(`[User ${userId}] Error performing atomic update for signal:`, updateError);
-                continue;
-              }
+          const alertMessage = `🚨 *Autonomous AI Trading Alert* 🚨\n\n` +
+            `*Pair:* ${signal.pair} (${selectedTimeframe})\n` +
+            `*Direction:* ${signal.direction === 'BUY' ? '🟢 BUY' : '🔴 SELL'}\n` +
+            `*Entry Price:* ${signal.entryPrice}\n` +
+            `*Stop Loss:* ${signal.stopLoss}\n` +
+            `*Take Profit:* ${signal.takeProfit}\n` +
+            `*Risk/Reward:* ${signal.riskRewardRatio}\n` +
+            `*Confidence:* ${signal.confidenceScore}/100\n\n` +
+            `*AI Reasoning:* ${signal.aiReasoning}\n\n` +
+            `*Time:* ${new Date().toUTCString()}`;
 
-              if (!updatedRows || updatedRows.length === 0) {
-                console.log("[WATCHER SKIPPED]\nwatcher_id: " + watcher.id + "\nuser_id: " + userId + "\nselected_pair: " + selectedPair + "\nselected_timeframe: " + selectedTimeframe + "\nreason: Concurrent or duplicate signal already registered");
-                console.log(`[User ${userId}] Concurrent or duplicate signal already registered in database for ${signal.pair}. Skipping alert.`);
-                continue;
-              }
-
-              // 3. We won the database lock, safe to send Telegram message
-              const alertMessage = `🚨 *Autonomous AI Trading Alert* 🚨\n\n` +
-                `*Pair:* ${signal.pair} (${selectedTimeframe})\n` +
-                `*Direction:* ${signal.direction === 'BUY' ? '🟢 BUY' : '🔴 SELL'}\n` +
-                `*Entry Price:* ${signal.entryPrice}\n` +
-                `*Stop Loss:* ${signal.stopLoss}\n` +
-                `*Take Profit:* ${signal.takeProfit}\n` +
-                `*Risk/Reward:* ${signal.riskRewardRatio}\n` +
-                `*Confidence:* ${signal.confidenceScore}/100\n\n` +
-                `*AI Reasoning:* ${signal.aiReasoning}\n\n` +
-                `*Time:* ${new Date().toUTCString()}`;
-
-              const alertSent = await sendTelegramMessage(telegramChatId, alertMessage);
-              if (alertSent) {
-                signalsSent++;
-                telegramMessagesSentCount++;
-              }
-            }
+          const alertSent = await sendTelegramMessage(telegramChatId, alertMessage);
+          if (alertSent) {
+            telegramMessagesSentCount++;
+            console.log(`LOG: Telegram message sent successfully for ${selectedPair}`);
+          } else {
+            console.error(`LOG ERROR: Telegram message failed for ${selectedPair}`);
           }
         }
 
@@ -843,53 +748,20 @@ export default async function handler(req: any, res: any) {
           })
           .eq("id", watcher.id);
 
-        console.log("[WATCHER SUCCESS]\nwatcher_id: " + watcher.id + "\nlast_scan_at: " + new Date().toISOString());
-
         watchersProcessedCount++;
-        results.push({ userId, symbol, signalsFound: signals.length, signalsSent });
+        results.push({ userId, symbol, signalsFound: 1, signalsSent: shouldSendTelegram ? 1 : 0 });
 
       } catch (err: any) {
-        console.log("[WATCHER SKIPPED]\nwatcher_id: " + watcher.id + "\nuser_id: " + userId + "\nselected_pair: " + selectedPair + "\nselected_timeframe: " + selectedTimeframe + "\nreason: Error: " + (err.message || err));
-        console.error(`[User ${userId}] Error processing watcher:`, err.message || err);
+        console.error(`LOG ERROR: Watcher ${watcher.id} failed`);
+        console.error(`Exception: ${err.message}`);
+        console.error(`Stack: ${err.stack}`);
         errors.push({ userId, error: err.message || "Unknown error" });
         watchersSkippedCount++;
       }
     }
 
     const totalTime = Date.now() - startTime;
-
-    // Structured Log: Skipped Watchers
-    if (watchersSkippedCount > 0) {
-      console.log(JSON.stringify({
-        event: "watchers_skipped",
-        skipped: watchersSkippedCount,
-        details: skipped
-      }));
-    }
-
-    // Structured Log: Gemini Analyses Run
-    console.log(JSON.stringify({
-      event: "gemini_analyses",
-      count: watchersProcessedCount
-    }));
-
-    // Structured Log: Telegram Messages
-    console.log(JSON.stringify({
-      event: "telegram_messages_sent",
-      count: telegramMessagesSentCount
-    }));
-
-    // Structured Log: Cycle Complete & Execution Time
-    console.log(JSON.stringify({
-      event: "cycle_complete",
-      status: "success",
-      totalWatchers: watchers.length,
-      processedCount: watchersProcessedCount,
-      skippedCount: watchersSkippedCount,
-      geminiAnalysesCount: watchersProcessedCount,
-      telegramMessagesSentCount: telegramMessagesSentCount,
-      executionTimeMs: totalTime
-    }));
+    console.log(`LOG: Cron completed (Processed: ${watchersProcessedCount}, Sent: ${telegramMessagesSentCount})`);
 
     return res.status(200).json({
       success: true,
@@ -900,27 +772,15 @@ export default async function handler(req: any, res: any) {
 
   } catch (err: any) {
     const totalTime = Date.now() - startTime;
-    console.error("[Market Watcher Cron] Fatal Error Stack:", err.stack || err);
+    console.error("LOG FATAL ERROR: Cron failed");
+    console.error(`Exception: ${err.message}`);
+    console.error(`Stack: ${err.stack}`);
     
-    let errorMsg = err.message || "Unknown error";
-    if (errorMsg.includes("Gemini") || (err.stack && err.stack.includes("Gemini")) || errorMsg.includes("API key not valid") || errorMsg.includes("fetch failed") || errorMsg.includes("Invalid prompt")) {
-       errorMsg = "Cron failed because Gemini request failed.";
-    } else if (err.status && typeof err.status === 'number' && (err.status >= 400 && err.status < 600)) {
-       errorMsg = "Cron failed because Gemini request failed.";
-    }
-
-    console.log(JSON.stringify({
-      event: "cycle_complete",
-      status: "fatal_error",
-      error: errorMsg,
-      totalWatchers: 0,
-      processedCount: watchersProcessedCount,
-      skippedCount: watchersSkippedCount,
-      geminiAnalysesCount: watchersProcessedCount,
-      telegramMessagesSentCount: telegramMessagesSentCount,
-      executionTimeMs: totalTime
-    }));
-
-    return res.status(500).json({ success: false, error: errorMsg });
+    return res.status(500).json({ 
+      success: false, 
+      error: err.message,
+      stack: err.stack 
+    });
   }
 }
+
