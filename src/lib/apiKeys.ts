@@ -32,17 +32,15 @@ export async function getGeminiKey(): Promise<string | null> {
       .maybeSingle();
 
     if (error) {
-      console.warn("Could not fetch Gemini key from database (falling back to local storage):", error.message);
-      // Fallback: check localStorage for simulated sessions/resilience
-      return localStorage.getItem(`gaks_gemini_key_${session.user.id}`) || null;
+      console.warn("Could not fetch Gemini key from database:", error.message);
+      return null;
     }
 
     if (data && data.api_key) {
       return data.api_key;
     }
 
-    // Fallback: check localStorage
-    return localStorage.getItem(`gaks_gemini_key_${session.user.id}`) || null;
+    return null;
   } catch (err) {
     console.error("Exception in getGeminiKey:", err);
     return null;
@@ -90,12 +88,13 @@ export async function saveGeminiKey(key: string): Promise<{ success: boolean; er
     let result;
     const commonFields = {
         api_key: trimmedKey,
-        updated_at: new Date().toISOString(),
-        status: 'active',
-        last_success_at: new Date().toISOString(),
-        last_error: null,
-        telegram_notified: false
+        updated_at: new Date().toISOString()
     };
+
+    console.log("[Gemini Save] Saving key", {
+      userId,
+      provider: "gemini"
+    });
 
     if (existingKey?.id) {
       // Update existing
@@ -116,14 +115,17 @@ export async function saveGeminiKey(key: string): Promise<{ success: boolean; er
     }
 
     if (result.error) {
-      console.warn("Could not save API key to database (falling back to local storage):", result.error.message);
-      // Fallback: save to localStorage to ensure the app stays operational
-      localStorage.setItem(`gaks_gemini_key_${userId}`, trimmedKey);
-      return { success: true }; // Return success as we saved it in local fallback
+      console.error("Could not save API key to database:", result.error.message);
+      return {
+        success: false,
+        error: result.error.message
+      };
     }
 
-    // Keep localStorage in sync
-    localStorage.setItem(`gaks_gemini_key_${userId}`, trimmedKey);
+    console.log("[Gemini Save] Saved key successfully", {
+      userId,
+      provider: "gemini"
+    });
 
     // Resume all paused watchers
     await supabase.from('watchers').update({ status: 'active', updated_at: new Date().toISOString() }).eq('user_id', userId).eq('status', 'paused');
@@ -160,7 +162,6 @@ export async function deleteGeminiKey(): Promise<{ success: boolean; error?: str
     }
 
     const userId = session.user.id;
-    localStorage.removeItem(`gaks_gemini_key_${userId}`);
 
     const { error } = await supabase
       .from('user_api_keys')
@@ -169,7 +170,7 @@ export async function deleteGeminiKey(): Promise<{ success: boolean; error?: str
       .eq('provider', 'gemini');
 
     if (error) {
-      console.warn("Could not delete API key from database (cleaning up local storage):", error.message);
+      console.warn("Could not delete API key from database:", error.message);
       return { success: false, error: error.message };
     }
 
@@ -179,3 +180,4 @@ export async function deleteGeminiKey(): Promise<{ success: boolean; error?: str
     return { success: false, error: err.message || "An unexpected error occurred." };
   }
 }
+
