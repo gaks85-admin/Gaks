@@ -552,34 +552,18 @@ export default async function handler(req: any, res: any) {
           supabase.from("user_api_keys").select("*").eq("user_id", userId).eq("provider", "gemini").maybeSingle()
         ]);
 
-        const strategyText = extractStrategyTextById(prefsRecord?.strategy_text || '', watcher.strategy_id);
+        const rawStrategyText = prefsRecord?.strategy_text;
+
+        if (!rawStrategyText || !rawStrategyText.trim()) {
+          console.log(`[CRON] Strategy text missing for ${userId}`);
+          console.log(`LOG: Watcher ${watcher.id} skipped - Strategy text missing for user ${userId}`);
+          skipped.push({ userId, reason: `Strategy text missing for ${userId}` });
+          watchersSkippedCount++;
+          continue;
+        }
+
+        const strategyText = extractStrategyTextById(rawStrategyText, watcher.strategy_id);
         console.log(`LOG: Strategy loaded for ${selectedPair}`);
-
-        if (!strategyText.trim()) {
-          console.log(`LOG: Watcher ${watcher.id} skipped - Strategy text empty`);
-          skipped.push({ userId, reason: "Strategy text empty" });
-          watchersSkippedCount++;
-          continue;
-        }
-
-        // 5. Parsed Strategy Loaded
-        let parsed_strategy: any = null;
-        if (watcher.strategy_id) {
-          const { data: strategyRecord } = await supabase
-            .from("strategies")
-            .select("parsed_strategy")
-            .eq("id", watcher.strategy_id)
-            .maybeSingle();
-          parsed_strategy = strategyRecord?.parsed_strategy;
-        }
-
-        if (!parsed_strategy) {
-          console.log(`LOG: Watcher ${watcher.id} skipped - Parsed strategy loaded: NO`);
-          skipped.push({ userId, reason: "No parsed strategy available" });
-          watchersSkippedCount++;
-          continue;
-        }
-        console.log(`LOG: Parsed strategy loaded for ${selectedPair}: YES`);
 
         // Check Telegram connection
         const { data: telegramConn } = await supabase
@@ -672,7 +656,10 @@ export default async function handler(req: any, res: any) {
 
         // 7. Strategy Engine Executed
         console.log(`LOG: Strategy engine executed for ${selectedPair}`);
-        const analysis = analyzeMarket(candleData, parsed_strategy);
+        const parsedStrategy: any = {
+          entryConditions: [strategyText]
+        };
+        const analysis = analyzeMarket(candleData, parsedStrategy);
 
         // 8. Signal Result
         console.log(`LOG: Signal result for ${selectedPair}: ${analysis.signal} (Confidence: ${analysis.confidence}%)`);
