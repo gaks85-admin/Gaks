@@ -28,6 +28,7 @@ import liveRatesHandler from "./api/live-rates";
 import telegramWebhookHandler from "./api/telegram/webhook";
 import watcherStartHandler from "./api/watcher/start";
 import watcherScanHandler from "./api/watcher/scan";
+import strategySummaryHandler from "./api/strategy/summary";
 import debugGeminiHandler from "./api/debug/gemini";
 import testKeyHandler from "./api/debug/test-key";
 
@@ -99,6 +100,9 @@ async function startServer() {
 
   // Admin APIs
                       
+  // Strategy APIs
+  app.post("/api/strategy/summary", strategySummaryHandler as any);
+
   // Watcher APIs
   app.post("/api/watcher/start", watcherStartHandler as any);
   app.post("/api/watcher/scan", watcherScanHandler as any);

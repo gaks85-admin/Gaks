@@ -1545,6 +1545,7 @@ ${JSON.stringify(collectedData, null, 2)}
               pair: sig.pair,
               timeframe: watcher.selected_timeframe || 'H1',
               direction: sig.direction,
+              strategySummary: prefsRecord?.strategy_summary || 'Custom Strategy',
               entryPrice: sig.entryPrice,
               stopLoss: sig.stopLoss,
               takeProfit: sig.takeProfit,

@@ -62,18 +62,20 @@ export function formatTimeframe(tf: string): string {
 }
 
 export function formatUtcTimestamp(date = new Date()): string {
-  const yyyy = date.getUTCFullYear();
-  const mm = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   const dd = String(date.getUTCDate()).padStart(2, '0');
+  const mmm = months[date.getUTCMonth()];
+  const yyyy = date.getUTCFullYear();
   const hh = String(date.getUTCHours()).padStart(2, '0');
   const min = String(date.getUTCMinutes()).padStart(2, '0');
-  return `${yyyy}-${mm}-${dd} ${hh}:${min} UTC`;
+  return `${dd} ${mmm} ${yyyy} ${hh}:${min} UTC`;
 }
 
 export interface SignalTelegramPayload {
   pair: string;
   timeframe: string;
   direction: string;
+  strategySummary?: string;
   entryPrice: number | string | null;
   stopLoss: number | string | null;
   takeProfit: number | string | null;
@@ -87,6 +89,9 @@ export function buildTelegramAlertMessage(signal: SignalTelegramPayload): string
   const tfStr = formatTimeframe(signal.timeframe);
   const isBuy = signal.direction.toUpperCase() === 'BUY';
   const dirStr = isBuy ? '🟢 BUY' : '🔴 SELL';
+  const stratSummary = (signal.strategySummary && signal.strategySummary.trim())
+    ? signal.strategySummary.trim()
+    : 'Custom Strategy';
   const entryStr = formatPrice(signal.entryPrice, signal.pair);
   const slStr = formatPrice(signal.stopLoss, signal.pair);
   const tpStr = formatPrice(signal.takeProfit, signal.pair);
@@ -115,16 +120,16 @@ export function buildTelegramAlertMessage(signal: SignalTelegramPayload): string
   const timeStr = formatUtcTimestamp();
 
   return (
-    `🚨 AI Trading Alert\n\n` +
-    `Pair: ${pairStr}\n` +
-    `Timeframe: ${tfStr}\n\n` +
+    `🚨 Autonomous AI Trading Alert 🚨\n\n` +
+    `Pair: ${pairStr} (${tfStr})\n\n` +
     `Direction: ${dirStr}\n\n` +
-    `Entry: ${entryStr}\n` +
-    `Stop Loss: ${slStr}\n` +
+    `Strategy: ${stratSummary}\n\n` +
+    `Entry Price: ${entryStr}\n\n` +
+    `Stop Loss: ${slStr}\n\n` +
     `Take Profit: ${tpStr}\n\n` +
-    `${rrStr}\n\n` +
+    `Risk/Reward: ${rrStr}\n\n` +
     `Confidence: ${confStr}\n\n` +
-    `Reason:\n` +
+    `AI Reasoning:\n` +
     `${bulletReasons}\n\n` +
     `Time:\n` +
     `${timeStr}`

@@ -660,6 +660,7 @@ export default function App() {
           triggerNotification("Saved locally. Supabase sync failed.", "info");
         } else {
           triggerNotification("Strategy playbook saved & synchronized successfully!");
+          syncStrategySummary(serialized, session.user.id);
         }
       } catch (err: any) {
         console.error("Exception saving strategy to Supabase:", err);
@@ -667,6 +668,21 @@ export default function App() {
       }
     } else {
       triggerNotification("Strategy playbook saved successfully!");
+    }
+  };
+
+  const syncStrategySummary = async (text: string, userId: string) => {
+    try {
+      await fetch('/api/strategy/summary', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session?.access_token || ''}`
+        },
+        body: JSON.stringify({ strategyText: text, userId })
+      });
+    } catch (err) {
+      console.warn('Failed to sync strategy summary:', err);
     }
   };
 
@@ -691,6 +707,7 @@ export default function App() {
           triggerNotification("Activated locally. DB sync failed.", "info");
         } else {
           triggerNotification(`"${strategies.find(s => s.id === id)?.name}" is now active!`);
+          syncStrategySummary(serialized, session.user.id);
         }
       } catch (err: any) {
         console.error("Exception activating strategy:", err);

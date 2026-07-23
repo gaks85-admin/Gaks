@@ -765,6 +765,7 @@ export default async function handler(req: any, res: any) {
             pair: mappedSymbol,
             timeframe: selectedTimeframe,
             direction: analysis.signal,
+            strategySummary: prefsRecord?.strategy_summary || 'Custom Strategy',
             entryPrice: analysis.entryPrice,
             stopLoss: analysis.stopLoss,
             takeProfit: analysis.takeProfit,

@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { randomUUID } from 'crypto';
+import { generateStrategySummary } from '../../src/lib/strategy-summarizer.js';
 
 /**
  * Self-contained Supabase client initialization.
@@ -391,6 +392,20 @@ export default async function handler(req: any, res: any) {
         success: false,
         error: "Active trading strategy is empty. Please configure your strategy first."
       });
+    }
+
+    // Ensure strategy_summary is populated if missing
+    if (!prefsRecord?.strategy_summary || !prefsRecord.strategy_summary.trim()) {
+      try {
+        const summary = await generateStrategySummary(activeStrategyText);
+        await supabase
+          .from("trading_preferences")
+          .update({ strategy_summary: summary, updated_at: new Date().toISOString() })
+          .eq("user_id", userId);
+        console.log("[Watcher Start] Populated strategy_summary:", summary);
+      } catch (sumErr: any) {
+        console.warn("[Watcher Start] Failed to populate strategy_summary:", sumErr.message);
+      }
     }
 
     const preferredRisk = prefsRecord?.preferred_risk || '';
