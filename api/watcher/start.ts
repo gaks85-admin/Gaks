@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { randomUUID } from 'crypto';
 import { generateStrategySummary } from '../../src/lib/strategy-summarizer.js';
+import { timeframeToMinutes } from '../../src/lib/timeframe.js';
 
 /**
  * Self-contained Supabase client initialization.
@@ -601,7 +602,12 @@ export default async function handler(req: any, res: any) {
       }
     }
 
-    const scanInterval = 5;
+    const finalTimeframe = selectedTimeframe || 'H1';
+    const computedInterval = timeframeToMinutes(finalTimeframe);
+
+    console.log(`Selected timeframe: ${finalTimeframe}`);
+    console.log(`Computed interval: ${computedInterval}`);
+    console.log(`Database interval: ${computedInterval}`);
 
     // Ensure the strategy exists in public.strategies table to satisfy foreign key constraint
     console.log("[Watcher Start] Upserting strategy...");
@@ -633,9 +639,9 @@ export default async function handler(req: any, res: any) {
       account_size: accountSize,
       risk_percentage: riskPercentage,
       selected_pair: selectedPair,
-      selected_timeframe: selectedTimeframe || 'H1',
+      selected_timeframe: finalTimeframe,
       gemini_model: "gemini-1.5-flash",
-      scan_interval_minutes: scanInterval,
+      scan_interval_minutes: computedInterval,
       updated_at: nowString
     };
     console.log("[Watcher Start] Watcher data payload:", JSON.stringify(watcherData, null, 2));
@@ -653,7 +659,7 @@ export default async function handler(req: any, res: any) {
         reason: "Failed to write watcher state to DB: " + watchersError.message,
         user_id: userId,
         selected_pair: selectedPair,
-        selected_timeframe: selectedTimeframe
+        selected_timeframe: finalTimeframe
       });
       return res.status(500).json({
         success: false,
@@ -662,6 +668,28 @@ export default async function handler(req: any, res: any) {
       });
     }
     console.log("[Watcher Start] Watcher upsert successful.");
+
+    // Immediately query the row back and log
+    const { data: savedWatcherRow, error: fetchSavedErr } = await supabase
+      .from("watchers")
+      .select("selected_timeframe, scan_interval_minutes")
+      .eq("user_id", userId)
+      .eq("selected_pair", selectedPair)
+      .maybeSingle();
+
+    if (fetchSavedErr || !savedWatcherRow) {
+      console.error("[Watcher Start] Failed to query saved watcher record:", fetchSavedErr?.message || "Not found");
+      throw new Error(`Failed to verify saved watcher: ${fetchSavedErr?.message || "Not found"}`);
+    }
+
+    console.log(`Saved timeframe: ${savedWatcherRow.selected_timeframe}`);
+    console.log(`Saved scan_interval_minutes: ${savedWatcherRow.scan_interval_minutes}`);
+
+    if (savedWatcherRow.scan_interval_minutes !== computedInterval) {
+      console.error(`[Watcher Start] Interval mismatch! Computed: ${computedInterval}, Saved: ${savedWatcherRow.scan_interval_minutes}`);
+      throw new Error(`Saved interval (${savedWatcherRow.scan_interval_minutes}) differs from computed interval (${computedInterval})`);
+    }
+
     console.log("[Watcher Activation] Watcher created successfully");
 
     // Upsert into legacy market_watchers table for interface backwards-compatibility
@@ -693,7 +721,7 @@ export default async function handler(req: any, res: any) {
       `*Strategy:* ${strategyDetails.name} (${strategyDetails.isDefault ? 'Default' : 'Custom'})\n` +
       `*Account Size:* $${accountSize || 'Not set'}\n` +
       `*Risk:* ${riskPercentage ? riskPercentage + '%' : 'Not set'}\n` +
-      `*Scan Interval:* Every ${scanInterval} minutes\n\n` +
+      `*Scan Interval:* Every ${computedInterval} minutes\n\n` +
       `I will now monitor the markets and alert you of any high-probability setups matching your strategy.`
     );
 

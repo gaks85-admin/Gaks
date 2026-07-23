@@ -2,6 +2,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { GoogleGenAI, Type } from '@google/genai';
 import { buildTelegramAlertMessage } from '../src/lib/telegram-formatter.js';
+import { timeframeToMinutes } from '../src/lib/timeframe.js';
 
 // --- Inlined Gemini & Telegram Wrappers ---
 
@@ -1369,6 +1370,11 @@ async function watchers_action_handler(req: any, res: any) {
       }
 
       // Now insert or update the watcher for this user and pair
+      const computedInterval = timeframeToMinutes(timeframe);
+      console.log(`Selected timeframe: ${timeframe}`);
+      console.log(`Computed interval: ${computedInterval}`);
+      console.log(`Database interval: ${computedInterval}`);
+
       const { data: existingWatcher } = await supabase
         .from("watchers")
         .select("id")
@@ -1382,6 +1388,7 @@ async function watchers_action_handler(req: any, res: any) {
           .update({
             status: "active",
             selected_timeframe: timeframe,
+            scan_interval_minutes: computedInterval,
             started_at: nowString,
             updated_at: nowString
           })
@@ -1394,9 +1401,29 @@ async function watchers_action_handler(req: any, res: any) {
             status: "active",
             selected_pair: symbol.toUpperCase(),
             selected_timeframe: timeframe,
+            scan_interval_minutes: computedInterval,
             started_at: nowString,
             updated_at: nowString
           });
+      }
+
+      // Query row back immediately and log
+      const { data: savedAdminWatcher, error: verifyErr } = await supabase
+        .from("watchers")
+        .select("selected_timeframe, scan_interval_minutes")
+        .eq("user_id", userId)
+        .eq("selected_pair", symbol.toUpperCase())
+        .maybeSingle();
+
+      if (verifyErr || !savedAdminWatcher) {
+        throw new Error("Failed to verify saved watcher: " + (verifyErr?.message || "Not found"));
+      }
+
+      console.log(`Saved timeframe: ${savedAdminWatcher.selected_timeframe}`);
+      console.log(`Saved scan_interval_minutes: ${savedAdminWatcher.scan_interval_minutes}`);
+
+      if (savedAdminWatcher.scan_interval_minutes !== computedInterval) {
+        throw new Error(`Saved interval (${savedAdminWatcher.scan_interval_minutes}) differs from computed interval (${computedInterval})`);
       }
 
       return res.status(200).json({ success: true, message: `Watcher for ${symbol} (${timeframe}) successfully added for ${email}!` });
