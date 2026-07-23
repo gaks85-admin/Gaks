@@ -23,6 +23,7 @@ const getSupabase = () => {
 };
 
 import marketWatcherCronHandler from "./api/cron/market-watcher";
+import testCronHandler from "./api/cron/test";
 import liveRatesHandler from "./api/live-rates";
 import telegramWebhookHandler from "./api/telegram/webhook";
 import watcherStartHandler from "./api/watcher/start";
@@ -112,6 +113,7 @@ async function startServer() {
 
   // Scheduled Cron execution for active market watchers
   app.post("/api/cron/market-watcher", marketWatcherCronHandler as any);
+  app.all("/api/cron/test", testCronHandler as any);
 
   // Temporary debug endpoint
   app.all("/api/debug/gemini", debugGeminiHandler as any);
