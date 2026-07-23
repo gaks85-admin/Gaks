@@ -135,6 +135,10 @@ export default async function handler(req: any, res: any) {
     return res.status(200).end();
   }
 
+  let userId = req.body?.userId;
+  let selectedPair = req.body?.selectedPair;
+  let selectedTimeframe = req.body?.selectedTimeframe;
+
   if (req.method !== 'POST') {
     console.log("[Watcher Activation] FAILED at Step 0:", {
       step: 0,
@@ -145,13 +149,6 @@ export default async function handler(req: any, res: any) {
     });
     return res.status(405).json({ success: false, error: 'Method Not Allowed' });
   }
-
-  console.log("[Watcher Start] Incoming Request Body:", JSON.stringify(req.body, null, 2));
-  console.log("[Watcher Start] Incoming Request Headers:", JSON.stringify(req.headers, null, 2));
-
-  let userId = req.body.userId;
-  let selectedPair = req.body.selectedPair;
-  let selectedTimeframe = req.body.selectedTimeframe;
 
   // 1. Verify the user is authenticated (using authorization header)
   const authHeader = req.headers.authorization || '';

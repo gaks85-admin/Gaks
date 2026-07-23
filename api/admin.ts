@@ -1,6 +1,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import { GoogleGenAI, Type } from '@google/genai';
+import { buildTelegramAlertMessage } from '../src/lib/telegram-formatter.js';
 
 // --- Inlined Gemini & Telegram Wrappers ---
 
@@ -1540,15 +1541,17 @@ ${JSON.stringify(collectedData, null, 2)}
           });
           
           if (watcher.telegram_chat_id && sig.confidenceScore >= 70) {
-            const alertMessage = `🚨 *Force Scan Trading Alert* 🚨\n\n` +
-              `*Pair:* ${sig.pair}\n` +
-              `*Direction:* ${sig.direction === 'BUY' ? '🟢 BUY' : '🔴 SELL'}\n` +
-              `*Entry Price:* ${sig.entryPrice}\n` +
-              `*Stop Loss:* ${sig.stopLoss}\n` +
-              `*Take Profit:* ${sig.takeProfit}\n` +
-              `*Risk/Reward:* ${sig.riskRewardRatio}\n` +
-              `*Confidence:* ${sig.confidenceScore}/100\n\n` +
-              `*AI Reasoning:* ${sig.aiReasoning}`;
+            const alertMessage = buildTelegramAlertMessage({
+              pair: sig.pair,
+              timeframe: watcher.selected_timeframe || 'H1',
+              direction: sig.direction,
+              entryPrice: sig.entryPrice,
+              stopLoss: sig.stopLoss,
+              takeProfit: sig.takeProfit,
+              riskRewardRatio: sig.riskRewardRatio,
+              confidenceScore: sig.confidenceScore,
+              aiReasoning: sig.aiReasoning
+            });
               
             await sendTelegramMessage_watcher(watcher.telegram_chat_id, alertMessage);
             signalsSent++;

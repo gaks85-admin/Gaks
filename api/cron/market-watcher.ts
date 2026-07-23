@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { GoogleGenAI, Type } from '@google/genai';
 import { analyzeMarket, Candle } from '../../src/lib/strategy-engine.js';
+import { buildTelegramAlertMessage } from '../../src/lib/telegram-formatter.js';
 
 // --- Inlined Gemini Wrapper ---
 
@@ -172,13 +173,14 @@ const registeredSignalsCache = new Map<string, { hash: string; timestamp: number
 
 export interface SignalPayload {
   pair: string;
+  timeframe?: string;
   direction: string;
-  entryPrice: number | string;
-  stopLoss: number | string;
-  takeProfit: number | string;
-  riskRewardRatio: string;
+  entryPrice: number | string | null;
+  stopLoss: number | string | null;
+  takeProfit: number | string | null;
+  riskRewardRatio?: number | string | null;
   confidenceScore: number;
-  aiReasoning: string;
+  aiReasoning?: string | string[];
 }
 
 export async function registerSignal(
@@ -761,13 +763,14 @@ export default async function handler(req: any, res: any) {
 
         const signal = {
             pair: mappedSymbol,
+            timeframe: selectedTimeframe,
             direction: analysis.signal,
             entryPrice: analysis.entryPrice,
             stopLoss: analysis.stopLoss,
             takeProfit: analysis.takeProfit,
-            riskRewardRatio: analysis.riskReward ? analysis.riskReward.toFixed(2) : "N/A",
+            riskRewardRatio: analysis.riskReward,
             confidenceScore: analysis.confidence,
-            aiReasoning: analysis.reasoning.join(" | ")
+            aiReasoning: analysis.reasoning
         };
 
         // 9. Telegram Send Decision
@@ -782,16 +785,7 @@ export default async function handler(req: any, res: any) {
             continue;
           }
 
-          const alertMessage = `🚨 *Autonomous AI Trading Alert* 🚨\n\n` +
-            `*Pair:* ${signal.pair} (${selectedTimeframe})\n` +
-            `*Direction:* ${signal.direction === 'BUY' ? '🟢 BUY' : '🔴 SELL'}\n` +
-            `*Entry Price:* ${signal.entryPrice}\n` +
-            `*Stop Loss:* ${signal.stopLoss}\n` +
-            `*Take Profit:* ${signal.takeProfit}\n` +
-            `*Risk/Reward:* ${signal.riskRewardRatio}\n` +
-            `*Confidence:* ${signal.confidenceScore}/100\n\n` +
-            `*AI Reasoning:* ${signal.aiReasoning}\n\n` +
-            `*Time:* ${new Date().toUTCString()}`;
+          const alertMessage = buildTelegramAlertMessage(signal);
 
           const alertSent = await sendTelegramMessage(telegramChatId, alertMessage);
           if (alertSent) {
