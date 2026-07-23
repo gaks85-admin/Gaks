@@ -5,6 +5,27 @@ import { buildTelegramAlertMessage } from '../../src/lib/telegram-formatter.js';
 
 // --- Inlined Gemini Wrapper ---
 
+export function getScanIntervalMinutes(watcher: any): number {
+  const rawInterval = watcher?.scan_interval ?? watcher?.scan_interval_minutes;
+  if (rawInterval !== undefined && rawInterval !== null && rawInterval !== '') {
+    const parsed = typeof rawInterval === 'number' ? rawInterval : parseInt(String(rawInterval), 10);
+    if (!isNaN(parsed) && parsed > 0) {
+      return parsed;
+    }
+  }
+
+  const tf = (watcher?.selected_timeframe || '').toUpperCase().trim();
+  if (tf === 'M1' || tf === '1M' || tf === '1') return 1;
+  if (tf === 'M5' || tf === '5M' || tf === '5') return 5;
+  if (tf === 'M15' || tf === '15M' || tf === '15') return 15;
+  if (tf === 'M30' || tf === '30M' || tf === '30') return 30;
+  if (tf === 'H1' || tf === '1H' || tf === '60') return 60;
+  if (tf === 'H4' || tf === '4H' || tf === '240') return 240;
+  if (tf === 'D1' || tf === '1D' || tf === '1440') return 1440;
+
+  return 5;
+}
+
 export type GeminiErrorType = 'invalid_key' | 'quota_exceeded' | 'rate_limited' | 'temporary_failure' | 'unknown_error';
 
 export function classifyGeminiError(error: any): GeminiErrorType {
@@ -622,6 +643,48 @@ export default async function handler(req: any, res: any) {
       const symbol = selectedPair;
       const selectedTimeframe = watcher.selected_timeframe || 'H1';
       console.log(`--- Processing Watcher ${watcher.id} (${selectedPair}) ---`);
+
+      // 1. Determine scan interval in minutes
+      const scanIntervalMinutes = getScanIntervalMinutes(watcher);
+
+      // 2. Parse last_scan_at
+      const now = new Date();
+      let lastScanDate: Date | null = null;
+      if (watcher.last_scan_at) {
+        const parsed = new Date(watcher.last_scan_at);
+        if (!isNaN(parsed.getTime())) {
+          lastScanDate = parsed;
+        }
+      }
+
+      // 3. Determine if watcher is due for a scan
+      let isDue = false;
+      let nextScanDate: Date | null = null;
+
+      if (!lastScanDate) {
+        isDue = true;
+      } else {
+        nextScanDate = new Date(lastScanDate.getTime() + scanIntervalMinutes * 60 * 1000);
+        isDue = now.getTime() >= nextScanDate.getTime();
+      }
+
+      // 4. Log detailed watcher check status
+      console.log(
+        `[Watcher Check]\n` +
+        `Current Time: ${now.toISOString()}\n` +
+        `Last Scan: ${lastScanDate ? lastScanDate.toISOString() : 'NULL'}\n` +
+        `Next Scan: ${nextScanDate ? nextScanDate.toISOString() : 'NOW'}\n` +
+        `Scan Interval: ${scanIntervalMinutes}m\n` +
+        `Due: ${isDue ? 'YES' : 'NO'}`
+      );
+
+      // 5. Skip watcher if not due yet
+      if (!isDue) {
+        console.log("[Watcher Skip] Not due yet.");
+        skipped.push({ userId, reason: "Not due yet" });
+        watchersSkippedCount++;
+        continue;
+      }
       
       if (!selectedPair) {
         console.log(`LOG: Watcher ${watcher.id} skipped - No selected pair`);
