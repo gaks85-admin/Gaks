@@ -167,6 +167,87 @@ async function generateContentWithDiagnostics(ai: any, params: any) {
 }
 
 
+// In-memory duplicate cache for signal registration (15-min window per watcher)
+const registeredSignalsCache = new Map<string, { hash: string; timestamp: number }>();
+
+export interface SignalPayload {
+  pair: string;
+  direction: string;
+  entryPrice: number | string;
+  stopLoss: number | string;
+  takeProfit: number | string;
+  riskRewardRatio: string;
+  confidenceScore: number;
+  aiReasoning: string;
+}
+
+export async function registerSignal(
+  supabase: any,
+  watcher: any,
+  signal: SignalPayload
+): Promise<boolean> {
+  const signalHash = `${signal.pair}_${signal.direction}_${signal.entryPrice}`;
+  console.log(`[registerSignal] Processing signal registration for watcher ${watcher.id}...`);
+  console.log(`[registerSignal] Signal payload:`, JSON.stringify(signal, null, 2));
+  console.log(`[registerSignal] Signal hash generated: ${signalHash}`);
+
+  try {
+    // 1. Duplicate Check
+    const cached = registeredSignalsCache.get(watcher.id);
+    const now = Date.now();
+    const isDuplicate = cached && cached.hash === signalHash && (now - cached.timestamp < 15 * 60 * 1000);
+
+    console.log(`[registerSignal] Duplicate-check result:`, {
+      watcherId: watcher.id,
+      cachedHash: cached?.hash || null,
+      currentHash: signalHash,
+      timeSinceLastSignalMs: cached ? (now - cached.timestamp) : null,
+      isDuplicate: !!isDuplicate
+    });
+
+    if (isDuplicate) {
+      console.log(`[registerSignal] Genuine duplicate signal detected for ${signal.pair} on watcher ${watcher.id}. Skipping.`);
+      console.log(`[registerSignal] Returning boolean: false`);
+      return false;
+    }
+
+    // 2. Insert/Update registration log in database
+    console.log(`[registerSignal] Updating watcher ${watcher.id} in Supabase...`);
+    const { data: updatedRows, error: updateError } = await supabase
+      .from("watchers")
+      .update({
+        last_scan_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      })
+      .eq("id", watcher.id)
+      .select();
+
+    console.log(`[registerSignal] Database update result:`, {
+      success: !updateError && !!updatedRows && updatedRows.length > 0,
+      updatedRowsCount: updatedRows ? updatedRows.length : 0,
+      error: updateError ? updateError.message : null
+    });
+
+    if (updateError) {
+      console.error(`[registerSignal] Database update failed for watcher ${watcher.id}:`, updateError.message);
+      console.log(`[registerSignal] Returning boolean: false`);
+      return false;
+    }
+
+    // 3. Save to duplicate cache
+    registeredSignalsCache.set(watcher.id, { hash: signalHash, timestamp: now });
+
+    console.log(`[registerSignal] Signal registered successfully for ${signal.pair}.`);
+    console.log(`[registerSignal] Returning boolean: true`);
+    return true;
+
+  } catch (err: any) {
+    console.error(`[registerSignal] Exception caught during signal registration:`, err);
+    console.log(`[registerSignal] Returning boolean: false`);
+    return false;
+  }
+}
+
 /**
  * Self-contained Supabase client initialization.
  */
@@ -692,23 +773,9 @@ export default async function handler(req: any, res: any) {
         console.log(`LOG: Telegram send decision for ${selectedPair}: ${shouldSendTelegram ? 'YES' : 'NO'}`);
         
         if (shouldSendTelegram) {
-          const signalHash = `${signal.pair}_${signal.direction}_${signal.entryPrice}`;
-          
-          // Check for duplicate
-          if (watcher.last_signal_data === signalHash) {
-            console.log(`LOG: Telegram send decision for ${selectedPair}: NO (Duplicate signal detected)`);
-            continue;
-          }
+          const isRegistered = await registerSignal(supabase, watcher, signal);
 
-          // Atomic update to register signal
-          const { data: updatedRows, error: updateError } = await supabase
-            .from("watchers")
-            .update({ last_signal_data: signalHash })
-            .eq("id", watcher.id)
-            .or(`last_signal_data.is.null,last_signal_data.neq.${signalHash}`)
-            .select();
-
-          if (updateError || !updatedRows || updatedRows.length === 0) {
+          if (!isRegistered) {
             console.log(`LOG: Telegram send decision for ${selectedPair}: NO (Failed to register signal or race condition)`);
             continue;
           }
