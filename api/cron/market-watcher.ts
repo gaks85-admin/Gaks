@@ -383,109 +383,112 @@ function extractStrategyTextById(strategyTextRaw: string, strategyId?: string): 
 }
 
 export default async function handler(req: any, res: any) {
-  console.log({
-    NODE_ENV: process.env.NODE_ENV,
-    VERCEL_ENV: process.env.VERCEL_ENV,
-    VERCEL_URL: process.env.VERCEL_URL,
-    githubExists: !!process.env.GITHUB_TOKEN,
-  });
-  console.log("LOG: Cron started");
-  const startTime = Date.now();
-  const requestTimestamp = new Date().toISOString();
-
-  // Metrics trackers
-  let watchersProcessedCount = 0;
-  let watchersSkippedCount = 0;
-  let signalsGeneratedCount = 0;
-  let telegramMessagesSentCount = 0;
-
-  // Enforce JSON content type from the very beginning
-  res.setHeader("Content-Type", "application/json");
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With");
-
-  if (req.method === "OPTIONS") {
-    return res.status(200).end();
-  }
-
-  if (req.method !== 'POST') {
-    return res.status(405).json({ success: false, error: "Method Not Allowed. Use POST." });
-  }
-
-  // 1. Load Environment Variables
-  const twelveDataKey = process.env.TWELVE_DATA_API_KEY;
-  const cronSecretRaw = process.env.CRON_SECRET;
-  const supabaseUrl = process.env.VITE_SUPABASE_URL;
-  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY;
-  const telegramBotToken = process.env.TELEGRAM_BOT_TOKEN;
-
-  console.log("LOG: Environment variables loaded");
-
-  // 2. Supabase Connection
-  let supabase: any;
   try {
-    supabase = getSupabase();
-    console.log("LOG: Supabase connected");
-  } catch (err: any) {
-    console.error("LOG ERROR: Supabase connection failed");
-    console.error(`Exception: ${err.message}`);
-    console.error(`Stack: ${err.stack}`);
-    return res.status(500).json({ success: false, error: "Supabase connection failed" });
-  }
-
-  // Debug logging immediately before the authorization check
-  console.log("DEBUG CRON AUTH:", {
-    method: req.method,
-    headers: req.headers,
-    authorization: req.headers.authorization || req.headers['authorization'] || null,
-  });
-
-  // Protect the endpoint using a CRON_SECRET
-  const authHeader = req.headers.authorization || req.headers['authorization'];
-  
-  // Robust parsing of Bearer token
-  let token: string | null = null;
-  if (authHeader) {
-    const trimmedHeader = authHeader.trim();
-    if (trimmedHeader.toLowerCase().startsWith("bearer ")) {
-      token = trimmedHeader.substring(7).trim();
-    } else {
-      token = trimmedHeader;
-    }
-  }
-
-  // Clean quotes or whitespace
-  const cleanToken = token ? token.replace(/^['"]|['"]$/g, '').trim() : "";
-  const cleanCronSecret = cronSecretRaw ? cronSecretRaw.trim().replace(/^['"]|['"]$/g, '').trim() : "";
-
-  let authorized = true;
-  let authFailureReason = "";
-
-  if (cleanCronSecret) {
-    if (!authHeader) {
-      authorized = false;
-      authFailureReason = "Authorization header is missing.";
-    } else if (!cleanToken) {
-      authorized = false;
-      authFailureReason = "No token could be extracted from Authorization header.";
-    } else if (cleanToken !== cleanCronSecret) {
-      authorized = false;
-      authFailureReason = "Token mismatch.";
-    }
-  }
-
-  if (!authorized) {
-    console.warn(`LOG: Unauthorized access attempt: ${authFailureReason}`);
-    return res.status(401).json({
-      success: false,
-      error: "Unauthorized",
-      reason: authFailureReason
+    console.log("[CRON STEP 1] Handler entered");
+    console.log({
+      NODE_ENV: process.env.NODE_ENV,
+      VERCEL_ENV: process.env.VERCEL_ENV,
+      VERCEL_URL: process.env.VERCEL_URL,
+      githubExists: !!process.env.GITHUB_TOKEN,
     });
-  }
+    console.log("LOG: Cron started");
+    const startTime = Date.now();
+    const requestTimestamp = new Date().toISOString();
 
+    // Metrics trackers
+    let watchersProcessedCount = 0;
+    let watchersSkippedCount = 0;
+    let signalsGeneratedCount = 0;
+    let telegramMessagesSentCount = 0;
 
-  try {
+    // Enforce JSON content type from the very beginning
+    res.setHeader("Content-Type", "application/json");
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With");
+
+    if (req.method === "OPTIONS") {
+      return res.status(200).end();
+    }
+
+    if (req.method !== 'POST') {
+      return res.status(405).json({ success: false, error: "Method Not Allowed. Use POST." });
+    }
+
+    // 1. Load Environment Variables
+    const twelveDataKey = process.env.TWELVE_DATA_API_KEY;
+    const cronSecretRaw = process.env.CRON_SECRET;
+    const supabaseUrl = process.env.VITE_SUPABASE_URL;
+    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+    const telegramBotToken = process.env.TELEGRAM_BOT_TOKEN;
+
+    console.log("LOG: Environment variables loaded");
+
+    // 2. Supabase Connection
+    let supabase: any;
+    try {
+      supabase = getSupabase();
+      console.log("LOG: Supabase connected");
+      console.log("[CRON STEP 3]");
+    } catch (err: any) {
+      console.error("LOG ERROR: Supabase connection failed");
+      console.error(`Exception: ${err.message}`);
+      console.error(`Stack: ${err.stack}`);
+      return res.status(500).json({ success: false, error: "Supabase connection failed" });
+    }
+
+    // Debug logging immediately before the authorization check
+    console.log("DEBUG CRON AUTH:", {
+      method: req.method,
+      headers: req.headers,
+      authorization: req.headers.authorization || req.headers['authorization'] || null,
+    });
+
+    // Protect the endpoint using a CRON_SECRET
+    const authHeader = req.headers.authorization || req.headers['authorization'];
+    
+    // Robust parsing of Bearer token
+    let token: string | null = null;
+    if (authHeader) {
+      const trimmedHeader = authHeader.trim();
+      if (trimmedHeader.toLowerCase().startsWith("bearer ")) {
+        token = trimmedHeader.substring(7).trim();
+      } else {
+        token = trimmedHeader;
+      }
+    }
+
+    // Clean quotes or whitespace
+    const cleanToken = token ? token.replace(/^['"]|['"]$/g, '').trim() : "";
+    const cleanCronSecret = cronSecretRaw ? cronSecretRaw.trim().replace(/^['"]|['"]$/g, '').trim() : "";
+
+    let authorized = true;
+    let authFailureReason = "";
+
+    if (cleanCronSecret) {
+      if (!authHeader) {
+        authorized = false;
+        authFailureReason = "Authorization header is missing.";
+      } else if (!cleanToken) {
+        authorized = false;
+        authFailureReason = "No token could be extracted from Authorization header.";
+      } else if (cleanToken !== cleanCronSecret) {
+        authorized = false;
+        authFailureReason = "Token mismatch.";
+      }
+    }
+
+    if (!authorized) {
+      console.warn(`LOG: Unauthorized access attempt: ${authFailureReason}`);
+      return res.status(401).json({
+        success: false,
+        error: "Unauthorized",
+        reason: authFailureReason
+      });
+    }
+
+    console.log("[CRON STEP 2]");
+
     if (!twelveDataKey) {
       throw new Error("Missing TWELVE_DATA_API_KEY environment variable.");
     }
@@ -500,6 +503,7 @@ export default async function handler(req: any, res: any) {
       throw fetchError;
     }
 
+    console.log("[CRON STEP 4]");
     console.log(`LOG: Active watchers found: ${watchers ? watchers.length : 0}`);
     
     if (!watchers || watchers.length === 0) {
@@ -517,6 +521,8 @@ export default async function handler(req: any, res: any) {
     const errors = [];
     
     let twelveDataExhausted = false;
+
+    console.log("[CRON STEP 5]");
 
     // Process each active watcher sequentially to respect Twelve Data free limits
     for (const watcher of watchers) {
@@ -772,18 +778,10 @@ export default async function handler(req: any, res: any) {
     });
 
   } catch (err: any) {
-    const totalTime = Date.now() - startTime;
-    console.error("LOG FATAL ERROR: Cron failed");
-    console.error(`Exception: ${err.message}`);
-    console.error(`Filename: ${__filename}`);
-    console.error(`Line: ${err.lineNumber || 'N/A'}`);
-    console.error(`Stack: ${err.stack}`);
-    
+    console.error("[CRON FATAL]", err);
     return res.status(500).json({ 
       success: false, 
-      error: err.message,
-      stack: err.stack,
-      filename: __filename
+      error: String(err)
     });
   }
 }
