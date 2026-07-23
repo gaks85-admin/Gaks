@@ -193,44 +193,45 @@ export async function registerSignal(
 
   try {
     // 1. Duplicate Check
+    console.log("[REGISTER] About to check duplicate");
     const cached = registeredSignalsCache.get(watcher.id);
     const now = Date.now();
-    const isDuplicate = cached && cached.hash === signalHash && (now - cached.timestamp < 15 * 60 * 1000);
+    const isDuplicate = !!(cached && cached.hash === signalHash && (now - cached.timestamp < 15 * 60 * 1000));
 
-    console.log(`[registerSignal] Duplicate-check result:`, {
-      watcherId: watcher.id,
-      cachedHash: cached?.hash || null,
-      currentHash: signalHash,
-      timeSinceLastSignalMs: cached ? (now - cached.timestamp) : null,
-      isDuplicate: !!isDuplicate
-    });
+    console.log("[REGISTER] Duplicate query result:", { cached, isDuplicate }, null);
 
     if (isDuplicate) {
       console.log(`[registerSignal] Genuine duplicate signal detected for ${signal.pair} on watcher ${watcher.id}. Skipping.`);
-      console.log(`[registerSignal] Returning boolean: false`);
+      console.log("[REGISTER] Returning:", false);
       return false;
     }
 
     // 2. Insert/Update registration log in database
-    console.log(`[registerSignal] Updating watcher ${watcher.id} in Supabase...`);
+    console.log("[REGISTER] About to update watcher");
+    const payload = {
+      last_scan_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+    console.log("[REGISTER] Update payload:", payload);
+
     const { data: updatedRows, error: updateError } = await supabase
       .from("watchers")
-      .update({
-        last_scan_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      })
+      .update(payload)
       .eq("id", watcher.id)
       .select();
 
-    console.log(`[registerSignal] Database update result:`, {
-      success: !updateError && !!updatedRows && updatedRows.length > 0,
-      updatedRowsCount: updatedRows ? updatedRows.length : 0,
-      error: updateError ? updateError.message : null
-    });
+    console.log("[REGISTER] Update result:", updatedRows);
+    console.log("[REGISTER] Update error:", updateError);
 
     if (updateError) {
       console.error(`[registerSignal] Database update failed for watcher ${watcher.id}:`, updateError.message);
-      console.log(`[registerSignal] Returning boolean: false`);
+      console.log("[REGISTER] Returning:", false);
+      return false;
+    }
+
+    if (!updatedRows || updatedRows.length === 0) {
+      console.log(`[registerSignal] No rows returned from update for watcher ${watcher.id}`);
+      console.log("[REGISTER] Returning:", false);
       return false;
     }
 
@@ -238,12 +239,13 @@ export async function registerSignal(
     registeredSignalsCache.set(watcher.id, { hash: signalHash, timestamp: now });
 
     console.log(`[registerSignal] Signal registered successfully for ${signal.pair}.`);
-    console.log(`[registerSignal] Returning boolean: true`);
+    console.log("[REGISTER] Returning:", true);
     return true;
 
   } catch (err: any) {
     console.error(`[registerSignal] Exception caught during signal registration:`, err);
-    console.log(`[registerSignal] Returning boolean: false`);
+    console.error(`[REGISTER] Exception stack:`, err?.stack || err);
+    console.log("[REGISTER] Returning:", false);
     return false;
   }
 }
