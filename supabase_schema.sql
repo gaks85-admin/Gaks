@@ -442,6 +442,7 @@ CREATE TABLE IF NOT EXISTS public.watchers (
   direction TEXT,
   opened_at TIMESTAMPTZ,
   closed_at TIMESTAMPTZ,
+  cooldown_until TIMESTAMPTZ,
   signal_message_id TEXT,
   
   -- Auditing and metadata timestamps

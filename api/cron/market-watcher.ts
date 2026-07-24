@@ -209,9 +209,10 @@ export async function registerSignal(
   watcher: any,
   signal: SignalPayload
 ): Promise<boolean> {
-  // If watcher is already in ACTIVE trade state, do not register duplicate signal
-  if ((watcher?.trade_status || '').toUpperCase().trim() === 'ACTIVE') {
-    console.log(`[registerSignal] Active trade already exists for watcher ${watcher.id}. Skipping to prevent duplicate signals.`);
+  // Only WAITING state may generate new signals.
+  const currentStatus = (watcher?.trade_status || 'WAITING').toUpperCase().trim();
+  if (currentStatus !== 'WAITING') {
+    console.log(`[registerSignal] Watcher ${watcher.id} is in status '${currentStatus}' (not WAITING). Skipping to prevent duplicate signals.`);
     return false;
   }
 
@@ -684,14 +685,88 @@ export default async function handler(req: any, res: any) {
       const selectedPair = toCanonicalSymbol(watcher.selected_pair || "");
       const symbol = selectedPair;
       const selectedTimeframe = watcher.selected_timeframe || 'H1';
-      const tradeStatus = (watcher.trade_status || 'WAITING').toUpperCase().trim();
-      console.log(`--- Processing Watcher ${watcher.id} (${selectedPair}) [Trade State: ${tradeStatus}] ---`);
+      let tradeStatus = (watcher.trade_status || 'WAITING').toUpperCase().trim();
+      const now = new Date();
+      const scanIntervalMinutes = getScanIntervalMinutes(watcher);
+
+      let lastScanDate: Date | null = null;
+      if (watcher.last_scan_at) {
+        const parsed = new Date(watcher.last_scan_at);
+        if (!isNaN(parsed.getTime())) {
+          lastScanDate = parsed;
+        }
+      }
+
+      let nextScanDate: Date | null = null;
+      if (lastScanDate) {
+        nextScanDate = new Date(lastScanDate.getTime() + scanIntervalMinutes * 60 * 1000);
+      }
+
+      const cooldownUntilStr = watcher.cooldown_until ? new Date(watcher.cooldown_until).toISOString() : 'NULL';
+
+      console.log(`--- Processing Watcher ${watcher.id} (${selectedPair}) ---`);
+      console.log(`State: ${tradeStatus}`);
+      console.log(`Current Time: ${now.toISOString()}`);
+      console.log(`Last Scan: ${lastScanDate ? lastScanDate.toISOString() : 'NULL'}`);
+      console.log(`Cooldown Until: ${cooldownUntilStr}`);
+      console.log(`Next Eligible Scan: ${nextScanDate ? nextScanDate.toISOString() : 'NOW'}`);
+      console.log(`Trade Status: ${tradeStatus}`);
 
       if (!selectedPair) {
         console.log(`LOG: Watcher ${watcher.id} skipped - No selected pair`);
         skipped.push({ userId, reason: "No selected pair" });
         watchersSkippedCount++;
         continue;
+      }
+
+      // =====================================================================
+      // STATE 3 — COOLDOWN
+      // =====================================================================
+      if (tradeStatus === 'COOLDOWN') {
+        const cooldownUntilDate = watcher.cooldown_until ? new Date(watcher.cooldown_until) : null;
+        const isCooldownExpired = !cooldownUntilDate || (now.getTime() >= cooldownUntilDate.getTime());
+
+        if (!isCooldownExpired) {
+          const remainingMs = cooldownUntilDate ? (cooldownUntilDate.getTime() - now.getTime()) : 0;
+          const remainingMin = Math.ceil(remainingMs / (1000 * 60));
+          console.log(`Watcher in cooldown`);
+          console.log(`Current Time: ${now.toISOString()}`);
+          console.log(`Cooldown Until: ${cooldownUntilDate ? cooldownUntilDate.toISOString() : 'NULL'}`);
+          console.log(`Remaining: ${remainingMin} minute(s)`);
+
+          watchersProcessedCount++;
+          results.push({ userId, symbol, tradeStatus: 'COOLDOWN', result: 'In cooldown' });
+          continue;
+        }
+
+        // If TRUE (expired): Clear all previous trade fields and reset to WAITING
+        console.log(`[COOLDOWN Expired] Resetting all trade fields and setting trade_status = WAITING for watcher ${watcher.id}`);
+        await supabase
+          .from("watchers")
+          .update({
+            trade_status: 'WAITING',
+            entry_price: null,
+            stop_loss: null,
+            take_profit: null,
+            direction: null,
+            signal_message_id: null,
+            opened_at: null,
+            closed_at: null,
+            cooldown_until: null,
+            updated_at: new Date().toISOString()
+          })
+          .eq("id", watcher.id);
+
+        watcher.trade_status = 'WAITING';
+        watcher.entry_price = null;
+        watcher.stop_loss = null;
+        watcher.take_profit = null;
+        watcher.direction = null;
+        watcher.signal_message_id = null;
+        watcher.opened_at = null;
+        watcher.closed_at = null;
+        watcher.cooldown_until = null;
+        tradeStatus = 'WAITING';
       }
 
       // =====================================================================
@@ -754,6 +829,9 @@ export default async function handler(req: any, res: any) {
           continue;
         }
 
+        const lastScanMs = watcher.last_scan_at ? new Date(watcher.last_scan_at).getTime() : now.getTime();
+        const cooldownUntilIso = new Date(Math.max(now.getTime(), lastScanMs) + scanIntervalMinutes * 60 * 1000).toISOString();
+
         // Handle TP Reached
         if (isTP) {
           console.log(`[STATE 2 - ACTIVE] ✅ Target reached for ${selectedPair}! Exit price: ${currentPrice}, TP: ${takeProfit}`);
@@ -764,24 +842,20 @@ export default async function handler(req: any, res: any) {
             telegramMessagesSentCount++;
           }
 
-          // Reset fields: trade_status = 'WAITING', clear entry_price, take_profit, stop_loss, direction, opened_at
+          // Transition to COOLDOWN
           await supabase
             .from("watchers")
             .update({
-              trade_status: 'WAITING',
-              entry_price: null,
-              take_profit: null,
-              stop_loss: null,
-              direction: null,
-              opened_at: null,
+              trade_status: 'COOLDOWN',
               closed_at: new Date().toISOString(),
+              cooldown_until: cooldownUntilIso,
               last_scan_at: new Date().toISOString(),
               updated_at: new Date().toISOString()
             })
             .eq("id", watcher.id);
 
           watchersProcessedCount++;
-          results.push({ userId, symbol, tradeStatus: 'WAITING', result: 'Closed TP' });
+          results.push({ userId, symbol, tradeStatus: 'COOLDOWN', result: 'Closed TP' });
           continue;
         }
 
@@ -795,24 +869,20 @@ export default async function handler(req: any, res: any) {
             telegramMessagesSentCount++;
           }
 
-          // Reset fields: trade_status = 'WAITING', clear entry_price, take_profit, stop_loss, direction, opened_at
+          // Transition to COOLDOWN
           await supabase
             .from("watchers")
             .update({
-              trade_status: 'WAITING',
-              entry_price: null,
-              take_profit: null,
-              stop_loss: null,
-              direction: null,
-              opened_at: null,
+              trade_status: 'COOLDOWN',
               closed_at: new Date().toISOString(),
+              cooldown_until: cooldownUntilIso,
               last_scan_at: new Date().toISOString(),
               updated_at: new Date().toISOString()
             })
             .eq("id", watcher.id);
 
           watchersProcessedCount++;
-          results.push({ userId, symbol, tradeStatus: 'WAITING', result: 'Closed SL' });
+          results.push({ userId, symbol, tradeStatus: 'COOLDOWN', result: 'Closed SL' });
           continue;
         }
       }
@@ -821,41 +891,15 @@ export default async function handler(req: any, res: any) {
       // STATE 1 — WAITING
       // =====================================================================
 
-      // 1. Determine scan interval in minutes
-      const scanIntervalMinutes = getScanIntervalMinutes(watcher);
-
-      // 2. Parse last_scan_at
-      const now = new Date();
-      let lastScanDate: Date | null = null;
-      if (watcher.last_scan_at) {
-        const parsed = new Date(watcher.last_scan_at);
-        if (!isNaN(parsed.getTime())) {
-          lastScanDate = parsed;
-        }
-      }
-
-      // 3. Determine if watcher is due for a scan
+      // Determine if watcher is due for a scan
       let isDue = false;
-      let nextScanDate: Date | null = null;
-
       if (!lastScanDate) {
         isDue = true;
       } else {
-        nextScanDate = new Date(lastScanDate.getTime() + scanIntervalMinutes * 60 * 1000);
-        isDue = now.getTime() >= nextScanDate.getTime();
+        isDue = now.getTime() >= nextScanDate!.getTime();
       }
 
-      // 4. Log detailed watcher check status
-      console.log(
-        `[STATE 1 - WAITING Check]\n` +
-        `Current Time: ${now.toISOString()}\n` +
-        `Last Scan: ${lastScanDate ? lastScanDate.toISOString() : 'NULL'}\n` +
-        `Next Scan: ${nextScanDate ? nextScanDate.toISOString() : 'NOW'}\n` +
-        `Scan Interval: ${scanIntervalMinutes}m\n` +
-        `Due: ${isDue ? 'YES' : 'NO'}`
-      );
-
-      // 5. Skip watcher if not due yet
+      // Skip watcher if not due yet
       if (!isDue) {
         console.log("[Watcher Skip] Not due yet.");
         skipped.push({ userId, reason: "Not due yet" });
@@ -1038,6 +1082,7 @@ export default async function handler(req: any, res: any) {
             direction: analysis.signal,
             opened_at: new Date().toISOString(),
             closed_at: null,
+            cooldown_until: null,
             last_scan_at: new Date().toISOString(),
             updated_at: new Date().toISOString()
           })
