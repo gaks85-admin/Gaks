@@ -209,6 +209,12 @@ export async function registerSignal(
   watcher: any,
   signal: SignalPayload
 ): Promise<boolean> {
+  // If watcher is already in ACTIVE trade state, do not register duplicate signal
+  if ((watcher?.trade_status || '').toUpperCase().trim() === 'ACTIVE') {
+    console.log(`[registerSignal] Active trade already exists for watcher ${watcher.id}. Skipping to prevent duplicate signals.`);
+    return false;
+  }
+
   const signalHash = `${signal.pair}_${signal.direction}_${signal.entryPrice}`;
   console.log(`[registerSignal] Processing signal registration for watcher ${watcher.id}...`);
   console.log(`[registerSignal] Signal payload:`, JSON.stringify(signal, null, 2));
@@ -445,6 +451,42 @@ async function validateSymbolWithTwelveData(symbol: string, apiKey: string): Pro
   }
 }
 
+export async function fetchCurrentPrice(selectedPair: string, twelveDataKey: string): Promise<number | null> {
+  const mappedSymbol = toDisplaySymbol(selectedPair);
+  // Try /price endpoint first
+  const priceUrl = `https://api.twelvedata.com/price?symbol=${encodeURIComponent(mappedSymbol)}&apikey=${twelveDataKey}`;
+  try {
+    const res = await fetchWithRetry(priceUrl, { signal: AbortSignal.timeout(4000) }, 2, 500);
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.price) {
+        const parsed = parseFloat(String(data.price));
+        if (!isNaN(parsed) && parsed > 0) return parsed;
+      }
+    }
+  } catch (err: any) {
+    console.warn(`[fetchCurrentPrice] /price endpoint failed for ${mappedSymbol}: ${err.message || err}`);
+  }
+
+  // Fallback to /quote endpoint
+  const quoteUrl = `https://api.twelvedata.com/quote?symbol=${encodeURIComponent(mappedSymbol)}&apikey=${twelveDataKey}`;
+  try {
+    const res = await fetchWithRetry(quoteUrl, { signal: AbortSignal.timeout(4000) }, 2, 500);
+    if (res.ok) {
+      const data = await res.json();
+      const val = data?.price || data?.close;
+      if (val) {
+        const parsed = parseFloat(String(val));
+        if (!isNaN(parsed) && parsed > 0) return parsed;
+      }
+    }
+  } catch (err: any) {
+    console.warn(`[fetchCurrentPrice] /quote endpoint failed for ${mappedSymbol}: ${err.message || err}`);
+  }
+
+  return null;
+}
+
 const DEFAULT_STRATEGY_TEXT = `# Gaks AI Default Strategy
 
 ## 1. Overview
@@ -642,7 +684,142 @@ export default async function handler(req: any, res: any) {
       const selectedPair = toCanonicalSymbol(watcher.selected_pair || "");
       const symbol = selectedPair;
       const selectedTimeframe = watcher.selected_timeframe || 'H1';
-      console.log(`--- Processing Watcher ${watcher.id} (${selectedPair}) ---`);
+      const tradeStatus = (watcher.trade_status || 'WAITING').toUpperCase().trim();
+      console.log(`--- Processing Watcher ${watcher.id} (${selectedPair}) [Trade State: ${tradeStatus}] ---`);
+
+      if (!selectedPair) {
+        console.log(`LOG: Watcher ${watcher.id} skipped - No selected pair`);
+        skipped.push({ userId, reason: "No selected pair" });
+        watchersSkippedCount++;
+        continue;
+      }
+
+      // =====================================================================
+      // STATE 2 — ACTIVE TRADE
+      // =====================================================================
+      if (tradeStatus === 'ACTIVE') {
+        console.log(`[STATE 2 - ACTIVE] Monitoring open trade for ${selectedPair}. Skipping Gemini, strategy load, and candle download.`);
+
+        // Fetch Telegram Chat ID for trade status updates
+        const { data: telegramConn } = await supabase
+          .from("telegram_connections")
+          .select("telegram_chat_id, connected")
+          .eq("user_id", userId)
+          .maybeSingle();
+
+        const telegramChatId = (telegramConn && telegramConn.connected) ? telegramConn.telegram_chat_id : (watcher.telegram_chat_id || null);
+
+        // Fetch ONLY the latest market price from Twelve Data
+        const currentPrice = await fetchCurrentPrice(selectedPair, twelveDataKey);
+
+        if (currentPrice === null) {
+          console.warn(`[STATE 2 - ACTIVE] Could not fetch current price for ${selectedPair}. Skipping this check.`);
+          skipped.push({ userId, reason: "Failed to fetch current price for active trade" });
+          watchersSkippedCount++;
+          continue;
+        }
+
+        const entryPrice = watcher.entry_price ? parseFloat(String(watcher.entry_price)) : null;
+        const stopLoss = watcher.stop_loss ? parseFloat(String(watcher.stop_loss)) : null;
+        const takeProfit = watcher.take_profit ? parseFloat(String(watcher.take_profit)) : null;
+        const dir = (watcher.direction || '').toUpperCase().trim();
+        const isBuy = dir === 'BUY' || dir === 'LONG';
+        const isSell = dir === 'SELL' || dir === 'SHORT';
+
+        console.log(`[STATE 2 Price Check] Symbol: ${selectedPair}, Current: ${currentPrice}, Entry: ${entryPrice}, SL: ${stopLoss}, TP: ${takeProfit}, Dir: ${dir}`);
+
+        let isTP = false;
+        let isSL = false;
+
+        if (isBuy) {
+          if (takeProfit !== null && !isNaN(takeProfit) && currentPrice >= takeProfit) {
+            isTP = true;
+          }
+          if (stopLoss !== null && !isNaN(stopLoss) && currentPrice <= stopLoss) {
+            isSL = true;
+          }
+        } else if (isSell) {
+          if (takeProfit !== null && !isNaN(takeProfit) && currentPrice <= takeProfit) {
+            isTP = true;
+          }
+          if (stopLoss !== null && !isNaN(stopLoss) && currentPrice >= stopLoss) {
+            isSL = true;
+          }
+        }
+
+        if (!isTP && !isSL) {
+          console.log(`[STATE 2 - ACTIVE] Neither TP nor SL hit for ${selectedPair}. Exiting immediately.`);
+          watchersProcessedCount++;
+          results.push({ userId, symbol, tradeStatus: 'ACTIVE', result: 'Holding' });
+          continue;
+        }
+
+        // Handle TP Reached
+        if (isTP) {
+          console.log(`[STATE 2 - ACTIVE] ✅ Target reached for ${selectedPair}! Exit price: ${currentPrice}, TP: ${takeProfit}`);
+          
+          if (telegramChatId) {
+            const tpMsg = `✅ Trade closed\nTarget reached`;
+            await sendTelegramMessage(telegramChatId, tpMsg);
+            telegramMessagesSentCount++;
+          }
+
+          // Reset fields: trade_status = 'WAITING', clear entry_price, take_profit, stop_loss, direction, opened_at
+          await supabase
+            .from("watchers")
+            .update({
+              trade_status: 'WAITING',
+              entry_price: null,
+              take_profit: null,
+              stop_loss: null,
+              direction: null,
+              opened_at: null,
+              closed_at: new Date().toISOString(),
+              last_scan_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            })
+            .eq("id", watcher.id);
+
+          watchersProcessedCount++;
+          results.push({ userId, symbol, tradeStatus: 'WAITING', result: 'Closed TP' });
+          continue;
+        }
+
+        // Handle SL Reached
+        if (isSL) {
+          console.log(`[STATE 2 - ACTIVE] ❌ Stop loss hit for ${selectedPair}! Exit price: ${currentPrice}, SL: ${stopLoss}`);
+
+          if (telegramChatId) {
+            const slMsg = `❌ Trade closed\nStop loss hit`;
+            await sendTelegramMessage(telegramChatId, slMsg);
+            telegramMessagesSentCount++;
+          }
+
+          // Reset fields: trade_status = 'WAITING', clear entry_price, take_profit, stop_loss, direction, opened_at
+          await supabase
+            .from("watchers")
+            .update({
+              trade_status: 'WAITING',
+              entry_price: null,
+              take_profit: null,
+              stop_loss: null,
+              direction: null,
+              opened_at: null,
+              closed_at: new Date().toISOString(),
+              last_scan_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            })
+            .eq("id", watcher.id);
+
+          watchersProcessedCount++;
+          results.push({ userId, symbol, tradeStatus: 'WAITING', result: 'Closed SL' });
+          continue;
+        }
+      }
+
+      // =====================================================================
+      // STATE 1 — WAITING
+      // =====================================================================
 
       // 1. Determine scan interval in minutes
       const scanIntervalMinutes = getScanIntervalMinutes(watcher);
@@ -670,7 +847,7 @@ export default async function handler(req: any, res: any) {
 
       // 4. Log detailed watcher check status
       console.log(
-        `[Watcher Check]\n` +
+        `[STATE 1 - WAITING Check]\n` +
         `Current Time: ${now.toISOString()}\n` +
         `Last Scan: ${lastScanDate ? lastScanDate.toISOString() : 'NULL'}\n` +
         `Next Scan: ${nextScanDate ? nextScanDate.toISOString() : 'NOW'}\n` +
@@ -685,16 +862,9 @@ export default async function handler(req: any, res: any) {
         watchersSkippedCount++;
         continue;
       }
-      
-      if (!selectedPair) {
-        console.log(`LOG: Watcher ${watcher.id} skipped - No selected pair`);
-        skipped.push({ userId, reason: "No selected pair" });
-        watchersSkippedCount++;
-        continue;
-      }
 
       try {
-        // 4. Strategy Loaded
+        // Strategy Loaded
         const [{ data: prefsRecord }, { data: apiKeyRecord }] = await Promise.all([
           supabase.from("trading_preferences").select("*").eq("user_id", userId).maybeSingle(),
           supabase.from("user_api_keys").select("*").eq("user_id", userId).eq("provider", "gemini").maybeSingle()
@@ -745,7 +915,7 @@ export default async function handler(req: any, res: any) {
           continue;
         }
 
-        // 6. Candle Data Downloaded
+        // Candle Data Downloaded
         const mappedSymbol = toDisplaySymbol(selectedPair);
         const interval = mapTimeframeToInterval(selectedTimeframe);
 
@@ -788,7 +958,7 @@ export default async function handler(req: any, res: any) {
                   })).reverse();
                 }
               }
-            } catch (tsErr) {
+            } catch (tsErr: any) {
               console.warn(`[Twelve Data API] error for ${finalSymbol}: ${tsErr.message || tsErr}`);
             }
           }
@@ -802,17 +972,18 @@ export default async function handler(req: any, res: any) {
         }
         console.log(`LOG: Candle data downloaded for ${selectedPair}: YES (${candleData.length} candles)`);
 
-        // 7. Strategy Engine Executed
+        // Strategy Engine / Gemini Analysis Executed
         console.log(`LOG: Strategy engine executed for ${selectedPair}`);
         const parsedStrategy: any = {
           entryConditions: [strategyText]
         };
         const analysis = analyzeMarket(candleData, parsedStrategy);
 
-        // 8. Signal Result
         console.log(`LOG: Signal result for ${selectedPair}: ${analysis.signal} (Confidence: ${analysis.confidence}%)`);
 
-        if (analysis.signal === 'NO_TRADE') {
+        // If there is NO setup: Update last_scan_at and Exit.
+        if (analysis.signal === 'NO_TRADE' || analysis.confidence < 70) {
+            console.log(`[STATE 1 - WAITING] No setup for ${selectedPair}. Updating last_scan_at and exiting.`);
             await supabase
               .from("watchers")
               .update({ 
@@ -824,6 +995,7 @@ export default async function handler(req: any, res: any) {
             continue;
         }
 
+        // Gemini / Strategy returned a VALID trade!
         const signal = {
             pair: mappedSymbol,
             timeframe: selectedTimeframe,
@@ -837,40 +1009,42 @@ export default async function handler(req: any, res: any) {
             aiReasoning: analysis.reasoning
         };
 
-        // 9. Telegram Send Decision
-        const shouldSendTelegram = signal.confidenceScore >= 70;
-        console.log(`LOG: Telegram send decision for ${selectedPair}: ${shouldSendTelegram ? 'YES' : 'NO'}`);
-        
-        if (shouldSendTelegram) {
-          const isRegistered = await registerSignal(supabase, watcher, signal);
+        const isRegistered = await registerSignal(supabase, watcher, signal);
 
-          if (!isRegistered) {
-            console.log(`LOG: Telegram send decision for ${selectedPair}: NO (Failed to register signal or race condition)`);
-            continue;
-          }
-
-          const alertMessage = buildTelegramAlertMessage(signal);
-
-          const alertSent = await sendTelegramMessage(telegramChatId, alertMessage);
-          if (alertSent) {
-            telegramMessagesSentCount++;
-            console.log(`LOG: Telegram message sent successfully for ${selectedPair}`);
-          } else {
-            console.error(`LOG ERROR: Telegram message failed for ${selectedPair}`);
-          }
+        if (!isRegistered) {
+          console.log(`LOG: Telegram send decision for ${selectedPair}: NO (Failed to register signal or active trade already exists)`);
+          continue;
         }
 
-        // Update watcher last scan timestamp
+        // Send ONE Telegram signal
+        const alertMessage = buildTelegramAlertMessage(signal);
+        const alertSent = await sendTelegramMessage(telegramChatId, alertMessage);
+        if (alertSent) {
+          telegramMessagesSentCount++;
+          console.log(`LOG: Telegram message sent successfully for ${selectedPair}`);
+        } else {
+          console.error(`LOG ERROR: Telegram message failed for ${selectedPair}`);
+        }
+
+        // Save active trade state:
+        // trade_status = 'ACTIVE', entry_price, stop_loss, take_profit, direction, opened_at
         await supabase
           .from("watchers")
           .update({ 
+            trade_status: 'ACTIVE',
+            entry_price: analysis.entryPrice,
+            stop_loss: analysis.stopLoss,
+            take_profit: analysis.takeProfit,
+            direction: analysis.signal,
+            opened_at: new Date().toISOString(),
+            closed_at: null,
             last_scan_at: new Date().toISOString(),
             updated_at: new Date().toISOString()
           })
           .eq("id", watcher.id);
 
         watchersProcessedCount++;
-        results.push({ userId, symbol, signalsFound: 1, signalsSent: shouldSendTelegram ? 1 : 0 });
+        results.push({ userId, symbol, tradeStatus: 'ACTIVE', signalsFound: 1, signalsSent: alertSent ? 1 : 0 });
 
       } catch (err: any) {
         console.error(`LOG ERROR: Watcher ${watcher.id} failed`);

@@ -433,6 +433,16 @@ CREATE TABLE IF NOT EXISTS public.watchers (
   last_scan_at TIMESTAMPTZ,
   started_at TIMESTAMPTZ,
   stopped_at TIMESTAMPTZ,
+
+  -- Stateful trade lifecycle tracking
+  trade_status TEXT DEFAULT 'WAITING',
+  entry_price NUMERIC,
+  stop_loss NUMERIC,
+  take_profit NUMERIC,
+  direction TEXT,
+  opened_at TIMESTAMPTZ,
+  closed_at TIMESTAMPTZ,
+  signal_message_id TEXT,
   
   -- Auditing and metadata timestamps
   created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
