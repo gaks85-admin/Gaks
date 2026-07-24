@@ -248,6 +248,7 @@ export async function registerSignal(
       .from("watchers")
       .update(payload)
       .eq("id", watcher.id)
+      .eq("trade_status", "WAITING")
       .select();
 
     console.log("[REGISTER] Update result:", updatedRows);
@@ -723,6 +724,7 @@ export default async function handler(req: any, res: any) {
       // STATE 3 — COOLDOWN
       // =====================================================================
       if (tradeStatus === 'COOLDOWN') {
+        console.log(`[BRANCH EXECUTED] COOLDOWN branch for Watcher ID: ${watcher.id}`);
         const cooldownUntilDate = watcher.cooldown_until ? new Date(watcher.cooldown_until) : null;
         const isCooldownExpired = !cooldownUntilDate || (now.getTime() >= cooldownUntilDate.getTime());
 
@@ -730,6 +732,7 @@ export default async function handler(req: any, res: any) {
           const remainingMs = cooldownUntilDate ? (cooldownUntilDate.getTime() - now.getTime()) : 0;
           const remainingMin = Math.ceil(remainingMs / (1000 * 60));
           console.log(`Watcher in cooldown`);
+          console.log(`Watcher ID: ${watcher.id}`);
           console.log(`Current Time: ${now.toISOString()}`);
           console.log(`Cooldown Until: ${cooldownUntilDate ? cooldownUntilDate.toISOString() : 'NULL'}`);
           console.log(`Remaining: ${remainingMin} minute(s)`);
@@ -740,8 +743,8 @@ export default async function handler(req: any, res: any) {
         }
 
         // If TRUE (expired): Clear all previous trade fields and reset to WAITING
-        console.log(`[COOLDOWN Expired] Resetting all trade fields and setting trade_status = WAITING for watcher ${watcher.id}`);
-        await supabase
+        console.log(`[COOLDOWN EXPIRED] Resetting all trade fields and setting trade_status = WAITING for Watcher ID: ${watcher.id}`);
+        const { data: cooldownResetData, error: cooldownResetErr } = await supabase
           .from("watchers")
           .update({
             trade_status: 'WAITING',
@@ -755,7 +758,14 @@ export default async function handler(req: any, res: any) {
             cooldown_until: null,
             updated_at: new Date().toISOString()
           })
-          .eq("id", watcher.id);
+          .eq("id", watcher.id)
+          .select();
+
+        if (cooldownResetErr || !cooldownResetData || cooldownResetData.length === 0) {
+          console.error(`[COOLDOWN RESET ERROR] Watcher ID: ${watcher.id} failed to reset to WAITING:`, cooldownResetErr?.message || 'No rows returned');
+        } else {
+          console.log(`[COOLDOWN RESET SUCCESS] Watcher ID: ${watcher.id} successfully reset to WAITING in Supabase.`);
+        }
 
         watcher.trade_status = 'WAITING';
         watcher.entry_price = null;
@@ -773,7 +783,8 @@ export default async function handler(req: any, res: any) {
       // STATE 2 — ACTIVE TRADE
       // =====================================================================
       if (tradeStatus === 'ACTIVE') {
-        console.log(`[STATE 2 - ACTIVE] Monitoring open trade for ${selectedPair}. Skipping Gemini, strategy load, and candle download.`);
+        console.log(`[BRANCH EXECUTED] ACTIVE branch (Price Monitoring Only) for Watcher ID: ${watcher.id}`);
+        console.log(`[STATE 2 - ACTIVE] Monitoring open trade for Watcher ID: ${watcher.id} (${selectedPair}). Skipping Gemini, strategy load, and candle download.`);
 
         // Fetch Telegram Chat ID for trade status updates
         const { data: telegramConn } = await supabase
@@ -801,7 +812,7 @@ export default async function handler(req: any, res: any) {
         const isBuy = dir === 'BUY' || dir === 'LONG';
         const isSell = dir === 'SELL' || dir === 'SHORT';
 
-        console.log(`[STATE 2 Price Check] Symbol: ${selectedPair}, Current: ${currentPrice}, Entry: ${entryPrice}, SL: ${stopLoss}, TP: ${takeProfit}, Dir: ${dir}`);
+        console.log(`[STATE 2 Price Check] Watcher ID: ${watcher.id}, Symbol: ${selectedPair}, Current: ${currentPrice}, Entry: ${entryPrice}, SL: ${stopLoss}, TP: ${takeProfit}, Dir: ${dir}`);
 
         let isTP = false;
         let isSL = false;
@@ -823,7 +834,7 @@ export default async function handler(req: any, res: any) {
         }
 
         if (!isTP && !isSL) {
-          console.log(`[STATE 2 - ACTIVE] Neither TP nor SL hit for ${selectedPair}. Exiting immediately.`);
+          console.log(`[STATE 2 - ACTIVE] Neither TP nor SL hit for Watcher ID: ${watcher.id} (${selectedPair}). Exiting immediately.`);
           watchersProcessedCount++;
           results.push({ userId, symbol, tradeStatus: 'ACTIVE', result: 'Holding' });
           continue;
@@ -834,7 +845,7 @@ export default async function handler(req: any, res: any) {
 
         // Handle TP Reached
         if (isTP) {
-          console.log(`[STATE 2 - ACTIVE] ✅ Target reached for ${selectedPair}! Exit price: ${currentPrice}, TP: ${takeProfit}`);
+          console.log(`[STATE 2 - ACTIVE] ✅ Target reached for Watcher ID: ${watcher.id} (${selectedPair})! Exit price: ${currentPrice}, TP: ${takeProfit}`);
           
           if (telegramChatId) {
             const tpMsg = `✅ Trade closed\nTarget reached`;
@@ -843,7 +854,7 @@ export default async function handler(req: any, res: any) {
           }
 
           // Transition to COOLDOWN
-          await supabase
+          const { data: tpCooldownData, error: tpCooldownErr } = await supabase
             .from("watchers")
             .update({
               trade_status: 'COOLDOWN',
@@ -852,7 +863,14 @@ export default async function handler(req: any, res: any) {
               last_scan_at: new Date().toISOString(),
               updated_at: new Date().toISOString()
             })
-            .eq("id", watcher.id);
+            .eq("id", watcher.id)
+            .select();
+
+          if (tpCooldownErr || !tpCooldownData || tpCooldownData.length === 0) {
+            console.error(`[COOLDOWN UPDATE ERROR] Watcher ID: ${watcher.id} failed to update to COOLDOWN:`, tpCooldownErr?.message || 'No rows returned');
+          } else {
+            console.log(`[COOLDOWN UPDATE SUCCESS] Watcher ID: ${watcher.id} successfully updated to trade_status = COOLDOWN in Supabase.`);
+          }
 
           watchersProcessedCount++;
           results.push({ userId, symbol, tradeStatus: 'COOLDOWN', result: 'Closed TP' });
@@ -861,7 +879,7 @@ export default async function handler(req: any, res: any) {
 
         // Handle SL Reached
         if (isSL) {
-          console.log(`[STATE 2 - ACTIVE] ❌ Stop loss hit for ${selectedPair}! Exit price: ${currentPrice}, SL: ${stopLoss}`);
+          console.log(`[STATE 2 - ACTIVE] ❌ Stop loss hit for Watcher ID: ${watcher.id} (${selectedPair})! Exit price: ${currentPrice}, SL: ${stopLoss}`);
 
           if (telegramChatId) {
             const slMsg = `❌ Trade closed\nStop loss hit`;
@@ -870,7 +888,7 @@ export default async function handler(req: any, res: any) {
           }
 
           // Transition to COOLDOWN
-          await supabase
+          const { data: slCooldownData, error: slCooldownErr } = await supabase
             .from("watchers")
             .update({
               trade_status: 'COOLDOWN',
@@ -879,7 +897,14 @@ export default async function handler(req: any, res: any) {
               last_scan_at: new Date().toISOString(),
               updated_at: new Date().toISOString()
             })
-            .eq("id", watcher.id);
+            .eq("id", watcher.id)
+            .select();
+
+          if (slCooldownErr || !slCooldownData || slCooldownData.length === 0) {
+            console.error(`[COOLDOWN UPDATE ERROR] Watcher ID: ${watcher.id} failed to update to COOLDOWN:`, slCooldownErr?.message || 'No rows returned');
+          } else {
+            console.log(`[COOLDOWN UPDATE SUCCESS] Watcher ID: ${watcher.id} successfully updated to trade_status = COOLDOWN in Supabase.`);
+          }
 
           watchersProcessedCount++;
           results.push({ userId, symbol, tradeStatus: 'COOLDOWN', result: 'Closed SL' });
@@ -890,6 +915,12 @@ export default async function handler(req: any, res: any) {
       // =====================================================================
       // STATE 1 — WAITING
       // =====================================================================
+      if (tradeStatus !== 'WAITING') {
+        console.warn(`[STATE GUARD] Watcher ID: ${watcher.id} is in status '${tradeStatus}' (not WAITING). Bypassing signal generation.`);
+        continue;
+      }
+
+      console.log(`[BRANCH EXECUTED] WAITING branch for Watcher ID: ${watcher.id}`);
 
       // Determine if watcher is due for a scan
       let isDue = false;
@@ -1027,7 +1058,7 @@ export default async function handler(req: any, res: any) {
 
         // If there is NO setup: Update last_scan_at and Exit.
         if (analysis.signal === 'NO_TRADE' || analysis.confidence < 70) {
-            console.log(`[STATE 1 - WAITING] No setup for ${selectedPair}. Updating last_scan_at and exiting.`);
+            console.log(`[STATE 1 - WAITING] No setup for Watcher ID: ${watcher.id} (${selectedPair}). Signal: ${analysis.signal}, Confidence: ${analysis.confidence}%. Updating last_scan_at and exiting.`);
             await supabase
               .from("watchers")
               .update({ 
@@ -1040,6 +1071,10 @@ export default async function handler(req: any, res: any) {
         }
 
         // Gemini / Strategy returned a VALID trade!
+        const signalReasoning = Array.isArray(analysis.reasoning) ? analysis.reasoning.join("; ") : (analysis.reasoning || "Strategy criteria matched");
+        console.log(`[SIGNAL GENERATED] Watcher ID: ${watcher.id}`);
+        console.log(`Exact reason new signal was generated: Strategy evaluation returned signal '${analysis.signal}' with confidence ${analysis.confidence}% (>= 70 threshold) on pair ${selectedPair}. Entry: ${analysis.entryPrice}, Stop Loss: ${analysis.stopLoss}, Take Profit: ${analysis.takeProfit}. Reasoning: ${signalReasoning}`);
+
         const signal = {
             pair: mappedSymbol,
             timeframe: selectedTimeframe,
@@ -1065,14 +1100,15 @@ export default async function handler(req: any, res: any) {
         const alertSent = await sendTelegramMessage(telegramChatId, alertMessage);
         if (alertSent) {
           telegramMessagesSentCount++;
-          console.log(`LOG: Telegram message sent successfully for ${selectedPair}`);
+          console.log(`LOG: Telegram message sent successfully for Watcher ID: ${watcher.id} (${selectedPair})`);
         } else {
-          console.error(`LOG ERROR: Telegram message failed for ${selectedPair}`);
+          console.error(`LOG ERROR: Telegram message failed for Watcher ID: ${watcher.id} (${selectedPair})`);
         }
 
-        // Save active trade state:
+        // Save active trade state in Supabase:
         // trade_status = 'ACTIVE', entry_price, stop_loss, take_profit, direction, opened_at
-        await supabase
+        console.log(`[ACTIVE UPDATE START] Attempting to update Watcher ID: ${watcher.id} to trade_status = ACTIVE in Supabase...`);
+        const { data: activeUpdateRows, error: activeUpdateErr } = await supabase
           .from("watchers")
           .update({ 
             trade_status: 'ACTIVE',
@@ -1086,7 +1122,20 @@ export default async function handler(req: any, res: any) {
             last_scan_at: new Date().toISOString(),
             updated_at: new Date().toISOString()
           })
-          .eq("id", watcher.id);
+          .eq("id", watcher.id)
+          .select();
+
+        const dbUpdateActiveSucceeded = !activeUpdateErr && activeUpdateRows && activeUpdateRows.length > 0;
+
+        if (dbUpdateActiveSucceeded) {
+          console.log(`[ACTIVE UPDATE SUCCESS] Watcher ID: ${watcher.id} successfully updated to trade_status = ACTIVE in Supabase.`);
+          console.log(`Whether DB update to ACTIVE succeeded: YES`);
+          console.log(`Updated row data:`, JSON.stringify(activeUpdateRows[0]));
+        } else {
+          console.error(`[ACTIVE UPDATE FAILED] Watcher ID: ${watcher.id} failed to update to trade_status = ACTIVE in Supabase.`);
+          console.error(`Error details:`, activeUpdateErr?.message || 'No rows returned from update');
+          console.log(`Whether DB update to ACTIVE succeeded: NO`);
+        }
 
         watchersProcessedCount++;
         results.push({ userId, symbol, tradeStatus: 'ACTIVE', signalsFound: 1, signalsSent: alertSent ? 1 : 0 });
