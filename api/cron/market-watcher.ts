@@ -386,6 +386,10 @@ async function fetchWithRetry(url: string, options: RequestInit = {}, maxRetries
       if (response.ok) {
         return response;
       }
+      if (response.status === 429) {
+        console.warn(`[Twelve Data Rate Limit] HTTP 429 rate limit received from ${url}. Never retrying 429.`);
+        return response;
+      }
       if (response.status === 404 || response.status === 400) {
         // Do not retry client errors (like 404 Not Found)
         return response;
@@ -405,10 +409,14 @@ async function fetchWithRetry(url: string, options: RequestInit = {}, maxRetries
 // Global cache for symbol validation to save Twelve Data credits
 const symbolValidationCache: Record<string, { isValid: boolean; matchedSymbol?: string; instrumentType?: string; reason?: string }> = {};
 
-async function validateSymbolWithTwelveData(symbol: string, apiKey: string): Promise<{ isValid: boolean; matchedSymbol?: string; instrumentType?: string; reason?: string }> {
-  if (symbolValidationCache[symbol]) return symbolValidationCache[symbol];
+async function validateSymbolWithTwelveData(symbol: string, apiKey: string, stats?: { requests: number; cacheHits: number }): Promise<{ isValid: boolean; matchedSymbol?: string; instrumentType?: string; reason?: string }> {
+  if (symbolValidationCache[symbol]) {
+    if (stats) stats.cacheHits++;
+    return symbolValidationCache[symbol];
+  }
   
   try {
+    if (stats) stats.requests++;
     const searchUrl = `https://api.twelvedata.com/symbol_search?symbol=${encodeURIComponent(symbol)}&apikey=${apiKey}`;
     const response = await fetchWithRetry(searchUrl, {}, 2, 500);
     if (response.status === 429) {
@@ -454,29 +462,50 @@ async function validateSymbolWithTwelveData(symbol: string, apiKey: string): Pro
   }
 }
 
-export async function fetchCurrentPrice(selectedPair: string, twelveDataKey: string): Promise<number | null> {
+export async function fetchCurrentPrice(selectedPair: string, twelveDataKey: string, stats?: { requests: number; cacheHits: number }): Promise<number | null> {
   const mappedSymbol = toDisplaySymbol(selectedPair);
   // Try /price endpoint first
   const priceUrl = `https://api.twelvedata.com/price?symbol=${encodeURIComponent(mappedSymbol)}&apikey=${twelveDataKey}`;
   try {
+    if (stats) stats.requests++;
     const res = await fetchWithRetry(priceUrl, { signal: AbortSignal.timeout(4000) }, 2, 500);
+    if (res.status === 429) {
+      throw new Error("HTTP 429: Rate limit exceeded");
+    }
     if (res.ok) {
       const data = await res.json();
+      if (data && (data.status === "error" || data.code === 429)) {
+        if (data.code === 429 || String(data.message).includes("limit") || String(data.message).includes("429")) {
+          throw new Error("HTTP 429: Rate limit exceeded");
+        }
+      }
       if (data && data.price) {
         const parsed = parseFloat(String(data.price));
         if (!isNaN(parsed) && parsed > 0) return parsed;
       }
     }
   } catch (err: any) {
+    if (err.message && err.message.includes("429")) {
+      throw err;
+    }
     console.warn(`[fetchCurrentPrice] /price endpoint failed for ${mappedSymbol}: ${err.message || err}`);
   }
 
   // Fallback to /quote endpoint
   const quoteUrl = `https://api.twelvedata.com/quote?symbol=${encodeURIComponent(mappedSymbol)}&apikey=${twelveDataKey}`;
   try {
+    if (stats) stats.requests++;
     const res = await fetchWithRetry(quoteUrl, { signal: AbortSignal.timeout(4000) }, 2, 500);
+    if (res.status === 429) {
+      throw new Error("HTTP 429: Rate limit exceeded");
+    }
     if (res.ok) {
       const data = await res.json();
+      if (data && (data.status === "error" || data.code === 429)) {
+        if (data.code === 429 || String(data.message).includes("limit") || String(data.message).includes("429")) {
+          throw new Error("HTTP 429: Rate limit exceeded");
+        }
+      }
       const val = data?.price || data?.close;
       if (val) {
         const parsed = parseFloat(String(val));
@@ -484,6 +513,9 @@ export async function fetchCurrentPrice(selectedPair: string, twelveDataKey: str
       }
     }
   } catch (err: any) {
+    if (err.message && err.message.includes("429")) {
+      throw err;
+    }
     console.warn(`[fetchCurrentPrice] /quote endpoint failed for ${mappedSymbol}: ${err.message || err}`);
   }
 
@@ -551,6 +583,21 @@ export default async function handler(req: any, res: any) {
     let watchersSkippedCount = 0;
     let signalsGeneratedCount = 0;
     let telegramMessagesSentCount = 0;
+
+    let totalTwelveDataRequests = 0;
+    let requestsSavedThroughCachingCount = 0;
+    let watchersSkippedDueToRateLimitCount = 0;
+
+    const tdStats = {
+      get requests() { return totalTwelveDataRequests; },
+      set requests(val) { totalTwelveDataRequests = val; },
+      get cacheHits() { return requestsSavedThroughCachingCount; },
+      set cacheHits(val) { requestsSavedThroughCachingCount = val; }
+    };
+
+    // Per-cron request caches to reuse Twelve Data responses across all watchers
+    const cronPriceCache: Record<string, number> = {};
+    const cronTimeSeriesCache: Record<string, { quoteData: any; candleData: Candle[] }> = {};
 
     // Enforce JSON content type from the very beginning
     res.setHeader("Content-Type", "application/json");
@@ -795,7 +842,37 @@ export default async function handler(req: any, res: any) {
         const telegramChatId = (telegramConn && telegramConn.connected) ? telegramConn.telegram_chat_id : (watcher.telegram_chat_id || null);
 
         // Fetch ONLY the latest market price from Twelve Data
-        const currentPrice = await fetchCurrentPrice(selectedPair, twelveDataKey);
+        let currentPrice: number | null = null;
+        const symbolKey = toDisplaySymbol(selectedPair);
+        if (cronPriceCache[symbolKey] !== undefined) {
+          currentPrice = cronPriceCache[symbolKey];
+          tdStats.cacheHits++;
+          console.log(`[Cache Hit] Using cached Twelve Data current price for ${symbolKey}: ${currentPrice}`);
+        } else {
+          if (twelveDataExhausted) {
+            console.warn(`[Twelve Data Rate Limit] Watcher ${watcher.id} skipped due to HTTP 429 rate limit. Deferring until next cron cycle.`);
+            skipped.push({ userId, reason: "TwelveData rate limit (429) exhausted" });
+            watchersSkippedDueToRateLimitCount++;
+            watchersSkippedCount++;
+            continue;
+          }
+          try {
+            currentPrice = await fetchCurrentPrice(selectedPair, twelveDataKey, tdStats);
+            if (currentPrice !== null) {
+              cronPriceCache[symbolKey] = currentPrice;
+            }
+          } catch (err: any) {
+            if (err.message && err.message.includes("429")) {
+              twelveDataExhausted = true;
+              console.warn(`[Twelve Data Rate Limit] Watcher ${watcher.id} skipped due to HTTP 429 rate limit. Deferring until next cron cycle.`);
+              skipped.push({ userId, reason: "TwelveData rate limit (429) exhausted" });
+              watchersSkippedDueToRateLimitCount++;
+              watchersSkippedCount++;
+              continue;
+            }
+            console.warn(`[STATE 2 - ACTIVE] Error fetching current price for ${selectedPair}: ${err.message}`);
+          }
+        }
 
         if (currentPrice === null) {
           console.warn(`[STATE 2 - ACTIVE] Could not fetch current price for ${selectedPair}. Skipping this check.`);
@@ -1022,46 +1099,82 @@ export default async function handler(req: any, res: any) {
         let quoteData: any = null;
         let candleData: Candle[] = [];
 
-        if (!twelveDataExhausted) {
-          const validation = await validateSymbolWithTwelveData(mappedSymbol, twelveDataKey);
-          
-          if (!validation.isValid) {
-            if (validation.reason?.includes("429")) {
-              twelveDataExhausted = true;
-            } else {
-              console.log(`LOG: Watcher ${watcher.id} skipped - TwelveData validation failed: ${validation.reason}`);
-              continue;
-            }
-          }
-          
-          if (!twelveDataExhausted) {
-            const finalSymbol = validation.matchedSymbol || mappedSymbol;
-            const timeSeriesUrl = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(finalSymbol)}&interval=${interval}&outputsize=20&apikey=${twelveDataKey}`;
+        if (twelveDataExhausted) {
+          console.warn(`[Twelve Data Rate Limit] Watcher ${watcher.id} skipped due to HTTP 429 rate limit. Deferring until next cron cycle.`);
+          skipped.push({ userId, reason: "TwelveData rate limit (429) exhausted" });
+          watchersSkippedDueToRateLimitCount++;
+          watchersSkippedCount++;
+          continue;
+        }
 
-            try {
-              const tsRes = await fetchWithRetry(timeSeriesUrl, { signal: AbortSignal.timeout(4000) }, 2, 500);
-              if (tsRes.status === 429) {
+        const validation = await validateSymbolWithTwelveData(mappedSymbol, twelveDataKey, tdStats);
+        if (!validation.isValid) {
+          if (validation.reason?.includes("429")) {
+            twelveDataExhausted = true;
+            console.warn(`[Twelve Data Rate Limit] Watcher ${watcher.id} skipped due to HTTP 429 rate limit. Deferring until next cron cycle.`);
+            skipped.push({ userId, reason: "TwelveData rate limit (429) exhausted" });
+            watchersSkippedDueToRateLimitCount++;
+            watchersSkippedCount++;
+            continue;
+          } else {
+            console.log(`LOG: Watcher ${watcher.id} skipped - TwelveData validation failed: ${validation.reason}`);
+            continue;
+          }
+        }
+
+        const finalSymbol = validation.matchedSymbol || mappedSymbol;
+        const tsCacheKey = `${finalSymbol}_${interval}`;
+
+        if (cronTimeSeriesCache[tsCacheKey]) {
+          console.log(`[Cache Hit] Reusing cached Twelve Data time series for ${tsCacheKey}`);
+          tdStats.cacheHits++;
+          quoteData = cronTimeSeriesCache[tsCacheKey].quoteData;
+          candleData = cronTimeSeriesCache[tsCacheKey].candleData;
+        } else {
+          const timeSeriesUrl = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(finalSymbol)}&interval=${interval}&outputsize=20&apikey=${twelveDataKey}`;
+          try {
+            tdStats.requests++;
+            const tsRes = await fetchWithRetry(timeSeriesUrl, { signal: AbortSignal.timeout(4000) }, 2, 500);
+            if (tsRes.status === 429) {
+              twelveDataExhausted = true;
+            } else if (tsRes.ok) {
+              const tsData = await tsRes.json();
+              if (tsData.status === "error" && tsData.code === 429) {
                 twelveDataExhausted = true;
-              } else if (tsRes.ok) {
-                const tsData = await tsRes.json();
-                if (tsData.status === "error" && tsData.code === 429) {
-                  twelveDataExhausted = true;
-                } else if (tsData.status === "ok" && tsData.values && tsData.values.length > 0) {
-                  quoteData = tsData.values[0];
-                  candleData = tsData.values.map((v: any) => ({
-                    timestamp: v.datetime,
-                    open: parseFloat(v.open),
-                    high: parseFloat(v.high),
-                    low: parseFloat(v.low),
-                    close: parseFloat(v.close),
-                    volume: v.volume ? parseFloat(v.volume) : undefined
-                  })).reverse();
+              } else if (tsData.status === "ok" && tsData.values && tsData.values.length > 0) {
+                quoteData = tsData.values[0];
+                candleData = tsData.values.map((v: any) => ({
+                  timestamp: v.datetime,
+                  open: parseFloat(v.open),
+                  high: parseFloat(v.high),
+                  low: parseFloat(v.low),
+                  close: parseFloat(v.close),
+                  volume: v.volume ? parseFloat(v.volume) : undefined
+                })).reverse();
+
+                cronTimeSeriesCache[tsCacheKey] = { quoteData, candleData };
+                if (candleData.length > 0) {
+                  const latestPrice = candleData[candleData.length - 1].close;
+                  cronPriceCache[toDisplaySymbol(selectedPair)] = latestPrice;
+                  cronPriceCache[finalSymbol] = latestPrice;
                 }
               }
-            } catch (tsErr: any) {
+            }
+          } catch (tsErr: any) {
+            if (tsErr.message && tsErr.message.includes("429")) {
+              twelveDataExhausted = true;
+            } else {
               console.warn(`[Twelve Data API] error for ${finalSymbol}: ${tsErr.message || tsErr}`);
             }
           }
+        }
+
+        if (twelveDataExhausted) {
+          console.warn(`[Twelve Data Rate Limit] Watcher ${watcher.id} skipped due to HTTP 429 rate limit. Deferring until next cron cycle.`);
+          skipped.push({ userId, reason: "TwelveData rate limit (429) exhausted" });
+          watchersSkippedDueToRateLimitCount++;
+          watchersSkippedCount++;
+          continue;
         }
 
         if (candleData.length < 2) {
@@ -1078,7 +1191,79 @@ export default async function handler(req: any, res: any) {
           entryConditions: [strategyText]
         };
         console.log("GEMINI CALLED");
-        const analysis = analyzeMarket(candleData, parsedStrategy);
+        let analysis = analyzeMarket(candleData, parsedStrategy);
+        try {
+          const geminiKey = apiKeyRecord?.api_key || process.env.GEMINI_API_KEY;
+          if (geminiKey) {
+            const ai = new GoogleGenAI({ apiKey: geminiKey });
+            const promptText = `
+You are an expert AI trading assistant.
+Analyze the following live market data against the user's trading strategy and configuration.
+Return a structured JSON list of trading signals. Only generate a signal if the setup strongly matches the strategy.
+If no valid setups are found, return an empty array for signals.
+
+User's Trading Strategy:
+${strategyText}
+
+Trading Configuration:
+- Account Size: $${accountSize}
+- Risk Percentage per trade: ${riskPercentage}%
+- Risk-to-Reward Ratio: ${riskRewardStr}
+- Maximum Daily Risk: ${maxDailyRiskStr}
+- Preferred Timeframe: ${selectedTimeframe}
+- Preferred Instrument: ${selectedPair}
+
+Live Market Data:
+${JSON.stringify(candleData.slice(-10), null, 2)}
+`;
+            const aiResponse = await generateContentWithDiagnostics(ai, {
+              model: "gemini-2.5-flash",
+              contents: promptText,
+              config: {
+                responseMimeType: "application/json",
+                responseSchema: {
+                  type: Type.OBJECT,
+                  properties: {
+                    signals: {
+                      type: Type.ARRAY,
+                      items: {
+                        type: Type.OBJECT,
+                        properties: {
+                          pair: { type: Type.STRING },
+                          direction: { type: Type.STRING },
+                          entryPrice: { type: Type.NUMBER },
+                          stopLoss: { type: Type.NUMBER },
+                          takeProfit: { type: Type.NUMBER },
+                          riskRewardRatio: { type: Type.STRING },
+                          confidenceScore: { type: Type.NUMBER },
+                          aiReasoning: { type: Type.STRING }
+                        },
+                        required: ["pair", "direction", "entryPrice", "stopLoss", "takeProfit", "riskRewardRatio", "confidenceScore", "aiReasoning"]
+                      }
+                    }
+                  },
+                  required: ["signals"]
+                }
+              }
+            });
+            const parsedResult = JSON.parse(aiResponse.text || '{"signals": []}');
+            const signals = parsedResult.signals || [];
+            if (signals.length > 0 && signals[0].confidenceScore >= 70) {
+              const sig = signals[0];
+              analysis = {
+                signal: sig.direction,
+                confidence: sig.confidenceScore,
+                entryPrice: sig.entryPrice,
+                stopLoss: sig.stopLoss,
+                takeProfit: sig.takeProfit,
+                riskReward: sig.riskRewardRatio,
+                reasoning: [sig.aiReasoning]
+              };
+            }
+          }
+        } catch (gemErr: any) {
+          console.warn(`[Gemini Signal Generation Warning]: Falling back to local strategy engine:`, gemErr.message);
+        }
 
         console.log(`LOG: Signal result for ${selectedPair}: ${analysis.signal} (Confidence: ${analysis.confidence}%)`);
 
@@ -1097,6 +1282,24 @@ export default async function handler(req: any, res: any) {
         }
 
         // Gemini / Strategy returned a VALID trade!
+        const riskAmount = accountSize * (riskPercentage / 100);
+        const slDistance = Math.abs(analysis.entryPrice - analysis.stopLoss);
+        let lotSize = 0;
+        if (slDistance > 0) {
+          const rawUnits = riskAmount / slDistance;
+          if (analysis.entryPrice < 10 || /EUR|GBP|AUD|NZD|CAD|CHF|JPY/i.test(selectedPair)) {
+            lotSize = Number((rawUnits / 100000).toFixed(4));
+          } else {
+            lotSize = Number(rawUnits.toFixed(4));
+          }
+        }
+        console.log(`\nPosition Size Calculation\n`);
+        console.log(`Account Size: $${accountSize}`);
+        console.log(`Risk Amount: $${riskAmount.toFixed(2)} (${riskPercentage}%)`);
+        console.log(`Entry: ${analysis.entryPrice}`);
+        console.log(`Stop Loss: ${analysis.stopLoss}`);
+        console.log(`Calculated Lot Size: ${lotSize}\n`);
+
         const signalReasoning = Array.isArray(analysis.reasoning) ? analysis.reasoning.join("; ") : (analysis.reasoning || "Strategy criteria matched");
         console.log(`[SIGNAL GENERATED] Watcher ID: ${watcher.id}`);
         console.log(`Exact reason new signal was generated: Strategy evaluation returned signal '${analysis.signal}' with confidence ${analysis.confidence}% (>= 70 threshold) on pair ${selectedPair}. Entry: ${analysis.entryPrice}, Stop Loss: ${analysis.stopLoss}, Take Profit: ${analysis.takeProfit}. Reasoning: ${signalReasoning}`);
@@ -1176,12 +1379,23 @@ export default async function handler(req: any, res: any) {
     }
 
     const totalTime = Date.now() - startTime;
+    console.log(`\n==================================================`);
+    console.log(`[TWELVE DATA API USAGE AUDIT & METRICS]`);
+    console.log(`Total Twelve Data requests per cron execution: ${totalTwelveDataRequests}`);
+    console.log(`Requests saved through caching: ${requestsSavedThroughCachingCount}`);
+    console.log(`Watchers skipped due to rate limiting: ${watchersSkippedDueToRateLimitCount}`);
+    console.log(`==================================================\n`);
     console.log(`LOG: Cron completed (Processed: ${watchersProcessedCount}, Sent: ${telegramMessagesSentCount})`);
 
     return res.status(200).json({
       success: true,
       processed: watchersProcessedCount,
       signalsSent: telegramMessagesSentCount,
+      twelveDataMetrics: {
+        totalRequests: totalTwelveDataRequests,
+        savedThroughCaching: requestsSavedThroughCachingCount,
+        skippedDueToRateLimit: watchersSkippedDueToRateLimitCount
+      },
       executionTimeMs: totalTime
     });
 

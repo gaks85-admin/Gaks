@@ -65,6 +65,10 @@ serve(async (req) => {
           if (response.ok) {
             return response;
           }
+          if (response.status === 429) {
+            console.warn(`[Twelve Data Rate Limit] HTTP 429 rate limit received from ${url}. Never retrying 429.`);
+            return response;
+          }
           if (response.status === 404 || response.status === 400) {
             // Do not retry client errors (like 404 Not Found)
             return response;
@@ -405,16 +409,20 @@ This is the default, institutional-grade multi-timeframe strategy designed for c
         
         const promptText = `
 You are an expert AI trading assistant.
-Analyze the following live market data against the user's trading strategy.
+Analyze the following live market data against the user's trading strategy and configuration.
 Return a structured JSON list of trading signals. Only generate a signal if the setup strongly matches the strategy.
 If no valid setups are found, return an empty array for signals.
 
 User's Trading Strategy:
 ${strategyText}
 
-Account Size: $${accountSize}
-Risk Percentage per trade: ${riskPercentage}%
-Timeframe: ${selectedTimeframe}
+Trading Configuration:
+- Account Size: $${accountSize}
+- Risk Percentage per trade: ${riskPercentage}%
+- Risk-to-Reward Ratio: ${riskRewardStr}
+- Maximum Daily Risk: ${maxDailyRiskStr}
+- Preferred Timeframe: ${selectedTimeframe}
+- Preferred Instrument: ${selectedPair}
 
 Live Market Data (Twelve Data):
 ${JSON.stringify(marketData, null, 2)}
@@ -459,6 +467,24 @@ ${JSON.stringify(marketData, null, 2)}
         // Send Telegram Message if valid signals found
         if (signals.length > 0) {
           for (const signal of signals) {
+            const riskAmount = accountSize * (riskPercentage / 100);
+            const slDistance = Math.abs(signal.entryPrice - signal.stopLoss);
+            let lotSize = 0;
+            if (slDistance > 0) {
+              const rawUnits = riskAmount / slDistance;
+              if (signal.entryPrice < 10 || /EUR|GBP|AUD|NZD|CAD|CHF|JPY/i.test(signal.pair)) {
+                lotSize = Number((rawUnits / 100000).toFixed(4));
+              } else {
+                lotSize = Number(rawUnits.toFixed(4));
+              }
+            }
+            console.log(`\nPosition Size Calculation\n`);
+            console.log(`Account Size: $${accountSize}`);
+            console.log(`Risk Amount: $${riskAmount.toFixed(2)} (${riskPercentage}%)`);
+            console.log(`Entry: ${signal.entryPrice}`);
+            console.log(`Stop Loss: ${signal.stopLoss}`);
+            console.log(`Calculated Lot Size: ${lotSize}\n`);
+
             if (signal.confidenceScore >= 70) {
               
               // Duplicate Signal Prevention
