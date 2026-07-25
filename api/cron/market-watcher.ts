@@ -125,6 +125,7 @@ export async function runGeminiRequest(
         throw new Error('Watcher skipped because Gemini key is inactive.');
     }
 
+    console.log("GEMINI CALLED");
     const ai = new GoogleGenAI({ apiKey: apiKeyData.api_key });
 
     try {
@@ -706,6 +707,9 @@ export default async function handler(req: any, res: any) {
       const cooldownUntilStr = watcher.cooldown_until ? new Date(watcher.cooldown_until).toISOString() : 'NULL';
 
       console.log(`--- Processing Watcher ${watcher.id} (${selectedPair}) ---`);
+      console.log(`Watcher ID: ${watcher.id}`);
+      console.log(`trade_status from database: ${watcher.trade_status}`);
+      console.log(`selected_pair: ${selectedPair}`);
       console.log(`State: ${tradeStatus}`);
       console.log(`Current Time: ${now.toISOString()}`);
       console.log(`Last Scan: ${lastScanDate ? lastScanDate.toISOString() : 'NULL'}`);
@@ -723,6 +727,7 @@ export default async function handler(req: any, res: any) {
       // =====================================================================
       // STATE 3 — COOLDOWN
       // =====================================================================
+      console.log(`ENTERING COOLDOWN`);
       if (tradeStatus === 'COOLDOWN') {
         console.log(`[BRANCH EXECUTED] COOLDOWN branch for Watcher ID: ${watcher.id}`);
         const cooldownUntilDate = watcher.cooldown_until ? new Date(watcher.cooldown_until) : null;
@@ -767,21 +772,15 @@ export default async function handler(req: any, res: any) {
           console.log(`[COOLDOWN RESET SUCCESS] Watcher ID: ${watcher.id} successfully reset to WAITING in Supabase.`);
         }
 
-        watcher.trade_status = 'WAITING';
-        watcher.entry_price = null;
-        watcher.stop_loss = null;
-        watcher.take_profit = null;
-        watcher.direction = null;
-        watcher.signal_message_id = null;
-        watcher.opened_at = null;
-        watcher.closed_at = null;
-        watcher.cooldown_until = null;
-        tradeStatus = 'WAITING';
+        watchersProcessedCount++;
+        results.push({ userId, symbol, tradeStatus: 'COOLDOWN', result: 'Cooldown expired, reset to WAITING' });
+        continue;
       }
 
       // =====================================================================
       // STATE 2 — ACTIVE TRADE
       // =====================================================================
+      console.log(`ENTERING ACTIVE`);
       if (tradeStatus === 'ACTIVE') {
         console.log(`[BRANCH EXECUTED] ACTIVE branch (Price Monitoring Only) for Watcher ID: ${watcher.id}`);
         console.log(`[STATE 2 - ACTIVE] Monitoring open trade for Watcher ID: ${watcher.id} (${selectedPair}). Skipping Gemini, strategy load, and candle download.`);
@@ -802,6 +801,7 @@ export default async function handler(req: any, res: any) {
           console.warn(`[STATE 2 - ACTIVE] Could not fetch current price for ${selectedPair}. Skipping this check.`);
           skipped.push({ userId, reason: "Failed to fetch current price for active trade" });
           watchersSkippedCount++;
+          console.log(`ACTIVE branch exited.`);
           continue;
         }
 
@@ -837,6 +837,7 @@ export default async function handler(req: any, res: any) {
           console.log(`[STATE 2 - ACTIVE] Neither TP nor SL hit for Watcher ID: ${watcher.id} (${selectedPair}). Exiting immediately.`);
           watchersProcessedCount++;
           results.push({ userId, symbol, tradeStatus: 'ACTIVE', result: 'Holding' });
+          console.log(`ACTIVE branch exited.`);
           continue;
         }
 
@@ -874,6 +875,7 @@ export default async function handler(req: any, res: any) {
 
           watchersProcessedCount++;
           results.push({ userId, symbol, tradeStatus: 'COOLDOWN', result: 'Closed TP' });
+          console.log(`ACTIVE branch exited.`);
           continue;
         }
 
@@ -908,13 +910,18 @@ export default async function handler(req: any, res: any) {
 
           watchersProcessedCount++;
           results.push({ userId, symbol, tradeStatus: 'COOLDOWN', result: 'Closed SL' });
+          console.log(`ACTIVE branch exited.`);
           continue;
         }
+
+        console.log(`ACTIVE branch exited.`);
+        continue;
       }
 
       // =====================================================================
       // STATE 1 — WAITING
       // =====================================================================
+      console.log(`ENTERING WAITING`);
       if (tradeStatus !== 'WAITING') {
         console.warn(`[STATE GUARD] Watcher ID: ${watcher.id} is in status '${tradeStatus}' (not WAITING). Bypassing signal generation.`);
         continue;
@@ -973,8 +980,26 @@ export default async function handler(req: any, res: any) {
         }
         const telegramChatId = telegramConn.telegram_chat_id;
 
-        const accountSize = watcher.account_size || (prefsRecord?.capital ? parseFloat(prefsRecord.capital.replace(/[^0-9.]/g, "")) : null);
-        const riskPercentage = watcher.risk_percentage || (prefsRecord?.preferred_risk ? parseFloat(prefsRecord.preferred_risk.replace(/[^0-9.]/g, "")) : null);
+        const rawCap = prefsRecord?.capital === 'Custom'
+          ? (prefsRecord?.custom_capital || prefsRecord?.capital || "")
+          : (prefsRecord?.capital || prefsRecord?.custom_capital || "");
+        const cleanedCap = rawCap ? String(rawCap).replace(/[^0-9.]/g, "") : "";
+        const accountSize = cleanedCap ? parseFloat(cleanedCap) : (watcher.account_size || null);
+
+        const rawRisk = prefsRecord?.preferred_risk || "";
+        const cleanedRisk = rawRisk ? String(rawRisk).replace(/[^0-9.]/g, "") : "";
+        const riskPercentage = cleanedRisk ? parseFloat(cleanedRisk) : (watcher.risk_percentage || null);
+
+        const riskRewardStr = prefsRecord?.risk_reward || '1:2';
+        const maxDailyRiskStr = (prefsRecord as any)?.max_daily_risk || (prefsRecord as any)?.max_daily_loss || '3 consecutive losses in 24h (Strategy Cap)';
+
+        console.log(`Trading Preferences Loaded\n`);
+        console.log(`Account Size: ${accountSize ? '$' + accountSize : 'N/A'}`);
+        console.log(`Risk %: ${riskPercentage ? riskPercentage + '%' : 'N/A'}`);
+        console.log(`Risk Reward: ${riskRewardStr}`);
+        console.log(`Max Daily Risk: ${maxDailyRiskStr}`);
+        console.log(`Strategy: ${strategyText ? strategyText.substring(0, 100) + '...' : 'N/A'}`);
+        console.log(`[DB Row Comparison] DB capital: "${prefsRecord?.capital || ''}", DB custom_capital: "${prefsRecord?.custom_capital || ''}", DB preferred_risk: "${prefsRecord?.preferred_risk || ''}", DB risk_reward: "${prefsRecord?.risk_reward || ''}"`);
 
         if (!accountSize || !riskPercentage) {
           console.log(`LOG: Watcher ${watcher.id} skipped - Account size/risk not defined`);
@@ -1052,6 +1077,7 @@ export default async function handler(req: any, res: any) {
         const parsedStrategy: any = {
           entryConditions: [strategyText]
         };
+        console.log("GEMINI CALLED");
         const analysis = analyzeMarket(candleData, parsedStrategy);
 
         console.log(`LOG: Signal result for ${selectedPair}: ${analysis.signal} (Confidence: ${analysis.confidence}%)`);

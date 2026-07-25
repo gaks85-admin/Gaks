@@ -209,8 +209,26 @@ This is the default, institutional-grade multi-timeframe strategy designed for c
           continue;
         }
 
-        const accountSize = watcher.account_size || (prefsRecord?.capital ? parseFloat(prefsRecord.capital.replace(/[^0-9.]/g, "")) : null);
-        const riskPercentage = watcher.risk_percentage || (prefsRecord?.preferred_risk ? parseFloat(prefsRecord.preferred_risk.replace(/[^0-9.]/g, "")) : null);
+        const rawCap = prefsRecord?.capital === 'Custom'
+          ? (prefsRecord?.custom_capital || prefsRecord?.capital || "")
+          : (prefsRecord?.capital || prefsRecord?.custom_capital || "");
+        const cleanedCap = rawCap ? String(rawCap).replace(/[^0-9.]/g, "") : "";
+        const accountSize = cleanedCap ? parseFloat(cleanedCap) : (watcher.account_size || null);
+
+        const rawRisk = prefsRecord?.preferred_risk || "";
+        const cleanedRisk = rawRisk ? String(rawRisk).replace(/[^0-9.]/g, "") : "";
+        const riskPercentage = cleanedRisk ? parseFloat(cleanedRisk) : (watcher.risk_percentage || null);
+
+        const riskRewardStr = prefsRecord?.risk_reward || '1:2';
+        const maxDailyRiskStr = (prefsRecord as any)?.max_daily_risk || (prefsRecord as any)?.max_daily_loss || '3 consecutive losses in 24h (Strategy Cap)';
+
+        console.log(`Trading Preferences Loaded\n`);
+        console.log(`Account Size: ${accountSize ? '$' + accountSize : 'N/A'}`);
+        console.log(`Risk %: ${riskPercentage ? riskPercentage + '%' : 'N/A'}`);
+        console.log(`Risk Reward: ${riskRewardStr}`);
+        console.log(`Max Daily Risk: ${maxDailyRiskStr}`);
+        console.log(`Strategy: ${strategyText ? strategyText.substring(0, 100) + '...' : 'N/A'}`);
+        console.log(`[DB Row Comparison] DB capital: "${prefsRecord?.capital || ''}", DB custom_capital: "${prefsRecord?.custom_capital || ''}", DB preferred_risk: "${prefsRecord?.preferred_risk || ''}", DB risk_reward: "${prefsRecord?.risk_reward || ''}"`);
 
         if (!accountSize || !riskPercentage) {
           console.log(`[User ${userId}] Account size or risk percentage not defined. Skipping.`);

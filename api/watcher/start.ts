@@ -587,8 +587,10 @@ export default async function handler(req: any, res: any) {
     // Parse capital size and risk percentage for structured watchers columns
     let accountSize: number | null = null;
     if (prefsRecord) {
-      const cap = prefsRecord.custom_capital || prefsRecord.capital || "";
-      const cleanedCap = cap.replace(/[^0-9.]/g, "");
+      const cap = prefsRecord.capital === 'Custom'
+        ? (prefsRecord.custom_capital || prefsRecord.capital || "")
+        : (prefsRecord.capital || prefsRecord.custom_capital || "");
+      const cleanedCap = String(cap).replace(/[^0-9.]/g, "");
       if (cleanedCap) {
         accountSize = parseFloat(cleanedCap);
       }
@@ -596,7 +598,7 @@ export default async function handler(req: any, res: any) {
 
     let riskPercentage: number | null = null;
     if (prefsRecord && prefsRecord.preferred_risk) {
-      const cleanedRisk = prefsRecord.preferred_risk.replace(/[^0-9.]/g, "");
+      const cleanedRisk = String(prefsRecord.preferred_risk).replace(/[^0-9.]/g, "");
       if (cleanedRisk) {
         riskPercentage = parseFloat(cleanedRisk);
       }
