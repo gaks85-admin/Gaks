@@ -6,6 +6,7 @@ import { toCanonicalSymbol, toDisplaySymbol, normalizeSymbol } from '../lib/mark
 import { parseUserStrategy } from "./lib/strategy-parser";
 
 const Auth = React.lazy(() => import('./components/Auth'));
+import { AuthSkeleton } from './components/Auth';
 const AdminDashboard = React.lazy(() => import('./components/admin/AdminDashboard'));
 import {
   Home as HomeIcon,
@@ -1437,28 +1438,12 @@ export default function App() {
   };
 
   if (isAuthLoading) {
-    return (
-      <div className="min-h-screen w-full bg-[#030303] flex flex-col justify-center items-center gap-4">
-        <div className="w-10 h-10 rounded-full border-2 border-zinc-900 border-t-zinc-400 animate-spin"></div>
-        <div className="flex items-center gap-1">
-          <span className="text-[20px] font-semibold tracking-[-0.03em] text-white font-sans">Gaks</span>
-          <span className="text-[16px] font-normal tracking-normal text-zinc-500 font-sans">AI</span>
-        </div>
-      </div>
-    );
+    return <AuthSkeleton />;
   }
 
   if (!session) {
     return (
-      <React.Suspense fallback={
-        <div className="min-h-screen w-full bg-[#030303] flex flex-col justify-center items-center gap-4">
-          <div className="w-10 h-10 rounded-full border-2 border-zinc-900 border-t-zinc-400 animate-spin"></div>
-          <div className="flex items-center gap-1">
-            <span className="text-[20px] font-semibold tracking-[-0.03em] text-white font-sans">Gaks</span>
-            <span className="text-[16px] font-normal tracking-normal text-zinc-500 font-sans">AI</span>
-          </div>
-        </div>
-      }>
+      <React.Suspense fallback={<AuthSkeleton />}>
         <Auth onAuthSuccess={(newSession) => setSession(newSession)} />
       </React.Suspense>
     );
