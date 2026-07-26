@@ -22,6 +22,86 @@ export interface AnalysisResult {
 }
 
 /**
+ * Calculates the Exponential Moving Average (EMA) for a series of numerical values.
+ * @param prices Array of prices (oldest to newest)
+ * @param period EMA period (e.g., 20 or 50)
+ * @returns The latest EMA value or null if insufficient data
+ */
+export function calculateEMA(prices: number[], period: number): number | null {
+  if (!prices || !Array.isArray(prices) || prices.length < period || period <= 0) return null;
+  const k = 2 / (period + 1);
+  
+  // Initialize with SMA of the first 'period' elements
+  let sum = 0;
+  for (let i = 0; i < period; i++) {
+    sum += prices[i];
+  }
+  let ema = sum / period;
+  
+  // Calculate EMA for the rest of the array
+  for (let i = period; i < prices.length; i++) {
+    ema = (prices[i] * k) + (ema * (1 - k));
+  }
+  return ema;
+}
+
+/**
+ * Determines short-term market bias by comparing recent candles and EMA structure.
+ * @param candles Array of historical candles (oldest to newest)
+ * @returns 'Bullish' | 'Bearish' | 'Neutral'
+ */
+export function determineMarketBias(candles: Candle[]): 'Bullish' | 'Bearish' | 'Neutral' {
+  if (!candles || !Array.isArray(candles) || candles.length < 2) {
+    return 'Neutral';
+  }
+
+  const closePrices = candles.map(c => Number(c.close)).filter(p => !isNaN(p));
+  if (closePrices.length < 2) return 'Neutral';
+
+  const currentPrice = closePrices[closePrices.length - 1];
+  const ema20 = calculateEMA(closePrices, 20);
+  const ema50 = calculateEMA(closePrices, 50);
+
+  const lastCandle = candles[candles.length - 1];
+  const prevCandle = candles[candles.length - 2];
+  const prev2Candle = candles[candles.length - 3] || prevCandle;
+
+  // Compare recent highs and lows to check short-term momentum
+  const higherHighs = lastCandle.high >= prevCandle.high || lastCandle.close > prev2Candle.close;
+  const lowerLows = lastCandle.low <= prevCandle.low || lastCandle.close < prev2Candle.close;
+
+  // If we have enough data for EMA20 and EMA50:
+  if (ema20 !== null && ema50 !== null) {
+    if (currentPrice > ema20 && currentPrice > ema50 && ema20 > ema50 && higherHighs) {
+      return 'Bullish';
+    } else if (currentPrice < ema20 && currentPrice < ema50 && ema20 < ema50 && lowerLows) {
+      return 'Bearish';
+    } else if (currentPrice > ema20 && ema20 > ema50 && lastCandle.close > prevCandle.close) {
+      return 'Bullish';
+    } else if (currentPrice < ema20 && ema20 < ema50 && lastCandle.close < prevCandle.close) {
+      return 'Bearish';
+    }
+    return 'Neutral';
+  }
+
+  // Fallback if fewer than 50 candles are available: use short-term EMA or price action structure
+  if (ema20 !== null) {
+    if (currentPrice > ema20 && higherHighs) return 'Bullish';
+    if (currentPrice < ema20 && lowerLows) return 'Bearish';
+    return 'Neutral';
+  }
+
+  // Fallback for simple price action if < 20 candles
+  if (lastCandle.close > prevCandle.close && lastCandle.high > prevCandle.high) {
+    return 'Bullish';
+  } else if (lastCandle.close < prevCandle.close && lastCandle.low < prevCandle.low) {
+    return 'Bearish';
+  }
+
+  return 'Neutral';
+}
+
+/**
  * Analyzes the market using deterministic technical logic based on the user's parsed strategy.
  * Evaluates only the rules contained inside parsed_strategy.
  *

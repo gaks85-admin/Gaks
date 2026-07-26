@@ -35,7 +35,8 @@ import {
   CheckCircle2,
   Lock,
   Key,
-  Send
+  Send,
+  Minus
 } from 'lucide-react';
 
 import { getTelegramConnection, initiateTelegramConnection, getTelegramDeepLink } from './lib/telegram';
@@ -1613,7 +1614,8 @@ export default function App() {
                     ))
                   ) : (
                     liveRates.map(pair => {
-                      const isBearish = pair.sentiment === 'Bearish';
+                      const isNegativeChange = pair.change < 0;
+                      const chartColor = pair.sentiment === 'Bullish' ? "#10b981" : pair.sentiment === 'Bearish' ? "#ef4444" : "#71717a";
                       const { lineD, fillD } = getSparklinePaths(pair.history, 110, 28);
 
                       return (
@@ -1627,12 +1629,17 @@ export default function App() {
                               <h3 className="text-[17px] sm:text-[18px] font-semibold text-white tracking-[-0.02em] font-sans">{pair.symbol}</h3>
                               <p className="text-[13px] text-zinc-500 font-normal tracking-normal">{pair.name}</p>
                             </div>
-                            <span className={`px-3 py-1 rounded-full text-[12px] font-medium tracking-normal border ${
-                              isBearish
+                            <span className={`px-3 py-1 rounded-full text-[12px] font-medium tracking-normal border flex items-center gap-1.5 ${
+                              pair.sentiment === 'Bullish'
+                                ? 'bg-[#081e14] text-[#10b981] border-[#133c29]'
+                                : pair.sentiment === 'Bearish'
                                 ? 'bg-[#200c0c] text-[#ef4444] border-[#3f1616]'
-                                : 'bg-[#081e14] text-[#10b981] border-[#133c29]'
+                                : 'bg-[#1a1a1e] text-[#a1a1aa] border-[#27272a]'
                             }`}>
-                              {pair.sentiment}
+                              {pair.sentiment === 'Bullish' && <TrendingUp className="w-3.5 h-3.5 shrink-0" />}
+                              {pair.sentiment === 'Bearish' && <TrendingDown className="w-3.5 h-3.5 shrink-0" />}
+                              {pair.sentiment === 'Neutral' && <Minus className="w-3.5 h-3.5 shrink-0" />}
+                              <span>{pair.sentiment}</span>
                             </span>
                           </div>
 
@@ -1643,12 +1650,12 @@ export default function App() {
                               <svg className="w-full h-full overflow-visible" viewBox="0 0 110 28" preserveAspectRatio="none">
                                 <defs>
                                   <linearGradient id={`grad-${pair.symbol}`} x1="0" y1="0" x2="0" y2="1">
-                                    <stop offset="0%" stopColor={isBearish ? "#ef4444" : "#10b981"} stopOpacity="0.25"/>
-                                    <stop offset="100%" stopColor={isBearish ? "#ef4444" : "#10b981"} stopOpacity="0.0"/>
+                                    <stop offset="0%" stopColor={chartColor} stopOpacity="0.25"/>
+                                    <stop offset="100%" stopColor={chartColor} stopOpacity="0.0"/>
                                   </linearGradient>
                                 </defs>
                                 <path d={fillD} fill={`url(#grad-${pair.symbol})`} />
-                                <path d={lineD} fill="none" stroke={isBearish ? "#ef4444" : "#10b981"} strokeWidth="1.2" />
+                                <path d={lineD} fill="none" stroke={chartColor} strokeWidth="1.2" />
                               </svg>
                             </div>
 
@@ -1659,9 +1666,9 @@ export default function App() {
                               ) : (
                                 <>
                                   <div className="text-[24px] sm:text-[26px] font-semibold text-white tracking-[-0.03em] font-sans tabular-nums">{pair.price.toLocaleString(undefined, { minimumFractionDigits: pair.price > 10 ? 2 : 4 })}</div>
-                                  <div className={`text-[13px] sm:text-[14px] font-medium tracking-normal flex items-center justify-end gap-1 ${isBearish ? 'text-[#ef4444]' : 'text-[#10b981]'}`}>
-                                    {isBearish ? <ArrowDownRight className="w-4 h-4 stroke-[2]" /> : <ArrowUpRight className="w-4 h-4 stroke-[2]" />}
-                                    <span>{isBearish ? '' : '+'}{pair.change.toFixed(2)}%</span>
+                                  <div className={`text-[13px] sm:text-[14px] font-medium tracking-normal flex items-center justify-end gap-1 ${isNegativeChange ? 'text-[#ef4444]' : 'text-[#10b981]'}`}>
+                                    {isNegativeChange ? <ArrowDownRight className="w-4 h-4 stroke-[2]" /> : <ArrowUpRight className="w-4 h-4 stroke-[2]" />}
+                                    <span>{isNegativeChange ? '' : '+'}{pair.change.toFixed(2)}%</span>
                                   </div>
                                 </>
                               )}
