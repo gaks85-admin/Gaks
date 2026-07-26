@@ -1466,16 +1466,16 @@ export default function App() {
   return (
     <div className="min-h-screen bg-[#030303] text-zinc-100 flex justify-center items-start font-sans antialiased overflow-x-hidden selection:bg-zinc-800 selection:text-white">
       {/* Maximum-width wrapper modeled for an incredible mobile aspect layout & gorgeous desktop presentation */}
-      <div className="w-full max-w-md bg-[#080808] min-h-screen pb-32 border-x border-zinc-900 shadow-2xl relative flex flex-col">
+      <div className="w-full max-w-md bg-[#080808] min-h-screen pb-36 border-x border-zinc-900 shadow-2xl relative flex flex-col">
         
-        {/* Header - Matches Screenshot 2 */}
-        <header className="px-6 py-5 border-b border-zinc-900/80 flex justify-between items-center bg-[#080808]/90 sticky top-0 z-40 backdrop-blur-md">
+        {/* Minimalist Header - Matches reference UI */}
+        <header className="px-6 py-4 border-b border-zinc-900/80 flex justify-between items-center bg-[#080808]/90 sticky top-0 z-40 backdrop-blur-md">
           <div className="flex items-center gap-1.5 cursor-pointer" onClick={() => setActiveTab('home')}>
             <span className="text-xl font-bold tracking-tight text-white font-display">Gaks</span>
             <span className="text-sm font-semibold text-zinc-500 font-display">AI</span>
           </div>
           <div className="flex items-center gap-3">
-            {userProfile && (
+            {activeTab !== 'home' && userProfile && (
               <div 
                 onClick={() => setActiveTab('settings')}
                 className="flex items-center gap-2 px-3 py-1 rounded-full bg-zinc-900/50 border border-zinc-800/60 hover:border-zinc-700 transition-all cursor-pointer"
@@ -1492,7 +1492,7 @@ export default function App() {
             )}
             <button 
               onClick={handleLogout}
-              className="p-1.5 text-zinc-400 hover:text-white transition-all rounded-lg hover:bg-zinc-900 cursor-pointer animate-fade-in" 
+              className="p-2 text-zinc-400 hover:text-white transition-all rounded-xl hover:bg-zinc-900 cursor-pointer" 
               title="Logout"
             >
               <LogOut className="w-4.5 h-4.5 stroke-[1.8]" />
@@ -1526,42 +1526,42 @@ export default function App() {
 
           {/* ==================== TAB 1: HOME ==================== */}
           {activeTab === 'home' && (
-            <div className="space-y-8 animate-fade-in">
+            <div className="space-y-6 animate-fade-in pb-8">
               
               {/* Live markets status & date row */}
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full border border-zinc-800 bg-zinc-950/60 w-fit">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full border border-zinc-800/80 bg-[#121214] w-fit">
                   <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                  <span className="text-xs text-zinc-400 font-medium">Live · markets open</span>
+                  <span className="text-xs text-zinc-300 font-medium">Live · markets open</span>
                 </div>
-                <span className="text-[11px] text-zinc-500 font-medium tracking-tight mt-0.5 sm:mt-0">
+                <span className="text-xs text-zinc-500 font-medium tracking-tight">
                   Updated {formattedTime}
                 </span>
               </div>
 
               {/* Title & Description Header */}
-              <div className="space-y-2.5">
-                <h1 className="text-3xl font-bold tracking-tight text-white font-display">
+              <div className="space-y-2">
+                <h1 className="text-3xl sm:text-4xl font-bold tracking-tight text-white font-display leading-tight">
                   Good signal, good trade.
                 </h1>
-                <p className="text-xs text-zinc-400 leading-relaxed max-w-sm">
+                <p className="text-sm sm:text-base text-zinc-400 leading-relaxed max-w-lg">
                   Your AI-curated view of the forex market — refreshed every few seconds.
                 </p>
               </div>
 
-              {/* Action Buttons */}
-              <div className="flex gap-3">
+              {/* Action Buttons - identical height (h-12 / 48px), balanced 8px spacing */}
+              <div className="flex gap-4">
                 <button
                   onClick={handleRefresh}
                   disabled={isRefreshing}
-                  className="flex-1 flex items-center justify-center gap-2 px-5 py-3 rounded-full border border-zinc-800 bg-zinc-950/40 text-xs font-semibold text-white hover:bg-zinc-900 hover:border-zinc-700 transition-all cursor-pointer"
+                  className="h-12 flex-1 flex items-center justify-center gap-2.5 px-6 rounded-full border border-zinc-800/80 bg-[#151517] text-xs sm:text-sm font-semibold text-white hover:bg-[#202022] hover:border-zinc-700 transition-all cursor-pointer shadow-sm"
                 >
                   <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
                   <span>Refresh</span>
                 </button>
                 <button
                   onClick={handleQuickAnalyze}
-                  className="flex-1 flex items-center justify-center gap-2 px-5 py-3 rounded-full bg-white text-xs font-bold text-black hover:bg-zinc-200 transition-all cursor-pointer shadow-md"
+                  className="h-12 flex-1 flex items-center justify-center gap-2.5 px-6 rounded-full bg-white text-xs sm:text-sm font-bold text-black hover:bg-zinc-100 transition-all cursor-pointer shadow-md"
                 >
                   <Zap className="w-4 h-4 fill-black" />
                   <span>Quick Analyze</span>
@@ -1585,76 +1585,118 @@ export default function App() {
               <div className="space-y-4">
                 <div className="space-y-0.5">
                   <h2 className="text-xl font-bold tracking-tight text-white font-display">Live Rates</h2>
-                  <p className="text-xs text-zinc-500">Major forex pairs</p>
+                  <p className="text-xs text-zinc-500 font-medium">Major forex pairs</p>
                 </div>
 
-                <div className="space-y-3">
-                  {liveRates.map(pair => {
-                    const isBearish = pair.sentiment === 'Bearish';
-                    const { lineD, fillD } = getSparklinePaths(pair.history, 110, 24);
-
-                    return (
+                <div className="space-y-4">
+                  {isRatesLoading && liveRates.length === 0 ? (
+                    [1, 2, 3].map(i => (
                       <div
-                        key={pair.symbol}
-                        className="p-5 rounded-3xl border border-zinc-800 bg-[#0f0f11] relative overflow-hidden flex justify-between items-start hover:border-zinc-700 transition-all"
+                        key={i}
+                        className="p-6 rounded-3xl border border-zinc-800/60 bg-[#111113]/60 animate-pulse flex flex-col justify-between min-h-[140px]"
                       >
-                        {/* Left Info Column */}
-                        <div className="space-y-1 z-10">
-                          <h3 className="text-lg font-bold text-white font-display tracking-tight">{pair.symbol}</h3>
-                          <p className="text-[11px] text-zinc-500 font-medium">{pair.name}</p>
+                        <div className="flex justify-between items-start">
+                          <div className="space-y-2">
+                            <div className="h-5 w-24 bg-zinc-800 rounded-lg"></div>
+                            <div className="h-3 w-32 bg-zinc-900 rounded-md"></div>
+                          </div>
+                          <div className="h-6 w-16 bg-zinc-800/80 rounded-full"></div>
                         </div>
-
-                        {/* Middle Curve Plot (Visual Sparkline) */}
-                        <div className="absolute bottom-5 left-6 right-36 h-6 pointer-events-none opacity-80">
-                          <svg className="w-full h-full overflow-visible" viewBox="0 0 110 24" preserveAspectRatio="none">
-                            <defs>
-                              <linearGradient id={`grad-${pair.symbol}`} x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="0%" stopColor={isBearish ? "#ef4444" : "#22c55e"} stopOpacity="0.15"/>
-                                <stop offset="100%" stopColor={isBearish ? "#ef4444" : "#22c55e"} stopOpacity="0.0"/>
-                              </linearGradient>
-                            </defs>
-                            <path d={fillD} fill={`url(#grad-${pair.symbol})`} />
-                            <path d={lineD} fill="none" stroke={isBearish ? "#b91c1c" : "#15803d"} strokeWidth="1.5" />
-                          </svg>
-                        </div>
-
-                        {/* Right Rate / Badge Column */}
-                        <div className="flex flex-col items-end gap-1.5 z-10">
-                          <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold tracking-wider uppercase border ${
-                            isBearish
-                              ? 'bg-[#1c0c0c] text-red-500 border-red-950/80'
-                              : 'bg-[#0c1c0c] text-emerald-500 border-emerald-950/80'
-                          }`}>
-                            {pair.sentiment}
-                          </span>
-                          <div className="text-right space-y-0.5">
-                            {pair.status === 'unavailable' ? (
-                              <div className="text-xs font-bold text-zinc-500 uppercase tracking-wider">Data unavailable</div>
-                            ) : (
-                              <>
-                                <div className="text-base font-bold text-white tracking-tight">{pair.price.toLocaleString(undefined, { minimumFractionDigits: pair.price > 10 ? 2 : 4 })}</div>
-                                <div className={`text-xs font-semibold flex items-center justify-end gap-0.5 ${isBearish ? 'text-red-500' : 'text-emerald-500'}`}>
-                                  {isBearish ? <ArrowDownRight className="w-3.5 h-3.5" /> : <ArrowUpRight className="w-3.5 h-3.5" />}
-                                  <span>{isBearish ? '' : '+'}{pair.change.toFixed(2)}%</span>
-                                </div>
-                              </>
-                            )}
+                        <div className="mt-6 flex items-end justify-between gap-4">
+                          <div className="w-1/2 h-10 bg-zinc-900/80 rounded-xl"></div>
+                          <div className="space-y-2 flex flex-col items-end">
+                            <div className="h-7 w-28 bg-zinc-800 rounded-lg"></div>
+                            <div className="h-4 w-16 bg-zinc-900 rounded-md"></div>
                           </div>
                         </div>
                       </div>
-                    );
-                  })}
+                    ))
+                  ) : (
+                    liveRates.map(pair => {
+                      const isBearish = pair.sentiment === 'Bearish';
+                      const { lineD, fillD } = getSparklinePaths(pair.history, 110, 28);
+
+                      return (
+                        <div
+                          key={pair.symbol}
+                          className="p-6 rounded-3xl border border-zinc-800/80 bg-[#111113]/90 relative overflow-hidden flex flex-col justify-between hover:border-zinc-700 transition-all shadow-lg"
+                        >
+                          {/* Top Info Row */}
+                          <div className="flex justify-between items-start z-10">
+                            <div className="space-y-1">
+                              <h3 className="text-lg font-bold text-white font-display tracking-tight">{pair.symbol}</h3>
+                              <p className="text-xs text-zinc-500 font-medium">{pair.name}</p>
+                            </div>
+                            <span className={`px-3 py-1 rounded-full text-xs font-semibold tracking-wide border ${
+                              isBearish
+                                ? 'bg-red-500/10 text-red-400 border-red-500/20'
+                                : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                            }`}>
+                              {pair.sentiment}
+                            </span>
+                          </div>
+
+                          {/* Bottom Row: Thinner Chart & Rate Display */}
+                          <div className="mt-6 flex items-end justify-between gap-4">
+                            {/* Left Curve Plot (Visual Sparkline) */}
+                            <div className="w-1/2 max-w-[180px] h-12 opacity-90">
+                              <svg className="w-full h-full overflow-visible" viewBox="0 0 110 28" preserveAspectRatio="none">
+                                <defs>
+                                  <linearGradient id={`grad-${pair.symbol}`} x1="0" y1="0" x2="0" y2="1">
+                                    <stop offset="0%" stopColor={isBearish ? "#ef4444" : "#10b981"} stopOpacity="0.25"/>
+                                    <stop offset="100%" stopColor={isBearish ? "#ef4444" : "#10b981"} stopOpacity="0.0"/>
+                                  </linearGradient>
+                                </defs>
+                                <path d={fillD} fill={`url(#grad-${pair.symbol})`} />
+                                <path d={lineD} fill="none" stroke={isBearish ? "#ef4444" : "#10b981"} strokeWidth="1.2" />
+                              </svg>
+                            </div>
+
+                            {/* Right Rate / Badge Column */}
+                            <div className="text-right space-y-1 z-10">
+                              {pair.status === 'unavailable' ? (
+                                <div className="text-xs font-bold text-zinc-500 uppercase tracking-wider">Data unavailable</div>
+                              ) : (
+                                <>
+                                  <div className="text-2xl sm:text-3xl font-bold text-white tracking-tight font-display">{pair.price.toLocaleString(undefined, { minimumFractionDigits: pair.price > 10 ? 2 : 4 })}</div>
+                                  <div className={`text-xs sm:text-sm font-semibold flex items-center justify-end gap-1 ${isBearish ? 'text-red-500' : 'text-emerald-500'}`}>
+                                    {isBearish ? <ArrowDownRight className="w-4 h-4 stroke-[2]" /> : <ArrowUpRight className="w-4 h-4 stroke-[2]" />}
+                                    <span>{isBearish ? '' : '+'}{pair.change.toFixed(2)}%</span>
+                                  </div>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
                 </div>
               </div>
 
               {/* Top Movers Section */}
-              <div className="p-6 rounded-3xl border border-zinc-800 bg-[#0c0c0e]/80 space-y-5">
+              <div className="p-6 rounded-3xl border border-zinc-800/80 bg-[#111113]/80 space-y-4">
                 <div className="flex justify-between items-baseline">
                   <h3 className="text-base font-bold text-white font-display">Top Movers</h3>
-                  <span className="text-[11px] text-zinc-500 font-medium">Biggest % change today</span>
+                  <span className="text-xs text-zinc-500 font-medium">Biggest % change today</span>
                 </div>
                 <div className="divide-y divide-zinc-900">
-                  {liveRates.filter(r => r.status !== 'unavailable' && r.price > 0).length > 0 ? (
+                  {isRatesLoading && liveRates.length === 0 ? (
+                    <div className="space-y-3 py-2 animate-pulse">
+                      {[1, 2, 3, 4].map(i => (
+                        <div key={i} className="flex justify-between items-center py-2.5">
+                          <div className="space-y-1.5">
+                            <div className="h-4 w-16 bg-zinc-800 rounded"></div>
+                            <div className="h-2.5 w-24 bg-zinc-900 rounded"></div>
+                          </div>
+                          <div className="space-y-1.5 flex flex-col items-end">
+                            <div className="h-4 w-14 bg-zinc-800 rounded"></div>
+                            <div className="h-2.5 w-10 bg-zinc-900 rounded"></div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : liveRates.filter(r => r.status !== 'unavailable' && r.price > 0).length > 0 ? (
                     [...liveRates]
                       .filter(r => r.status !== 'unavailable' && r.price > 0)
                       .sort((a, b) => Math.abs(b.change) - Math.abs(a.change))
@@ -1662,57 +1704,67 @@ export default function App() {
                       .map((mover, idx) => (
                         <div key={idx} className="py-3 flex justify-between items-center first:pt-0 last:pb-0">
                           <div>
-                            <div className="text-xs font-bold text-white">{mover.symbol}</div>
-                            <div className="text-[10px] text-zinc-500">{mover.name}</div>
+                            <div className="text-xs sm:text-sm font-bold text-white">{mover.symbol}</div>
+                            <div className="text-[10px] sm:text-xs text-zinc-500 font-medium">{mover.name}</div>
                           </div>
                           <div className="text-right">
-                            <div className="text-xs font-bold text-white tracking-tight">{mover.price.toLocaleString(undefined, { minimumFractionDigits: mover.price > 10 ? 2 : 4 })}</div>
-                            <div className={`text-[11px] font-semibold ${mover.change >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
+                            <div className="text-xs sm:text-sm font-bold text-white tracking-tight">{mover.price.toLocaleString(undefined, { minimumFractionDigits: mover.price > 10 ? 2 : 4 })}</div>
+                            <div className={`text-xs font-semibold ${mover.change >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
                               {mover.change >= 0 ? '+' : ''}{mover.change.toFixed(2)}%
                             </div>
                           </div>
                         </div>
                       ))
                   ) : (
-                    <div className="py-8 text-center text-zinc-600 text-xs italic">
+                    <div className="py-8 text-center text-zinc-500 text-xs font-medium">
                       Gathering market movement data...
                     </div>
                   )}
                 </div>
               </div>
 
-              {/* Trending Pairs Grid */}
-              <div className="p-6 rounded-3xl border border-zinc-800 bg-[#0c0c0e]/80 space-y-4">
+              {/* Trending Pairs Grid - Matches Screenshot 2 */}
+              <div className="p-6 rounded-3xl border border-zinc-800/80 bg-[#111113]/80 space-y-4">
                 <div className="flex flex-col">
-                  <span className="text-base font-bold text-white font-display">Trending Pairs</span>
-                  <span className="text-[11px] text-zinc-500 mt-0.5">What traders are watching</span>
+                  <span className="text-base sm:text-lg font-bold text-white font-display">Trending Pairs</span>
+                  <span className="text-xs text-zinc-500 mt-0.5 font-medium">What traders are watching</span>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
-                  {liveRates.filter(r => r.status !== 'unavailable' && r.price > 0).length > 0 ? (
+                <div className="grid grid-cols-2 gap-4">
+                  {isRatesLoading && liveRates.length === 0 ? (
+                    [1, 2, 3, 4].map(i => (
+                      <div key={i} className="p-4 rounded-2xl border border-zinc-800/60 bg-[#161618]/60 flex flex-col justify-between h-24 sm:h-28 animate-pulse">
+                        <div className="flex justify-between items-center">
+                          <div className="h-4 w-14 bg-zinc-800 rounded"></div>
+                          <div className="h-3 w-10 bg-zinc-900 rounded"></div>
+                        </div>
+                        <div className="w-full h-8 bg-zinc-900/80 rounded-lg mt-3"></div>
+                      </div>
+                    ))
+                  ) : liveRates.filter(r => r.status !== 'unavailable' && r.price > 0).length > 0 ? (
                     liveRates.filter(r => r.status !== 'unavailable' && r.price > 0).slice(0, 4).map((trend, idx) => {
                       const isBearish = trend.change < 0;
-                      const { lineD, fillD } = getSparklinePaths(trend.history.length > 0 ? trend.history : [10, 10, 10], 80, 15);
+                      const { lineD, fillD } = getSparklinePaths(trend.history.length > 0 ? trend.history : [10, 10, 10], 80, 18);
                       return (
-                        <div key={idx} className="p-4 rounded-2xl border border-zinc-900 bg-zinc-950/40 relative overflow-hidden flex flex-col justify-between h-20">
+                        <div key={idx} className="p-4 rounded-2xl border border-zinc-800/80 bg-[#161618] relative overflow-hidden flex flex-col justify-between h-24 sm:h-28 hover:border-zinc-700 transition-all">
                           <div className="flex justify-between items-center z-10">
-                            <span className="text-xs font-bold text-white tracking-tight">{trend.symbol}</span>
-                            <span className={`text-[10px] font-bold ${isBearish ? 'text-red-500' : 'text-emerald-500'}`}>
+                            <span className="text-sm font-bold text-white tracking-tight">{trend.symbol}</span>
+                            <span className={`text-xs font-semibold ${isBearish ? 'text-red-400' : 'text-emerald-400'}`}>
                               {trend.change >= 0 ? '+' : ''}{trend.change.toFixed(2)}%
                             </span>
                           </div>
-                          {/* Mini Sparkline in trend cards */}
-                          <div className="h-4 w-full opacity-60 z-0">
+                          {/* Mini Sparkline in trend cards - thinner stroke */}
+                          <div className="h-8 sm:h-10 w-full opacity-90 z-0 mt-2">
                             {trend.history.length > 0 && (
-                              <svg className="w-full h-full" viewBox="0 0 80 15" preserveAspectRatio="none">
+                              <svg className="w-full h-full overflow-visible" viewBox="0 0 80 18" preserveAspectRatio="none">
                                 <defs>
                                   <linearGradient id={`trend-grad-${idx}`} x1="0" y1="0" x2="0" y2="1">
-                                    <stop offset="0%" stopColor={isBearish ? "#ef4444" : "#22c55e"} stopOpacity="0.2"/>
-                                    <stop offset="100%" stopColor={isBearish ? "#ef4444" : "#22c55e"} stopOpacity="0.0"/>
+                                    <stop offset="0%" stopColor={isBearish ? "#ef4444" : "#10b981"} stopOpacity="0.25"/>
+                                    <stop offset="100%" stopColor={isBearish ? "#ef4444" : "#10b981"} stopOpacity="0.0"/>
                                   </linearGradient>
                                 </defs>
                                 <path d={fillD} fill={`url(#trend-grad-${idx})`} />
-                                <path d={lineD} fill="none" stroke={isBearish ? "#ef4444" : "#22c55e"} strokeWidth="1.2" />
+                                <path d={lineD} fill="none" stroke={isBearish ? "#ef4444" : "#10b981"} strokeWidth="1.2" />
                               </svg>
                             )}
                           </div>
@@ -1720,20 +1772,27 @@ export default function App() {
                       );
                     })
                   ) : (
-                    <div className="col-span-2 py-4 text-center text-zinc-600 text-[10px]">Awaiting trend data...</div>
+                    <div className="col-span-2 py-6 text-center text-zinc-500 text-xs font-medium">Awaiting trend data...</div>
                   )}
                 </div>
               </div>
 
-              {/* Market Heatmap Section */}
-              <div className="p-6 rounded-3xl border border-zinc-800 bg-[#0c0c0e]/80 space-y-4">
+              {/* Market Heatmap Section - Matches Screenshot 2 */}
+              <div className="p-6 rounded-3xl border border-zinc-800/80 bg-[#111113]/80 space-y-4">
                 <div className="flex flex-col">
-                  <span className="text-base font-bold text-white font-display">Market Heatmap</span>
-                  <span className="text-[11px] text-zinc-500 mt-0.5">Performance at a glance</span>
+                  <span className="text-base sm:text-lg font-bold text-white font-display">Market Heatmap</span>
+                  <span className="text-xs text-zinc-500 mt-0.5 font-medium">Performance at a glance</span>
                 </div>
 
                 <div className="grid grid-cols-4 gap-2">
-                  {liveRates.filter(r => r.status !== 'unavailable' && r.price > 0).length > 0 ? (
+                  {isRatesLoading && liveRates.length === 0 ? (
+                    [1, 2, 3, 4, 5, 6, 7, 8].map(i => (
+                      <div key={i} className="aspect-square rounded-2xl bg-zinc-900/50 border border-zinc-800/40 flex flex-col justify-center items-center p-2 animate-pulse gap-1">
+                        <div className="h-3 w-8 bg-zinc-800 rounded"></div>
+                        <div className="h-2.5 w-6 bg-zinc-900 rounded"></div>
+                      </div>
+                    ))
+                  ) : liveRates.filter(r => r.status !== 'unavailable' && r.price > 0).length > 0 ? (
                     liveRates.filter(r => r.status !== 'unavailable' && r.price > 0).slice(0, 12).map((pair, idx) => {
                       const isBearish = pair.change < 0;
                       const absChange = Math.abs(pair.change);
@@ -1744,15 +1803,15 @@ export default function App() {
                       return (
                         <div
                           key={idx}
-                          className={`aspect-square rounded-xl border flex flex-col justify-center items-center p-1 text-center transition-all hover:scale-[1.03] ${alphaClass}`}
+                          className={`aspect-square rounded-2xl border flex flex-col justify-center items-center p-2 text-center transition-all hover:scale-[1.03] ${alphaClass}`}
                         >
-                          <span className="text-[9px] font-bold text-white leading-none mb-1">{pair.symbol}</span>
-                          <span className="text-[8px] font-medium text-zinc-100 leading-none">{pair.change >= 0 ? '+' : ''}{pair.change.toFixed(2)}%</span>
+                          <span className="text-[10px] sm:text-xs font-bold text-white leading-none mb-1">{pair.symbol}</span>
+                          <span className="text-[9px] sm:text-[10px] font-semibold text-zinc-100 leading-none">{pair.change >= 0 ? '+' : ''}{pair.change.toFixed(2)}%</span>
                         </div>
                       );
                     })
                   ) : (
-                    <div className="col-span-4 py-8 text-center text-zinc-600 text-[10px]">Generating heatmap from live data...</div>
+                    <div className="col-span-4 py-8 text-center text-zinc-500 text-xs font-medium">Generating heatmap from live data...</div>
                   )}
                 </div>
               </div>
@@ -2425,10 +2484,10 @@ export default function App() {
                       return (
                         <div
                           key={pair.symbol}
-                          className="p-5 rounded-3xl border border-zinc-800 bg-[#0f0f11] flex flex-col gap-4 hover:border-zinc-700 transition-all relative overflow-hidden"
+                          className="p-6 rounded-3xl border border-zinc-800/80 bg-[#111113]/90 flex flex-col gap-4 hover:border-zinc-700 transition-all relative overflow-hidden shadow-lg"
                         >
                           <div className="flex justify-between items-start">
-                            <div className="space-y-0.5">
+                            <div className="space-y-1">
                               <h3 className="text-base font-bold text-white font-display tracking-tight flex items-center gap-2">
                                 <span>{pair.symbol}</span>
                                 <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wider uppercase border ${
@@ -2459,17 +2518,17 @@ export default function App() {
                           {/* Bid/Ask Price display & tiny sparkline wave */}
                           <div className="flex justify-between items-end">
                             {/* Wave graphics */}
-                            <div className="h-6 w-24 opacity-60 pointer-events-none">
+                            <div className="h-6 w-24 opacity-80 pointer-events-none">
                               {pair.status !== 'unavailable' && pair.history.length > 0 && (
-                                <svg className="w-full h-full" viewBox="0 0 100 24" preserveAspectRatio="none">
+                                <svg className="w-full h-full overflow-visible" viewBox="0 0 100 24" preserveAspectRatio="none">
                                   <defs>
                                     <linearGradient id={`watcher-grad-${pair.symbol}`} x1="0" y1="0" x2="0" y2="1">
-                                      <stop offset="0%" stopColor={isBearish ? "#ef4444" : "#22c55e"} stopOpacity="0.15"/>
-                                      <stop offset="100%" stopColor={isBearish ? "#ef4444" : "#22c55e"} stopOpacity="0.0"/>
+                                      <stop offset="0%" stopColor={isBearish ? "#ef4444" : "#10b981"} stopOpacity="0.25"/>
+                                      <stop offset="100%" stopColor={isBearish ? "#ef4444" : "#10b981"} stopOpacity="0.0"/>
                                     </linearGradient>
                                   </defs>
                                   <path d={fillD} fill={`url(#watcher-grad-${pair.symbol})`} />
-                                  <path d={lineD} fill="none" stroke={isBearish ? "#b91c1c" : "#15803d"} strokeWidth="1.5" />
+                                  <path d={lineD} fill="none" stroke={isBearish ? "#ef4444" : "#10b981"} strokeWidth="1.2" />
                                 </svg>
                               )}
                             </div>
@@ -2836,8 +2895,8 @@ export default function App() {
 
         </main>
 
-        {/* Floating/Bottom Navigation Bar - Matches Screenshots exactly */}
-        <nav className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md bg-[#080808]/95 border-t border-zinc-900/90 px-6 py-4.5 z-40 backdrop-blur-md flex justify-between items-center shadow-2xl">
+        {/* Floating/Bottom Navigation Bar - Matches minimalist reference UI */}
+        <nav className="fixed bottom-4 left-1/2 -translate-x-1/2 w-[calc(100%-32px)] max-w-[416px] bg-[#0c0c0e]/95 border border-zinc-800/80 px-4 py-2 z-50 backdrop-blur-xl rounded-full flex justify-between items-center shadow-2xl">
           <button
             onClick={() => setActiveTab('home')}
             className={`flex-1 flex flex-col items-center gap-1 cursor-pointer transition-all ${
@@ -2846,10 +2905,10 @@ export default function App() {
                 : 'text-zinc-500 hover:text-zinc-300'
             }`}
           >
-            <div className={`p-2 rounded-2xl w-[90%] flex flex-col items-center gap-1.5 transition-all ${
-              activeTab === 'home' ? 'bg-[#151515] text-white font-semibold' : ''
+            <div className={`py-1.5 px-3 rounded-2xl flex flex-col items-center gap-1 transition-all ${
+              activeTab === 'home' ? 'bg-[#1a1a1e] text-white shadow-sm font-semibold' : ''
             }`}>
-              <HomeIcon className="w-4.5 h-4.5 stroke-[1.8]" />
+              <HomeIcon className="w-4 h-4 stroke-[2]" />
               <span className="text-[9px] uppercase tracking-wider font-bold">Home</span>
             </div>
           </button>
@@ -2862,10 +2921,10 @@ export default function App() {
                 : 'text-zinc-500 hover:text-zinc-300'
             }`}
           >
-            <div className={`p-2 rounded-2xl w-[90%] flex flex-col items-center gap-1.5 transition-all ${
-              activeTab === 'strategy' ? 'bg-[#151515] text-white font-semibold' : ''
+            <div className={`py-1.5 px-3 rounded-2xl flex flex-col items-center gap-1 transition-all ${
+              activeTab === 'strategy' ? 'bg-[#1a1a1e] text-white shadow-sm font-semibold' : ''
             }`}>
-              <TrendingUp className="w-4.5 h-4.5 stroke-[1.8]" />
+              <TrendingUp className="w-4 h-4 stroke-[2]" />
               <span className="text-[9px] uppercase tracking-wider font-bold">Strategy</span>
             </div>
           </button>
@@ -2878,10 +2937,10 @@ export default function App() {
                 : 'text-zinc-500 hover:text-zinc-300'
             }`}
           >
-            <div className={`p-2 rounded-2xl w-[90%] flex flex-col items-center gap-1.5 transition-all ${
-              activeTab === 'watcher' ? 'bg-[#151515] text-white font-semibold' : ''
+            <div className={`py-1.5 px-3 rounded-2xl flex flex-col items-center gap-1 transition-all ${
+              activeTab === 'watcher' ? 'bg-[#1a1a1e] text-white shadow-sm font-semibold' : ''
             }`}>
-              <Eye className="w-4.5 h-4.5 stroke-[1.8]" />
+              <Eye className="w-4 h-4 stroke-[2]" />
               <span className="text-[9px] uppercase tracking-wider font-bold">Watcher</span>
             </div>
           </button>
@@ -2894,10 +2953,10 @@ export default function App() {
                 : 'text-zinc-500 hover:text-zinc-300'
             }`}
           >
-            <div className={`p-2 rounded-2xl w-[90%] flex flex-col items-center gap-1.5 transition-all ${
-              activeTab === 'settings' ? 'bg-[#151515] text-white font-semibold' : ''
+            <div className={`py-1.5 px-3 rounded-2xl flex flex-col items-center gap-1 transition-all ${
+              activeTab === 'settings' ? 'bg-[#1a1a1e] text-white shadow-sm font-semibold' : ''
             }`}>
-              <SettingsIcon className="w-4.5 h-4.5 stroke-[1.8]" />
+              <SettingsIcon className="w-4 h-4 stroke-[2]" />
               <span className="text-[9px] uppercase tracking-wider font-bold">Settings</span>
             </div>
           </button>
@@ -2911,10 +2970,10 @@ export default function App() {
                   : 'text-zinc-500 hover:text-zinc-300'
               }`}
             >
-              <div className={`p-2 rounded-2xl w-[90%] flex flex-col items-center gap-1.5 transition-all ${
-                activeTab === 'admin' ? 'bg-[#151515] text-white font-semibold' : ''
+              <div className={`py-1.5 px-3 rounded-2xl flex flex-col items-center gap-1 transition-all ${
+                activeTab === 'admin' ? 'bg-[#1a1a1e] text-white shadow-sm font-semibold' : ''
               }`}>
-                <Shield className="w-4.5 h-4.5 stroke-[1.8]" />
+                <Shield className="w-4 h-4 stroke-[2]" />
                 <span className="text-[9px] uppercase tracking-wider font-bold">Admin</span>
               </div>
             </button>
