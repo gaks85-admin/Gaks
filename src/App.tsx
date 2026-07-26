@@ -1439,9 +1439,9 @@ export default function App() {
     return (
       <div className="min-h-screen w-full bg-[#030303] flex flex-col justify-center items-center gap-4">
         <div className="w-10 h-10 rounded-full border-2 border-zinc-900 border-t-zinc-400 animate-spin"></div>
-        <div className="flex items-center gap-1.5">
-          <span className="text-xl font-bold tracking-tight text-white font-display">Gaks</span>
-          <span className="text-sm font-semibold text-zinc-500 font-display">AI</span>
+        <div className="flex items-center gap-1">
+          <span className="text-[20px] font-semibold tracking-[-0.03em] text-white font-sans">Gaks</span>
+          <span className="text-[16px] font-normal tracking-normal text-zinc-500 font-sans">AI</span>
         </div>
       </div>
     );
@@ -1452,9 +1452,9 @@ export default function App() {
       <React.Suspense fallback={
         <div className="min-h-screen w-full bg-[#030303] flex flex-col justify-center items-center gap-4">
           <div className="w-10 h-10 rounded-full border-2 border-zinc-900 border-t-zinc-400 animate-spin"></div>
-          <div className="flex items-center gap-1.5">
-            <span className="text-xl font-bold tracking-tight text-white font-display">Gaks</span>
-            <span className="text-sm font-semibold text-zinc-500 font-display">AI</span>
+          <div className="flex items-center gap-1">
+            <span className="text-[20px] font-semibold tracking-[-0.03em] text-white font-sans">Gaks</span>
+            <span className="text-[16px] font-normal tracking-normal text-zinc-500 font-sans">AI</span>
           </div>
         </div>
       }>
@@ -1470,9 +1470,9 @@ export default function App() {
         
         {/* Minimalist Header - Matches reference UI */}
         <header className="px-6 py-4 border-b border-zinc-900/80 flex justify-between items-center bg-[#080808]/90 sticky top-0 z-40 backdrop-blur-md">
-          <div className="flex items-center gap-1.5 cursor-pointer" onClick={() => setActiveTab('home')}>
-            <span className="text-xl font-bold tracking-tight text-white font-display">Gaks</span>
-            <span className="text-sm font-semibold text-zinc-500 font-display">AI</span>
+          <div className="flex items-center gap-1 cursor-pointer" onClick={() => setActiveTab('home')}>
+            <span className="text-[20px] font-semibold tracking-[-0.03em] text-white font-sans">Gaks</span>
+            <span className="text-[16px] font-normal tracking-normal text-zinc-500 font-sans">AI</span>
           </div>
           <div className="flex items-center gap-3">
             {activeTab !== 'home' && userProfile && (
@@ -1480,14 +1480,14 @@ export default function App() {
                 onClick={() => setActiveTab('settings')}
                 className="flex items-center gap-2 px-3 py-1 rounded-full bg-zinc-900/50 border border-zinc-800/60 hover:border-zinc-700 transition-all cursor-pointer"
               >
-                <div className="w-5 h-5 rounded-full bg-white/10 text-white flex items-center justify-center text-[10px] font-bold uppercase overflow-hidden shrink-0">
+                <div className="w-5 h-5 rounded-full bg-white/10 text-white flex items-center justify-center text-[10px] font-semibold uppercase overflow-hidden shrink-0">
                   {profileAvatarUrl ? (
                     <img src={profileAvatarUrl} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                   ) : (
                     profileFullName ? profileFullName.charAt(0) : 'U'
                   )}
                 </div>
-                <span className="text-[10px] font-semibold text-zinc-300 max-w-[80px] truncate">{profileFullName}</span>
+                <span className="text-[11px] font-normal text-zinc-300 max-w-[80px] truncate">{profileFullName}</span>
               </div>
             )}
             <button 
@@ -1506,7 +1506,7 @@ export default function App() {
             <div className={`p-1 rounded-full ${showNotification.type === 'success' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-blue-500/10 text-blue-400'}`}>
               <Check className="w-4 h-4 stroke-[2.5]" />
             </div>
-            <span className="text-xs font-medium text-zinc-200">{showNotification.message}</span>
+            <span className="text-xs font-normal text-zinc-200">{showNotification.message}</span>
           </div>
         )}
 
@@ -1514,8 +1514,8 @@ export default function App() {
         {isAnalyzing && (
           <div className="fixed inset-0 bg-black/80 z-50 flex flex-col items-center justify-center p-6 backdrop-blur-sm">
             <div className="w-16 h-16 rounded-full border-4 border-zinc-800 border-t-white animate-spin mb-6"></div>
-            <h3 className="text-lg font-bold font-display text-white mb-2">Analyzing Markets...</h3>
-            <p className="text-xs text-zinc-400 text-center max-w-xs leading-relaxed">
+            <h3 className="text-lg font-semibold tracking-tight text-white mb-2">Analyzing Markets...</h3>
+            <p className="text-xs font-normal text-zinc-400 text-center max-w-xs leading-relaxed">
               Scanning technical oscillators, volume profiles, and historical candle patterns for perfect entries.
             </p>
           </div>
@@ -1531,39 +1531,39 @@ export default function App() {
               {/* Live markets status & date row */}
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                 <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full border border-zinc-800/80 bg-[#121214] w-fit">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                  <span className="text-xs text-zinc-300 font-medium">Live · markets open</span>
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                  <span className="text-[13px] text-zinc-300 font-normal tracking-normal">Live · markets open</span>
                 </div>
-                <span className="text-xs text-zinc-500 font-medium tracking-tight">
+                <span className="text-[13px] text-zinc-400 font-normal tracking-normal">
                   Updated {formattedTime}
                 </span>
               </div>
 
               {/* Title & Description Header */}
               <div className="space-y-2">
-                <h1 className="text-3xl sm:text-4xl font-bold tracking-tight text-white font-display leading-tight">
+                <h1 className="text-[32px] sm:text-[36px] font-semibold tracking-[-0.035em] text-white leading-[1.15] font-sans max-w-[280px] sm:max-w-md">
                   Good signal, good trade.
                 </h1>
-                <p className="text-sm sm:text-base text-zinc-400 leading-relaxed max-w-lg">
+                <p className="text-[15px] sm:text-[16px] font-normal tracking-[-0.01em] text-zinc-400 leading-[1.45] max-w-[340px] sm:max-w-lg">
                   Your AI-curated view of the forex market — refreshed every few seconds.
                 </p>
               </div>
 
-              {/* Action Buttons - identical height (h-12 / 48px), balanced 8px spacing */}
-              <div className="flex gap-4">
+              {/* Action Buttons - matched proportions and typography */}
+              <div className="flex gap-3.5">
                 <button
                   onClick={handleRefresh}
                   disabled={isRefreshing}
-                  className="h-12 flex-1 flex items-center justify-center gap-2.5 px-6 rounded-full border border-zinc-800/80 bg-[#151517] text-xs sm:text-sm font-semibold text-white hover:bg-[#202022] hover:border-zinc-700 transition-all cursor-pointer shadow-sm"
+                  className="h-11 sm:h-12 flex-1 flex items-center justify-center gap-2 px-5 rounded-full border border-zinc-800/80 bg-[#141416] text-[14px] sm:text-[15px] font-medium tracking-[-0.01em] text-white hover:bg-[#1f1f22] hover:border-zinc-700 transition-all cursor-pointer shadow-sm"
                 >
-                  <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+                  <RefreshCw className={`w-4 h-4 stroke-[1.8] ${isRefreshing ? 'animate-spin' : ''}`} />
                   <span>Refresh</span>
                 </button>
                 <button
                   onClick={handleQuickAnalyze}
-                  className="h-12 flex-1 flex items-center justify-center gap-2.5 px-6 rounded-full bg-white text-xs sm:text-sm font-bold text-black hover:bg-zinc-100 transition-all cursor-pointer shadow-md"
+                  className="h-11 sm:h-12 flex-1 flex items-center justify-center gap-2 px-5 rounded-full bg-white text-[14px] sm:text-[15px] font-semibold tracking-[-0.01em] text-black hover:bg-zinc-100 transition-all cursor-pointer shadow-md"
                 >
-                  <Zap className="w-4 h-4 fill-black" />
+                  <Zap className="w-4 h-4 stroke-[2] fill-black/10" />
                   <span>Quick Analyze</span>
                 </button>
               </div>
@@ -1582,13 +1582,13 @@ export default function App() {
               )}
 
               {/* Live Rates Card Deck */}
-              <div className="space-y-4">
+              <div className="space-y-3.5">
                 <div className="space-y-0.5">
-                  <h2 className="text-xl font-bold tracking-tight text-white font-display">Live Rates</h2>
-                  <p className="text-xs text-zinc-500 font-medium">Major forex pairs</p>
+                  <h2 className="text-[19px] sm:text-[21px] font-semibold tracking-[-0.025em] text-white font-sans">Live Rates</h2>
+                  <p className="text-[13px] text-zinc-500 font-normal tracking-normal">Major forex pairs</p>
                 </div>
 
-                <div className="space-y-4">
+                <div className="space-y-3.5">
                   {isRatesLoading && liveRates.length === 0 ? (
                     [1, 2, 3].map(i => (
                       <div
@@ -1623,14 +1623,14 @@ export default function App() {
                         >
                           {/* Top Info Row */}
                           <div className="flex justify-between items-start z-10">
-                            <div className="space-y-1">
-                              <h3 className="text-lg font-bold text-white font-display tracking-tight">{pair.symbol}</h3>
-                              <p className="text-xs text-zinc-500 font-medium">{pair.name}</p>
+                            <div className="space-y-0.5">
+                              <h3 className="text-[17px] sm:text-[18px] font-semibold text-white tracking-[-0.02em] font-sans">{pair.symbol}</h3>
+                              <p className="text-[13px] text-zinc-500 font-normal tracking-normal">{pair.name}</p>
                             </div>
-                            <span className={`px-3 py-1 rounded-full text-xs font-semibold tracking-wide border ${
+                            <span className={`px-3 py-1 rounded-full text-[12px] font-medium tracking-normal border ${
                               isBearish
-                                ? 'bg-red-500/10 text-red-400 border-red-500/20'
-                                : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                                ? 'bg-[#200c0c] text-[#ef4444] border-[#3f1616]'
+                                : 'bg-[#081e14] text-[#10b981] border-[#133c29]'
                             }`}>
                               {pair.sentiment}
                             </span>
@@ -1655,11 +1655,11 @@ export default function App() {
                             {/* Right Rate / Badge Column */}
                             <div className="text-right space-y-1 z-10">
                               {pair.status === 'unavailable' ? (
-                                <div className="text-xs font-bold text-zinc-500 uppercase tracking-wider">Data unavailable</div>
+                                <div className="text-[12px] font-medium text-zinc-500 uppercase tracking-wider">Data unavailable</div>
                               ) : (
                                 <>
-                                  <div className="text-2xl sm:text-3xl font-bold text-white tracking-tight font-display">{pair.price.toLocaleString(undefined, { minimumFractionDigits: pair.price > 10 ? 2 : 4 })}</div>
-                                  <div className={`text-xs sm:text-sm font-semibold flex items-center justify-end gap-1 ${isBearish ? 'text-red-500' : 'text-emerald-500'}`}>
+                                  <div className="text-[24px] sm:text-[26px] font-semibold text-white tracking-[-0.03em] font-sans tabular-nums">{pair.price.toLocaleString(undefined, { minimumFractionDigits: pair.price > 10 ? 2 : 4 })}</div>
+                                  <div className={`text-[13px] sm:text-[14px] font-medium tracking-normal flex items-center justify-end gap-1 ${isBearish ? 'text-[#ef4444]' : 'text-[#10b981]'}`}>
                                     {isBearish ? <ArrowDownRight className="w-4 h-4 stroke-[2]" /> : <ArrowUpRight className="w-4 h-4 stroke-[2]" />}
                                     <span>{isBearish ? '' : '+'}{pair.change.toFixed(2)}%</span>
                                   </div>
@@ -1677,8 +1677,8 @@ export default function App() {
               {/* Top Movers Section */}
               <div className="p-6 rounded-3xl border border-zinc-800/80 bg-[#111113]/80 space-y-4">
                 <div className="flex justify-between items-baseline">
-                  <h3 className="text-base font-bold text-white font-display">Top Movers</h3>
-                  <span className="text-xs text-zinc-500 font-medium">Biggest % change today</span>
+                  <h3 className="text-[16px] sm:text-[17px] font-semibold tracking-[-0.02em] text-white font-sans">Top Movers</h3>
+                  <span className="text-[12px] text-zinc-500 font-normal tracking-normal">Biggest % change today</span>
                 </div>
                 <div className="divide-y divide-zinc-900">
                   {isRatesLoading && liveRates.length === 0 ? (
@@ -1704,12 +1704,12 @@ export default function App() {
                       .map((mover, idx) => (
                         <div key={idx} className="py-3 flex justify-between items-center first:pt-0 last:pb-0">
                           <div>
-                            <div className="text-xs sm:text-sm font-bold text-white">{mover.symbol}</div>
-                            <div className="text-[10px] sm:text-xs text-zinc-500 font-medium">{mover.name}</div>
+                            <div className="text-[14px] sm:text-[15px] font-semibold tracking-[-0.015em] text-white">{mover.symbol}</div>
+                            <div className="text-[12px] text-zinc-500 font-normal tracking-normal">{mover.name}</div>
                           </div>
                           <div className="text-right">
-                            <div className="text-xs sm:text-sm font-bold text-white tracking-tight">{mover.price.toLocaleString(undefined, { minimumFractionDigits: mover.price > 10 ? 2 : 4 })}</div>
-                            <div className={`text-xs font-semibold ${mover.change >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
+                            <div className="text-[14px] sm:text-[15px] font-semibold tracking-[-0.02em] text-white tabular-nums">{mover.price.toLocaleString(undefined, { minimumFractionDigits: mover.price > 10 ? 2 : 4 })}</div>
+                            <div className={`text-[13px] font-medium tracking-normal ${mover.change >= 0 ? 'text-[#10b981]' : 'text-[#ef4444]'}`}>
                               {mover.change >= 0 ? '+' : ''}{mover.change.toFixed(2)}%
                             </div>
                           </div>
@@ -1726,8 +1726,8 @@ export default function App() {
               {/* Trending Pairs Grid - Matches Screenshot 2 */}
               <div className="p-6 rounded-3xl border border-zinc-800/80 bg-[#111113]/80 space-y-4">
                 <div className="flex flex-col">
-                  <span className="text-base sm:text-lg font-bold text-white font-display">Trending Pairs</span>
-                  <span className="text-xs text-zinc-500 mt-0.5 font-medium">What traders are watching</span>
+                  <span className="text-[19px] sm:text-[21px] font-semibold tracking-[-0.025em] text-white font-sans">Trending Pairs</span>
+                  <span className="text-[13px] text-zinc-500 mt-0.5 font-normal tracking-normal">What traders are watching</span>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
@@ -1748,8 +1748,8 @@ export default function App() {
                       return (
                         <div key={idx} className="p-4 rounded-2xl border border-zinc-800/80 bg-[#161618] relative overflow-hidden flex flex-col justify-between h-24 sm:h-28 hover:border-zinc-700 transition-all">
                           <div className="flex justify-between items-center z-10">
-                            <span className="text-sm font-bold text-white tracking-tight">{trend.symbol}</span>
-                            <span className={`text-xs font-semibold ${isBearish ? 'text-red-400' : 'text-emerald-400'}`}>
+                            <span className="text-[14px] sm:text-[15px] font-semibold tracking-[-0.02em] text-white">{trend.symbol}</span>
+                            <span className={`text-[13px] font-medium tracking-normal ${isBearish ? 'text-[#ef4444]' : 'text-[#10b981]'}`}>
                               {trend.change >= 0 ? '+' : ''}{trend.change.toFixed(2)}%
                             </span>
                           </div>
@@ -1780,8 +1780,8 @@ export default function App() {
               {/* Market Heatmap Section - Matches Screenshot 2 */}
               <div className="p-6 rounded-3xl border border-zinc-800/80 bg-[#111113]/80 space-y-4">
                 <div className="flex flex-col">
-                  <span className="text-base sm:text-lg font-bold text-white font-display">Market Heatmap</span>
-                  <span className="text-xs text-zinc-500 mt-0.5 font-medium">Performance at a glance</span>
+                  <span className="text-[19px] sm:text-[21px] font-semibold tracking-[-0.025em] text-white font-sans">Market Heatmap</span>
+                  <span className="text-[13px] text-zinc-500 mt-0.5 font-normal tracking-normal">Performance at a glance</span>
                 </div>
 
                 <div className="grid grid-cols-4 gap-2">
@@ -1805,8 +1805,8 @@ export default function App() {
                           key={idx}
                           className={`aspect-square rounded-2xl border flex flex-col justify-center items-center p-2 text-center transition-all hover:scale-[1.03] ${alphaClass}`}
                         >
-                          <span className="text-[10px] sm:text-xs font-bold text-white leading-none mb-1">{pair.symbol}</span>
-                          <span className="text-[9px] sm:text-[10px] font-semibold text-zinc-100 leading-none">{pair.change >= 0 ? '+' : ''}{pair.change.toFixed(2)}%</span>
+                          <span className="text-[11px] sm:text-[12px] font-semibold tracking-[-0.01em] text-white leading-none mb-1">{pair.symbol}</span>
+                          <span className="text-[10px] sm:text-[11px] font-medium tracking-normal text-zinc-100 leading-none">{pair.change >= 0 ? '+' : ''}{pair.change.toFixed(2)}%</span>
                         </div>
                       );
                     })
@@ -1831,8 +1831,8 @@ export default function App() {
                 
                 {/* Header Title */}
                 <div className="space-y-2">
-                  <h1 className="text-3xl font-bold tracking-tight text-white font-display">Strategy</h1>
-                  <p className="text-xs text-zinc-400 leading-relaxed max-w-sm">
+                  <h1 className="text-[32px] sm:text-[36px] font-semibold tracking-[-0.035em] text-white leading-[1.15] font-sans">Strategy</h1>
+                  <p className="text-[15px] sm:text-[16px] font-normal tracking-[-0.01em] text-zinc-400 leading-[1.45] max-w-sm">
                     Write the playbook your AI assistant trades with.
                   </p>
                   <div className="flex items-center gap-1.5 pt-0.5">
@@ -2219,8 +2219,8 @@ export default function App() {
               
               {/* Header Title */}
               <div className="space-y-2">
-                <h1 className="text-3xl font-bold tracking-tight text-white font-display">Market Watcher</h1>
-                <p className="text-xs text-zinc-400 leading-relaxed max-w-sm">
+                <h1 className="text-[32px] sm:text-[36px] font-semibold tracking-[-0.035em] text-white leading-[1.15] font-sans">Market Watcher</h1>
+                <p className="text-[15px] sm:text-[16px] font-normal tracking-[-0.01em] text-zinc-400 leading-[1.45] max-w-sm">
                   Build a personal watchlist with AI signals and confidence scoring.
                 </p>
               </div>
@@ -2581,8 +2581,8 @@ export default function App() {
               
               {/* Header Title */}
               <div className="space-y-2">
-                <h1 className="text-3xl font-bold tracking-tight text-white font-display">Account & Profile</h1>
-                <p className="text-xs text-zinc-400 leading-relaxed max-w-sm">
+                <h1 className="text-[32px] sm:text-[36px] font-semibold tracking-[-0.035em] text-white leading-[1.15] font-sans">Account & Profile</h1>
+                <p className="text-[15px] sm:text-[16px] font-normal tracking-[-0.01em] text-zinc-400 leading-[1.45] max-w-sm">
                   Manage your personal user credentials, profiles database and live Gaks AI subscriptions.
                 </p>
               </div>
@@ -2906,10 +2906,10 @@ export default function App() {
             }`}
           >
             <div className={`py-1.5 px-3 rounded-2xl flex flex-col items-center gap-1 transition-all ${
-              activeTab === 'home' ? 'bg-[#1a1a1e] text-white shadow-sm font-semibold' : ''
+              activeTab === 'home' ? 'bg-[#1a1a1e] text-white shadow-sm font-medium' : ''
             }`}>
-              <HomeIcon className="w-4 h-4 stroke-[2]" />
-              <span className="text-[9px] uppercase tracking-wider font-bold">Home</span>
+              <HomeIcon className="w-4 h-4 stroke-[1.8]" />
+              <span className="text-[10px] font-medium tracking-normal">Home</span>
             </div>
           </button>
 
@@ -2922,10 +2922,10 @@ export default function App() {
             }`}
           >
             <div className={`py-1.5 px-3 rounded-2xl flex flex-col items-center gap-1 transition-all ${
-              activeTab === 'strategy' ? 'bg-[#1a1a1e] text-white shadow-sm font-semibold' : ''
+              activeTab === 'strategy' ? 'bg-[#1a1a1e] text-white shadow-sm font-medium' : ''
             }`}>
-              <TrendingUp className="w-4 h-4 stroke-[2]" />
-              <span className="text-[9px] uppercase tracking-wider font-bold">Strategy</span>
+              <TrendingUp className="w-4 h-4 stroke-[1.8]" />
+              <span className="text-[10px] font-medium tracking-normal">Strategy</span>
             </div>
           </button>
 
@@ -2938,10 +2938,10 @@ export default function App() {
             }`}
           >
             <div className={`py-1.5 px-3 rounded-2xl flex flex-col items-center gap-1 transition-all ${
-              activeTab === 'watcher' ? 'bg-[#1a1a1e] text-white shadow-sm font-semibold' : ''
+              activeTab === 'watcher' ? 'bg-[#1a1a1e] text-white shadow-sm font-medium' : ''
             }`}>
-              <Eye className="w-4 h-4 stroke-[2]" />
-              <span className="text-[9px] uppercase tracking-wider font-bold">Watcher</span>
+              <Eye className="w-4 h-4 stroke-[1.8]" />
+              <span className="text-[10px] font-medium tracking-normal">Watcher</span>
             </div>
           </button>
 
@@ -2954,10 +2954,10 @@ export default function App() {
             }`}
           >
             <div className={`py-1.5 px-3 rounded-2xl flex flex-col items-center gap-1 transition-all ${
-              activeTab === 'settings' ? 'bg-[#1a1a1e] text-white shadow-sm font-semibold' : ''
+              activeTab === 'settings' ? 'bg-[#1a1a1e] text-white shadow-sm font-medium' : ''
             }`}>
-              <SettingsIcon className="w-4 h-4 stroke-[2]" />
-              <span className="text-[9px] uppercase tracking-wider font-bold">Settings</span>
+              <SettingsIcon className="w-4 h-4 stroke-[1.8]" />
+              <span className="text-[10px] font-medium tracking-normal">Settings</span>
             </div>
           </button>
           
@@ -2971,10 +2971,10 @@ export default function App() {
               }`}
             >
               <div className={`py-1.5 px-3 rounded-2xl flex flex-col items-center gap-1 transition-all ${
-                activeTab === 'admin' ? 'bg-[#1a1a1e] text-white shadow-sm font-semibold' : ''
+                activeTab === 'admin' ? 'bg-[#1a1a1e] text-white shadow-sm font-medium' : ''
               }`}>
-                <Shield className="w-4 h-4 stroke-[2]" />
-                <span className="text-[9px] uppercase tracking-wider font-bold">Admin</span>
+                <Shield className="w-4 h-4 stroke-[1.8]" />
+                <span className="text-[10px] font-medium tracking-normal">Admin</span>
               </div>
             </button>
           )}
