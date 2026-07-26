@@ -131,10 +131,12 @@ export async function runGeminiRequest(
         .from('watchers')
         .select('status')
         .eq('user_id', userId)
+        .eq('status', 'active')
+        .limit(1)
         .maybeSingle();
 
-    if (watcher && watcher.status !== 'active') {
-        throw new Error('Watcher skipped because Gemini key is inactive.');
+    if (!watcher) {
+        throw new Error('Watcher skipped because no active watcher found.');
     }
 
     const ai = new GoogleGenAI({ apiKey: apiKeyData.api_key });
@@ -760,9 +762,11 @@ async function send_test_alert_handler(req: any, res: any) {
       .from('watchers')
       .select('*')
       .eq('user_id', targetUser.id)
+      .eq('status', 'active')
+      .limit(1)
       .maybeSingle();
 
-    if (watcherError || !watcher || watcher.status !== 'active') {
+    if (watcherError || !watcher) {
       await writeLog("TEST", "FAILED", "Market Watcher inactive");
       return res.status(400).json({ success: false, error: "Market Watcher inactive" });
     }
@@ -1103,11 +1107,50 @@ async function users_action_handler(req: any, res: any) {
     }
 
     if (action === 'pause') {
-      await supabase.from('watchers').update({ status: 'paused', updated_at: new Date().toISOString() }).eq('user_id', userId);
+      const { data: userWatchers } = await supabase.from('watchers').select('*').eq('user_id', userId);
+      await supabase.from('watchers').update({
+        status: 'paused',
+        trade_status: 'WAITING',
+        entry_price: null,
+        stop_loss: null,
+        take_profit: null,
+        direction: null,
+        opened_at: null,
+        closed_at: null,
+        cooldown_until: null,
+        signal_message_id: null,
+        last_scan_at: null,
+        updated_at: new Date().toISOString()
+      }).eq('user_id', userId);
+
+      if (userWatchers) {
+        for (const w of userWatchers) {
+          console.log(`\n[WATCHER STOPPED]\nWatcher ID: ${w.id}\nPair: ${w.selected_pair || 'N/A'}\nPrevious Status: ${w.status || 'UNKNOWN'}\nTrade state cleared: YES\nCron monitoring stopped: YES\n`);
+        }
+      }
     } else if (action === 'resume') {
       await supabase.from('watchers').update({ status: 'active', updated_at: new Date().toISOString() }).eq('user_id', userId);
     } else if (action === 'delete') {
+      const { data: userWatchers } = await supabase.from('watchers').select('*').eq('user_id', userId);
+      await supabase.from('watchers').update({
+        trade_status: 'WAITING',
+        entry_price: null,
+        stop_loss: null,
+        take_profit: null,
+        direction: null,
+        opened_at: null,
+        closed_at: null,
+        cooldown_until: null,
+        signal_message_id: null,
+        last_scan_at: null
+      }).eq('user_id', userId);
       await supabase.from('watchers').delete().eq('user_id', userId);
+
+      if (userWatchers) {
+        for (const w of userWatchers) {
+          console.log(`\n[WATCHER STOPPED]\nWatcher ID: ${w.id}\nPair: ${w.selected_pair || 'N/A'}\nPrevious Status: ${w.status || 'UNKNOWN'}\nTrade state cleared: YES\nCron monitoring stopped: YES\n`);
+        }
+      }
     } else {
       return res.status(400).json({ success: false, error: "Invalid action type." });
     }
@@ -1382,6 +1425,19 @@ async function watchers_action_handler(req: any, res: any) {
         .eq("selected_pair", symbol.toUpperCase())
         .maybeSingle();
 
+      const freshTradeState = {
+        trade_status: "WAITING",
+        entry_price: null,
+        stop_loss: null,
+        take_profit: null,
+        direction: null,
+        opened_at: null,
+        closed_at: null,
+        cooldown_until: null,
+        signal_message_id: null,
+        last_scan_at: null
+      };
+
       if (existingWatcher) {
         await supabase
           .from("watchers")
@@ -1390,7 +1446,8 @@ async function watchers_action_handler(req: any, res: any) {
             selected_timeframe: timeframe,
             scan_interval_minutes: computedInterval,
             started_at: nowString,
-            updated_at: nowString
+            updated_at: nowString,
+            ...freshTradeState
           })
           .eq("id", existingWatcher.id);
       } else {
@@ -1403,14 +1460,15 @@ async function watchers_action_handler(req: any, res: any) {
             selected_timeframe: timeframe,
             scan_interval_minutes: computedInterval,
             started_at: nowString,
-            updated_at: nowString
+            updated_at: nowString,
+            ...freshTradeState
           });
       }
 
       // Query row back immediately and log
       const { data: savedAdminWatcher, error: verifyErr } = await supabase
         .from("watchers")
-        .select("selected_timeframe, scan_interval_minutes")
+        .select("id, selected_timeframe, scan_interval_minutes")
         .eq("user_id", userId)
         .eq("selected_pair", symbol.toUpperCase())
         .maybeSingle();
@@ -1419,6 +1477,7 @@ async function watchers_action_handler(req: any, res: any) {
         throw new Error("Failed to verify saved watcher: " + (verifyErr?.message || "Not found"));
       }
 
+      console.log(`\n[NEW WATCHER CREATED]\nWatcher ID: ${savedAdminWatcher.id}\nPair: ${symbol.toUpperCase()}\nLifecycle initialized: WAITING\nNo previous ACTIVE trade detected.\n`);
       console.log(`Saved timeframe: ${savedAdminWatcher.selected_timeframe}`);
       console.log(`Saved scan_interval_minutes: ${savedAdminWatcher.scan_interval_minutes}`);
 
@@ -1433,10 +1492,40 @@ async function watchers_action_handler(req: any, res: any) {
       await supabase.from('watchers').update({ status: 'active', started_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', watcherId);
       return res.status(200).json({ success: true, message: "Watcher restarted successfully." });
     } else if (action === 'stop') {
-      await supabase.from('watchers').update({ status: 'stopped', stopped_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', watcherId);
+      const { data: oldW } = await supabase.from('watchers').select('*').eq('id', watcherId).maybeSingle();
+      await supabase.from('watchers').update({
+        status: 'stopped',
+        stopped_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        trade_status: 'WAITING',
+        entry_price: null,
+        stop_loss: null,
+        take_profit: null,
+        direction: null,
+        opened_at: null,
+        closed_at: null,
+        cooldown_until: null,
+        signal_message_id: null,
+        last_scan_at: null
+      }).eq('id', watcherId);
+      console.log(`\n[WATCHER STOPPED]\nWatcher ID: ${watcherId}\nPair: ${oldW?.selected_pair || 'UNKNOWN'}\nPrevious Status: ${oldW?.status || 'UNKNOWN'}\nTrade state cleared: YES\nCron monitoring stopped: YES\n`);
       return res.status(200).json({ success: true, message: "Watcher stopped successfully." });
     } else if (action === 'delete') {
+      const { data: oldW } = await supabase.from('watchers').select('*').eq('id', watcherId).maybeSingle();
+      await supabase.from('watchers').update({
+        trade_status: 'WAITING',
+        entry_price: null,
+        stop_loss: null,
+        take_profit: null,
+        direction: null,
+        opened_at: null,
+        closed_at: null,
+        cooldown_until: null,
+        signal_message_id: null,
+        last_scan_at: null
+      }).eq('id', watcherId);
       await supabase.from('watchers').delete().eq('id', watcherId);
+      console.log(`\n[WATCHER STOPPED]\nWatcher ID: ${watcherId}\nPair: ${oldW?.selected_pair || 'UNKNOWN'}\nPrevious Status: ${oldW?.status || 'UNKNOWN'}\nTrade state cleared: YES\nCron monitoring stopped: YES\n`);
       return res.status(200).json({ success: true, message: "Watcher deleted successfully." });
     } else if (action === 'force_scan') {
       const { data: watcher, error: wErr } = await supabase.from('watchers').select('*').eq('id', watcherId).maybeSingle();

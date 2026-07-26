@@ -28,6 +28,7 @@ import liveRatesHandler from "./api/live-rates";
 import telegramWebhookHandler from "./api/telegram/webhook";
 import watcherStartHandler from "./api/watcher/start";
 import watcherScanHandler from "./api/watcher/scan";
+import watcherStopHandler from "./api/watcher/stop";
 import strategySummaryHandler from "./api/strategy/summary";
 import debugGeminiHandler from "./api/debug/gemini";
 import testKeyHandler from "./api/debug/test-key";
@@ -107,6 +108,8 @@ async function startServer() {
   app.post("/api/watcher/start", watcherStartHandler as any);
   app.post("/api/watcher/scan", watcherScanHandler as any);
   app.post("/api/watcher/activate", watcherStartHandler as any);
+  app.post("/api/watcher/stop", watcherStopHandler as any);
+  app.delete("/api/watcher/stop", watcherStopHandler as any);
 
   // Live Rates
   app.get("/api/live-rates", liveRatesHandler as any);

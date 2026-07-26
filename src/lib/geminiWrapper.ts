@@ -97,10 +97,12 @@ export async function runGeminiRequest(
         .from('watchers')
         .select('status')
         .eq('user_id', userId)
+        .eq('status', 'active')
+        .limit(1)
         .maybeSingle();
 
-    if (watcher && watcher.status !== 'active') {
-        throw new Error('Watcher skipped because Gemini key is inactive.');
+    if (!watcher) {
+        throw new Error('Watcher skipped because no active watcher found.');
     }
 
     // Initialize GoogleGenAI

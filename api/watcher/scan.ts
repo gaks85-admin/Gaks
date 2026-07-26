@@ -240,11 +240,17 @@ export default async function handler(req: any, res: any) {
 
   try {
     // 3. Active Watchers Found
-    const { data: watcher, error: watcherError } = await supabase
+    let watcherQuery = supabase
       .from("watchers")
       .select("*")
       .eq("user_id", userId)
-      .maybeSingle();
+      .eq("status", "active");
+
+    if (req.body?.symbol || req.body?.selected_pair) {
+      watcherQuery = watcherQuery.eq("selected_pair", req.body?.symbol || req.body?.selected_pair);
+    }
+
+    const { data: watcher, error: watcherError } = await watcherQuery.limit(1).maybeSingle();
 
     if (watcherError) throw watcherError;
     if (!watcher) throw new Error("No watcher found.");

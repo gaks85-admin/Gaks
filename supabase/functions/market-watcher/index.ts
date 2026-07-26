@@ -179,6 +179,10 @@ This is the default, institutional-grade multi-timeframe strategy designed for c
 
     // 4. Process each active watcher
     for (const watcher of watchers) {
+      if (!watcher || watcher.status !== 'active') {
+        console.log(`[Market Watcher Edge] Watcher ${watcher?.id} skipped - Status is '${watcher?.status}' (not active)`);
+        continue;
+      }
       const userId = watcher.user_id
       const selectedPair = watcher.selected_pair
       const selectedTimeframe = watcher.selected_timeframe || 'H1'

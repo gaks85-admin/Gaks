@@ -1183,9 +1183,28 @@ export default function App() {
   const stopAiMarketWatcher = async () => {
     if (session?.user) {
       try {
+        await fetch('/api/watcher/stop', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: session.user.id })
+        }).catch(err => console.error("Error calling /api/watcher/stop:", err));
+
         await supabase
           .from('watchers')
-          .update({ status: 'stopped', updated_at: new Date().toISOString() })
+          .update({
+            status: 'stopped',
+            trade_status: 'WAITING',
+            entry_price: null,
+            stop_loss: null,
+            take_profit: null,
+            direction: null,
+            opened_at: null,
+            closed_at: null,
+            cooldown_until: null,
+            signal_message_id: null,
+            last_scan_at: null,
+            updated_at: new Date().toISOString()
+          })
           .eq('user_id', session.user.id);
       } catch (err) {
         console.error("Error stopping watcher:", err);
@@ -1340,9 +1359,28 @@ export default function App() {
       });
       
       if (session?.user) {
+        fetch('/api/watcher/stop', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: session.user.id, selected_pair: symbolToRemove })
+        }).catch(err => console.error("Error calling /api/watcher/stop:", err));
+
         supabase
           .from('watchers')
-          .update({ status: 'stopped', updated_at: new Date().toISOString() })
+          .update({
+            status: 'stopped',
+            trade_status: 'WAITING',
+            entry_price: null,
+            stop_loss: null,
+            take_profit: null,
+            direction: null,
+            opened_at: null,
+            closed_at: null,
+            cooldown_until: null,
+            signal_message_id: null,
+            last_scan_at: null,
+            updated_at: new Date().toISOString()
+          })
           .eq('user_id', session.user.id)
           .eq('selected_pair', symbolToRemove)
           .then();

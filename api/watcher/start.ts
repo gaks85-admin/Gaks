@@ -461,6 +461,24 @@ export default async function handler(req: any, res: any) {
       }
     }
     
+    // Clean up any stale trade state on existing stopped watchers for this user
+    await supabase
+      .from("watchers")
+      .update({
+        trade_status: "WAITING",
+        entry_price: null,
+        stop_loss: null,
+        take_profit: null,
+        direction: null,
+        opened_at: null,
+        closed_at: null,
+        cooldown_until: null,
+        signal_message_id: null,
+        last_scan_at: null
+      })
+      .eq("user_id", userId)
+      .neq("status", "active");
+    
     // Fetch user's watchlist to include in the Telegram message
     // (Deprecated: Now we just use selectedPair)
     const pairsMonitored = selectedPair;
@@ -644,6 +662,16 @@ export default async function handler(req: any, res: any) {
       selected_timeframe: finalTimeframe,
       gemini_model: "gemini-1.5-flash",
       scan_interval_minutes: computedInterval,
+      trade_status: "WAITING",
+      entry_price: null,
+      stop_loss: null,
+      take_profit: null,
+      direction: null,
+      opened_at: null,
+      closed_at: null,
+      cooldown_until: null,
+      signal_message_id: null,
+      last_scan_at: null,
       updated_at: nowString
     };
     console.log("[Watcher Start] Watcher data payload:", JSON.stringify(watcherData, null, 2));
@@ -674,16 +702,16 @@ export default async function handler(req: any, res: any) {
     // Immediately query the row back and log
     const { data: savedWatcherRow, error: fetchSavedErr } = await supabase
       .from("watchers")
-      .select("selected_timeframe, scan_interval_minutes")
+      .select("id, selected_timeframe, scan_interval_minutes")
       .eq("user_id", userId)
       .eq("selected_pair", selectedPair)
       .maybeSingle();
 
     if (fetchSavedErr || !savedWatcherRow) {
-      console.error("[Watcher Start] Failed to query saved watcher record:", fetchSavedErr?.message || "Not found");
       throw new Error(`Failed to verify saved watcher: ${fetchSavedErr?.message || "Not found"}`);
     }
 
+    console.log(`\n[NEW WATCHER CREATED]\nWatcher ID: ${savedWatcherRow.id}\nPair: ${selectedPair}\nLifecycle initialized: WAITING\nNo previous ACTIVE trade detected.\n`);
     console.log(`Saved timeframe: ${savedWatcherRow.selected_timeframe}`);
     console.log(`Saved scan_interval_minutes: ${savedWatcherRow.scan_interval_minutes}`);
 

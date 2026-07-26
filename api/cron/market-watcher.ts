@@ -119,10 +119,12 @@ export async function runGeminiRequest(
         .from('watchers')
         .select('status')
         .eq('user_id', userId)
+        .eq('status', 'active')
+        .limit(1)
         .maybeSingle();
 
-    if (watcher && watcher.status !== 'active') {
-        throw new Error('Watcher skipped because Gemini key is inactive.');
+    if (!watcher) {
+        throw new Error('Watcher skipped because no active watcher found.');
     }
 
     console.log("GEMINI CALLED");
@@ -724,6 +726,13 @@ export default async function handler(req: any, res: any) {
 
     // Process each active watcher sequentially to respect Twelve Data free limits
     for (const watcher of watchers) {
+      if (!watcher || watcher.status !== 'active') {
+        console.log(`LOG: Watcher ${watcher?.id} skipped - Status is '${watcher?.status}' (not active)`);
+        skipped.push({ userId: watcher?.user_id || 'unknown', reason: `Watcher status is ${watcher?.status || 'stopped/deleted'}` });
+        watchersSkippedCount++;
+        continue;
+      }
+
       // Ensure the endpoint finishes within 30 seconds by stopping early if needed
       if (Date.now() - startTime > 25000) {
         console.warn("LOG: Approaching 30s timeout limit. Stopping early.");
