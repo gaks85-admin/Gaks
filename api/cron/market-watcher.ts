@@ -591,6 +591,11 @@ export default async function handler(req: any, res: any) {
     let watchersSkippedCount = 0;
     let signalsGeneratedCount = 0;
     let telegramMessagesSentCount = 0;
+    let ruleEnginePassedCount = 0;
+    let ruleEngineFailedCount = 0;
+    let geminiCallsCount = 0;
+    let activeTradesCount = 0;
+    let cooldownTradesCount = 0;
 
     let totalTwelveDataRequests = 0;
     let requestsSavedThroughCachingCount = 0;
