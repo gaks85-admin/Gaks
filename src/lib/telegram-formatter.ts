@@ -82,6 +82,9 @@ export interface SignalTelegramPayload {
   riskRewardRatio: number | string | null;
   confidenceScore: number;
   aiReasoning: string | string[];
+  lotSize?: number | string | null;
+  riskAmount?: number | string | null;
+  expectedLoss?: number | string | null;
 }
 
 export function buildTelegramAlertMessage(signal: SignalTelegramPayload): string {
@@ -97,6 +100,10 @@ export function buildTelegramAlertMessage(signal: SignalTelegramPayload): string
   const tpStr = formatPrice(signal.takeProfit, signal.pair);
   const rrStr = formatRiskReward(signal.riskRewardRatio);
   const confStr = `${Math.round(signal.confidenceScore)}%`;
+
+  const posSizeStr = (signal.lotSize !== undefined && signal.lotSize !== null)
+    ? `Position Size: ${signal.lotSize} Lots (Risk: $${Number(signal.riskAmount || 0).toFixed(2)})\n\n`
+    : '';
 
   let reasons: string[] = [];
   if (Array.isArray(signal.aiReasoning)) {
@@ -128,6 +135,7 @@ export function buildTelegramAlertMessage(signal: SignalTelegramPayload): string
     `Stop Loss: ${slStr}\n\n` +
     `Take Profit: ${tpStr}\n\n` +
     `Risk/Reward: ${rrStr}\n\n` +
+    `${posSizeStr}` +
     `Confidence: ${confStr}\n\n` +
     `AI Reasoning:\n` +
     `${bulletReasons}\n\n` +

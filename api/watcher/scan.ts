@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { GoogleGenAI, Type } from "@google/genai";
 import { analyzeMarket, Candle } from "../../src/lib/strategy-engine.js";
+import { extractRiskPreferences, calculatePositionSize, logPositionSizeAudit } from "../../src/lib/risk-engine.js";
 
 
 async function generateContentWithDiagnostics(ai: any, params: any) {
@@ -267,29 +268,18 @@ export default async function handler(req: any, res: any) {
     const strategyText = extractStrategyTextById(prefsRecord?.strategy_text || '', watcher.strategy_id);
     console.log(`LOG: Strategy loaded`);
 
-    const rawCap = prefsRecord?.capital === 'Custom'
-      ? (prefsRecord?.custom_capital || prefsRecord?.capital || "")
-      : (prefsRecord?.capital || prefsRecord?.custom_capital || "");
-    const cleanedCap = rawCap ? String(rawCap).replace(/[^0-9.]/g, "") : "";
-    const accountSize = cleanedCap ? parseFloat(cleanedCap) : (watcher.account_size || null);
-
-    const rawRisk = prefsRecord?.preferred_risk || "";
-    const cleanedRisk = rawRisk ? String(rawRisk).replace(/[^0-9.]/g, "") : "";
-    const riskPercentage = cleanedRisk ? parseFloat(cleanedRisk) : (watcher.risk_percentage || null);
-
-    const riskRewardStr = prefsRecord?.risk_reward || '1:2';
-    const maxDailyRiskStr = (prefsRecord as any)?.max_daily_risk || (prefsRecord as any)?.max_daily_loss || '3 consecutive losses in 24h (Strategy Cap)';
+    const riskPrefs = extractRiskPreferences(prefsRecord, userId);
+    const accountSize = riskPrefs.accountSize;
+    const riskPercentage = riskPrefs.riskPercentage;
+    const riskRewardStr = riskPrefs.riskRewardStr;
+    const maxDailyRiskStr = riskPrefs.maxDailyRiskStr;
 
     console.log(`Trading Preferences Loaded\n`);
-    console.log(`Account Size: ${accountSize ? '$' + accountSize : 'N/A'}`);
-    console.log(`Risk %: ${riskPercentage ? riskPercentage + '%' : 'N/A'}`);
+    console.log(`Account Size: $${accountSize}`);
+    console.log(`Risk %: ${riskPercentage}%`);
     console.log(`Risk Reward: ${riskRewardStr}`);
     console.log(`Max Daily Risk: ${maxDailyRiskStr}`);
     console.log(`Strategy: ${strategyText ? strategyText.substring(0, 100) + '...' : 'N/A'}`);
-
-    if (!accountSize || !riskPercentage) {
-      throw new Error("Account size or risk percentage not defined in trading preferences.");
-    }
 
     // 5. Parsed Strategy Loaded
     let parsed_strategy: any = null;
@@ -334,23 +324,18 @@ export default async function handler(req: any, res: any) {
     console.log(`LOG: Signal result: ${analysis.signal}`);
 
     if (analysis.signal !== 'NO_TRADE' && analysis.confidence >= 70) {
-      const riskAmount = accountSize * (riskPercentage / 100);
-      const slDistance = Math.abs(analysis.entryPrice - analysis.stopLoss);
-      let lotSize = 0;
-      if (slDistance > 0) {
-        const rawUnits = riskAmount / slDistance;
-        if (analysis.entryPrice < 10 || /EUR|GBP|AUD|NZD|CAD|CHF|JPY/i.test(symbol)) {
-          lotSize = Number((rawUnits / 100000).toFixed(4));
-        } else {
-          lotSize = Number(rawUnits.toFixed(4));
-        }
-      }
-      console.log(`\nPosition Size Calculation\n`);
-      console.log(`Account Size: $${accountSize}`);
-      console.log(`Risk Amount: $${riskAmount.toFixed(2)} (${riskPercentage}%)`);
-      console.log(`Entry: ${analysis.entryPrice}`);
-      console.log(`Stop Loss: ${analysis.stopLoss}`);
-      console.log(`Calculated Lot Size: ${lotSize}\n`);
+      const posSizeResult = calculatePositionSize({
+        accountSize: accountSize,
+        riskPercentage: riskPercentage,
+        entryPrice: Number(analysis.entryPrice) || 0,
+        stopLoss: Number(analysis.stopLoss) || 0,
+        takeProfit: analysis.takeProfit ? Number(analysis.takeProfit) : null,
+        symbol: symbol
+      });
+      logPositionSizeAudit(posSizeResult, prefsRecord?.updated_at || prefsRecord?.created_at || 'N/A');
+      (analysis as any).lotSize = posSizeResult.calculatedLotSize;
+      (analysis as any).riskAmount = posSizeResult.riskAmount;
+      (analysis as any).expectedLoss = posSizeResult.expectedLoss;
     }
 
     // 9. Telegram Send Decision

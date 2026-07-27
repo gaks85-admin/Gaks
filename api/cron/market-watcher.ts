@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import { GoogleGenAI, Type } from '@google/genai';
 import { analyzeMarket, Candle } from '../../src/lib/strategy-engine.js';
 import { buildTelegramAlertMessage } from '../../src/lib/telegram-formatter.js';
+import { extractRiskPreferences, calculatePositionSize, logPositionSizeAudit } from '../../src/lib/risk-engine.js';
 
 // --- Inlined Gemini Wrapper ---
 
@@ -205,6 +206,9 @@ export interface SignalPayload {
   riskRewardRatio?: number | string | null;
   confidenceScore: number;
   aiReasoning?: string | string[];
+  lotSize?: number | string | null;
+  riskAmount?: number | string | null;
+  expectedLoss?: number | string | null;
 }
 
 export async function registerSignal(
@@ -1066,33 +1070,30 @@ export default async function handler(req: any, res: any) {
         }
         const telegramChatId = telegramConn.telegram_chat_id;
 
-        const rawCap = prefsRecord?.capital === 'Custom'
-          ? (prefsRecord?.custom_capital || prefsRecord?.capital || "")
-          : (prefsRecord?.capital || prefsRecord?.custom_capital || "");
-        const cleanedCap = rawCap ? String(rawCap).replace(/[^0-9.]/g, "") : "";
-        const accountSize = cleanedCap ? parseFloat(cleanedCap) : (watcher.account_size || null);
-
-        const rawRisk = prefsRecord?.preferred_risk || "";
-        const cleanedRisk = rawRisk ? String(rawRisk).replace(/[^0-9.]/g, "") : "";
-        const riskPercentage = cleanedRisk ? parseFloat(cleanedRisk) : (watcher.risk_percentage || null);
-
-        const riskRewardStr = prefsRecord?.risk_reward || '1:2';
-        const maxDailyRiskStr = (prefsRecord as any)?.max_daily_risk || (prefsRecord as any)?.max_daily_loss || '3 consecutive losses in 24h (Strategy Cap)';
+        let accountSize: number;
+        let riskPercentage: number;
+        let riskRewardStr: string;
+        let maxDailyRiskStr: string;
+        try {
+          const riskPrefs = extractRiskPreferences(prefsRecord, userId);
+          accountSize = riskPrefs.accountSize;
+          riskPercentage = riskPrefs.riskPercentage;
+          riskRewardStr = riskPrefs.riskRewardStr;
+          maxDailyRiskStr = riskPrefs.maxDailyRiskStr;
+        } catch (prefsErr: any) {
+          console.log(`LOG: Watcher ${watcher.id} skipped - ${prefsErr.message}`);
+          skipped.push({ userId, reason: prefsErr.message });
+          watchersSkippedCount++;
+          continue;
+        }
 
         console.log(`Trading Preferences Loaded\n`);
-        console.log(`Account Size: ${accountSize ? '$' + accountSize : 'N/A'}`);
-        console.log(`Risk %: ${riskPercentage ? riskPercentage + '%' : 'N/A'}`);
+        console.log(`Account Size: $${accountSize}`);
+        console.log(`Risk %: ${riskPercentage}%`);
         console.log(`Risk Reward: ${riskRewardStr}`);
         console.log(`Max Daily Risk: ${maxDailyRiskStr}`);
         console.log(`Strategy: ${strategyText ? strategyText.substring(0, 100) + '...' : 'N/A'}`);
         console.log(`[DB Row Comparison] DB capital: "${prefsRecord?.capital || ''}", DB custom_capital: "${prefsRecord?.custom_capital || ''}", DB preferred_risk: "${prefsRecord?.preferred_risk || ''}", DB risk_reward: "${prefsRecord?.risk_reward || ''}"`);
-
-        if (!accountSize || !riskPercentage) {
-          console.log(`LOG: Watcher ${watcher.id} skipped - Account size/risk not defined`);
-          skipped.push({ userId, reason: "Account size or risk percentage not defined" });
-          watchersSkippedCount++;
-          continue;
-        }
 
         if (!apiKeyRecord || !apiKeyRecord.api_key) {
           console.log(`LOG: Watcher ${watcher.id} skipped - Gemini API Key missing`);
@@ -1291,23 +1292,15 @@ ${JSON.stringify(candleData.slice(-10), null, 2)}
         }
 
         // Gemini / Strategy returned a VALID trade!
-        const riskAmount = accountSize * (riskPercentage / 100);
-        const slDistance = Math.abs(analysis.entryPrice - analysis.stopLoss);
-        let lotSize = 0;
-        if (slDistance > 0) {
-          const rawUnits = riskAmount / slDistance;
-          if (analysis.entryPrice < 10 || /EUR|GBP|AUD|NZD|CAD|CHF|JPY/i.test(selectedPair)) {
-            lotSize = Number((rawUnits / 100000).toFixed(4));
-          } else {
-            lotSize = Number(rawUnits.toFixed(4));
-          }
-        }
-        console.log(`\nPosition Size Calculation\n`);
-        console.log(`Account Size: $${accountSize}`);
-        console.log(`Risk Amount: $${riskAmount.toFixed(2)} (${riskPercentage}%)`);
-        console.log(`Entry: ${analysis.entryPrice}`);
-        console.log(`Stop Loss: ${analysis.stopLoss}`);
-        console.log(`Calculated Lot Size: ${lotSize}\n`);
+        const posSizeResult = calculatePositionSize({
+          accountSize: accountSize,
+          riskPercentage: riskPercentage,
+          entryPrice: Number(analysis.entryPrice) || 0,
+          stopLoss: Number(analysis.stopLoss) || 0,
+          takeProfit: analysis.takeProfit ? Number(analysis.takeProfit) : null,
+          symbol: selectedPair
+        });
+        logPositionSizeAudit(posSizeResult, prefsRecord?.updated_at || prefsRecord?.created_at || 'N/A');
 
         const signalReasoning = Array.isArray(analysis.reasoning) ? analysis.reasoning.join("; ") : (analysis.reasoning || "Strategy criteria matched");
         console.log(`[SIGNAL GENERATED] Watcher ID: ${watcher.id}`);
@@ -1323,7 +1316,10 @@ ${JSON.stringify(candleData.slice(-10), null, 2)}
             takeProfit: analysis.takeProfit,
             riskRewardRatio: analysis.riskReward,
             confidenceScore: analysis.confidence,
-            aiReasoning: analysis.reasoning
+            aiReasoning: analysis.reasoning,
+            lotSize: posSizeResult.calculatedLotSize,
+            riskAmount: posSizeResult.riskAmount,
+            expectedLoss: posSizeResult.expectedLoss
         };
 
         const isRegistered = await registerSignal(supabase, watcher, signal);
