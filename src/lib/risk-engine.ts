@@ -245,6 +245,21 @@ export function calculatePositionSize(config: {
   const actualReward = tpDistance;
   const actualRr = actualRisk > 0 ? actualReward / actualRisk : 0;
 
+  // Phase 5: Stop Loss & Take Profit Structural Validation
+  let slValidationPassed = true;
+  let slValidationError = '';
+  if (direction === 'SELL') {
+    if (executedSL <= executedEntry || executedTP >= executedEntry) {
+      slValidationPassed = false;
+      slValidationError = `Invalid SELL StopLoss/TakeProfit: SL (${executedSL}) must be > Entry (${executedEntry}) and TP (${executedTP}) must be < Entry (${executedEntry})`;
+    }
+  } else {
+    if (executedSL >= executedEntry || executedTP <= executedEntry) {
+      slValidationPassed = false;
+      slValidationError = `Invalid BUY StopLoss/TakeProfit: SL (${executedSL}) must be < Entry (${executedEntry}) and TP (${executedTP}) must be > Entry (${executedEntry})`;
+    }
+  }
+
   // Validate RR within 1% tolerance
   const expectedRrNumeric = targetRrRatio;
   const rrDiff = Math.abs(actualRr - expectedRrNumeric);
@@ -258,7 +273,7 @@ export function calculatePositionSize(config: {
     tpDistance,
     userRr,
     actualRr,
-    rrValidationPassed
+    rrValidationPassed && slValidationPassed
   );
 
   const cleanSym = (config.symbol || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
@@ -405,6 +420,67 @@ export function calculatePositionSize(config: {
         actualReward,
         actualRr,
         rrValidationPassed
+      };
+    }
+
+    if (!slValidationPassed) {
+      accepted = false;
+      skipReason = `Trade skipped. Stop loss validation failed: ${slValidationError}.`;
+      logRiskValidationAudit(
+        config.accountSize,
+        config.riskPercentage,
+        riskAmount,
+        exactLotSize,
+        minLot,
+        expectedLossAtRequiredLot,
+        expectedLossAtMinLot,
+        accepted,
+        skipReason
+      );
+
+      logExecutionValidationAudit(
+        intendedEntry,
+        executedEntry,
+        diff,
+        stopDistance,
+        tpDistance,
+        userRr,
+        actualRr,
+        0,
+        0,
+        false
+      );
+
+      return {
+        accountSize: config.accountSize,
+        riskPercentage: config.riskPercentage,
+        riskAmount,
+        entryPrice: executedEntry,
+        stopLoss: executedSL,
+        takeProfit: executedTP,
+        stopDistance,
+        pipValue,
+        contractSize,
+        calculatedLotSize: 0,
+        exactLotSize: Number(exactLotSize.toFixed(4)),
+        expectedLoss: 0,
+        expectedProfit: 0,
+        assetClass,
+        normalizedLotSize: 0,
+        lotType: 'Micro Lot',
+        lotStep,
+        minLot,
+        symbol: config.symbol,
+        accepted,
+        skipReason,
+        expectedLossAtRequiredLot,
+        expectedLossAtMinLot,
+        userRr,
+        geminiTp: config.geminiTp ?? config.takeProfit,
+        actualRisk,
+        actualReward,
+        actualRr,
+        rrValidationPassed: rrValidationPassed && slValidationPassed
       };
     }
 

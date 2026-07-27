@@ -363,8 +363,6 @@ Does this satisfy the user's strategy?
 Answer with JSON containing:
 - satisfies (boolean)
 - direction ('BUY' | 'SELL' | 'NO_TRADE')
-- entryPrice (number)
-- stopLoss (number)
 - confidenceScore (number 0-100)
 - reasoning (string)
 `;
@@ -378,22 +376,23 @@ Answer with JSON containing:
                 properties: {
                   satisfies: { type: Type.BOOLEAN },
                   direction: { type: Type.STRING },
-                  entryPrice: { type: Type.NUMBER },
-                  stopLoss: { type: Type.NUMBER },
                   confidenceScore: { type: Type.NUMBER },
                   reasoning: { type: Type.STRING }
                 },
-                required: ["satisfies", "direction", "entryPrice", "stopLoss", "confidenceScore", "reasoning"]
+                required: ["satisfies", "direction", "confidenceScore", "reasoning"]
               }
             }
           });
           const parsedResult = JSON.parse(aiResponse.text || '{}');
           if (parsedResult.satisfies && parsedResult.direction && parsedResult.direction !== 'NO_TRADE') {
+            const entry = candleData[candleData.length - 1].close;
+            const atrVal = ruleResult.atr && ruleResult.atr > 0 ? ruleResult.atr : entry * 0.005;
+            const sl = parsedResult.direction === 'BUY' ? entry - (atrVal * 1.5) : entry + (atrVal * 1.5);
             analysis = {
               signal: parsedResult.direction,
               confidence: parsedResult.confidenceScore || 85,
-              entryPrice: parsedResult.entryPrice || candleData[candleData.length - 1].close,
-              stopLoss: parsedResult.stopLoss || (parsedResult.direction === 'BUY' ? candleData[candleData.length - 1].close * 0.99 : candleData[candleData.length - 1].close * 1.01),
+              entryPrice: entry,
+              stopLoss: sl,
               takeProfit: null,
               riskReward: riskRewardStr,
               reasoning: [parsedResult.reasoning || "Satisfies strategy rules and Gemini validation."]

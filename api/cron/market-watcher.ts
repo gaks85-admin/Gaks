@@ -1202,6 +1202,19 @@ export default async function handler(req: any, res: any) {
         }
         console.log(`LOG: Candle data downloaded for ${selectedPair}: YES (${candleData.length} candles)`);
 
+        // Phase 2 & 3: Timeframe Logic & New Candle Check
+        const latestClosedCandle = candleData[candleData.length - 2] || candleData[candleData.length - 1];
+        const latestClosedCandleTime = String(latestClosedCandle?.timestamp || '');
+        const lastAnalyzedTime = watcher.last_analyzed_closed_candle_time || '';
+        const isNewCandle = latestClosedCandleTime && latestClosedCandleTime !== lastAnalyzedTime;
+
+        if (!isNewCandle) {
+          console.log(`[Timeframe Logic] Watcher ${watcher.id} skipped - Same candle already analyzed (${latestClosedCandleTime}). Exiting.`);
+          skipped.push({ userId, reason: "Same candle already analyzed (no new closed candle)" });
+          watchersSkippedCount++;
+          continue;
+        }
+
         // 1. Rule Engine Execution
         const ruleResult = evaluateRules(watcher, candleData);
         logRuleEngineAudit(ruleResult);
@@ -1215,11 +1228,12 @@ export default async function handler(req: any, res: any) {
           riskReward: null,
           reasoning: []
         };
+        let geminiDirection = 'NO_TRADE';
 
         if (!ruleResult.passed) {
           console.log(`[Rule Engine Failed] Watcher ID: ${watcher.id} (${selectedPair}) failed rule checks. Stopping execution. Gemini NOT called.`);
         } else {
-          // 2. Gemini Validation (Only if rules pass)
+          // 2. Gemini Validation (Only if rules pass) - Restricted to direction, satisfaction, confidence, reasoning ONLY
           console.log("GEMINI CALLED");
           ruleResult.geminiCalled = true;
           try {
@@ -1248,8 +1262,6 @@ Does this satisfy the user's strategy?
 Answer with JSON containing:
 - satisfies (boolean)
 - direction ('BUY' | 'SELL' | 'NO_TRADE')
-- entryPrice (number)
-- stopLoss (number)
 - confidenceScore (number 0-100)
 - reasoning (string)
 `;
@@ -1263,22 +1275,25 @@ Answer with JSON containing:
                     properties: {
                       satisfies: { type: Type.BOOLEAN },
                       direction: { type: Type.STRING },
-                      entryPrice: { type: Type.NUMBER },
-                      stopLoss: { type: Type.NUMBER },
                       confidenceScore: { type: Type.NUMBER },
                       reasoning: { type: Type.STRING }
                     },
-                    required: ["satisfies", "direction", "entryPrice", "stopLoss", "confidenceScore", "reasoning"]
+                    required: ["satisfies", "direction", "confidenceScore", "reasoning"]
                   }
                 }
               });
               const parsedResult = JSON.parse(aiResponse.text || '{}');
               if (parsedResult.satisfies && parsedResult.direction && parsedResult.direction !== 'NO_TRADE') {
+                geminiDirection = parsedResult.direction;
+                const entry = candleData[candleData.length - 1].close;
+                const atrVal = ruleResult.atr && ruleResult.atr > 0 ? ruleResult.atr : entry * 0.005;
+                const sl = geminiDirection === 'BUY' ? entry - (atrVal * 1.5) : entry + (atrVal * 1.5);
+
                 analysis = {
-                  signal: parsedResult.direction,
+                  signal: geminiDirection,
                   confidence: parsedResult.confidenceScore || 85,
-                  entryPrice: parsedResult.entryPrice || candleData[candleData.length - 1].close,
-                  stopLoss: parsedResult.stopLoss || (parsedResult.direction === 'BUY' ? candleData[candleData.length - 1].close * 0.99 : candleData[candleData.length - 1].close * 1.01),
+                  entryPrice: entry,
+                  stopLoss: sl,
                   takeProfit: null,
                   riskReward: riskRewardStr,
                   reasoning: [parsedResult.reasoning || "Satisfies strategy rules and Gemini validation."]
@@ -1289,18 +1304,20 @@ Answer with JSON containing:
             console.warn(`[Gemini Validation Warning]: Falling back to local strategy engine:`, gemErr.message);
             const localAnalysis = analyzeMarket(candleData, { entryConditions: [strategyText] });
             analysis = localAnalysis;
+            geminiDirection = analysis.signal;
           }
         }
 
         console.log(`LOG: Signal result for ${selectedPair}: ${analysis.signal} (Confidence: ${analysis.confidence}%)`);
 
-        // If there is NO setup: Update last_scan_at and Exit.
+        // If there is NO setup: Update last_scan_at, last_analyzed_closed_candle_time and Exit.
         if (analysis.signal === 'NO_TRADE' || analysis.confidence < 70) {
             console.log(`[STATE 1 - WAITING] No setup for Watcher ID: ${watcher.id} (${selectedPair}). Signal: ${analysis.signal}, Confidence: ${analysis.confidence}%. Updating last_scan_at and exiting.`);
             await supabase
               .from("watchers")
               .update({ 
                  last_scan_at: new Date().toISOString(),
+                 last_analyzed_closed_candle_time: latestClosedCandleTime,
                  updated_at: new Date().toISOString()
               })
               .eq("id", watcher.id);
@@ -1322,12 +1339,31 @@ Answer with JSON containing:
         });
         logPositionSizeAudit(posSizeResult, prefsRecord?.updated_at || prefsRecord?.created_at || 'N/A');
 
+        // Phase 7: Full Audit Report before Telegram / registration decision
+        console.log(`\n========== PHASE 7: FULL DIAGNOSTIC AUDIT REPORT ==========`);
+        console.log(`ENTRY: ${posSizeResult.entryPrice}`);
+        console.log(`STOP LOSS: ${posSizeResult.stopLoss}`);
+        console.log(`TAKE PROFIT: ${posSizeResult.takeProfit}`);
+        console.log(`RISK DISTANCE: ${posSizeResult.actualRisk.toFixed(5)}`);
+        console.log(`REWARD DISTANCE: ${posSizeResult.actualReward.toFixed(5)}`);
+        console.log(`CONFIGURED RR: ${riskRewardStr}`);
+        console.log(`ACTUAL RR: ${posSizeResult.actualRr.toFixed(4)}`);
+        console.log(`GEMINI DIRECTION: ${geminiDirection}`);
+        console.log(`BACKEND DIRECTION: ${analysis.signal}`);
+        console.log(`NEW CANDLE: ${isNewCandle ? 'YES' : 'NO'}`);
+        console.log(`ACTIVE TRADE: ${watcher.trade_status === 'ACTIVE' ? 'YES' : 'NO'}`);
+        console.log(`COOLDOWN: ${watcher.trade_status === 'COOLDOWN' ? 'YES' : 'NO'}`);
+        console.log(`TRADE ACCEPTED: ${posSizeResult.accepted ? 'YES' : 'NO'}`);
+        console.log(`REJECTION REASON: ${posSizeResult.skipReason || 'None'}`);
+        console.log(`===========================================================\n`);
+
         if (!posSizeResult.accepted) {
-          console.log(`[Risk Validation Failed - Trade Skipped] ${posSizeResult.skipReason}`);
+          console.log(`[Risk/Validation Failed - Trade Skipped] ${posSizeResult.skipReason}`);
           await supabase
             .from("watchers")
             .update({ 
                last_scan_at: new Date().toISOString(),
+               last_analyzed_closed_candle_time: latestClosedCandleTime,
                updated_at: new Date().toISOString()
             })
             .eq("id", watcher.id);
@@ -1361,6 +1397,14 @@ Answer with JSON containing:
         };
 
         const isRegistered = await registerSignal(supabase, watcher, signal);
+
+        // Also update last_analyzed_closed_candle_time on watcher
+        await supabase
+          .from("watchers")
+          .update({
+             last_analyzed_closed_candle_time: latestClosedCandleTime
+          })
+          .eq("id", watcher.id);
 
         if (!isRegistered) {
           console.log(`LOG: Telegram send decision for ${selectedPair}: NO (Failed to register signal or active trade already exists)`);
