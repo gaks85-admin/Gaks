@@ -33,6 +33,10 @@ export interface PositionSizeResult {
   expectedLossAtMinLot: number;
   userRr: string;
   geminiTp: number | null | undefined;
+  actualRisk: number;
+  actualReward: number;
+  actualRr: number;
+  rrValidationPassed: boolean;
 }
 
 export function classifyLotType(lotSize: number): string {
@@ -111,25 +115,26 @@ export function parseRiskRewardRatio(rrStr: string): number {
   return isNaN(val) ? 2.0 : val;
 }
 
-export function logTpCalculationAudit(
-  direction: string,
+export function logRrValidationAudit(
   entryPrice: number,
   stopLoss: number,
-  stopDistance: number,
+  takeProfit: number,
+  riskDistance: number,
+  rewardDistance: number,
   userRr: string,
-  calculatedTp: number,
-  geminiTp: number | null | undefined
+  actualRr: number,
+  validationPassed: boolean
 ): void {
-  console.log(`\n========== TP CALCULATION AUDIT ==========`);
-  console.log(`Direction: ${direction}`);
+  console.log(`\n========== RR VALIDATION ==========`);
   console.log(`Entry: ${entryPrice}`);
-  console.log(`Stop Loss: ${stopLoss}`);
-  console.log(`Stop Distance: ${stopDistance.toFixed(5)}`);
+  console.log(`SL: ${stopLoss}`);
+  console.log(`TP: ${takeProfit}`);
+  console.log(`Risk Distance: ${riskDistance.toFixed(5)}`);
+  console.log(`Reward Distance: ${rewardDistance.toFixed(5)}`);
   console.log(`User RR: ${userRr}`);
-  console.log(`Calculated TP: ${calculatedTp.toFixed(5)}`);
-  console.log(`Gemini TP: ${geminiTp ?? 'N/A'}`);
-  console.log(`Using Backend TP: ${calculatedTp.toFixed(5)}`);
-  console.log(`=========================================\n`);
+  console.log(`Actual RR: ${actualRr.toFixed(4)}`);
+  console.log(`Validation Passed: ${validationPassed ? 'YES' : 'NO'}`);
+  console.log(`==================================\n`);
 }
 
 export function logRiskValidationAudit(
@@ -157,8 +162,8 @@ export function logRiskValidationAudit(
 }
 
 /**
- * Calculates position size ensuring Maximum loss = Risk Amount exactly,
- * enforces backend TP calculation from Risk Reward, and rejects trades below broker minimum lot.
+ * Calculates position size, strictly enforcing broker minimum lot (0.01 fixed, no rounding up),
+ * backend TP calculation, and RR validation (within 1% tolerance).
  */
 export function calculatePositionSize(config: {
   accountSize: number;
@@ -172,7 +177,45 @@ export function calculatePositionSize(config: {
   riskRewardStr?: string;
 }): PositionSizeResult {
   const riskAmount = config.accountSize * (config.riskPercentage / 100);
-  const stopDistance = Math.abs(config.entryPrice - config.stopLoss);
+  const direction = (config.direction || 'BUY').toUpperCase();
+  
+  // Exact formulas for risk distance and TP calculation
+  let riskDistance = 0;
+  let calculatedTP = 0;
+  const userRr = config.riskRewardStr || '1:2';
+  const targetRrRatio = parseRiskRewardRatio(userRr);
+
+  if (direction === 'SELL') {
+    riskDistance = config.stopLoss - config.entryPrice;
+    calculatedTP = config.entryPrice - (riskDistance * targetRrRatio);
+  } else {
+    riskDistance = config.entryPrice - config.stopLoss;
+    calculatedTP = config.entryPrice + (riskDistance * targetRrRatio);
+  }
+
+  // Ensure riskDistance is positive
+  riskDistance = Math.abs(riskDistance);
+  const rewardDistance = Math.abs(calculatedTP - config.entryPrice);
+  const actualRisk = riskDistance;
+  const actualReward = rewardDistance;
+  const actualRr = actualRisk > 0 ? actualReward / actualRisk : 0;
+
+  // Validate RR within 1% tolerance
+  const expectedRrNumeric = targetRrRatio;
+  const rrDiff = Math.abs(actualRr - expectedRrNumeric);
+  const rrValidationPassed = expectedRrNumeric === 0 ? false : (rrDiff / expectedRrNumeric) <= 0.01;
+
+  logRrValidationAudit(
+    config.entryPrice,
+    config.stopLoss,
+    calculatedTP,
+    riskDistance,
+    rewardDistance,
+    userRr,
+    actualRr,
+    rrValidationPassed
+  );
+
   const cleanSym = (config.symbol || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 
   let assetClass: 'Forex' | 'Gold' | 'Indices' | 'Crypto' = 'Forex';
@@ -181,28 +224,8 @@ export function calculatePositionSize(config: {
   let lossPerOneLot = 0;
   let profitPerOneLot = 0;
 
-  // 1. Backend Take Profit calculation from User Risk Reward Ratio
-  const userRr = config.riskRewardStr || '1:2';
-  const rrMultiplier = parseRiskRewardRatio(userRr);
-  const direction = (config.direction || 'BUY').toUpperCase();
-  let calculatedTP = 0;
-  if (direction === 'SELL') {
-    calculatedTP = config.entryPrice - (stopDistance * rrMultiplier);
-  } else {
-    calculatedTP = config.entryPrice + (stopDistance * rrMultiplier);
-  }
-
-  logTpCalculationAudit(
-    direction,
-    config.entryPrice,
-    config.stopLoss,
-    stopDistance,
-    userRr,
-    calculatedTP,
-    config.geminiTp ?? config.takeProfit
-  );
-
-  const tpDistance = Math.abs(calculatedTP - config.entryPrice);
+  const stopDistance = riskDistance;
+  const tpDistance = rewardDistance;
 
   if (
     cleanSym.includes('BTC') ||
@@ -267,31 +290,21 @@ export function calculatePositionSize(config: {
     }
   }
 
-  let minLot = 0.01;
-  let lotStep = 0.01;
-  if (assetClass === 'Indices') {
-    minLot = 1;
-    lotStep = 1;
-  } else if (assetClass === 'Crypto') {
-    minLot = 0.001;
-    lotStep = 0.001;
-  } else {
-    minLot = 0.01;
-    lotStep = 0.01;
-  }
+  // Fixed broker minimum lot = 0.01, lot step = 0.01 (No nano lots, no rounding up)
+  const minLot = 0.01;
+  const lotStep = 0.01;
 
   let exactLotSize = 0;
   let expectedLossAtRequiredLot = 0;
-  let expectedLossAtMinLot = 0;
+  let expectedLossAtMinLot = minLot * lossPerOneLot;
   let accepted = true;
   let skipReason = '';
 
   if (lossPerOneLot > 0 && config.accountSize > 0 && config.riskPercentage > 0) {
     exactLotSize = riskAmount / lossPerOneLot;
     expectedLossAtRequiredLot = exactLotSize * lossPerOneLot;
-    expectedLossAtMinLot = minLot * lossPerOneLot;
 
-    // Strict validation: RequiredLot compared against BrokerMinimumLot
+    // Strict validation: RequiredLot < 0.01 (Broker minimum) -> Reject trade. Do NOT round up to 0.01.
     if (exactLotSize < minLot) {
       accepted = false;
       skipReason = `Trade skipped. Required lot size is below broker minimum. Required lot: ${exactLotSize.toFixed(4)}, Broker minimum: ${minLot}, Expected loss at minimum lot: $${expectedLossAtMinLot.toFixed(2)}, User maximum risk: $${riskAmount.toFixed(2)}.`;
@@ -332,7 +345,59 @@ export function calculatePositionSize(config: {
         expectedLossAtRequiredLot,
         expectedLossAtMinLot,
         userRr,
-        geminiTp: config.geminiTp ?? config.takeProfit
+        geminiTp: config.geminiTp ?? config.takeProfit,
+        actualRisk,
+        actualReward,
+        actualRr,
+        rrValidationPassed
+      };
+    }
+
+    if (!rrValidationPassed) {
+      accepted = false;
+      skipReason = `Trade skipped. RR validation failed. Expected RR: ${expectedRrNumeric}, Actual RR: ${actualRr.toFixed(4)}.`;
+      logRiskValidationAudit(
+        config.accountSize,
+        config.riskPercentage,
+        riskAmount,
+        exactLotSize,
+        minLot,
+        expectedLossAtRequiredLot,
+        expectedLossAtMinLot,
+        accepted,
+        skipReason
+      );
+
+      return {
+        accountSize: config.accountSize,
+        riskPercentage: config.riskPercentage,
+        riskAmount,
+        entryPrice: config.entryPrice,
+        stopLoss: config.stopLoss,
+        takeProfit: calculatedTP,
+        stopDistance,
+        pipValue,
+        contractSize,
+        calculatedLotSize: 0,
+        exactLotSize: Number(exactLotSize.toFixed(4)),
+        expectedLoss: 0,
+        expectedProfit: 0,
+        assetClass,
+        normalizedLotSize: 0,
+        lotType: 'Micro Lot',
+        lotStep,
+        minLot,
+        symbol: config.symbol,
+        accepted,
+        skipReason,
+        expectedLossAtRequiredLot,
+        expectedLossAtMinLot,
+        userRr,
+        geminiTp: config.geminiTp ?? config.takeProfit,
+        actualRisk,
+        actualReward,
+        actualRr,
+        rrValidationPassed
       };
     }
   }
@@ -341,10 +406,7 @@ export function calculatePositionSize(config: {
   if (exactLotSize > 0) {
     const steps = Math.floor((exactLotSize + 1e-9) / lotStep);
     normalizedLotSize = steps * lotStep;
-    if (normalizedLotSize < minLot && exactLotSize > 0) {
-      normalizedLotSize = minLot;
-    }
-    const decimals = lotStep === 1 ? 0 : lotStep === 0.01 ? 2 : lotStep === 0.001 ? 3 : 4;
+    const decimals = 2;
     normalizedLotSize = Number(normalizedLotSize.toFixed(decimals));
   }
 
@@ -398,7 +460,11 @@ export function calculatePositionSize(config: {
     expectedLossAtRequiredLot,
     expectedLossAtMinLot,
     userRr,
-    geminiTp: config.geminiTp ?? config.takeProfit
+    geminiTp: config.geminiTp ?? config.takeProfit,
+    actualRisk,
+    actualReward,
+    actualRr,
+    rrValidationPassed
   };
 }
 
