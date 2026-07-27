@@ -1674,10 +1674,12 @@ ${JSON.stringify(collectedData, null, 2)}
       
       if (signals.length > 0) {
         for (const sig of signals) {
+          const executedPrice = Number(sig.entryPrice) || 0;
           const posSizeResult = calculatePositionSize({
             accountSize: accountSize,
             riskPercentage: riskPercentage,
             entryPrice: Number(sig.entryPrice) || 0,
+            executedEntry: executedPrice,
             stopLoss: Number(sig.stopLoss) || 0,
             geminiTp: sig.takeProfit ? Number(sig.takeProfit) : null,
             symbol: sig.pair,
@@ -1691,6 +1693,8 @@ ${JSON.stringify(collectedData, null, 2)}
             continue;
           }
 
+          sig.entryPrice = posSizeResult.entryPrice;
+          sig.stopLoss = posSizeResult.stopLoss;
           sig.takeProfit = posSizeResult.takeProfit;
           sig.riskRewardRatio = riskRewardStr;
           (sig as any).lotSize = posSizeResult.calculatedLotSize;

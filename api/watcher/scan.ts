@@ -411,10 +411,12 @@ Answer with JSON containing:
     console.log(`LOG: Signal result: ${analysis.signal}`);
 
     if (analysis.signal !== 'NO_TRADE' && analysis.confidence >= 70) {
+      const executedPrice = Number(candleData[candleData.length - 1]?.close) || Number(analysis.entryPrice) || 0;
       const posSizeResult = calculatePositionSize({
         accountSize: accountSize,
         riskPercentage: riskPercentage,
         entryPrice: Number(analysis.entryPrice) || 0,
+        executedEntry: executedPrice,
         stopLoss: Number(analysis.stopLoss) || 0,
         geminiTp: analysis.takeProfit ? Number(analysis.takeProfit) : null,
         symbol: symbol,
@@ -422,6 +424,8 @@ Answer with JSON containing:
         riskRewardStr: riskRewardStr
       });
       logPositionSizeAudit(posSizeResult, prefsRecord?.updated_at || prefsRecord?.created_at || 'N/A');
+      analysis.entryPrice = posSizeResult.entryPrice;
+      analysis.stopLoss = posSizeResult.stopLoss;
       analysis.takeProfit = posSizeResult.takeProfit;
       analysis.riskReward = parseRiskRewardRatio(riskRewardStr);
       (analysis as any).riskRewardStr = riskRewardStr;

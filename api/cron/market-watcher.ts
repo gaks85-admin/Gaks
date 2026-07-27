@@ -1308,11 +1308,12 @@ Answer with JSON containing:
             continue;
         }
 
-        // Gemini / Strategy returned a VALID trade!
+        const executedPrice = Number(candleData[candleData.length - 1]?.close) || Number(analysis.entryPrice) || 0;
         const posSizeResult = calculatePositionSize({
           accountSize: accountSize,
           riskPercentage: riskPercentage,
           entryPrice: Number(analysis.entryPrice) || 0,
+          executedEntry: executedPrice,
           stopLoss: Number(analysis.stopLoss) || 0,
           geminiTp: analysis.takeProfit ? Number(analysis.takeProfit) : null,
           symbol: selectedPair,
@@ -1334,9 +1335,13 @@ Answer with JSON containing:
           continue;
         }
 
+        analysis.entryPrice = posSizeResult.entryPrice;
+        analysis.stopLoss = posSizeResult.stopLoss;
+        analysis.takeProfit = posSizeResult.takeProfit;
+
         const signalReasoning = Array.isArray(analysis.reasoning) ? analysis.reasoning.join("; ") : (analysis.reasoning || "Strategy criteria matched");
         console.log(`[SIGNAL GENERATED] Watcher ID: ${watcher.id}`);
-        console.log(`Exact reason new signal was generated: Strategy evaluation returned signal '${analysis.signal}' with confidence ${analysis.confidence}% (>= 70 threshold) on pair ${selectedPair}. Entry: ${analysis.entryPrice}, Stop Loss: ${analysis.stopLoss}, Take Profit: ${posSizeResult.takeProfit}. Reasoning: ${signalReasoning}`);
+        console.log(`Exact reason new signal was generated: Strategy evaluation returned signal '${analysis.signal}' with confidence ${analysis.confidence}% (>= 70 threshold) on pair ${selectedPair}. Executed Entry: ${analysis.entryPrice}, Stop Loss: ${analysis.stopLoss}, Take Profit: ${analysis.takeProfit}. Reasoning: ${signalReasoning}`);
 
         const signal = {
             pair: mappedSymbol,
@@ -1345,7 +1350,7 @@ Answer with JSON containing:
             strategySummary: prefsRecord?.strategy_summary || 'Custom Strategy',
             entryPrice: analysis.entryPrice,
             stopLoss: analysis.stopLoss,
-            takeProfit: posSizeResult.takeProfit,
+            takeProfit: analysis.takeProfit,
             riskRewardRatio: riskRewardStr,
             confidenceScore: analysis.confidence,
             aiReasoning: analysis.reasoning,

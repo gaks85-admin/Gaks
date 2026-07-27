@@ -39,6 +39,40 @@ export interface PositionSizeResult {
   rrValidationPassed: boolean;
 }
 
+export function getTickSize(symbol: string): number {
+  const clean = (symbol || '').toUpperCase();
+  if (clean.includes('JPY') || clean.includes('XAU') || clean.includes('GOLD') || clean.includes('XAG') || clean.includes('SILVER') || clean.includes('US30') || clean.includes('NAS') || clean.includes('SPX') || clean.includes('BTC') || clean.includes('ETH')) {
+    return 0.01;
+  }
+  return 0.0001;
+}
+
+export function logExecutionValidationAudit(
+  intendedEntry: number,
+  executedEntry: number,
+  difference: number,
+  slDistance: number,
+  tpDistance: number,
+  configuredRr: string,
+  actualRr: number,
+  expectedLoss: number,
+  expectedProfit: number,
+  passed: boolean
+): void {
+  console.log(`\n========== EXECUTION VALIDATION ==========`);
+  console.log(`Intended Entry: ${intendedEntry}`);
+  console.log(`Executed Entry: ${executedEntry}`);
+  console.log(`Difference: ${difference.toFixed(5)}`);
+  console.log(`SL Distance: ${slDistance.toFixed(5)}`);
+  console.log(`TP Distance: ${tpDistance.toFixed(5)}`);
+  console.log(`Configured RR: ${configuredRr}`);
+  console.log(`Actual RR: ${actualRr.toFixed(4)}`);
+  console.log(`Expected Loss: $${expectedLoss.toFixed(2)}`);
+  console.log(`Expected Profit: $${expectedProfit.toFixed(2)}`);
+  console.log(`PASS / FAIL: ${passed ? 'PASS' : 'FAIL'}`);
+  console.log(`==========================================\n`);
+}
+
 export function classifyLotType(lotSize: number): string {
   if (lotSize < 0.01) {
     return "Nano Lot";
@@ -169,6 +203,7 @@ export function calculatePositionSize(config: {
   accountSize: number;
   riskPercentage: number;
   entryPrice: number;
+  executedEntry?: number;
   stopLoss: number;
   takeProfit?: number | null;
   geminiTp?: number | null;
@@ -178,26 +213,36 @@ export function calculatePositionSize(config: {
 }): PositionSizeResult {
   const riskAmount = config.accountSize * (config.riskPercentage / 100);
   const direction = (config.direction || 'BUY').toUpperCase();
-  
-  // Exact formulas for risk distance and TP calculation
-  let riskDistance = 0;
-  let calculatedTP = 0;
   const userRr = config.riskRewardStr || '1:2';
   const targetRrRatio = parseRiskRewardRatio(userRr);
 
-  if (direction === 'SELL') {
-    riskDistance = config.stopLoss - config.entryPrice;
-    calculatedTP = config.entryPrice - (riskDistance * targetRrRatio);
-  } else {
-    riskDistance = config.entryPrice - config.stopLoss;
-    calculatedTP = config.entryPrice + (riskDistance * targetRrRatio);
+  // 1. Determine Intended Entry Price
+  const intendedEntry = config.entryPrice;
+  // 4. Retrieve Actual Executed Entry Price
+  const executedEntry = config.executedEntry !== undefined ? config.executedEntry : intendedEntry;
+
+  // 2. Calculate Risk Distance
+  let riskDistance = direction === 'SELL' ? config.stopLoss - intendedEntry : intendedEntry - config.stopLoss;
+  riskDistance = Math.abs(riskDistance);
+
+  // 3. Calculate TP
+  let calculatedTP = direction === 'SELL' ? intendedEntry - (riskDistance * targetRrRatio) : intendedEntry + (riskDistance * targetRrRatio);
+
+  // Check tick difference
+  const diff = Math.abs(executedEntry - intendedEntry);
+  const tickSize = getTickSize(config.symbol);
+  if (diff > tickSize) {
+    console.log(`[Execution Validation] Executed entry (${executedEntry}) differs from intended entry (${intendedEntry}) by ${diff.toFixed(5)} (> 1 tick ${tickSize}). Automatically recomputing TP and SL.`);
   }
 
-  // Ensure riskDistance is positive
-  riskDistance = Math.abs(riskDistance);
-  const rewardDistance = Math.abs(calculatedTP - config.entryPrice);
-  const actualRisk = riskDistance;
-  const actualReward = rewardDistance;
+  // 5. Recalculate Stop Loss, Take Profit using ONLY the executed entry
+  const executedSL = direction === 'SELL' ? executedEntry + riskDistance : executedEntry - riskDistance;
+  const executedTP = direction === 'SELL' ? executedEntry - (riskDistance * targetRrRatio) : executedEntry + (riskDistance * targetRrRatio);
+
+  const stopDistance = Math.abs(executedEntry - executedSL);
+  const tpDistance = Math.abs(executedTP - executedEntry);
+  const actualRisk = stopDistance;
+  const actualReward = tpDistance;
   const actualRr = actualRisk > 0 ? actualReward / actualRisk : 0;
 
   // Validate RR within 1% tolerance
@@ -206,11 +251,11 @@ export function calculatePositionSize(config: {
   const rrValidationPassed = expectedRrNumeric === 0 ? false : (rrDiff / expectedRrNumeric) <= 0.01;
 
   logRrValidationAudit(
-    config.entryPrice,
-    config.stopLoss,
-    calculatedTP,
-    riskDistance,
-    rewardDistance,
+    executedEntry,
+    executedSL,
+    executedTP,
+    stopDistance,
+    tpDistance,
     userRr,
     actualRr,
     rrValidationPassed
@@ -223,9 +268,6 @@ export function calculatePositionSize(config: {
   let pipValue = 10.00;
   let lossPerOneLot = 0;
   let profitPerOneLot = 0;
-
-  const stopDistance = riskDistance;
-  const tpDistance = rewardDistance;
 
   if (
     cleanSym.includes('BTC') ||
@@ -320,13 +362,26 @@ export function calculatePositionSize(config: {
         skipReason
       );
 
+      logExecutionValidationAudit(
+        intendedEntry,
+        executedEntry,
+        diff,
+        stopDistance,
+        tpDistance,
+        userRr,
+        actualRr,
+        0,
+        0,
+        false
+      );
+
       return {
         accountSize: config.accountSize,
         riskPercentage: config.riskPercentage,
         riskAmount,
-        entryPrice: config.entryPrice,
-        stopLoss: config.stopLoss,
-        takeProfit: calculatedTP,
+        entryPrice: executedEntry,
+        stopLoss: executedSL,
+        takeProfit: executedTP,
         stopDistance,
         pipValue,
         contractSize,
@@ -368,13 +423,26 @@ export function calculatePositionSize(config: {
         skipReason
       );
 
+      logExecutionValidationAudit(
+        intendedEntry,
+        executedEntry,
+        diff,
+        stopDistance,
+        tpDistance,
+        userRr,
+        actualRr,
+        0,
+        0,
+        false
+      );
+
       return {
         accountSize: config.accountSize,
         riskPercentage: config.riskPercentage,
         riskAmount,
-        entryPrice: config.entryPrice,
-        stopLoss: config.stopLoss,
-        takeProfit: calculatedTP,
+        entryPrice: executedEntry,
+        stopLoss: executedSL,
+        takeProfit: executedTP,
         stopDistance,
         pipValue,
         contractSize,
@@ -435,13 +503,26 @@ export function calculatePositionSize(config: {
     skipReason
   );
 
+  logExecutionValidationAudit(
+    intendedEntry,
+    executedEntry,
+    diff,
+    stopDistance,
+    tpDistance,
+    userRr,
+    actualRr,
+    expectedLoss,
+    expectedProfit,
+    accepted && rrValidationPassed
+  );
+
   return {
     accountSize: config.accountSize,
     riskPercentage: config.riskPercentage,
     riskAmount,
-    entryPrice: config.entryPrice,
-    stopLoss: config.stopLoss,
-    takeProfit: calculatedTP,
+    entryPrice: executedEntry,
+    stopLoss: executedSL,
+    takeProfit: executedTP,
     stopDistance,
     pipValue,
     contractSize,
