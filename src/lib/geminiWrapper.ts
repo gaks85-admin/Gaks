@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { GoogleGenAI } from '@google/genai';
-import { sendTelegramMessage } from './telegramWrapper';
+import { sendTelegramMessage } from './telegramWrapper.js';
 
 // Simplified Error Classification
 export type GeminiErrorType = 'invalid_key' | 'quota_exceeded' | 'rate_limited' | 'temporary_failure' | 'unknown_error';

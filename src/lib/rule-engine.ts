@@ -1,4 +1,4 @@
-import { Candle, calculateEMA } from './strategy-engine';
+import { Candle, calculateEMA } from './strategy-engine.js';
 
 export interface RuleEngineResult {
   trend: 'Bullish' | 'Bearish' | 'Neutral';

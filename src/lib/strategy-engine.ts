@@ -1,4 +1,4 @@
-import { ParsedStrategy } from './strategy-parser';
+import { ParsedStrategy } from './strategy-parser.js';
 
 export interface Candle {
   timestamp: number | string;

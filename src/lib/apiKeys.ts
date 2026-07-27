@@ -1,7 +1,7 @@
 import { supabase } from '../supabaseClient';
-import { runGeminiRequest } from './geminiWrapper';
+import { runGeminiRequest } from './geminiWrapper.js';
 import { GoogleGenAI } from '@google/genai';
-import { sendTelegramMessage } from './telegramWrapper';
+import { sendTelegramMessage } from './telegramWrapper.js';
 
 export interface UserApiKey {
   id?: string;
