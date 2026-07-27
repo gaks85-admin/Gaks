@@ -1679,10 +1679,20 @@ ${JSON.stringify(collectedData, null, 2)}
             riskPercentage: riskPercentage,
             entryPrice: Number(sig.entryPrice) || 0,
             stopLoss: Number(sig.stopLoss) || 0,
-            takeProfit: sig.takeProfit ? Number(sig.takeProfit) : null,
-            symbol: sig.pair
+            geminiTp: sig.takeProfit ? Number(sig.takeProfit) : null,
+            symbol: sig.pair,
+            direction: sig.direction,
+            riskRewardStr: riskRewardStr
           });
           logPositionSizeAudit(posSizeResult, prefsRecord?.updated_at || prefsRecord?.created_at || 'N/A');
+
+          if (!posSizeResult.accepted) {
+            console.log(`[Risk Validation Failed - Trade Skipped] ${posSizeResult.skipReason}`);
+            continue;
+          }
+
+          sig.takeProfit = posSizeResult.takeProfit;
+          sig.riskRewardRatio = riskRewardStr;
           (sig as any).lotSize = posSizeResult.calculatedLotSize;
           (sig as any).riskAmount = posSizeResult.riskAmount;
           (sig as any).expectedLoss = posSizeResult.expectedLoss;

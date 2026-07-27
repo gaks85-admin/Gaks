@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { GoogleGenAI, Type } from "@google/genai";
 import { analyzeMarket, Candle } from "../../src/lib/strategy-engine.js";
-import { extractRiskPreferences, calculatePositionSize, logPositionSizeAudit } from "../../src/lib/risk-engine.js";
+import { extractRiskPreferences, calculatePositionSize, logPositionSizeAudit, parseRiskRewardRatio } from "../../src/lib/risk-engine.js";
 
 
 async function generateContentWithDiagnostics(ai: any, params: any) {
@@ -329,14 +329,27 @@ export default async function handler(req: any, res: any) {
         riskPercentage: riskPercentage,
         entryPrice: Number(analysis.entryPrice) || 0,
         stopLoss: Number(analysis.stopLoss) || 0,
-        takeProfit: analysis.takeProfit ? Number(analysis.takeProfit) : null,
-        symbol: symbol
+        geminiTp: analysis.takeProfit ? Number(analysis.takeProfit) : null,
+        symbol: symbol,
+        direction: analysis.signal,
+        riskRewardStr: riskRewardStr
       });
       logPositionSizeAudit(posSizeResult, prefsRecord?.updated_at || prefsRecord?.created_at || 'N/A');
+      analysis.takeProfit = posSizeResult.takeProfit;
+      analysis.riskReward = parseRiskRewardRatio(riskRewardStr);
+      (analysis as any).riskRewardStr = riskRewardStr;
+      (analysis as any).accepted = posSizeResult.accepted;
+      (analysis as any).skipReason = posSizeResult.skipReason;
       (analysis as any).lotSize = posSizeResult.calculatedLotSize;
       (analysis as any).riskAmount = posSizeResult.riskAmount;
       (analysis as any).expectedLoss = posSizeResult.expectedLoss;
+      (analysis as any).expectedProfit = posSizeResult.expectedProfit;
       (analysis as any).lotType = posSizeResult.lotType;
+
+      if (!posSizeResult.accepted) {
+        console.log(`[Risk Validation Failed - Trade Skipped] ${posSizeResult.skipReason}`);
+        analysis.signal = 'NO_TRADE';
+      }
     }
 
     // 9. Telegram Send Decision

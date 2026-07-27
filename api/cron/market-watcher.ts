@@ -1298,14 +1298,29 @@ ${JSON.stringify(candleData.slice(-10), null, 2)}
           riskPercentage: riskPercentage,
           entryPrice: Number(analysis.entryPrice) || 0,
           stopLoss: Number(analysis.stopLoss) || 0,
-          takeProfit: analysis.takeProfit ? Number(analysis.takeProfit) : null,
-          symbol: selectedPair
+          geminiTp: analysis.takeProfit ? Number(analysis.takeProfit) : null,
+          symbol: selectedPair,
+          direction: analysis.signal,
+          riskRewardStr: riskRewardStr
         });
         logPositionSizeAudit(posSizeResult, prefsRecord?.updated_at || prefsRecord?.created_at || 'N/A');
 
+        if (!posSizeResult.accepted) {
+          console.log(`[Risk Validation Failed - Trade Skipped] ${posSizeResult.skipReason}`);
+          await supabase
+            .from("watchers")
+            .update({ 
+               last_scan_at: new Date().toISOString(),
+               updated_at: new Date().toISOString()
+            })
+            .eq("id", watcher.id);
+          watchersProcessedCount++;
+          continue;
+        }
+
         const signalReasoning = Array.isArray(analysis.reasoning) ? analysis.reasoning.join("; ") : (analysis.reasoning || "Strategy criteria matched");
         console.log(`[SIGNAL GENERATED] Watcher ID: ${watcher.id}`);
-        console.log(`Exact reason new signal was generated: Strategy evaluation returned signal '${analysis.signal}' with confidence ${analysis.confidence}% (>= 70 threshold) on pair ${selectedPair}. Entry: ${analysis.entryPrice}, Stop Loss: ${analysis.stopLoss}, Take Profit: ${analysis.takeProfit}. Reasoning: ${signalReasoning}`);
+        console.log(`Exact reason new signal was generated: Strategy evaluation returned signal '${analysis.signal}' with confidence ${analysis.confidence}% (>= 70 threshold) on pair ${selectedPair}. Entry: ${analysis.entryPrice}, Stop Loss: ${analysis.stopLoss}, Take Profit: ${posSizeResult.takeProfit}. Reasoning: ${signalReasoning}`);
 
         const signal = {
             pair: mappedSymbol,
@@ -1314,8 +1329,8 @@ ${JSON.stringify(candleData.slice(-10), null, 2)}
             strategySummary: prefsRecord?.strategy_summary || 'Custom Strategy',
             entryPrice: analysis.entryPrice,
             stopLoss: analysis.stopLoss,
-            takeProfit: analysis.takeProfit,
-            riskRewardRatio: analysis.riskReward,
+            takeProfit: posSizeResult.takeProfit,
+            riskRewardRatio: riskRewardStr,
             confidenceScore: analysis.confidence,
             aiReasoning: analysis.reasoning,
             lotSize: posSizeResult.calculatedLotSize,

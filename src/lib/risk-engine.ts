@@ -27,6 +27,12 @@ export interface PositionSizeResult {
   lotStep: number;
   minLot: number;
   symbol: string;
+  accepted: boolean;
+  skipReason: string;
+  expectedLossAtRequiredLot: number;
+  expectedLossAtMinLot: number;
+  userRr: string;
+  geminiTp: number | null | undefined;
 }
 
 export function classifyLotType(lotSize: number): string {
@@ -93,8 +99,66 @@ export async function loadRiskPreferences(supabase: any, userId: string): Promis
   return extractRiskPreferences(prefsRecord, userId);
 }
 
+export function parseRiskRewardRatio(rrStr: string): number {
+  if (!rrStr) return 2.0;
+  const parts = rrStr.split(':');
+  if (parts.length === 2) {
+    const riskPart = parseFloat(parts[0]) || 1;
+    const rewardPart = parseFloat(parts[1]) || 2;
+    return rewardPart / riskPart;
+  }
+  const val = parseFloat(rrStr);
+  return isNaN(val) ? 2.0 : val;
+}
+
+export function logTpCalculationAudit(
+  direction: string,
+  entryPrice: number,
+  stopLoss: number,
+  stopDistance: number,
+  userRr: string,
+  calculatedTp: number,
+  geminiTp: number | null | undefined
+): void {
+  console.log(`\n========== TP CALCULATION AUDIT ==========`);
+  console.log(`Direction: ${direction}`);
+  console.log(`Entry: ${entryPrice}`);
+  console.log(`Stop Loss: ${stopLoss}`);
+  console.log(`Stop Distance: ${stopDistance.toFixed(5)}`);
+  console.log(`User RR: ${userRr}`);
+  console.log(`Calculated TP: ${calculatedTp.toFixed(5)}`);
+  console.log(`Gemini TP: ${geminiTp ?? 'N/A'}`);
+  console.log(`Using Backend TP: ${calculatedTp.toFixed(5)}`);
+  console.log(`=========================================\n`);
+}
+
+export function logRiskValidationAudit(
+  accountSize: number,
+  riskPercentage: number,
+  riskAmount: number,
+  requiredLot: number,
+  minLot: number,
+  expectedLossAtRequiredLot: number,
+  expectedLossAtMinLot: number,
+  accepted: boolean,
+  reason: string
+): void {
+  console.log(`\n========== RISK VALIDATION ==========`);
+  console.log(`Capital: $${accountSize.toFixed(2)}`);
+  console.log(`Risk %: ${riskPercentage}%`);
+  console.log(`Risk Amount: $${riskAmount.toFixed(2)}`);
+  console.log(`Required Lot: ${requiredLot.toFixed(4)}`);
+  console.log(`Broker Minimum Lot: ${minLot}`);
+  console.log(`Expected Loss at Required Lot: $${expectedLossAtRequiredLot.toFixed(2)}`);
+  console.log(`Expected Loss at Minimum Lot: $${expectedLossAtMinLot.toFixed(2)}`);
+  console.log(`Trade Accepted: ${accepted ? 'YES' : 'NO'}`);
+  console.log(`Reason: ${reason}`);
+  console.log(`====================================\n`);
+}
+
 /**
- * Calculates position size ensuring Maximum loss = Risk Amount exactly.
+ * Calculates position size ensuring Maximum loss = Risk Amount exactly,
+ * enforces backend TP calculation from Risk Reward, and rejects trades below broker minimum lot.
  */
 export function calculatePositionSize(config: {
   accountSize: number;
@@ -102,7 +166,10 @@ export function calculatePositionSize(config: {
   entryPrice: number;
   stopLoss: number;
   takeProfit?: number | null;
+  geminiTp?: number | null;
   symbol: string;
+  direction?: string;
+  riskRewardStr?: string;
 }): PositionSizeResult {
   const riskAmount = config.accountSize * (config.riskPercentage / 100);
   const stopDistance = Math.abs(config.entryPrice - config.stopLoss);
@@ -114,7 +181,28 @@ export function calculatePositionSize(config: {
   let lossPerOneLot = 0;
   let profitPerOneLot = 0;
 
-  const tpDistance = config.takeProfit ? Math.abs(config.takeProfit - config.entryPrice) : 0;
+  // 1. Backend Take Profit calculation from User Risk Reward Ratio
+  const userRr = config.riskRewardStr || '1:2';
+  const rrMultiplier = parseRiskRewardRatio(userRr);
+  const direction = (config.direction || 'BUY').toUpperCase();
+  let calculatedTP = 0;
+  if (direction === 'SELL') {
+    calculatedTP = config.entryPrice - (stopDistance * rrMultiplier);
+  } else {
+    calculatedTP = config.entryPrice + (stopDistance * rrMultiplier);
+  }
+
+  logTpCalculationAudit(
+    direction,
+    config.entryPrice,
+    config.stopLoss,
+    stopDistance,
+    userRr,
+    calculatedTP,
+    config.geminiTp ?? config.takeProfit
+  );
+
+  const tpDistance = Math.abs(calculatedTP - config.entryPrice);
 
   if (
     cleanSym.includes('BTC') ||
@@ -193,25 +281,77 @@ export function calculatePositionSize(config: {
   }
 
   let exactLotSize = 0;
-  let normalizedLotSize = 0;
-  let expectedLoss = 0;
-  let expectedProfit = 0;
+  let expectedLossAtRequiredLot = 0;
+  let expectedLossAtMinLot = 0;
+  let accepted = true;
+  let skipReason = '';
 
   if (lossPerOneLot > 0 && config.accountSize > 0 && config.riskPercentage > 0) {
     exactLotSize = riskAmount / lossPerOneLot;
-    if (exactLotSize > 0) {
-      const steps = Math.floor((exactLotSize + 1e-9) / lotStep);
-      normalizedLotSize = steps * lotStep;
-      if (normalizedLotSize < minLot && exactLotSize > 0) {
-        normalizedLotSize = minLot;
-      }
-      const decimals = lotStep === 1 ? 0 : lotStep === 0.01 ? 2 : lotStep === 0.001 ? 3 : 4;
-      normalizedLotSize = Number(normalizedLotSize.toFixed(decimals));
+    expectedLossAtRequiredLot = exactLotSize * lossPerOneLot;
+    expectedLossAtMinLot = minLot * lossPerOneLot;
+
+    // Strict validation: RequiredLot compared against BrokerMinimumLot
+    if (exactLotSize < minLot) {
+      accepted = false;
+      skipReason = `Trade skipped. Required lot size is below broker minimum. Required lot: ${exactLotSize.toFixed(4)}, Broker minimum: ${minLot}, Expected loss at minimum lot: $${expectedLossAtMinLot.toFixed(2)}, User maximum risk: $${riskAmount.toFixed(2)}.`;
+      logRiskValidationAudit(
+        config.accountSize,
+        config.riskPercentage,
+        riskAmount,
+        exactLotSize,
+        minLot,
+        expectedLossAtRequiredLot,
+        expectedLossAtMinLot,
+        accepted,
+        skipReason
+      );
+
+      return {
+        accountSize: config.accountSize,
+        riskPercentage: config.riskPercentage,
+        riskAmount,
+        entryPrice: config.entryPrice,
+        stopLoss: config.stopLoss,
+        takeProfit: calculatedTP,
+        stopDistance,
+        pipValue,
+        contractSize,
+        calculatedLotSize: 0,
+        exactLotSize: Number(exactLotSize.toFixed(4)),
+        expectedLoss: 0,
+        expectedProfit: 0,
+        assetClass,
+        normalizedLotSize: 0,
+        lotType: 'Nano Lot',
+        lotStep,
+        minLot,
+        symbol: config.symbol,
+        accepted,
+        skipReason,
+        expectedLossAtRequiredLot,
+        expectedLossAtMinLot,
+        userRr,
+        geminiTp: config.geminiTp ?? config.takeProfit
+      };
     }
+  }
+
+  let normalizedLotSize = 0;
+  if (exactLotSize > 0) {
+    const steps = Math.floor((exactLotSize + 1e-9) / lotStep);
+    normalizedLotSize = steps * lotStep;
+    if (normalizedLotSize < minLot && exactLotSize > 0) {
+      normalizedLotSize = minLot;
+    }
+    const decimals = lotStep === 1 ? 0 : lotStep === 0.01 ? 2 : lotStep === 0.001 ? 3 : 4;
+    normalizedLotSize = Number(normalizedLotSize.toFixed(decimals));
   }
 
   const calculatedLotSize = normalizedLotSize;
   const rawLotSizeFormatted = Number(exactLotSize.toFixed(4));
+  let expectedLoss = 0;
+  let expectedProfit = 0;
 
   if (lossPerOneLot > 0 && calculatedLotSize > 0) {
     expectedLoss = Number((calculatedLotSize * lossPerOneLot).toFixed(2));
@@ -219,6 +359,19 @@ export function calculatePositionSize(config: {
   }
 
   const lotType = classifyLotType(calculatedLotSize);
+  skipReason = `Required lot (${rawLotSizeFormatted}) is greater than or equal to broker minimum (${minLot}).`;
+
+  logRiskValidationAudit(
+    config.accountSize,
+    config.riskPercentage,
+    riskAmount,
+    rawLotSizeFormatted,
+    minLot,
+    expectedLossAtRequiredLot,
+    expectedLossAtMinLot,
+    accepted,
+    skipReason
+  );
 
   return {
     accountSize: config.accountSize,
@@ -226,7 +379,7 @@ export function calculatePositionSize(config: {
     riskAmount,
     entryPrice: config.entryPrice,
     stopLoss: config.stopLoss,
-    takeProfit: config.takeProfit ?? null,
+    takeProfit: calculatedTP,
     stopDistance,
     pipValue,
     contractSize,
@@ -239,7 +392,13 @@ export function calculatePositionSize(config: {
     lotType,
     lotStep,
     minLot,
-    symbol: config.symbol
+    symbol: config.symbol,
+    accepted,
+    skipReason,
+    expectedLossAtRequiredLot,
+    expectedLossAtMinLot,
+    userRr,
+    geminiTp: config.geminiTp ?? config.takeProfit
   };
 }
 
