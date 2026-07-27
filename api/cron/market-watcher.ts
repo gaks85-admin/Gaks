@@ -3,6 +3,7 @@ import { GoogleGenAI, Type } from '@google/genai';
 import { analyzeMarket, Candle } from '../../src/lib/strategy-engine.js';
 import { buildTelegramAlertMessage } from '../../src/lib/telegram-formatter.js';
 import { extractRiskPreferences, calculatePositionSize, logPositionSizeAudit } from '../../src/lib/risk-engine.js';
+import { evaluateRules, logRuleEngineAudit } from '../../src/lib/rule-engine.js';
 
 // --- Inlined Gemini Wrapper ---
 
@@ -1196,84 +1197,94 @@ export default async function handler(req: any, res: any) {
         }
         console.log(`LOG: Candle data downloaded for ${selectedPair}: YES (${candleData.length} candles)`);
 
-        // Strategy Engine / Gemini Analysis Executed
-        console.log(`LOG: Strategy engine executed for ${selectedPair}`);
-        const parsedStrategy: any = {
-          entryConditions: [strategyText]
+        // 1. Rule Engine Execution
+        const ruleResult = evaluateRules(watcher, candleData);
+        logRuleEngineAudit(ruleResult);
+
+        let analysis: any = {
+          signal: 'NO_TRADE',
+          confidence: 0,
+          entryPrice: null,
+          stopLoss: null,
+          takeProfit: null,
+          riskReward: null,
+          reasoning: []
         };
-        console.log("GEMINI CALLED");
-        let analysis = analyzeMarket(candleData, parsedStrategy);
-        try {
-          const geminiKey = apiKeyRecord?.api_key || process.env.GEMINI_API_KEY;
-          if (geminiKey) {
-            const ai = new GoogleGenAI({ apiKey: geminiKey });
-            const promptText = `
+
+        if (!ruleResult.passed) {
+          console.log(`[Rule Engine Failed] Watcher ID: ${watcher.id} (${selectedPair}) failed rule checks. Stopping execution. Gemini NOT called.`);
+        } else {
+          // 2. Gemini Validation (Only if rules pass)
+          console.log("GEMINI CALLED");
+          ruleResult.geminiCalled = true;
+          try {
+            const geminiKey = apiKeyRecord?.api_key || process.env.GEMINI_API_KEY;
+            if (geminiKey) {
+              const ai = new GoogleGenAI({ apiKey: geminiKey });
+              const promptText = `
 You are an expert AI trading assistant.
-Analyze the following live market data against the user's trading strategy and configuration.
-Return a structured JSON list of trading signals. Only generate a signal if the setup strongly matches the strategy.
-If no valid setups are found, return an empty array for signals.
+Evaluate whether the following market conditions and indicators satisfy the user's trading strategy.
+
+Rule Engine Indicators:
+- Trend: ${ruleResult.trend}
+- EMA Trend Aligned: YES
+- ATR Volatility: ${ruleResult.atr.toFixed(5)}
+- Market Session: ${ruleResult.session}
+- Support Proximity: ${ruleResult.supportProximity ? 'Near Support' : 'Neutral'}
+- Resistance Proximity: ${ruleResult.resistanceProximity ? 'Near Resistance' : 'Neutral'}
+- Trendline Breakout: ${ruleResult.breakout ? 'Breakout Detected' : 'No breakout'}
+- Volume Confirmation: ${ruleResult.volumeConfirmed ? 'Confirmed' : 'Normal'}
+- Recent Candles: ${JSON.stringify(candleData.slice(-5), null, 2)}
 
 User's Trading Strategy:
 ${strategyText}
 
-Trading Configuration:
-- Account Size: $${accountSize}
-- Risk Percentage per trade: ${riskPercentage}%
-- Risk-to-Reward Ratio: ${riskRewardStr}
-- Maximum Daily Risk: ${maxDailyRiskStr}
-- Preferred Timeframe: ${selectedTimeframe}
-- Preferred Instrument: ${selectedPair}
-
-Live Market Data:
-${JSON.stringify(candleData.slice(-10), null, 2)}
+Does this satisfy the user's strategy?
+Answer with JSON containing:
+- satisfies (boolean)
+- direction ('BUY' | 'SELL' | 'NO_TRADE')
+- entryPrice (number)
+- stopLoss (number)
+- confidenceScore (number 0-100)
+- reasoning (string)
 `;
-            const aiResponse = await generateContentWithDiagnostics(ai, {
-              model: "gemini-2.5-flash",
-              contents: promptText,
-              config: {
-                responseMimeType: "application/json",
-                responseSchema: {
-                  type: Type.OBJECT,
-                  properties: {
-                    signals: {
-                      type: Type.ARRAY,
-                      items: {
-                        type: Type.OBJECT,
-                        properties: {
-                          pair: { type: Type.STRING },
-                          direction: { type: Type.STRING },
-                          entryPrice: { type: Type.NUMBER },
-                          stopLoss: { type: Type.NUMBER },
-                          takeProfit: { type: Type.NUMBER },
-                          riskRewardRatio: { type: Type.STRING },
-                          confidenceScore: { type: Type.NUMBER },
-                          aiReasoning: { type: Type.STRING }
-                        },
-                        required: ["pair", "direction", "entryPrice", "stopLoss", "takeProfit", "riskRewardRatio", "confidenceScore", "aiReasoning"]
-                      }
-                    }
-                  },
-                  required: ["signals"]
+              const aiResponse = await generateContentWithDiagnostics(ai, {
+                model: "gemini-2.5-flash",
+                contents: promptText,
+                config: {
+                  responseMimeType: "application/json",
+                  responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                      satisfies: { type: Type.BOOLEAN },
+                      direction: { type: Type.STRING },
+                      entryPrice: { type: Type.NUMBER },
+                      stopLoss: { type: Type.NUMBER },
+                      confidenceScore: { type: Type.NUMBER },
+                      reasoning: { type: Type.STRING }
+                    },
+                    required: ["satisfies", "direction", "entryPrice", "stopLoss", "confidenceScore", "reasoning"]
+                  }
                 }
+              });
+              const parsedResult = JSON.parse(aiResponse.text || '{}');
+              if (parsedResult.satisfies && parsedResult.direction && parsedResult.direction !== 'NO_TRADE') {
+                analysis = {
+                  signal: parsedResult.direction,
+                  confidence: parsedResult.confidenceScore || 85,
+                  entryPrice: parsedResult.entryPrice || candleData[candleData.length - 1].close,
+                  stopLoss: parsedResult.stopLoss || (parsedResult.direction === 'BUY' ? candleData[candleData.length - 1].close * 0.99 : candleData[candleData.length - 1].close * 1.01),
+                  takeProfit: null,
+                  riskReward: riskRewardStr,
+                  reasoning: [parsedResult.reasoning || "Satisfies strategy rules and Gemini validation."]
+                };
               }
-            });
-            const parsedResult = JSON.parse(aiResponse.text || '{"signals": []}');
-            const signals = parsedResult.signals || [];
-            if (signals.length > 0 && signals[0].confidenceScore >= 70) {
-              const sig = signals[0];
-              analysis = {
-                signal: sig.direction,
-                confidence: sig.confidenceScore,
-                entryPrice: sig.entryPrice,
-                stopLoss: sig.stopLoss,
-                takeProfit: sig.takeProfit,
-                riskReward: sig.riskRewardRatio,
-                reasoning: [sig.aiReasoning]
-              };
             }
+          } catch (gemErr: any) {
+            console.warn(`[Gemini Validation Warning]: Falling back to local strategy engine:`, gemErr.message);
+            const localAnalysis = analyzeMarket(candleData, { entryConditions: [strategyText] });
+            analysis = localAnalysis;
           }
-        } catch (gemErr: any) {
-          console.warn(`[Gemini Signal Generation Warning]: Falling back to local strategy engine:`, gemErr.message);
         }
 
         console.log(`LOG: Signal result for ${selectedPair}: ${analysis.signal} (Confidence: ${analysis.confidence}%)`);
