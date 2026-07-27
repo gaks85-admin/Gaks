@@ -1686,6 +1686,7 @@ ${JSON.stringify(collectedData, null, 2)}
           (sig as any).lotSize = posSizeResult.calculatedLotSize;
           (sig as any).riskAmount = posSizeResult.riskAmount;
           (sig as any).expectedLoss = posSizeResult.expectedLoss;
+          (sig as any).lotType = posSizeResult.lotType;
 
           await supabase.from("signals").insert({
             user_id: userId,
@@ -1709,7 +1710,8 @@ ${JSON.stringify(collectedData, null, 2)}
               aiReasoning: sig.aiReasoning,
               lotSize: posSizeResult.calculatedLotSize,
               riskAmount: posSizeResult.riskAmount,
-              expectedLoss: posSizeResult.expectedLoss
+              expectedLoss: posSizeResult.expectedLoss,
+              lotType: posSizeResult.lotType
             });
               
             await sendTelegramMessage_watcher(watcher.telegram_chat_id, alertMessage);

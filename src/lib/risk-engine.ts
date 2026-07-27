@@ -22,6 +22,23 @@ export interface PositionSizeResult {
   expectedLoss: number;
   expectedProfit: number;
   assetClass: 'Forex' | 'Gold' | 'Indices' | 'Crypto';
+  normalizedLotSize: number;
+  lotType: string;
+  lotStep: number;
+  minLot: number;
+  symbol: string;
+}
+
+export function classifyLotType(lotSize: number): string {
+  if (lotSize < 0.01) {
+    return "Nano Lot";
+  } else if (lotSize >= 0.01 && lotSize < 0.10 - 1e-9) {
+    return "Micro Lot";
+  } else if (lotSize >= 0.10 - 1e-9 && lotSize < 1.00 - 1e-9) {
+    return "Mini Lot";
+  } else {
+    return "Standard Lot";
+  }
 }
 
 /**
@@ -162,17 +179,46 @@ export function calculatePositionSize(config: {
     }
   }
 
+  let minLot = 0.01;
+  let lotStep = 0.01;
+  if (assetClass === 'Indices') {
+    minLot = 1;
+    lotStep = 1;
+  } else if (assetClass === 'Crypto') {
+    minLot = 0.001;
+    lotStep = 0.001;
+  } else {
+    minLot = 0.01;
+    lotStep = 0.01;
+  }
+
   let exactLotSize = 0;
+  let normalizedLotSize = 0;
   let expectedLoss = 0;
   let expectedProfit = 0;
 
   if (lossPerOneLot > 0 && config.accountSize > 0 && config.riskPercentage > 0) {
     exactLotSize = riskAmount / lossPerOneLot;
-    expectedLoss = exactLotSize * lossPerOneLot;
-    expectedProfit = exactLotSize * profitPerOneLot;
+    if (exactLotSize > 0) {
+      const steps = Math.floor((exactLotSize + 1e-9) / lotStep);
+      normalizedLotSize = steps * lotStep;
+      if (normalizedLotSize < minLot && exactLotSize > 0) {
+        normalizedLotSize = minLot;
+      }
+      const decimals = lotStep === 1 ? 0 : lotStep === 0.01 ? 2 : lotStep === 0.001 ? 3 : 4;
+      normalizedLotSize = Number(normalizedLotSize.toFixed(decimals));
+    }
   }
 
-  const calculatedLotSize = Number(exactLotSize.toFixed(4));
+  const calculatedLotSize = normalizedLotSize;
+  const rawLotSizeFormatted = Number(exactLotSize.toFixed(4));
+
+  if (lossPerOneLot > 0 && calculatedLotSize > 0) {
+    expectedLoss = Number((calculatedLotSize * lossPerOneLot).toFixed(2));
+    expectedProfit = Number((calculatedLotSize * profitPerOneLot).toFixed(2));
+  }
+
+  const lotType = classifyLotType(calculatedLotSize);
 
   return {
     accountSize: config.accountSize,
@@ -185,15 +231,20 @@ export function calculatePositionSize(config: {
     pipValue,
     contractSize,
     calculatedLotSize,
-    exactLotSize,
+    exactLotSize: rawLotSizeFormatted,
     expectedLoss,
     expectedProfit,
-    assetClass
+    assetClass,
+    normalizedLotSize: calculatedLotSize,
+    lotType,
+    lotStep,
+    minLot,
+    symbol: config.symbol
   };
 }
 
 /**
- * Prints the verification audit log required by Task 5.
+ * Prints the verification audit log required by Task 5 and Task 6.
  */
 export function logPositionSizeAudit(result: PositionSizeResult, dbTimestamp: string): void {
   console.log(`\n========== POSITION SIZE AUDIT ==========`);
@@ -212,4 +263,14 @@ export function logPositionSizeAudit(result: PositionSizeResult, dbTimestamp: st
   console.log(`Trading Preferences Loaded From: Supabase (trading_preferences)`);
   console.log(`Database Timestamp: ${dbTimestamp}`);
   console.log(`========================================\n`);
+
+  console.log(`========== LOT NORMALIZATION AUDIT =========`);
+  console.log(`Asset: ${result.symbol || 'N/A'}`);
+  console.log(`Raw Lot: ${result.exactLotSize}`);
+  console.log(`Normalized Lot: ${result.normalizedLotSize}`);
+  console.log(`Lot Type: ${result.lotType}`);
+  console.log(`Lot Step: ${result.lotStep}`);
+  console.log(`Expected Loss: $${result.expectedLoss.toFixed(2)}`);
+  console.log(`Expected Profit: $${result.expectedProfit.toFixed(2)}`);
+  console.log(`============================================\n`);
 }

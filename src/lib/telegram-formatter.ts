@@ -85,6 +85,7 @@ export interface SignalTelegramPayload {
   lotSize?: number | string | null;
   riskAmount?: number | string | null;
   expectedLoss?: number | string | null;
+  lotType?: string;
 }
 
 export function buildTelegramAlertMessage(signal: SignalTelegramPayload): string {
@@ -101,9 +102,14 @@ export function buildTelegramAlertMessage(signal: SignalTelegramPayload): string
   const rrStr = formatRiskReward(signal.riskRewardRatio);
   const confStr = `${Math.round(signal.confidenceScore)}%`;
 
-  const posSizeStr = (signal.lotSize !== undefined && signal.lotSize !== null)
-    ? `Position Size: ${signal.lotSize} Lots (Risk: $${Number(signal.riskAmount || 0).toFixed(2)})\n\n`
-    : '';
+  let posSizeStr = '';
+  if (signal.lotSize !== undefined && signal.lotSize !== null) {
+    const lotTypeLine = signal.lotType ? `Lot Type: ${signal.lotType}\n` : '';
+    const riskVal = (signal.expectedLoss !== undefined && signal.expectedLoss !== null)
+      ? Number(signal.expectedLoss)
+      : Number(signal.riskAmount || 0);
+    posSizeStr = `Position Size: ${signal.lotSize} Lots\n${lotTypeLine}Risk: $${riskVal.toFixed(2)}\n\n`;
+  }
 
   let reasons: string[] = [];
   if (Array.isArray(signal.aiReasoning)) {

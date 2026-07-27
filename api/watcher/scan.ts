@@ -336,6 +336,7 @@ export default async function handler(req: any, res: any) {
       (analysis as any).lotSize = posSizeResult.calculatedLotSize;
       (analysis as any).riskAmount = posSizeResult.riskAmount;
       (analysis as any).expectedLoss = posSizeResult.expectedLoss;
+      (analysis as any).lotType = posSizeResult.lotType;
     }
 
     // 9. Telegram Send Decision

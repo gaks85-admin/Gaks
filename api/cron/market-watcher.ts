@@ -209,6 +209,7 @@ export interface SignalPayload {
   lotSize?: number | string | null;
   riskAmount?: number | string | null;
   expectedLoss?: number | string | null;
+  lotType?: string;
 }
 
 export async function registerSignal(
@@ -1319,7 +1320,8 @@ ${JSON.stringify(candleData.slice(-10), null, 2)}
             aiReasoning: analysis.reasoning,
             lotSize: posSizeResult.calculatedLotSize,
             riskAmount: posSizeResult.riskAmount,
-            expectedLoss: posSizeResult.expectedLoss
+            expectedLoss: posSizeResult.expectedLoss,
+            lotType: posSizeResult.lotType
         };
 
         const isRegistered = await registerSignal(supabase, watcher, signal);
