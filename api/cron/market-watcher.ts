@@ -1377,12 +1377,6 @@ Answer with JSON containing:
               updated_at: new Date().toISOString()
             }).eq("id", userId);
 
-            if (wasReady && newStatus !== 'READY' && newStatus !== 'TEMP_ERROR' && telegramChatId) {
-              const noticeMsg = `⚠️ Action Required\n\nYour AI Market Watcher has been paused because your Gemini API key requires attention.\n\nUpdate your API key inside Gaks AI to resume monitoring.`;
-              await sendTelegramMessage(telegramChatId, noticeMsg);
-              telegramMessagesSentCount++;
-            }
-
             console.log(`========== AI STATUS ==========`);
             console.log(`User: ${userProfile?.email || userId}`);
             console.log(`Watcher: ${watcher.id} (${watcher.selected_pair})`);

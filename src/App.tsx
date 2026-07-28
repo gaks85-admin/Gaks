@@ -2792,6 +2792,32 @@ export default function App() {
                 </div>
 
                 <div className="space-y-4">
+                  {/* AI Status Display */}
+                  {(() => {
+                    const status = userProfile?.gemini_status || 'READY';
+                    const isReady = status === 'READY';
+                    return (
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between p-3.5 rounded-2xl bg-zinc-950/80 border border-zinc-900">
+                          <span className="text-xs text-zinc-400 font-medium">AI Status</span>
+                          <span className={`text-xs font-bold uppercase tracking-wider ${
+                            isReady ? 'text-emerald-400' :
+                            status === 'INVALID_KEY' ? 'text-red-400' :
+                            'text-amber-400'
+                          }`}>
+                            {isReady ? '🟢 Ready' : status === 'INVALID_KEY' ? '🔴 API Key Needs Attention' : '🟡 AI Paused'}
+                          </span>
+                        </div>
+
+                        {!isReady && (
+                          <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-300 text-[11px] leading-relaxed">
+                            Your AI Market Watcher is currently paused because your AI key requires attention.
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+
                   <div className="space-y-2">
                     <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-500 block">Gemini API Key</label>
                     <div className="relative rounded-2xl border border-zinc-900 bg-zinc-950/60 focus-within:border-zinc-700 overflow-hidden">
@@ -2835,15 +2861,10 @@ export default function App() {
                     >
                       {isGeminiKeySaving ? (
                         <div className="w-4 h-4 rounded-full border-2 border-zinc-950 border-t-transparent animate-spin"></div>
-                      ) : geminiKeyExists ? (
-                        <>
-                          <RefreshCw className="w-3.5 h-3.5" />
-                          <span>Update Gemini Key</span>
-                        </>
                       ) : (
                         <>
-                          <Check className="w-3.5 h-3.5" />
-                          <span>Save Gemini Key</span>
+                          <RefreshCw className="w-3.5 h-3.5" />
+                          <span>Update API Key</span>
                         </>
                       )}
                     </button>

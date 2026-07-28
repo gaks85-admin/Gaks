@@ -171,17 +171,6 @@ export async function runGeminiRequest(
             last_error_at: new Date().toISOString()
         }).eq('id', apiKeyData.id);
 
-        if ((errorType === 'invalid_key' || errorType === 'quota_exceeded') && !apiKeyData.telegram_notified) {
-            const { data: conn } = await supabase.from('telegram_connections').select('telegram_chat_id').eq('user_id', userId).maybeSingle();
-            
-            if (conn && conn.telegram_chat_id) {
-                const message = `⚠️ Gaks AI Notice\n\nYour Gemini API key is no longer working.\n\nReason: ${errorType}\n\nPlease update your Gemini API key in Settings.\n\nYour Market Watcher has been paused until the issue is resolved.`;
-                await sendTelegramMessage(conn.telegram_chat_id, message);
-            }
-            
-            await supabase.from('user_api_keys').update({ telegram_notified: true }).eq('id', apiKeyData.id);
-        }
-
         throw error;
     }
 }
