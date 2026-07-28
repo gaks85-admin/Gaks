@@ -752,6 +752,14 @@ export default async function handler(req: any, res: any) {
         continue;
       }
 
+      const userId = watcher.user_id;
+      const { data: telegramConn } = await supabase
+        .from("telegram_connections")
+        .select("telegram_chat_id, connected")
+        .eq("user_id", userId)
+        .maybeSingle();
+      const telegramChatId = (telegramConn && telegramConn.connected) ? telegramConn.telegram_chat_id : (watcher.telegram_chat_id || null);
+
       const nowCheck = new Date();
       const gStatus = watcher.gemini_status || 'READY';
       if (gStatus === 'READY') {
@@ -761,15 +769,27 @@ export default async function handler(req: any, res: any) {
           const retryAt = new Date(watcher.next_gemini_retry_at);
           if (!isNaN(retryAt.getTime()) && nowCheck >= retryAt) {
             console.log(`[Gemini Quota Recovery] Watcher ${watcher.id} retry time reached. Resetting gemini_status to READY.`);
+            
+            if (!watcher.resume_notification_sent && telegramChatId) {
+              const resumeMsg = `⚠️ Gaks AI Notice\n\nYour Gemini API key quota has reset.\nMarket monitoring has resumed.`;
+              await sendTelegramMessage(telegramChatId, resumeMsg);
+              telegramMessagesSentCount++;
+            }
+
             await supabase.from("watchers").update({
               gemini_status: 'READY',
               next_gemini_retry_at: null,
               last_gemini_error: null,
+              quota_notification_sent: false,
+              resume_notification_sent: false,
               updated_at: new Date().toISOString()
             }).eq("id", watcher.id);
+
             watcher.gemini_status = 'READY';
             watcher.next_gemini_retry_at = null;
             watcher.last_gemini_error = null;
+            watcher.quota_notification_sent = false;
+            watcher.resume_notification_sent = false;
             watchersReadyCount++;
           } else {
             console.log(`[SKIPPED]\nReason: Waiting for Gemini quota reset.`);
@@ -798,7 +818,7 @@ export default async function handler(req: any, res: any) {
         break;
       }
 
-      const userId = watcher.user_id;
+      // userId already declared above
       const selectedPair = toCanonicalSymbol(watcher.selected_pair || "");
       const symbol = selectedPair;
       const selectedTimeframe = watcher.selected_timeframe || 'H1';
@@ -900,14 +920,7 @@ export default async function handler(req: any, res: any) {
         console.log(`[BRANCH EXECUTED] ACTIVE branch (Price Monitoring Only) for Watcher ID: ${watcher.id}`);
         console.log(`[STATE 2 - ACTIVE] Monitoring open trade for Watcher ID: ${watcher.id} (${selectedPair}). Skipping Gemini, strategy load, and candle download.`);
 
-        // Fetch Telegram Chat ID for trade status updates
-        const { data: telegramConn } = await supabase
-          .from("telegram_connections")
-          .select("telegram_chat_id, connected")
-          .eq("user_id", userId)
-          .maybeSingle();
-
-        const telegramChatId = (telegramConn && telegramConn.connected) ? telegramConn.telegram_chat_id : (watcher.telegram_chat_id || null);
+        // telegramChatId already available from loop start
 
         // Fetch ONLY the latest market price from Twelve Data
         let currentPrice: number | null = null;
@@ -1332,12 +1345,22 @@ Answer with JSON containing:
               });
               geminiCallsExecutedCount++;
               if (watcher.gemini_status !== 'READY') {
+                if (watcher.gemini_status === 'QUOTA_EXHAUSTED' && !watcher.resume_notification_sent && telegramChatId) {
+                  const resumeMsg = `⚠️ Gaks AI Notice\n\nYour Gemini API key quota has reset.\nMarket monitoring has resumed.`;
+                  await sendTelegramMessage(telegramChatId, resumeMsg);
+                  telegramMessagesSentCount++;
+                }
                 await supabase.from("watchers").update({
                   gemini_status: 'READY',
                   next_gemini_retry_at: null,
                   last_gemini_error: null,
+                  quota_notification_sent: false,
+                  resume_notification_sent: false,
                   updated_at: new Date().toISOString()
                 }).eq("id", watcher.id);
+                watcher.gemini_status = 'READY';
+                watcher.quota_notification_sent = false;
+                watcher.resume_notification_sent = false;
               }
               const parsedResult = JSON.parse(aiResponse.text || '{}');
               if (parsedResult.satisfies && parsedResult.direction && parsedResult.direction !== 'NO_TRADE') {
@@ -1367,16 +1390,20 @@ Answer with JSON containing:
               const nextRetry = new Date(Date.now() + retryDelayMs).toISOString();
               console.log(`[Gemini Quota Exhausted] Watcher ${watcher.id}: ${errMsg}`);
 
-              const wasAlreadyExhausted = watcher.gemini_status === 'QUOTA_EXHAUSTED';
+              const alreadySent = watcher.quota_notification_sent === true || watcher.gemini_status === 'QUOTA_EXHAUSTED';
 
               await supabase.from("watchers").update({
                 gemini_status: 'QUOTA_EXHAUSTED',
                 next_gemini_retry_at: nextRetry,
                 last_gemini_error: errMsg,
+                quota_notification_sent: true,
                 updated_at: new Date().toISOString()
               }).eq("id", watcher.id);
 
-              if (!wasAlreadyExhausted && telegramChatId) {
+              watcher.gemini_status = 'QUOTA_EXHAUSTED';
+              watcher.quota_notification_sent = true;
+
+              if (!alreadySent && telegramChatId) {
                 const noticeMsg = `⚠️ Gaks AI Notice\n\nYour Gemini API key has reached its free quota.\nMarket monitoring has been paused temporarily.\nMonitoring will resume automatically when Gemini allows requests again.\nNo action is required unless the quota does not reset.`;
                 await sendTelegramMessage(telegramChatId, noticeMsg);
                 telegramMessagesSentCount++;

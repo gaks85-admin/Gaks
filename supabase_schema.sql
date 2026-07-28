@@ -449,6 +449,8 @@ CREATE TABLE IF NOT EXISTS public.watchers (
   gemini_status TEXT DEFAULT 'READY',
   next_gemini_retry_at TIMESTAMPTZ,
   last_gemini_error TEXT,
+  quota_notification_sent BOOLEAN DEFAULT false,
+  resume_notification_sent BOOLEAN DEFAULT false,
   
   -- Auditing and metadata timestamps
   created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
