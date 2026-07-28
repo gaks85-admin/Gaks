@@ -444,6 +444,11 @@ CREATE TABLE IF NOT EXISTS public.watchers (
   closed_at TIMESTAMPTZ,
   cooldown_until TIMESTAMPTZ,
   signal_message_id TEXT,
+
+  -- Gemini Quota & Health Status tracking
+  gemini_status TEXT DEFAULT 'READY',
+  next_gemini_retry_at TIMESTAMPTZ,
+  last_gemini_error TEXT,
   
   -- Auditing and metadata timestamps
   created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,

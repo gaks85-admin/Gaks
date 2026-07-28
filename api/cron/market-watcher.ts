@@ -733,6 +733,14 @@ export default async function handler(req: any, res: any) {
     
     let twelveDataExhausted = false;
 
+    let watchersReadyCount = 0;
+    let quotaWaitCount = 0;
+    let invalidKeyCount = 0;
+    let tempErrorCount = 0;
+    let skippedDueToQuotaCount = 0;
+    let geminiCallsExecutedCount = 0;
+    let geminiCallsSavedCount = 0;
+
     console.log("[CRON STEP 5]");
 
     // Process each active watcher sequentially to respect Twelve Data free limits
@@ -742,6 +750,46 @@ export default async function handler(req: any, res: any) {
         skipped.push({ userId: watcher?.user_id || 'unknown', reason: `Watcher status is ${watcher?.status || 'stopped/deleted'}` });
         watchersSkippedCount++;
         continue;
+      }
+
+      const nowCheck = new Date();
+      const gStatus = watcher.gemini_status || 'READY';
+      if (gStatus === 'READY') {
+        watchersReadyCount++;
+      } else if (gStatus === 'QUOTA_EXHAUSTED') {
+        if (watcher.next_gemini_retry_at) {
+          const retryAt = new Date(watcher.next_gemini_retry_at);
+          if (!isNaN(retryAt.getTime()) && nowCheck >= retryAt) {
+            console.log(`[Gemini Quota Recovery] Watcher ${watcher.id} retry time reached. Resetting gemini_status to READY.`);
+            await supabase.from("watchers").update({
+              gemini_status: 'READY',
+              next_gemini_retry_at: null,
+              last_gemini_error: null,
+              updated_at: new Date().toISOString()
+            }).eq("id", watcher.id);
+            watcher.gemini_status = 'READY';
+            watcher.next_gemini_retry_at = null;
+            watcher.last_gemini_error = null;
+            watchersReadyCount++;
+          } else {
+            console.log(`[SKIPPED]\nReason: Waiting for Gemini quota reset.`);
+            skipped.push({ userId: watcher.user_id, reason: "Waiting for Gemini quota reset." });
+            watchersSkippedCount++;
+            skippedDueToQuotaCount++;
+            geminiCallsSavedCount++;
+            quotaWaitCount++;
+            continue;
+          }
+        } else {
+          watchersReadyCount++;
+        }
+      } else if (gStatus === 'INVALID_KEY') {
+        invalidKeyCount++;
+        skipped.push({ userId: watcher.user_id, reason: "Gemini API key is invalid" });
+        watchersSkippedCount++;
+        continue;
+      } else if (gStatus === 'TEMP_ERROR') {
+        tempErrorCount++;
       }
 
       // Ensure the endpoint finishes within 30 seconds by stopping early if needed
@@ -1282,6 +1330,15 @@ Answer with JSON containing:
                   }
                 }
               });
+              geminiCallsExecutedCount++;
+              if (watcher.gemini_status !== 'READY') {
+                await supabase.from("watchers").update({
+                  gemini_status: 'READY',
+                  next_gemini_retry_at: null,
+                  last_gemini_error: null,
+                  updated_at: new Date().toISOString()
+                }).eq("id", watcher.id);
+              }
               const parsedResult = JSON.parse(aiResponse.text || '{}');
               if (parsedResult.satisfies && parsedResult.direction && parsedResult.direction !== 'NO_TRADE') {
                 geminiDirection = parsedResult.direction;
@@ -1301,10 +1358,79 @@ Answer with JSON containing:
               }
             }
           } catch (gemErr: any) {
-            console.warn(`[Gemini Validation Warning]: Falling back to local strategy engine:`, gemErr.message);
-            const localAnalysis = analyzeMarket(candleData, { entryConditions: [strategyText] });
-            analysis = localAnalysis;
-            geminiDirection = analysis.signal;
+            const errMsg = gemErr.message || String(gemErr);
+            const errStatus = gemErr.status || 0;
+            const lowerMsg = errMsg.toLowerCase();
+
+            if (errStatus === 429 || lowerMsg.includes('resource_exhausted') || lowerMsg.includes('quota exceeded') || lowerMsg.includes('rate limit') || lowerMsg.includes('retryinfo') || lowerMsg.includes('retrydelay')) {
+              const retryDelayMs = 3600 * 1000;
+              const nextRetry = new Date(Date.now() + retryDelayMs).toISOString();
+              console.log(`[Gemini Quota Exhausted] Watcher ${watcher.id}: ${errMsg}`);
+
+              const wasAlreadyExhausted = watcher.gemini_status === 'QUOTA_EXHAUSTED';
+
+              await supabase.from("watchers").update({
+                gemini_status: 'QUOTA_EXHAUSTED',
+                next_gemini_retry_at: nextRetry,
+                last_gemini_error: errMsg,
+                updated_at: new Date().toISOString()
+              }).eq("id", watcher.id);
+
+              if (!wasAlreadyExhausted && telegramChatId) {
+                const noticeMsg = `⚠️ Gaks AI Notice\n\nYour Gemini API key has reached its free quota.\nMarket monitoring has been paused temporarily.\nMonitoring will resume automatically when Gemini allows requests again.\nNo action is required unless the quota does not reset.`;
+                await sendTelegramMessage(telegramChatId, noticeMsg);
+                telegramMessagesSentCount++;
+              }
+
+              skipped.push({ userId, reason: "Gemini quota exceeded" });
+              watchersSkippedCount++;
+              quotaWaitCount++;
+              skippedDueToQuotaCount++;
+              geminiCallsSavedCount++;
+              continue;
+            }
+
+            if (errStatus === 401 || errStatus === 403 || lowerMsg.includes('invalid api key') || lowerMsg.includes('permission denied') || lowerMsg.includes('invalid')) {
+              console.log(`[Gemini Invalid Key] Watcher ${watcher.id}: ${errMsg}`);
+              const wasAlreadyInvalid = watcher.gemini_status === 'INVALID_KEY';
+
+              await supabase.from("watchers").update({
+                gemini_status: 'INVALID_KEY',
+                status: 'paused',
+                last_gemini_error: errMsg,
+                updated_at: new Date().toISOString()
+              }).eq("id", watcher.id);
+
+              if (!wasAlreadyInvalid && telegramChatId) {
+                const invMsg = `Your Gemini API key is invalid.\nPlease update it from Settings.`;
+                await sendTelegramMessage(telegramChatId, invMsg);
+                telegramMessagesSentCount++;
+              }
+
+              invalidKeyCount++;
+              skipped.push({ userId, reason: "Gemini API key is invalid" });
+              watchersSkippedCount++;
+              continue;
+            }
+
+            if (errStatus >= 500 || errStatus === 503 || lowerMsg.includes('timeout') || lowerMsg.includes('network') || lowerMsg.includes('gateway')) {
+              console.log(`[Gemini Temporary Failure] Watcher ${watcher.id}: ${errMsg}`);
+              await supabase.from("watchers").update({
+                gemini_status: 'TEMP_ERROR',
+                last_gemini_error: errMsg,
+                updated_at: new Date().toISOString()
+              }).eq("id", watcher.id);
+
+              tempErrorCount++;
+              const localAnalysis = analyzeMarket(candleData, { entryConditions: [strategyText] });
+              analysis = localAnalysis;
+              geminiDirection = analysis.signal;
+            } else {
+              console.warn(`[Gemini Validation Warning]: Falling back to local strategy engine:`, gemErr.message);
+              const localAnalysis = analyzeMarket(candleData, { entryConditions: [strategyText] });
+              analysis = localAnalysis;
+              geminiDirection = analysis.signal;
+            }
           }
         }
 
@@ -1472,6 +1598,17 @@ Answer with JSON containing:
     console.log(`Requests saved through caching: ${requestsSavedThroughCachingCount}`);
     console.log(`Watchers skipped due to rate limiting: ${watchersSkippedDueToRateLimitCount}`);
     console.log(`==================================================\n`);
+
+    console.log(`\n========== GEMINI HEALTH ==========`);
+    console.log(`Watchers Ready: ${watchersReadyCount}`);
+    console.log(`Waiting For Quota: ${quotaWaitCount}`);
+    console.log(`Invalid Keys: ${invalidKeyCount}`);
+    console.log(`Temporary Errors: ${tempErrorCount}`);
+    console.log(`Skipped Due To Quota: ${skippedDueToQuotaCount}`);
+    console.log(`Gemini Calls Executed: ${geminiCallsExecutedCount}`);
+    console.log(`Gemini Calls Saved: ${geminiCallsSavedCount}`);
+    console.log(`===================================\n`);
+
     console.log(`LOG: Cron completed (Processed: ${watchersProcessedCount}, Sent: ${telegramMessagesSentCount})`);
 
     return res.status(200).json({
@@ -1482,6 +1619,15 @@ Answer with JSON containing:
         totalRequests: totalTwelveDataRequests,
         savedThroughCaching: requestsSavedThroughCachingCount,
         skippedDueToRateLimit: watchersSkippedDueToRateLimitCount
+      },
+      geminiHealth: {
+        watchersReady: watchersReadyCount,
+        waitingForQuota: quotaWaitCount,
+        invalidKeys: invalidKeyCount,
+        temporaryErrors: tempErrorCount,
+        skippedDueToQuota: skippedDueToQuotaCount,
+        geminiCallsExecuted: geminiCallsExecutedCount,
+        geminiCallsSaved: geminiCallsSavedCount
       },
       executionTimeMs: totalTime
     });

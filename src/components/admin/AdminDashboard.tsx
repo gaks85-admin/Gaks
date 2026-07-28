@@ -890,80 +890,108 @@ const WatchersPage = ({ fetchWithAuth, showToast }: { fetchWithAuth: any; showTo
                   <th className="py-4 px-5">Pair</th>
                   <th className="py-4 px-5">Timeframe</th>
                   <th className="py-4 px-5">Status</th>
+                  <th className="py-4 px-5">Gemini Health</th>
                   <th className="py-4 px-5">Last Scan</th>
-                  <th className="py-4 px-5">Started At</th>
                   <th className="py-4 px-5 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {watchers.map(watcher => (
-                  <tr key={watcher.id} className="border-b border-zinc-900 hover:bg-zinc-900/30 transition-colors">
-                    <td className="py-4 px-5">
-                      <div className="flex flex-col">
-                        <span className="text-xs font-bold text-zinc-200">{watcher.email}</span>
-                        <span className="text-[9px] font-mono text-zinc-600 mt-0.5">Watcher ID: {watcher.id.substring(0, 8)}...</span>
-                      </div>
-                    </td>
-                    <td className="py-4 px-5 font-bold text-xs text-zinc-300">{watcher.selected_pair}</td>
-                    <td className="py-4 px-5 text-xs text-zinc-400 font-semibold">{watcher.selected_timeframe}</td>
-                    <td className="py-4 px-5">
-                      <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border ${
-                        watcher.status === 'active' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/10' :
-                        watcher.status === 'paused' ? 'bg-amber-500/10 text-amber-400 border-amber-500/10' :
-                        'bg-zinc-900 text-zinc-500 border-zinc-900'
-                      }`}>
-                        {watcher.status}
-                      </span>
-                    </td>
-                    <td className="py-4 px-5 text-xs text-zinc-400 font-mono">
-                      {watcher.last_scan_at ? new Date(watcher.last_scan_at).toLocaleString() : 'Never'}
-                    </td>
-                    <td className="py-4 px-5 text-xs text-zinc-500 font-mono">
-                      {watcher.started_at ? new Date(watcher.started_at).toLocaleDateString() : 'None'}
-                    </td>
-                    <td className="py-4 px-5">
-                      <div className="flex items-center justify-end gap-3">
-                        <button 
-                          onClick={() => handleWatcherAction(watcher.id, 'force_scan')}
-                          className="px-2.5 py-1 text-[10px] font-bold bg-sky-500/10 border border-sky-500/20 rounded-lg hover:bg-sky-500/20 text-sky-400 transition-colors cursor-pointer flex items-center gap-1"
-                        >
-                          <Zap className="w-3 h-3" /> Force Scan
-                        </button>
+                {watchers.map(watcher => {
+                  const gStatus = watcher.gemini_status || 'READY';
+                  const gStatusLabel = 
+                    gStatus === 'QUOTA_EXHAUSTED' ? 'WAITING FOR QUOTA' :
+                    gStatus === 'INVALID_KEY' ? 'INVALID KEY' :
+                    gStatus === 'TEMP_ERROR' ? 'TEMP ERROR' : 'READY';
+                  
+                  const gBadgeColor = 
+                    gStatus === 'READY' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/10' :
+                    gStatus === 'QUOTA_EXHAUSTED' ? 'bg-amber-500/10 text-amber-400 border-amber-500/10' :
+                    gStatus === 'TEMP_ERROR' ? 'bg-amber-500/10 text-amber-400 border-amber-500/10' :
+                    'bg-rose-500/10 text-rose-400 border-rose-500/10';
 
-                        <button 
-                          onClick={() => handleWatcherAction(watcher.id, 'restart')}
-                          disabled={actionLoading === watcher.id}
-                          className="p-1.5 text-emerald-400 hover:bg-emerald-500/10 rounded-lg transition-colors cursor-pointer"
-                          title="Restart / Start Watcher"
-                        >
-                          <Play className="w-3.5 h-3.5" />
-                        </button>
+                  return (
+                    <tr key={watcher.id} className="border-b border-zinc-900 hover:bg-zinc-900/30 transition-colors">
+                      <td className="py-4 px-5">
+                        <div className="flex flex-col">
+                          <span className="text-xs font-bold text-zinc-200">{watcher.email}</span>
+                          <span className="text-[9px] font-mono text-zinc-600 mt-0.5">Watcher ID: {watcher.id.substring(0, 8)}...</span>
+                        </div>
+                      </td>
+                      <td className="py-4 px-5 font-bold text-xs text-zinc-300">{watcher.selected_pair}</td>
+                      <td className="py-4 px-5 text-xs text-zinc-400 font-semibold">{watcher.selected_timeframe}</td>
+                      <td className="py-4 px-5">
+                        <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border ${
+                          watcher.status === 'active' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/10' :
+                          watcher.status === 'paused' ? 'bg-amber-500/10 text-amber-400 border-amber-500/10' :
+                          'bg-zinc-900 text-zinc-500 border-zinc-900'
+                        }`}>
+                          {watcher.status}
+                        </span>
+                      </td>
+                      <td className="py-4 px-5">
+                        <div className="flex flex-col gap-1">
+                          <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border w-fit ${gBadgeColor}`}>
+                            {gStatusLabel}
+                          </span>
+                          {watcher.next_gemini_retry_at && (
+                            <span className="text-[10px] font-mono text-zinc-400">
+                              Retry: {new Date(watcher.next_gemini_retry_at).toLocaleTimeString()}
+                            </span>
+                          )}
+                          {watcher.last_gemini_error && (
+                            <span className="text-[9px] font-mono text-rose-400 max-w-[200px] truncate" title={watcher.last_gemini_error}>
+                              Err: {watcher.last_gemini_error}
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="py-4 px-5 text-xs text-zinc-400 font-mono">
+                        {watcher.last_scan_at ? new Date(watcher.last_scan_at).toLocaleString() : 'Never'}
+                      </td>
+                      <td className="py-4 px-5">
+                        <div className="flex items-center justify-end gap-3">
+                          <button 
+                            onClick={() => handleWatcherAction(watcher.id, 'force_scan')}
+                            className="px-2.5 py-1 text-[10px] font-bold bg-sky-500/10 border border-sky-500/20 rounded-lg hover:bg-sky-500/20 text-sky-400 transition-colors cursor-pointer flex items-center gap-1"
+                          >
+                            <Zap className="w-3 h-3" /> Force Scan
+                          </button>
 
-                        <button 
-                          onClick={() => handleWatcherAction(watcher.id, 'stop')}
-                          disabled={actionLoading === watcher.id}
-                          className="p-1.5 text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors cursor-pointer"
-                          title="Stop Scanner"
-                        >
-                          <Power className="w-3.5 h-3.5" />
-                        </button>
+                          <button 
+                            onClick={() => handleWatcherAction(watcher.id, 'restart')}
+                            disabled={actionLoading === watcher.id}
+                            className="p-1.5 text-emerald-400 hover:bg-emerald-500/10 rounded-lg transition-colors cursor-pointer"
+                            title="Restart / Start Watcher"
+                          >
+                            <Play className="w-3.5 h-3.5" />
+                          </button>
 
-                        <button 
-                          onClick={() => {
-                            if (window.confirm(`Are you sure you want to delete the ${watcher.selected_pair} watcher for ${watcher.email}?`)) {
-                              handleWatcherAction(watcher.id, 'delete');
-                            }
-                          }}
-                          disabled={actionLoading === watcher.id}
-                          className="p-1.5 text-zinc-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors cursor-pointer"
-                          title="Delete Watcher"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                          <button 
+                            onClick={() => handleWatcherAction(watcher.id, 'stop')}
+                            disabled={actionLoading === watcher.id}
+                            className="p-1.5 text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors cursor-pointer"
+                            title="Stop Scanner"
+                          >
+                            <Power className="w-3.5 h-3.5" />
+                          </button>
+
+                          <button 
+                            onClick={() => {
+                              if (window.confirm(`Are you sure you want to delete the ${watcher.selected_pair} watcher for ${watcher.email}?`)) {
+                                handleWatcherAction(watcher.id, 'delete');
+                              }
+                            }}
+                            disabled={actionLoading === watcher.id}
+                            className="p-1.5 text-zinc-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors cursor-pointer"
+                            title="Delete Watcher"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
