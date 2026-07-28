@@ -524,7 +524,22 @@ async function health_handler(req: any, res: any) {
       // Gracefully bypass if table is missing
     }
 
-    const { data: allProfiles } = await supabase.from('profiles').select('id, gemini_status');
+    let allProfiles: any[] = [];
+    try {
+      const { data, error } = await supabase.from('profiles').select('id, gemini_status');
+      if (error) {
+        const { data: fallbackData } = await supabase.from('profiles').select('id');
+        allProfiles = (fallbackData || []).map((p: any) => ({ ...p, gemini_status: 'READY' }));
+      } else {
+        allProfiles = data || [];
+      }
+    } catch (e) {
+      try {
+        const { data: fallbackData } = await supabase.from('profiles').select('id');
+        allProfiles = (fallbackData || []).map((p: any) => ({ ...p, gemini_status: 'READY' }));
+      } catch (e2) {}
+    }
+
     const aiHealth = {
       totalUsers: allProfiles?.length || 0,
       ready: allProfiles?.filter(p => !p.gemini_status || p.gemini_status === 'READY').length || 0,
@@ -1006,8 +1021,26 @@ async function stats_handler(req: any, res: any) {
     }
 
     // Fetch stats
-    const { data: profiles, error: pErr } = await supabase.from('profiles').select('id, gemini_status');
-    if (pErr) throw pErr;
+    let profiles: any[] = [];
+    try {
+      const { data, error } = await supabase.from('profiles').select('id, gemini_status');
+      if (error) {
+        const { data: fallbackData, error: fallbackError } = await supabase.from('profiles').select('id');
+        if (fallbackError) throw fallbackError;
+        profiles = (fallbackData || []).map((p: any) => ({ ...p, gemini_status: 'READY' }));
+      } else {
+        profiles = data || [];
+      }
+    } catch (err) {
+      console.warn("Fallback query for stats profiles due to:", err);
+      try {
+        const { data: fallbackData, error: fallbackError } = await supabase.from('profiles').select('id');
+        if (fallbackError) throw fallbackError;
+        profiles = (fallbackData || []).map((p: any) => ({ ...p, gemini_status: 'READY' }));
+      } catch (err2: any) {
+        throw new Error("Failed to fetch profiles even with fallback: " + err2.message);
+      }
+    }
     
     const readyCount = profiles?.filter(p => !p.gemini_status || p.gemini_status === 'READY').length || 0;
     const needsAttentionCount = profiles?.filter(p => p.gemini_status === 'NEEDS_ATTENTION').length || 0;
@@ -1218,8 +1251,26 @@ async function users_handler(req: any, res: any) {
       return res.status(403).json({ success: false, error: "Unauthorized: Insufficient privileges." });
     }
 
-    const { data: profiles, error: pErr } = await supabase.from('profiles').select('*');
-    if (pErr) throw pErr;
+    let profiles: any[] = [];
+    try {
+      const { data, error } = await supabase.from('profiles').select('*');
+      if (error) throw error;
+      profiles = data || [];
+    } catch (err) {
+      console.warn("Fallback query for users profiles due to:", err);
+      try {
+        const { data: fallbackData, error: fallbackErr } = await supabase.from('profiles').select('id, email, full_name, created_at, telegram_connected, role');
+        if (fallbackErr) throw fallbackErr;
+        profiles = (fallbackData || []).map((p: any) => ({
+          ...p,
+          gemini_status: 'READY',
+          gemini_last_error: null,
+          gemini_last_checked: null
+        }));
+      } catch (err2: any) {
+        throw new Error("Failed to fetch profiles even with fallback: " + err2.message);
+      }
+    }
 
     const { data: watchers } = await supabase.from('watchers').select('*');
     const { data: keys } = await supabase.from('user_api_keys').select('*').eq('provider', 'gemini');
@@ -1814,13 +1865,28 @@ async function watchers_handler(req: any, res: any) {
     const { data: watchers, error: wErr } = await supabase.from('watchers').select('*');
     if (wErr) throw wErr;
 
-    const { data: profiles } = await supabase.from('profiles').select('id, email');
+    let profiles: any[] = [];
+    try {
+      const { data, error } = await supabase.from('profiles').select('id, email, gemini_status');
+      if (error) {
+        const { data: fallbackData } = await supabase.from('profiles').select('id, email');
+        profiles = (fallbackData || []).map((p: any) => ({ ...p, gemini_status: 'READY' }));
+      } else {
+        profiles = data || [];
+      }
+    } catch (e) {
+      try {
+        const { data: fallbackData } = await supabase.from('profiles').select('id, email');
+        profiles = (fallbackData || []).map((p: any) => ({ ...p, gemini_status: 'READY' }));
+      } catch (e2) {}
+    }
 
     const assembledWatchers = (watchers || []).map(w => {
       const prof = profiles?.find(p => p.id === w.user_id);
       return {
         ...w,
-        email: prof?.email || 'Unknown User'
+        email: prof?.email || 'Unknown User',
+        gemini_status: prof?.gemini_status || 'READY'
       };
     });
 
