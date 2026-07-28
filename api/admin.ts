@@ -535,9 +535,20 @@ async function health_handler(req: any, res: any) {
       // Gracefully bypass if table is missing
     }
 
+    const { data: allProfiles } = await supabase.from('profiles').select('id, gemini_status');
+    const aiHealth = {
+      totalUsers: allProfiles?.length || 0,
+      ready: allProfiles?.filter(p => !p.gemini_status || p.gemini_status === 'READY').length || 0,
+      needsAttention: allProfiles?.filter(p => p.gemini_status === 'NEEDS_ATTENTION').length || 0,
+      invalidKey: allProfiles?.filter(p => p.gemini_status === 'INVALID_KEY').length || 0,
+      quotaExhausted: allProfiles?.filter(p => p.gemini_status === 'QUOTA_EXHAUSTED').length || 0,
+      billingRequired: allProfiles?.filter(p => p.gemini_status === 'BILLING_REQUIRED').length || 0
+    };
+
     return res.status(200).json({
       success: true,
       health: {
+        aiHealth,
         supabase: {
           status: supabaseStatus,
           timestamp: new Date().toISOString(),
@@ -1006,9 +1017,15 @@ async function stats_handler(req: any, res: any) {
     }
 
     // Fetch stats
-    const { data: profiles, error: pErr } = await supabase.from('profiles').select('id');
+    const { data: profiles, error: pErr } = await supabase.from('profiles').select('id, gemini_status');
     if (pErr) throw pErr;
     
+    const readyCount = profiles?.filter(p => !p.gemini_status || p.gemini_status === 'READY').length || 0;
+    const needsAttentionCount = profiles?.filter(p => p.gemini_status === 'NEEDS_ATTENTION').length || 0;
+    const invalidKeyCount = profiles?.filter(p => p.gemini_status === 'INVALID_KEY').length || 0;
+    const quotaExhaustedCount = profiles?.filter(p => p.gemini_status === 'QUOTA_EXHAUSTED').length || 0;
+    const billingRequiredCount = profiles?.filter(p => p.gemini_status === 'BILLING_REQUIRED').length || 0;
+
     const { data: activeW, error: awErr } = await supabase.from('watchers').select('id').eq('status', 'active');
     if (awErr) throw awErr;
     const { data: stoppedW, error: swErr } = await supabase.from('watchers').select('id').eq('status', 'stopped');
@@ -1052,7 +1069,15 @@ async function stats_handler(req: any, res: any) {
         totalSignalsSent: totalSignalsCount || 0,
         totalPairsMonitored,
         lastCronRun,
-        systemStatus: "ONLINE"
+        systemStatus: "ONLINE",
+        aiHealth: {
+          totalUsers: profiles?.length || 0,
+          ready: readyCount,
+          needsAttention: needsAttentionCount,
+          invalidKey: invalidKeyCount,
+          quotaExhausted: quotaExhaustedCount,
+          billingRequired: billingRequiredCount
+        }
       }
     });
   } catch (err: any) {
@@ -1221,6 +1246,9 @@ async function users_handler(req: any, res: any) {
         created_at: p.created_at,
         telegram_connected: p.telegram_connected,
         gemini_configured: !!hasKey,
+        gemini_status: p.gemini_status || 'READY',
+        gemini_last_error: p.gemini_last_error || null,
+        gemini_last_checked: p.gemini_last_checked || null,
         watcher_status: watcher?.status || 'stopped',
         selected_pair: watcher?.selected_pair || 'None',
         selected_timeframe: watcher?.selected_timeframe || 'None',

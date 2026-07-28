@@ -146,15 +146,16 @@ export async function saveGeminiKey(key: string): Promise<{ success: boolean; er
       provider: "gemini"
     });
 
+    // Update profiles gemini_status to READY
+    await supabase.from('profiles').update({
+      gemini_status: 'READY',
+      gemini_last_error: null,
+      gemini_last_checked: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    }).eq('id', userId);
+
     // Resume all paused watchers
     await supabase.from('watchers').update({ status: 'active', updated_at: new Date().toISOString() }).eq('user_id', userId).eq('status', 'paused');
-
-    // Send Telegram: ✅ Gaks AI ... (Need to fetch chatId for the user)
-    const { data: conn } = await supabase.from('telegram_connections').select('telegram_chat_id').eq('user_id', userId).maybeSingle();
-    if (conn && conn.telegram_chat_id) {
-        const message = "✅ Gaks AI\n\nYour Gemini API key has been verified successfully.\n\nYour Market Watcher has been resumed.";
-        await sendTelegramMessage(conn.telegram_chat_id, message);
-    }
 
     return { success: true };
   } catch (err: any) {

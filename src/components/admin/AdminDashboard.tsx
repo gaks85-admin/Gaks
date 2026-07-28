@@ -439,6 +439,7 @@ const UsersPage = ({ fetchWithAuth, showToast }: { fetchWithAuth: any; showToast
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [aiStatusFilter, setAiStatusFilter] = useState('ALL');
   const [selectedUser, setSelectedUser] = useState<any | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
@@ -493,11 +494,15 @@ const UsersPage = ({ fetchWithAuth, showToast }: { fetchWithAuth: any; showToast
     fetchUsers();
   }, []);
 
-  const filteredUsers = users.filter(user => 
-    user.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    user.full_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    user.id?.includes(searchQuery)
-  );
+  const filteredUsers = users.filter(user => {
+    const matchesSearch = user.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      user.full_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      user.id?.includes(searchQuery);
+
+    if (aiStatusFilter === 'ALL') return matchesSearch;
+    const uStatus = user.gemini_status || 'READY';
+    return matchesSearch && uStatus === aiStatusFilter;
+  });
 
   return (
     <div className="p-6 space-y-6">
@@ -507,7 +512,19 @@ const UsersPage = ({ fetchWithAuth, showToast }: { fetchWithAuth: any; showToast
           <h3 className="text-lg font-bold text-white font-display">User Accounts</h3>
           <p className="text-xs text-zinc-500">Audit registered users, check integration status, or manage their market scanners.</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <select 
+            value={aiStatusFilter}
+            onChange={e => setAiStatusFilter(e.target.value)}
+            className="bg-zinc-950 text-xs text-zinc-300 border border-zinc-900 rounded-xl px-3 py-2 focus:outline-none focus:border-zinc-800"
+          >
+            <option value="ALL">All AI Statuses</option>
+            <option value="READY">READY</option>
+            <option value="NEEDS_ATTENTION">NEEDS_ATTENTION</option>
+            <option value="INVALID_KEY">INVALID_KEY</option>
+            <option value="QUOTA_EXHAUSTED">QUOTA_EXHAUSTED</option>
+            <option value="BILLING_REQUIRED">BILLING_REQUIRED</option>
+          </select>
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
             <input 
@@ -547,6 +564,7 @@ const UsersPage = ({ fetchWithAuth, showToast }: { fetchWithAuth: any; showToast
                 <tr className="border-b border-zinc-900 text-[10px] font-bold uppercase tracking-wider text-zinc-500 bg-zinc-950/50">
                   <th className="py-4 px-5">User Profile / ID</th>
                   <th className="py-4 px-5 text-center">Integrations</th>
+                  <th className="py-4 px-5 text-center">AI Status</th>
                   <th className="py-4 px-5 text-center">Watcher Status</th>
                   <th className="py-4 px-5">Selected Setup</th>
                   <th className="py-4 px-5 text-right">Actions</th>
@@ -574,11 +592,13 @@ const UsersPage = ({ fetchWithAuth, showToast }: { fetchWithAuth: any; showToast
                     </td>
                     <td className="py-4 px-5 text-center">
                       <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border ${
-                        user.watcher_status === 'active' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/10' :
-                        user.watcher_status === 'paused' ? 'bg-amber-500/10 text-amber-400 border-amber-500/10' :
-                        'bg-zinc-900 text-zinc-500 border-zinc-900'
+                        (!user.gemini_status || user.gemini_status === 'READY') ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
+                        user.gemini_status === 'QUOTA_EXHAUSTED' ? 'bg-purple-500/10 text-purple-400 border-purple-500/20' :
+                        user.gemini_status === 'INVALID_KEY' ? 'bg-red-500/10 text-red-400 border-red-500/20' :
+                        user.gemini_status === 'BILLING_REQUIRED' ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' :
+                        'bg-amber-500/10 text-amber-400 border-amber-500/20'
                       }`}>
-                        {user.watcher_status}
+                        {user.gemini_status || 'READY'}
                       </span>
                     </td>
                     <td className="py-4 px-5">
@@ -1472,6 +1492,40 @@ const SystemHealthPage = ({ fetchWithAuth }: { fetchWithAuth: any }) => {
       ) : (
         <div className="space-y-8 animate-fade-in">
           
+          {/* AI Health Status Panel */}
+          <div className="bg-zinc-950 p-6 rounded-2xl border border-zinc-900 space-y-4">
+            <div>
+              <h4 className="text-xs font-black text-zinc-400 uppercase tracking-widest font-mono">AI Health Status</h4>
+              <p className="text-xs text-zinc-500 mt-0.5">Real-time breakdown of user Gemini API statuses and quota health.</p>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
+              <div className="bg-zinc-900/40 p-4 rounded-xl border border-zinc-800/80">
+                <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Total Users</span>
+                <p className="text-2xl font-extrabold text-white mt-1 font-display">{health?.aiHealth?.totalUsers || 0}</p>
+              </div>
+              <div className="bg-emerald-500/10 p-4 rounded-xl border border-emerald-500/20">
+                <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider">READY</span>
+                <p className="text-2xl font-extrabold text-emerald-400 mt-1 font-display">{health?.aiHealth?.ready || 0}</p>
+              </div>
+              <div className="bg-amber-500/10 p-4 rounded-xl border border-amber-500/20">
+                <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider">NEEDS ATTENTION</span>
+                <p className="text-2xl font-extrabold text-amber-400 mt-1 font-display">{health?.aiHealth?.needsAttention || 0}</p>
+              </div>
+              <div className="bg-red-500/10 p-4 rounded-xl border border-red-500/20">
+                <span className="text-[10px] font-bold text-red-400 uppercase tracking-wider">INVALID KEY</span>
+                <p className="text-2xl font-extrabold text-red-400 mt-1 font-display">{health?.aiHealth?.invalidKey || 0}</p>
+              </div>
+              <div className="bg-purple-500/10 p-4 rounded-xl border border-purple-500/20">
+                <span className="text-[10px] font-bold text-purple-400 uppercase tracking-wider">QUOTA EXHAUSTED</span>
+                <p className="text-2xl font-extrabold text-purple-400 mt-1 font-display">{health?.aiHealth?.quotaExhausted || 0}</p>
+              </div>
+              <div className="bg-blue-500/10 p-4 rounded-xl border border-blue-500/20">
+                <span className="text-[10px] font-bold text-blue-400 uppercase tracking-wider">BILLING REQUIRED</span>
+                <p className="text-2xl font-extrabold text-blue-400 mt-1 font-display">{health?.aiHealth?.billingRequired || 0}</p>
+              </div>
+            </div>
+          </div>
+
           {/* Primary Ecosystem Grid */}
           <div>
             <h4 className="text-xs font-black text-zinc-400 uppercase tracking-widest mb-4 font-mono">Ecosystem Components</h4>

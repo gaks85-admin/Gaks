@@ -10,6 +10,9 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   subscription_plan TEXT NOT NULL DEFAULT 'Free',
   telegram_connected BOOLEAN NOT NULL DEFAULT false,
   role TEXT NOT NULL DEFAULT 'user',
+  gemini_status TEXT DEFAULT 'READY',
+  gemini_last_error TEXT NULL,
+  gemini_last_checked TIMESTAMPTZ NULL,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
