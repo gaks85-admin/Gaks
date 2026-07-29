@@ -1,15 +1,17 @@
 import { ParserResult, StrategyParserModule } from './types';
+import { fvgSynonyms } from './synonyms/fvg';
+import { findSynonymMatch } from './normalizer';
 
 export class FvgParser implements StrategyParserModule<boolean> {
   parse(text: string): ParserResult<boolean> {
-    const normalized = text.toLowerCase();
-    
-    const hasFvg = /\bfvg\b|fair\s*value\s*gap|\bimbalance\b/i.test(normalized);
+    const match = findSynonymMatch(text, fvgSynonyms, 'FAIR_VALUE_GAP', 0.98);
     
     return {
-      supported: hasFvg,
-      confidence: hasFvg ? 0.98 : 0.0,
-      parsedRule: hasFvg
+      supported: match.matched,
+      confidence: match.confidence,
+      parsedRule: match.matched,
+      matchedPhrase: match.matchedPhrase,
+      canonicalRule: match.canonicalRule
     };
   }
 }

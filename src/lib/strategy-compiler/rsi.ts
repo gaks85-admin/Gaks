@@ -1,4 +1,6 @@
 import { ParserResult, StrategyParserModule } from './types';
+import { rsiSynonyms } from './synonyms/rsi';
+import { findSynonymMatch, normalizeText } from './normalizer';
 
 export interface RsiRule {
   enabled: boolean;
@@ -8,14 +10,15 @@ export interface RsiRule {
 
 export class RsiParser implements StrategyParserModule<RsiRule> {
   parse(text: string): ParserResult<RsiRule> {
-    const normalized = text.toLowerCase();
+    const match = findSynonymMatch(text, rsiSynonyms, 'RSI_FILTER', 0.96);
     
-    const hasRsi = /\brsi\b|relative\s*strength\s*index/i.test(normalized);
     let overbought: number | undefined;
     let oversold: number | undefined;
+    const normalized = text.toLowerCase();
+    
+    const hasRsi = match.matched || /\brsi\b|relative\s*strength\s*index/i.test(normalized);
     
     if (hasRsi) {
-      // Extract overbought levels
       const obMatch = normalized.match(/overbought\s*(?:at\s*|level\s*|is\s*|above\s*)?(\d+)|(\d+)\s*overbought|above\s*(\d+)/i);
       if (obMatch) {
         const val = parseInt(obMatch[1] || obMatch[2] || obMatch[3], 10);
@@ -24,7 +27,6 @@ export class RsiParser implements StrategyParserModule<RsiRule> {
         }
       }
       
-      // Extract oversold levels
       const osMatch = normalized.match(/oversold\s*(?:at\s*|level\s*|is\s*|below\s*)?(\d+)|(\d+)\s*oversold|below\s*(\d+)/i);
       if (osMatch) {
         const val = parseInt(osMatch[1] || osMatch[2] || osMatch[3], 10);
@@ -33,7 +35,6 @@ export class RsiParser implements StrategyParserModule<RsiRule> {
         }
       }
       
-      // Fallback defaults if general words are used without numbers
       if (!overbought && /overbought/i.test(normalized)) overbought = 70;
       if (!oversold && /oversold/i.test(normalized)) oversold = 30;
     }
@@ -45,7 +46,9 @@ export class RsiParser implements StrategyParserModule<RsiRule> {
         enabled: hasRsi,
         overbought,
         oversold
-      }
+      },
+      matchedPhrase: match.matched ? match.matchedPhrase : (hasRsi ? "rsi" : ""),
+      canonicalRule: match.matched ? match.canonicalRule : (hasRsi ? "RSI_FILTER" : "")
     };
   }
 }

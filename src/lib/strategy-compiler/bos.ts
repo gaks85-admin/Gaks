@@ -1,16 +1,17 @@
 import { ParserResult, StrategyParserModule } from './types';
+import { bosSynonyms } from './synonyms/bos';
+import { findSynonymMatch } from './normalizer';
 
 export class BosParser implements StrategyParserModule<boolean> {
   parse(text: string): ParserResult<boolean> {
-    const normalized = text.toLowerCase();
-    
-    // Match BOS or Break of Structure
-    const hasBos = /\bbos\b|break\s*of\s*structure/i.test(normalized);
+    const match = findSynonymMatch(text, bosSynonyms, 'BREAK_OF_STRUCTURE', 0.98);
     
     return {
-      supported: hasBos,
-      confidence: hasBos ? 0.98 : 0.0,
-      parsedRule: hasBos
+      supported: match.matched,
+      confidence: match.confidence,
+      parsedRule: match.matched,
+      matchedPhrase: match.matchedPhrase,
+      canonicalRule: match.canonicalRule
     };
   }
 }

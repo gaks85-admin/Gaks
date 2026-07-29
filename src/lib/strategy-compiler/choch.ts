@@ -1,16 +1,17 @@
 import { ParserResult, StrategyParserModule } from './types';
+import { chochSynonyms } from './synonyms/choch';
+import { findSynonymMatch } from './normalizer';
 
 export class ChochParser implements StrategyParserModule<boolean> {
   parse(text: string): ParserResult<boolean> {
-    const normalized = text.toLowerCase();
-    
-    // Match CHoCH or Change of Character
-    const hasChoch = /\bchoch\b|change\s*of\s*character/i.test(normalized);
+    const match = findSynonymMatch(text, chochSynonyms, 'CHANGE_OF_CHARACTER', 0.98);
     
     return {
-      supported: hasChoch,
-      confidence: hasChoch ? 0.98 : 0.0,
-      parsedRule: hasChoch
+      supported: match.matched,
+      confidence: match.confidence,
+      parsedRule: match.matched,
+      matchedPhrase: match.matchedPhrase,
+      canonicalRule: match.canonicalRule
     };
   }
 }

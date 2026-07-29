@@ -1,8 +1,12 @@
 import { ParserResult, StrategyParserModule } from './types';
+import { sessionSynonyms } from './synonyms/session';
+import { findSynonymMatch, normalizeText } from './normalizer';
 
 export class SessionParser implements StrategyParserModule<string[]> {
   parse(text: string): ParserResult<string[]> {
-    const normalized = text.toLowerCase();
+    const match = findSynonymMatch(text, sessionSynonyms, 'SESSION_FILTER', 0.99);
+    
+    const normalized = normalizeText(text);
     const sessions: string[] = [];
     
     if (normalized.includes('london')) {
@@ -15,12 +19,14 @@ export class SessionParser implements StrategyParserModule<string[]> {
       sessions.push('Asian');
     }
     
-    const supported = sessions.length > 0;
+    const supported = match.matched || sessions.length > 0;
     
     return {
       supported,
       confidence: supported ? 0.99 : 0.0,
-      parsedRule: sessions
+      parsedRule: sessions,
+      matchedPhrase: match.matched ? match.matchedPhrase : (sessions.length > 0 ? "session" : ""),
+      canonicalRule: match.matched ? match.canonicalRule : (sessions.length > 0 ? "SESSION_FILTER" : "")
     };
   }
 }

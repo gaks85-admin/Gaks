@@ -1,4 +1,6 @@
 import { ParserResult, StrategyParserModule } from './types';
+import { atrSynonyms } from './synonyms/atr';
+import { findSynonymMatch } from './normalizer';
 
 export interface AtrRule {
   enabled: boolean;
@@ -6,16 +8,16 @@ export interface AtrRule {
 
 export class AtrParser implements StrategyParserModule<AtrRule> {
   parse(text: string): ParserResult<AtrRule> {
-    const normalized = text.toLowerCase();
-    
-    const hasAtr = /\batr\b|average\s*true\s*range/i.test(normalized);
+    const match = findSynonymMatch(text, atrSynonyms, 'ATR_FILTER', 0.98);
     
     return {
-      supported: hasAtr,
-      confidence: hasAtr ? 0.98 : 0.0,
+      supported: match.matched,
+      confidence: match.confidence,
       parsedRule: {
-        enabled: hasAtr
-      }
+        enabled: match.matched
+      },
+      matchedPhrase: match.matchedPhrase,
+      canonicalRule: match.canonicalRule
     };
   }
 }

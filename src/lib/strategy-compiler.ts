@@ -28,7 +28,11 @@ export function compileStrategy(strategyText: string): CompilerOutput {
     return {
       strategy_mode: 'AI_ONLY',
       compiled_rules: {},
-      confidence: 0.0
+      confidence: 0.0,
+      overall_confidence: 0.0,
+      module_confidence: {},
+      matched_phrases: [],
+      canonical_rules: []
     };
   }
 
@@ -79,6 +83,8 @@ export function compileStrategy(strategyText: string): CompilerOutput {
     fair_value_gap: fvgResult.parsedRule,
     support: srResult.parsedRule.support,
     resistance: srResult.parsedRule.resistance,
+    support_rejection: srResult.parsedRule.support_rejection,
+    resistance_rejection: srResult.parsedRule.resistance_rejection,
     ema: emaResult.parsedRule,
     rsi: rsiResult.parsedRule,
     macd: macdResult.parsedRule,
@@ -92,9 +98,6 @@ export function compileStrategy(strategyText: string): CompilerOutput {
   };
 
   // Classify strategy mode based on strict deterministic priority rules:
-  // - If any explicit AI_ONLY words exist, it must be classified as AI_ONLY.
-  // - Otherwise, if any subjective/discretionary words exist, it must be classified as HYBRID.
-  // - Otherwise, it defaults to RULE_ONLY.
   let strategy_mode: 'RULE_ONLY' | 'HYBRID' | 'AI_ONLY' = 'RULE_ONLY';
   if (classificationResult.parsedRule.ai_only_elements.length > 0) {
     strategy_mode = 'AI_ONLY';
@@ -129,30 +132,59 @@ export function compileStrategy(strategyText: string): CompilerOutput {
     confidence = 0.90;
   }
 
+  // Build module specific confidences and matched phrases/canonical rules
+  const modules = [
+    { name: 'trendline', result: trendlineResult },
+    { name: 'bos', result: bosResult },
+    { name: 'choch', result: chochResult },
+    { name: 'ema', result: emaResult },
+    { name: 'rsi', result: rsiResult },
+    { name: 'session', result: sessionResult },
+    { name: 'volume', result: volumeResult },
+    { name: 'liquidity', result: liquidityResult },
+    { name: 'fair_value_gap', result: fvgResult },
+    { name: 'support_resistance', result: srResult },
+    { name: 'macd', result: macdResult },
+    { name: 'atr', result: atrResult },
+    { name: 'confirmation_candle', result: confirmationCandleResult },
+    { name: 'risk_reward', result: rrResult },
+    { name: 'timeframes', result: timeframeResult },
+    { name: 'classification', result: classificationResult }
+  ];
+
+  const module_confidence: { [key: string]: number } = {};
+  const matched_phrases: string[] = [];
+  const canonical_rules: string[] = [];
+
+  for (const m of modules) {
+    if (m.result.supported) {
+      module_confidence[m.name] = m.result.confidence;
+      if (m.result.matchedPhrase) {
+        matched_phrases.push(m.result.matchedPhrase);
+      }
+      if (m.result.canonicalRule) {
+        canonical_rules.push(m.result.canonicalRule);
+      }
+    }
+  }
+
   // Internal logging for developers as requested
   console.log(`========== AI STATUS ==========`);
   console.log(`Strategy: [${strategyText.slice(0, 40)}${strategyText.length > 40 ? '...' : ''}]`);
   console.log(`Status: COMPILATION_SUCCESS`);
   console.log(`Mode: ${strategy_mode}`);
   console.log(`Confidence: ${confidence}`);
-  console.log(`Matched Concepts: ${Object.entries(compiled_rules)
-    .filter(([key, val]) => {
-      if (typeof val === 'boolean') return val;
-      if (Array.isArray(val)) return val.length > 0;
-      if (typeof val === 'object' && val !== null) {
-        if ('enabled' in val) return (val as any).enabled;
-        if ('min_ratio' in val) return (val as any).min_ratio !== undefined;
-        return true;
-      }
-      return false;
-    })
-    .map(([key]) => key)
-    .join(', ') || 'None'}`);
+  console.log(`Matched Phrases: ${matched_phrases.join(', ')}`);
+  console.log(`Canonical Rules: ${canonical_rules.join(', ')}`);
   console.log(`===============================`);
 
   return {
     strategy_mode,
     compiled_rules,
-    confidence
+    confidence,
+    overall_confidence: confidence,
+    module_confidence,
+    matched_phrases,
+    canonical_rules
   };
 }

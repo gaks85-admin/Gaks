@@ -1,4 +1,6 @@
 import { ParserResult, StrategyParserModule } from './types';
+import { macdSynonyms } from './synonyms/macd';
+import { findSynonymMatch } from './normalizer';
 
 export interface MacdRule {
   enabled: boolean;
@@ -6,16 +8,16 @@ export interface MacdRule {
 
 export class MacdParser implements StrategyParserModule<MacdRule> {
   parse(text: string): ParserResult<MacdRule> {
-    const normalized = text.toLowerCase();
-    
-    const hasMacd = /\bmacd\b|moving\s*average\s*convergence/i.test(normalized);
+    const match = findSynonymMatch(text, macdSynonyms, 'MACD_FILTER', 0.98);
     
     return {
-      supported: hasMacd,
-      confidence: hasMacd ? 0.98 : 0.0,
+      supported: match.matched,
+      confidence: match.confidence,
       parsedRule: {
-        enabled: hasMacd
-      }
+        enabled: match.matched
+      },
+      matchedPhrase: match.matchedPhrase,
+      canonicalRule: match.canonicalRule
     };
   }
 }

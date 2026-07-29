@@ -1,24 +1,37 @@
 import { ParserResult, StrategyParserModule } from './types';
+import { emaSynonyms } from './synonyms/ema';
+import { findSynonymMatch, normalizeText } from './normalizer';
 
 export interface EmaRule {
   enabled: boolean;
   periods: number[];
+  type?: string;
 }
 
 export class EmaParser implements StrategyParserModule<EmaRule> {
   parse(text: string): ParserResult<EmaRule> {
-    const normalized = text.toLowerCase();
+    const match = findSynonymMatch(text, emaSynonyms, 'EMA_CROSSOVER', 0.95);
     
-    // Check if EMA is mentioned
-    const hasEma = /\bema\b|exponential\s*moving\s*average/i.test(normalized);
+    let supported = match.matched;
+    let matchedPhrase = match.matchedPhrase;
+    let canonicalRule = match.canonicalRule;
+    let confidence = match.confidence;
+    
+    const normalizedInput = normalizeText(text);
+    if (!supported && (normalizedInput.includes('ema') || normalizedInput.includes('exponential moving average') || normalizedInput.includes('moving average'))) {
+      supported = true;
+      matchedPhrase = normalizedInput.includes('ema') ? 'EMA' : 'moving average';
+      canonicalRule = 'EMA';
+      confidence = 0.90;
+    }
+    
     const periods: number[] = [];
     
-    if (hasEma) {
-      // Extract numbers associated with EMA
-      const matches = text.match(/\b\d+\s*-?\s*period\s*ema|\b\d+\s*ema|ema\s*\d+|ema\s*with\s*period\s*\d+|\b\d+\s*exponential\s*moving/gi);
+    if (supported) {
+      const matches = text.match(/\b\d+\s*-?\s*period\s*ema|\b\d+\s*ema|ema\s*\d+|ema\s*with\s*period\s*\d+|\b\d+\s*exponential\s*moving|\b\d+\s*moving\s*average|\b\d+\s*ma/gi);
       if (matches) {
-        for (const match of matches) {
-          const digits = match.match(/\d+/g);
+        for (const m of matches) {
+          const digits = m.match(/\d+/g);
           if (digits) {
             for (const d of digits) {
               const val = parseInt(d, 10);
@@ -30,7 +43,6 @@ export class EmaParser implements StrategyParserModule<EmaRule> {
         }
       }
       
-      // Fallback: If EMA is mentioned and standard moving average periods (like 8, 9, 20, 21, 50, 100, 200) are in the text
       if (periods.length === 0) {
         const numbersInText = text.match(/\b(8|9|10|20|21|50|100|200)\b/g);
         if (numbersInText) {
@@ -44,13 +56,18 @@ export class EmaParser implements StrategyParserModule<EmaRule> {
       }
     }
     
+    const isCrossover = match.matched || /\bcross\b|\bcrossover\b/i.test(text);
+    
     return {
-      supported: hasEma,
-      confidence: hasEma ? 0.95 : 0.0,
+      supported,
+      confidence,
       parsedRule: {
-        enabled: hasEma,
-        periods: periods.sort((a, b) => a - b)
-      }
+        enabled: supported,
+        periods: periods.sort((a, b) => a - b),
+        ...(isCrossover ? { type: 'crossover' } : {})
+      },
+      matchedPhrase,
+      canonicalRule
     };
   }
 }

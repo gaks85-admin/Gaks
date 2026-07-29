@@ -2,6 +2,8 @@ export interface ParserResult<T = any> {
   supported: boolean;
   confidence: number;
   parsedRule: T;
+  matchedPhrase: string;
+  canonicalRule: string;
 }
 
 export interface CompiledRules {
@@ -14,9 +16,12 @@ export interface CompiledRules {
   fair_value_gap?: boolean;
   support?: boolean;
   resistance?: boolean;
+  support_rejection?: boolean;
+  resistance_rejection?: boolean;
   ema?: {
     enabled: boolean;
     periods: number[];
+    type?: string;
   };
   rsi?: {
     enabled: boolean;
@@ -42,7 +47,13 @@ export interface CompiledRules {
 export interface CompilerOutput {
   strategy_mode: 'RULE_ONLY' | 'HYBRID' | 'AI_ONLY';
   compiled_rules: CompiledRules;
-  confidence: number;
+  confidence: number; // for backward compatibility
+  overall_confidence: number;
+  module_confidence: {
+    [key: string]: number;
+  };
+  matched_phrases: string[];
+  canonical_rules: string[];
 }
 
 export interface StrategyParserModule<T = any> {

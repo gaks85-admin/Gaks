@@ -1,15 +1,17 @@
 import { ParserResult, StrategyParserModule } from './types';
+import { confirmationCandleSynonyms } from './synonyms/confirmation-candle';
+import { findSynonymMatch } from './normalizer';
 
 export class ConfirmationCandleParser implements StrategyParserModule<boolean> {
   parse(text: string): ParserResult<boolean> {
-    const normalized = text.toLowerCase();
-    
-    const hasConfirmationCandle = /confirmation\s*candle|signal\s*candle|trigger\s*candle/i.test(normalized);
+    const match = findSynonymMatch(text, confirmationCandleSynonyms, 'CONFIRMATION_CANDLE', 0.95);
     
     return {
-      supported: hasConfirmationCandle,
-      confidence: hasConfirmationCandle ? 0.95 : 0.0,
-      parsedRule: hasConfirmationCandle
+      supported: match.matched,
+      confidence: match.confidence,
+      parsedRule: match.matched,
+      matchedPhrase: match.matchedPhrase,
+      canonicalRule: match.canonicalRule
     };
   }
 }

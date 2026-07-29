@@ -1,4 +1,5 @@
 import { compileStrategy } from '../strategy-compiler';
+import { runTestSuite } from './test-suite';
 
 // This is an integration example demonstrating how to run the Gaks AI Strategy Compiler.
 // You can run these scenarios to see the structured output and categorization modes in action.
@@ -32,5 +33,9 @@ export function runExampleScenarios() {
     console.log("-".repeat(50));
   }
   
+  console.log("=== RUNNING FULL SEMANTIC TEST SUITE ===");
+  runTestSuite();
+  
   console.log("=== STRATEGY COMPILER DEMO COMPLETED ===");
 }
+

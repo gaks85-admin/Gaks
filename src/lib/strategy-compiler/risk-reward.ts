@@ -1,4 +1,6 @@
 import { ParserResult, StrategyParserModule } from './types';
+import { riskRewardSynonyms } from './synonyms/risk-reward';
+import { findSynonymMatch, normalizeText } from './normalizer';
 
 export interface RiskRewardRule {
   min_ratio?: number;
@@ -6,13 +8,11 @@ export interface RiskRewardRule {
 
 export class RiskRewardParser implements StrategyParserModule<RiskRewardRule> {
   parse(text: string): ParserResult<RiskRewardRule> {
-    const normalized = text.toLowerCase();
+    const match = findSynonymMatch(text, riskRewardSynonyms, 'RISK_REWARD', 0.95);
+    
     let min_ratio: number | undefined;
+    const normalized = text.toLowerCase();
     
-    // Check for "risk reward", "rr", "r:r", "r/r"
-    const hasRr = /risk\s*reward|r\s*(?::|\/)\s*r|\brr\b/i.test(normalized);
-    
-    // Extract ratio strings like "1:2", "1:3.5", "1 to 2", "minimum of 3"
     const ratioMatches = normalized.match(/(?:1\s*:\s*|1\s*to\s*)(\d+(?:\.\d+)?)|(\d+(?:\.\d+)?)\s*(?:rr|r:r|r\/r)|\b(?:ratio\s*of|min|minimum)\s*(\d+(?:\.\d+)?)/i);
     
     if (ratioMatches) {
@@ -25,12 +25,16 @@ export class RiskRewardParser implements StrategyParserModule<RiskRewardRule> {
       }
     }
     
+    const supported = match.matched || min_ratio !== undefined;
+    
     return {
-      supported: hasRr || min_ratio !== undefined,
-      confidence: (hasRr || min_ratio !== undefined) ? 0.95 : 0.0,
+      supported,
+      confidence: supported ? 0.95 : 0.0,
       parsedRule: {
         min_ratio
-      }
+      },
+      matchedPhrase: match.matched ? match.matchedPhrase : (min_ratio ? "ratio" : ""),
+      canonicalRule: match.matched ? match.canonicalRule : (min_ratio ? "RISK_REWARD" : "")
     };
   }
 }
