@@ -1,4 +1,4 @@
-import { supabase } from '../supabaseClient';
+import { supabase } from '../supabaseClient.js';
 import { runGeminiRequest } from './geminiWrapper.js';
 import { GoogleGenAI } from '@google/genai';
 import { sendTelegramMessage } from './telegramWrapper.js';
