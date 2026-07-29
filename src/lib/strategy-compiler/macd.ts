@@ -1,6 +1,6 @@
-import { ParserResult, StrategyParserModule } from './types';
-import { macdSynonyms } from './synonyms/macd';
-import { findSynonymMatch } from './normalizer';
+import { ParserResult, StrategyParserModule } from './types.js';
+import { macdSynonyms } from './synonyms/macd.js';
+import { findSynonymMatch } from './normalizer.js';
 
 export interface MacdRule {
   enabled: boolean;

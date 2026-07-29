@@ -1,6 +1,6 @@
-import { ParserResult, StrategyParserModule } from './types';
-import { trendlineSynonyms } from './synonyms/trendline';
-import { findSynonymMatch, normalizeText } from './normalizer';
+import { ParserResult, StrategyParserModule } from './types.js';
+import { trendlineSynonyms } from './synonyms/trendline.js';
+import { findSynonymMatch, normalizeText } from './normalizer.js';
 
 export interface TrendlineRule {
   trendline_breakout: boolean;

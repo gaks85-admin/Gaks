@@ -1,6 +1,6 @@
-import { ParserResult, StrategyParserModule } from './types';
-import { rsiSynonyms } from './synonyms/rsi';
-import { findSynonymMatch, normalizeText } from './normalizer';
+import { ParserResult, StrategyParserModule } from './types.js';
+import { rsiSynonyms } from './synonyms/rsi.js';
+import { findSynonymMatch, normalizeText } from './normalizer.js';
 
 export interface RsiRule {
   enabled: boolean;

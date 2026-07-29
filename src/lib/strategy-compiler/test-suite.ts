@@ -1,4 +1,4 @@
-import { compileStrategy } from '../strategy-compiler';
+import { compileStrategy } from '../strategy-compiler.js';
 
 export interface TestCase {
   id: number;

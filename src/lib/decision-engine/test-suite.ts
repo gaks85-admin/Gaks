@@ -1,5 +1,5 @@
-import { evaluateDecision, DecisionResult } from '../decision-engine';
-import { CompilerOutput } from '../strategy-compiler/types';
+import { evaluateDecision, DecisionResult } from '../decision-engine.js';
+import { CompilerOutput } from '../strategy-compiler/types.js';
 
 export interface DecisionTestCase {
   id: number;

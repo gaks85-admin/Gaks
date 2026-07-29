@@ -1,6 +1,6 @@
-import { ParserResult, StrategyParserModule } from './types';
-import { volumeSynonyms } from './synonyms/volume';
-import { findSynonymMatch } from './normalizer';
+import { ParserResult, StrategyParserModule } from './types.js';
+import { volumeSynonyms } from './synonyms/volume.js';
+import { findSynonymMatch } from './normalizer.js';
 
 export class VolumeParser implements StrategyParserModule<boolean> {
   parse(text: string): ParserResult<boolean> {

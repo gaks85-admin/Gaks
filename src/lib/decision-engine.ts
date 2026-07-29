@@ -1,5 +1,5 @@
-import { CompilerOutput } from './strategy-compiler/types';
-import { RULE_WEIGHTS } from './rule-weight-engine';
+import { CompilerOutput } from './strategy-compiler/types.js';
+import { RULE_WEIGHTS } from './rule-weight-engine.js';
 import {
   TrendlineEvaluator,
   BosEvaluator,
@@ -17,7 +17,7 @@ import {
   TimeframeEvaluator,
   RiskRewardEvaluator,
   ConfirmationCandleEvaluator
-} from './decision-engine/index';
+} from './decision-engine/index.js';
 
 export interface DecisionResult {
   decision_score: number;

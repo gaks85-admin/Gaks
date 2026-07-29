@@ -1,6 +1,6 @@
-import { ParserResult, StrategyParserModule } from './types';
-import { atrSynonyms } from './synonyms/atr';
-import { findSynonymMatch } from './normalizer';
+import { ParserResult, StrategyParserModule } from './types.js';
+import { atrSynonyms } from './synonyms/atr.js';
+import { findSynonymMatch } from './normalizer.js';
 
 export interface AtrRule {
   enabled: boolean;

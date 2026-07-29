@@ -1,6 +1,6 @@
-import { ParserResult, StrategyParserModule } from './types';
-import { confirmationCandleSynonyms } from './synonyms/confirmation-candle';
-import { findSynonymMatch } from './normalizer';
+import { ParserResult, StrategyParserModule } from './types.js';
+import { confirmationCandleSynonyms } from './synonyms/confirmation-candle.js';
+import { findSynonymMatch } from './normalizer.js';
 
 export class ConfirmationCandleParser implements StrategyParserModule<boolean> {
   parse(text: string): ParserResult<boolean> {

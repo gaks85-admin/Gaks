@@ -1,5 +1,5 @@
 // src/lib/explainability-tests.ts
-import { recordEvaluation, EvaluationRecord } from './explainability-engine';
+import { recordEvaluation, EvaluationRecord } from './explainability-engine.js';
 
 // Mock localStorage if running in a Node environment without a browser window
 const mockLocalStorage: Record<string, string> = {};

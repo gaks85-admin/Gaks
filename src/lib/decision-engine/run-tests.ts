@@ -1,4 +1,4 @@
-import { runDecisionTestSuite } from './test-suite';
+import { runDecisionTestSuite } from './test-suite.js';
 
 const result = runDecisionTestSuite();
 

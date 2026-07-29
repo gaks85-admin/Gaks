@@ -1,5 +1,5 @@
-import { CompiledRules } from '../strategy-compiler/types';
-import { MarketStructure } from '../market-structure-engine';
+import { CompiledRules } from '../strategy-compiler/types.js';
+import { MarketStructure } from '../market-structure-engine.js';
 
 export interface EvaluationResult {
   matched: boolean;

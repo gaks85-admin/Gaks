@@ -1,6 +1,6 @@
-import { ParserResult, StrategyParserModule } from './types';
-import { bosSynonyms } from './synonyms/bos';
-import { findSynonymMatch } from './normalizer';
+import { ParserResult, StrategyParserModule } from './types.js';
+import { bosSynonyms } from './synonyms/bos.js';
+import { findSynonymMatch } from './normalizer.js';
 
 export class BosParser implements StrategyParserModule<boolean> {
   parse(text: string): ParserResult<boolean> {

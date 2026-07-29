@@ -1,19 +1,19 @@
-import { emaSynonyms } from './synonyms/ema';
-import { trendlineSynonyms } from './synonyms/trendline';
-import { supportResistanceSynonyms } from './synonyms/support-resistance';
-import { volumeSynonyms } from './synonyms/volume';
-import { bosSynonyms } from './synonyms/bos';
-import { chochSynonyms } from './synonyms/choch';
-import { fvgSynonyms } from './synonyms/fvg';
-import { liquiditySynonyms } from './synonyms/liquidity';
-import { sessionSynonyms } from './synonyms/session';
-import { confirmationCandleSynonyms } from './synonyms/confirmation-candle';
-import { macdSynonyms } from './synonyms/macd';
-import { rsiSynonyms } from './synonyms/rsi';
-import { atrSynonyms } from './synonyms/atr';
-import { riskRewardSynonyms } from './synonyms/risk-reward';
-import { timeframeSynonyms } from './synonyms/timeframe';
-import { subjectiveSynonyms, aiOnlySynonyms } from './synonyms/classification';
+import { emaSynonyms } from './synonyms/ema.js';
+import { trendlineSynonyms } from './synonyms/trendline.js';
+import { supportResistanceSynonyms } from './synonyms/support-resistance.js';
+import { volumeSynonyms } from './synonyms/volume.js';
+import { bosSynonyms } from './synonyms/bos.js';
+import { chochSynonyms } from './synonyms/choch.js';
+import { fvgSynonyms } from './synonyms/fvg.js';
+import { liquiditySynonyms } from './synonyms/liquidity.js';
+import { sessionSynonyms } from './synonyms/session.js';
+import { confirmationCandleSynonyms } from './synonyms/confirmation-candle.js';
+import { macdSynonyms } from './synonyms/macd.js';
+import { rsiSynonyms } from './synonyms/rsi.js';
+import { atrSynonyms } from './synonyms/atr.js';
+import { riskRewardSynonyms } from './synonyms/risk-reward.js';
+import { timeframeSynonyms } from './synonyms/timeframe.js';
+import { subjectiveSynonyms, aiOnlySynonyms } from './synonyms/classification.js';
 
 /**
  * Normalizes input text to simplify semantic matching.

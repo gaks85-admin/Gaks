@@ -1,6 +1,6 @@
-import { ParserResult, StrategyParserModule } from './types';
-import { sessionSynonyms } from './synonyms/session';
-import { findSynonymMatch, normalizeText } from './normalizer';
+import { ParserResult, StrategyParserModule } from './types.js';
+import { sessionSynonyms } from './synonyms/session.js';
+import { findSynonymMatch, normalizeText } from './normalizer.js';
 
 export class SessionParser implements StrategyParserModule<string[]> {
   parse(text: string): ParserResult<string[]> {

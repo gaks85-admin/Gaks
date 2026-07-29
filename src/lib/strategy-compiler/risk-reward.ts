@@ -1,6 +1,6 @@
-import { ParserResult, StrategyParserModule } from './types';
-import { riskRewardSynonyms } from './synonyms/risk-reward';
-import { findSynonymMatch, normalizeText } from './normalizer';
+import { ParserResult, StrategyParserModule } from './types.js';
+import { riskRewardSynonyms } from './synonyms/risk-reward.js';
+import { findSynonymMatch, normalizeText } from './normalizer.js';
 
 export interface RiskRewardRule {
   min_ratio?: number;

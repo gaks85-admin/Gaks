@@ -1,6 +1,6 @@
-import { ParserResult, StrategyParserModule } from './types';
-import { timeframeSynonyms } from './synonyms/timeframe';
-import { findSynonymMatch, normalizeText } from './normalizer';
+import { ParserResult, StrategyParserModule } from './types.js';
+import { timeframeSynonyms } from './synonyms/timeframe.js';
+import { findSynonymMatch, normalizeText } from './normalizer.js';
 
 export class TimeframeParser implements StrategyParserModule<string[]> {
   parse(text: string): ParserResult<string[]> {

@@ -1,6 +1,6 @@
-import { ParserResult, StrategyParserModule } from './types';
-import { supportResistanceSynonyms } from './synonyms/support-resistance';
-import { findSynonymMatch, normalizeText } from './normalizer';
+import { ParserResult, StrategyParserModule } from './types.js';
+import { supportResistanceSynonyms } from './synonyms/support-resistance.js';
+import { findSynonymMatch, normalizeText } from './normalizer.js';
 
 export interface SupportResistanceRule {
   support: boolean;

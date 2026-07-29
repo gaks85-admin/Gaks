@@ -1,6 +1,6 @@
-import { ParserResult, StrategyParserModule } from './types';
-import { fvgSynonyms } from './synonyms/fvg';
-import { findSynonymMatch } from './normalizer';
+import { ParserResult, StrategyParserModule } from './types.js';
+import { fvgSynonyms } from './synonyms/fvg.js';
+import { findSynonymMatch } from './normalizer.js';
 
 export class FvgParser implements StrategyParserModule<boolean> {
   parse(text: string): ParserResult<boolean> {

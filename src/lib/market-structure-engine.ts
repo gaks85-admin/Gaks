@@ -1,4 +1,4 @@
-import { Candle } from './strategy-engine';
+import { Candle } from './strategy-engine.js';
 
 export interface MarketStructure {
   trend: 'BULLISH' | 'BEARISH' | 'SIDEWAYS';

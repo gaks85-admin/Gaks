@@ -1,5 +1,5 @@
 // src/lib/explainability-engine.ts
-import { DecisionResult } from './decision-engine';
+import { DecisionResult } from './decision-engine.js';
 
 export interface EvaluationRecord {
   id?: string;

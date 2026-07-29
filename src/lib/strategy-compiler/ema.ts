@@ -1,6 +1,6 @@
-import { ParserResult, StrategyParserModule } from './types';
-import { emaSynonyms } from './synonyms/ema';
-import { findSynonymMatch, normalizeText } from './normalizer';
+import { ParserResult, StrategyParserModule } from './types.js';
+import { emaSynonyms } from './synonyms/ema.js';
+import { findSynonymMatch, normalizeText } from './normalizer.js';
 
 export interface EmaRule {
   enabled: boolean;

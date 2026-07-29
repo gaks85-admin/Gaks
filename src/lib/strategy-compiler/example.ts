@@ -1,5 +1,5 @@
-import { compileStrategy } from '../strategy-compiler';
-import { runTestSuite } from './test-suite';
+import { compileStrategy } from '../strategy-compiler.js';
+import { runTestSuite } from './test-suite.js';
 
 // This is an integration example demonstrating how to run the Gaks AI Strategy Compiler.
 // You can run these scenarios to see the structured output and categorization modes in action.

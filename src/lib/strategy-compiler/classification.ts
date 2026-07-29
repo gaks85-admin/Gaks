@@ -1,6 +1,6 @@
-import { ParserResult, StrategyParserModule } from './types';
-import { subjectiveSynonyms, aiOnlySynonyms } from './synonyms/classification';
-import { normalizeText } from './normalizer';
+import { ParserResult, StrategyParserModule } from './types.js';
+import { subjectiveSynonyms, aiOnlySynonyms } from './synonyms/classification.js';
+import { normalizeText } from './normalizer.js';
 
 export interface ClassificationRule {
   subjective_elements: string[];

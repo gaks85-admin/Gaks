@@ -1,6 +1,6 @@
-import { ParserResult, StrategyParserModule } from './types';
-import { liquiditySynonyms } from './synonyms/liquidity';
-import { findSynonymMatch } from './normalizer';
+import { ParserResult, StrategyParserModule } from './types.js';
+import { liquiditySynonyms } from './synonyms/liquidity.js';
+import { findSynonymMatch } from './normalizer.js';
 
 export class LiquidityParser implements StrategyParserModule<boolean> {
   parse(text: string): ParserResult<boolean> {

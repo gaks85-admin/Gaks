@@ -1,22 +1,22 @@
-import { CompilerOutput, CompiledRules } from './strategy-compiler/types';
-import { TrendlineParser } from './strategy-compiler/trendline';
-import { BosParser } from './strategy-compiler/bos';
-import { ChochParser } from './strategy-compiler/choch';
-import { EmaParser } from './strategy-compiler/ema';
-import { RsiParser } from './strategy-compiler/rsi';
-import { SessionParser } from './strategy-compiler/session';
-import { VolumeParser } from './strategy-compiler/volume';
-import { LiquidityParser } from './strategy-compiler/liquidity';
-import { FvgParser } from './strategy-compiler/fvg';
-import { SupportResistanceParser } from './strategy-compiler/support-resistance';
-import { MacdParser } from './strategy-compiler/macd';
-import { AtrParser } from './strategy-compiler/atr';
-import { ConfirmationCandleParser } from './strategy-compiler/confirmation-candle';
-import { RiskRewardParser } from './strategy-compiler/risk-reward';
-import { TimeframeParser } from './strategy-compiler/timeframe';
-import { ClassificationParser } from './strategy-compiler/classification';
+import { CompilerOutput, CompiledRules } from './strategy-compiler/types.js';
+import { TrendlineParser } from './strategy-compiler/trendline.js';
+import { BosParser } from './strategy-compiler/bos.js';
+import { ChochParser } from './strategy-compiler/choch.js';
+import { EmaParser } from './strategy-compiler/ema.js';
+import { RsiParser } from './strategy-compiler/rsi.js';
+import { SessionParser } from './strategy-compiler/session.js';
+import { VolumeParser } from './strategy-compiler/volume.js';
+import { LiquidityParser } from './strategy-compiler/liquidity.js';
+import { FvgParser } from './strategy-compiler/fvg.js';
+import { SupportResistanceParser } from './strategy-compiler/support-resistance.js';
+import { MacdParser } from './strategy-compiler/macd.js';
+import { AtrParser } from './strategy-compiler/atr.js';
+import { ConfirmationCandleParser } from './strategy-compiler/confirmation-candle.js';
+import { RiskRewardParser } from './strategy-compiler/risk-reward.js';
+import { TimeframeParser } from './strategy-compiler/timeframe.js';
+import { ClassificationParser } from './strategy-compiler/classification.js';
 
-export * from './strategy-compiler/types';
+export * from './strategy-compiler/types.js';
 
 /**
  * Strategy Compiler converts natural language strategies into structured JSON rules

@@ -1,6 +1,6 @@
-import { ParserResult, StrategyParserModule } from './types';
-import { chochSynonyms } from './synonyms/choch';
-import { findSynonymMatch } from './normalizer';
+import { ParserResult, StrategyParserModule } from './types.js';
+import { chochSynonyms } from './synonyms/choch.js';
+import { findSynonymMatch } from './normalizer.js';
 
 export class ChochParser implements StrategyParserModule<boolean> {
   parse(text: string): ParserResult<boolean> {

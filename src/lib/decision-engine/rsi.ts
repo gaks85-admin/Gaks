@@ -1,5 +1,5 @@
-import { CompiledRules } from '../strategy-compiler/types';
-import { EvaluationResult } from './types';
+import { CompiledRules } from '../strategy-compiler/types.js';
+import { EvaluationResult } from './types.js';
 
 export class RsiEvaluator {
   evaluate(rules: CompiledRules, market: any): EvaluationResult {
