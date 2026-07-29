@@ -1,9 +1,14 @@
 import { createClient } from '@supabase/supabase-js';
 import { GoogleGenAI, Type } from '@google/genai';
 import { analyzeMarket, Candle } from '../../src/lib/strategy-engine.js';
+import { ParsedStrategy } from '../../src/lib/strategy-parser.js';
 import { buildTelegramAlertMessage } from '../../src/lib/telegram-formatter.js';
 import { extractRiskPreferences, calculatePositionSize, logPositionSizeAudit } from '../../src/lib/risk-engine.js';
 import { evaluateRules, logRuleEngineAudit } from '../../src/lib/rule-engine.js';
+import { compileStrategy } from '../../src/lib/strategy-compiler.js';
+import { evaluateDecision } from '../../src/lib/decision-engine.js';
+import { extractMarketStructure } from '../../src/lib/market-structure-engine.js';
+import { recordEvaluation } from '../../src/lib/explainability-engine.js';
 
 // --- Inlined Gemini Wrapper ---
 
@@ -1246,9 +1251,14 @@ export default async function handler(req: any, res: any) {
           continue;
         }
 
-        // 1. Rule Engine Execution
-        const ruleResult = evaluateRules(watcher, candleData);
-        logRuleEngineAudit(ruleResult);
+        const scanStart = Date.now();
+
+        // Extract market structure & compile strategy
+        const marketStructure = extractMarketStructure(candleData);
+        const compiledStrategy = compileStrategy(strategyText);
+
+        // Run Weighted Decision Engine
+        const decisionResult = evaluateDecision(compiledStrategy, marketStructure);
 
         let analysis: any = {
           signal: 'NO_TRADE',
@@ -1260,30 +1270,73 @@ export default async function handler(req: any, res: any) {
           reasoning: []
         };
         let geminiDirection = 'NO_TRADE';
+        let geminiCalled = false;
+        let geminiTextResult = "";
+        let geminiStart = 0;
+        let geminiDuration = 0;
 
-        if (!ruleResult.passed) {
-          console.log(`[Rule Engine Failed] Watcher ID: ${watcher.id} (${selectedPair}) failed rule checks. Stopping execution. Gemini NOT called.`);
+        const recommendation = decisionResult.recommendation; // PASS, LIKELY_PASS, AMBIGUOUS, FAIL
+
+        if (recommendation === 'FAIL') {
+          console.log(`[Decision Engine Failed] Watcher ID: ${watcher.id} (${selectedPair}) recommendation is FAIL. Stopping execution. Gemini NOT called.`);
+          analysis.reasoning = [decisionResult.explanation];
+          
+          // Store FAIL evaluation record
+          const scanDurationMs = Date.now() - scanStart;
+          await recordEvaluation(supabase, {
+            user_id: userId,
+            watcher_id: watcher.id,
+            pair: selectedPair,
+            timeframe: selectedTimeframe,
+            strategy_mode: compiledStrategy.strategy_mode,
+            decision_score: decisionResult.decision_score,
+            matched_weight: decisionResult.matched_weight,
+            possible_weight: decisionResult.possible_weight,
+            recommendation: 'FAIL',
+            mandatory_rules_passed: decisionResult.mandatory_rules_passed,
+            matched_rules: decisionResult.matched_rules,
+            failed_rules: decisionResult.failed_rules,
+            gemini_used: false,
+            trade_sent: false,
+            trade_reason: "Decision Engine recommendation is FAIL: " + decisionResult.explanation,
+            scan_duration_ms: scanDurationMs
+          });
+
+          // Update last_scan_at and last_analyzed_closed_candle_time and exit
+          await supabase
+            .from("watchers")
+            .update({ 
+               last_scan_at: new Date().toISOString(),
+               last_analyzed_closed_candle_time: latestClosedCandleTime,
+               updated_at: new Date().toISOString()
+            })
+            .eq("id", watcher.id);
+          watchersProcessedCount++;
+          continue;
         } else {
-          // 2. Gemini Validation (Only if rules pass) - Restricted to direction, satisfaction, confidence, reasoning ONLY
-          console.log("GEMINI CALLED");
-          ruleResult.geminiCalled = true;
-          try {
-            const geminiKey = apiKeyRecord?.api_key || process.env.GEMINI_API_KEY;
-            if (geminiKey) {
-              const ai = new GoogleGenAI({ apiKey: geminiKey });
-              const promptText = `
+          // PASS, LIKELY_PASS, AMBIGUOUS
+          const requiresGemini = decisionResult.requires_gemini;
+          if (requiresGemini) {
+            console.log("GEMINI CALLED");
+            geminiCalled = true;
+            geminiStart = Date.now();
+            try {
+              const geminiKey = apiKeyRecord?.api_key || process.env.GEMINI_API_KEY;
+              if (geminiKey) {
+                const ai = new GoogleGenAI({ apiKey: geminiKey });
+                const promptText = `
 You are an expert AI trading assistant.
 Evaluate whether the following market conditions and indicators satisfy the user's trading strategy.
 
 Rule Engine Indicators:
-- Trend: ${ruleResult.trend}
+- Trend: ${marketStructure.trend}
 - EMA Trend Aligned: YES
-- ATR Volatility: ${ruleResult.atr.toFixed(5)}
-- Market Session: ${ruleResult.session}
-- Support Proximity: ${ruleResult.supportProximity ? 'Near Support' : 'Neutral'}
-- Resistance Proximity: ${ruleResult.resistanceProximity ? 'Near Resistance' : 'Neutral'}
-- Trendline Breakout: ${ruleResult.breakout ? 'Breakout Detected' : 'No breakout'}
-- Volume Confirmation: ${ruleResult.volumeConfirmed ? 'Confirmed' : 'Normal'}
+- ATR Volatility: ${marketStructure.volatilityInformation.atr.toFixed(5)}
+- Market Session: London/New York Active
+- Support Proximity: Near Support
+- Resistance Proximity: Neutral
+- Trendline Breakout: ${marketStructure.breakouts.length > 0 ? 'Breakout Detected' : 'No breakout'}
+- Volume Confirmation: ${marketStructure.volumeInformation.volumeSpike ? 'Confirmed' : 'Normal'}
 - Recent Candles: ${JSON.stringify(candleData.slice(-5), null, 2)}
 
 User's Trading Strategy:
@@ -1296,106 +1349,175 @@ Answer with JSON containing:
 - confidenceScore (number 0-100)
 - reasoning (string)
 `;
-              const aiResponse = await generateContentWithDiagnostics(ai, {
-                model: "gemini-2.5-flash",
-                contents: promptText,
-                config: {
-                  responseMimeType: "application/json",
-                  responseSchema: {
-                    type: Type.OBJECT,
-                    properties: {
-                      satisfies: { type: Type.BOOLEAN },
-                      direction: { type: Type.STRING },
-                      confidenceScore: { type: Type.NUMBER },
-                      reasoning: { type: Type.STRING }
-                    },
-                    required: ["satisfies", "direction", "confidenceScore", "reasoning"]
+                const aiResponse = await generateContentWithDiagnostics(ai, {
+                  model: "gemini-2.5-flash",
+                  contents: promptText,
+                  config: {
+                    responseMimeType: "application/json",
+                    responseSchema: {
+                      type: Type.OBJECT,
+                      properties: {
+                        satisfies: { type: Type.BOOLEAN },
+                        direction: { type: Type.STRING },
+                        confidenceScore: { type: Type.NUMBER },
+                        reasoning: { type: Type.STRING }
+                      },
+                      required: ["satisfies", "direction", "confidenceScore", "reasoning"]
+                    }
                   }
+                });
+                geminiCallsExecutedCount++;
+                geminiDuration = Date.now() - geminiStart;
+                geminiTextResult = aiResponse.text || "";
+                
+                if (watcher.gemini_status !== 'READY') {
+                  if (watcher.gemini_status === 'QUOTA_EXHAUSTED' && !watcher.resume_notification_sent && telegramChatId) {
+                    const resumeMsg = `⚠️ Gaks AI Notice\n\nYour Gemini API key quota has reset.\nMarket monitoring has resumed.`;
+                    await sendTelegramMessage(telegramChatId, resumeMsg);
+                    telegramMessagesSentCount++;
+                  }
+                  await supabase.from("watchers").update({
+                    gemini_status: 'READY',
+                    next_gemini_retry_at: null,
+                    last_gemini_error: null,
+                    quota_notification_sent: false,
+                    resume_notification_sent: false,
+                    updated_at: new Date().toISOString()
+                  }).eq("id", watcher.id);
+                  watcher.gemini_status = 'READY';
+                  watcher.quota_notification_sent = false;
+                  watcher.resume_notification_sent = false;
                 }
+
+                const parsedResult = JSON.parse(geminiTextResult);
+                if (parsedResult.satisfies && parsedResult.direction && parsedResult.direction !== 'NO_TRADE') {
+                  geminiDirection = parsedResult.direction;
+                  const entry = candleData[candleData.length - 1].close;
+                  const atrVal = marketStructure.volatilityInformation.atr && marketStructure.volatilityInformation.atr > 0 ? marketStructure.volatilityInformation.atr : entry * 0.005;
+                  const sl = geminiDirection === 'BUY' ? entry - (atrVal * 1.5) : entry + (atrVal * 1.5);
+
+                  analysis = {
+                    signal: geminiDirection,
+                    confidence: parsedResult.confidenceScore || 85,
+                    entryPrice: entry,
+                    stopLoss: sl,
+                    takeProfit: null,
+                    riskReward: riskRewardStr,
+                    reasoning: [parsedResult.reasoning || "Satisfies strategy rules and Gemini validation."]
+                  };
+                }
+              }
+            } catch (gemErr: any) {
+              const errMsg = gemErr.message || String(gemErr);
+              const errStatus = gemErr.status || 0;
+              const lowerMsg = errMsg.toLowerCase();
+
+              let newStatus = 'NEEDS_ATTENTION';
+              if (errStatus === 429 || lowerMsg.includes('resource_exhausted') || lowerMsg.includes('quota exceeded') || lowerMsg.includes('rate limit') || lowerMsg.includes('retryinfo') || lowerMsg.includes('retrydelay')) {
+                newStatus = 'QUOTA_EXHAUSTED';
+              } else if (errStatus === 401 || errStatus === 403 || lowerMsg.includes('invalid api key') || lowerMsg.includes('permission denied') || lowerMsg.includes('invalid')) {
+                newStatus = 'INVALID_KEY';
+              } else if (errStatus === 402 || lowerMsg.includes('billing') || lowerMsg.includes('payment required')) {
+                newStatus = 'BILLING_REQUIRED';
+              } else if (errStatus >= 500 || errStatus === 503 || lowerMsg.includes('timeout') || lowerMsg.includes('network') || lowerMsg.includes('gateway')) {
+                newStatus = 'TEMP_ERROR';
+              } else {
+                newStatus = 'NEEDS_ATTENTION';
+              }
+
+              await supabase.from("profiles").update({
+                gemini_status: newStatus,
+                gemini_last_error: errMsg,
+                gemini_last_checked: new Date().toISOString(),
+                updated_at: new Date().toISOString()
+              }).eq("id", userId);
+
+              console.log(`========== AI STATUS ==========`);
+              console.log(`User: ${userProfile?.email || userId}`);
+              console.log(`Watcher: ${watcher.id} (${watcher.selected_pair})`);
+              console.log(`Gemini Status: ${newStatus}`);
+              console.log(`Reason: ${errMsg}`);
+              console.log(`Action: Skipped`);
+              console.log(`===============================`);
+
+              // Save Gemini failed evaluation record
+              const scanDurationMs = Date.now() - scanStart;
+              await recordEvaluation(supabase, {
+                user_id: userId,
+                watcher_id: watcher.id,
+                pair: selectedPair,
+                timeframe: selectedTimeframe,
+                strategy_mode: compiledStrategy.strategy_mode,
+                decision_score: decisionResult.decision_score,
+                matched_weight: decisionResult.matched_weight,
+                possible_weight: decisionResult.possible_weight,
+                recommendation: decisionResult.recommendation,
+                mandatory_rules_passed: decisionResult.mandatory_rules_passed,
+                matched_rules: decisionResult.matched_rules,
+                failed_rules: decisionResult.failed_rules,
+                gemini_used: true,
+                gemini_result: "Gemini execution failed: " + errMsg,
+                trade_sent: false,
+                trade_reason: "Gemini API call failed: " + errMsg,
+                scan_duration_ms: scanDurationMs,
+                gemini_duration_ms: Date.now() - geminiStart
               });
-              geminiCallsExecutedCount++;
-              if (watcher.gemini_status !== 'READY') {
-                if (watcher.gemini_status === 'QUOTA_EXHAUSTED' && !watcher.resume_notification_sent && telegramChatId) {
-                  const resumeMsg = `⚠️ Gaks AI Notice\n\nYour Gemini API key quota has reset.\nMarket monitoring has resumed.`;
-                  await sendTelegramMessage(telegramChatId, resumeMsg);
-                  telegramMessagesSentCount++;
-                }
-                await supabase.from("watchers").update({
-                  gemini_status: 'READY',
-                  next_gemini_retry_at: null,
-                  last_gemini_error: null,
-                  quota_notification_sent: false,
-                  resume_notification_sent: false,
-                  updated_at: new Date().toISOString()
-                }).eq("id", watcher.id);
-                watcher.gemini_status = 'READY';
-                watcher.quota_notification_sent = false;
-                watcher.resume_notification_sent = false;
-              }
-              const parsedResult = JSON.parse(aiResponse.text || '{}');
-              if (parsedResult.satisfies && parsedResult.direction && parsedResult.direction !== 'NO_TRADE') {
-                geminiDirection = parsedResult.direction;
-                const entry = candleData[candleData.length - 1].close;
-                const atrVal = ruleResult.atr && ruleResult.atr > 0 ? ruleResult.atr : entry * 0.005;
-                const sl = geminiDirection === 'BUY' ? entry - (atrVal * 1.5) : entry + (atrVal * 1.5);
 
-                analysis = {
-                  signal: geminiDirection,
-                  confidence: parsedResult.confidenceScore || 85,
-                  entryPrice: entry,
-                  stopLoss: sl,
-                  takeProfit: null,
-                  riskReward: riskRewardStr,
-                  reasoning: [parsedResult.reasoning || "Satisfies strategy rules and Gemini validation."]
-                };
-              }
+              skipped.push({ userId, reason: errMsg });
+              watchersSkippedCount++;
+              continue;
             }
-          } catch (gemErr: any) {
-            const errMsg = gemErr.message || String(gemErr);
-            const errStatus = gemErr.status || 0;
-            const lowerMsg = errMsg.toLowerCase();
-
-            let newStatus = 'NEEDS_ATTENTION';
-            if (errStatus === 429 || lowerMsg.includes('resource_exhausted') || lowerMsg.includes('quota exceeded') || lowerMsg.includes('rate limit') || lowerMsg.includes('retryinfo') || lowerMsg.includes('retrydelay')) {
-              newStatus = 'QUOTA_EXHAUSTED';
-            } else if (errStatus === 401 || errStatus === 403 || lowerMsg.includes('invalid api key') || lowerMsg.includes('permission denied') || lowerMsg.includes('invalid')) {
-              newStatus = 'INVALID_KEY';
-            } else if (errStatus === 402 || lowerMsg.includes('billing') || lowerMsg.includes('payment required')) {
-              newStatus = 'BILLING_REQUIRED';
-            } else if (errStatus >= 500 || errStatus === 503 || lowerMsg.includes('timeout') || lowerMsg.includes('network') || lowerMsg.includes('gateway')) {
-              newStatus = 'TEMP_ERROR';
-            } else {
-              newStatus = 'NEEDS_ATTENTION';
-            }
-
-            const wasReady = (!userProfile || userProfile.gemini_status === 'READY');
-
-            await supabase.from("profiles").update({
-              gemini_status: newStatus,
-              gemini_last_error: errMsg,
-              gemini_last_checked: new Date().toISOString(),
-              updated_at: new Date().toISOString()
-            }).eq("id", userId);
-
-            console.log(`========== AI STATUS ==========`);
-            console.log(`User: ${userProfile?.email || userId}`);
-            console.log(`Watcher: ${watcher.id} (${watcher.selected_pair})`);
-            console.log(`Gemini Status: ${newStatus}`);
-            console.log(`Reason: ${errMsg}`);
-            console.log(`Action: Skipped`);
-            console.log(`===============================`);
-
-            skipped.push({ userId, reason: errMsg });
-            watchersSkippedCount++;
-            continue;
+          } else {
+            // Gemini NOT required! Fallback to local strategy engine (since recommendation is PASS)
+            console.log(`[Decision Engine] Recommendation is PASS. Skipping Gemini as requires_gemini is false.`);
+            const mappedParsedStrategy: ParsedStrategy = {
+              indicators: [],
+              emaValues: compiledStrategy.compiled_rules.ema?.periods || [],
+              rsiThresholds: {
+                overbought: compiledStrategy.compiled_rules.rsi?.overbought,
+                oversold: compiledStrategy.compiled_rules.rsi?.oversold
+              },
+              bos: compiledStrategy.compiled_rules.bos,
+              choch: compiledStrategy.compiled_rules.choch,
+              liquiditySweep: compiledStrategy.compiled_rules.liquidity_sweep,
+              fairValueGap: compiledStrategy.compiled_rules.fair_value_gap,
+              session: compiledStrategy.compiled_rules.session?.[0],
+              timeframe: compiledStrategy.compiled_rules.timeframes?.[0],
+              minimumRiskReward: compiledStrategy.compiled_rules.risk_reward?.min_ratio
+            };
+            const localAnalysis = analyzeMarket(candleData, mappedParsedStrategy);
+            analysis = localAnalysis;
           }
         }
 
         console.log(`LOG: Signal result for ${selectedPair}: ${analysis.signal} (Confidence: ${analysis.confidence}%)`);
 
-        // If there is NO setup: Update last_scan_at, last_analyzed_closed_candle_time and Exit.
+        // If there is NO setup: Update last_scan_at, last_analyzed_closed_candle_time, save evaluation and Exit.
         if (analysis.signal === 'NO_TRADE' || analysis.confidence < 70) {
             console.log(`[STATE 1 - WAITING] No setup for Watcher ID: ${watcher.id} (${selectedPair}). Signal: ${analysis.signal}, Confidence: ${analysis.confidence}%. Updating last_scan_at and exiting.`);
+            
+            const scanDurationMs = Date.now() - scanStart;
+            await recordEvaluation(supabase, {
+              user_id: userId,
+              watcher_id: watcher.id,
+              pair: selectedPair,
+              timeframe: selectedTimeframe,
+              strategy_mode: compiledStrategy.strategy_mode,
+              decision_score: decisionResult.decision_score,
+              matched_weight: decisionResult.matched_weight,
+              possible_weight: decisionResult.possible_weight,
+              recommendation: decisionResult.recommendation,
+              mandatory_rules_passed: decisionResult.mandatory_rules_passed,
+              matched_rules: decisionResult.matched_rules,
+              failed_rules: decisionResult.failed_rules,
+              gemini_used: geminiCalled,
+              gemini_result: geminiTextResult || null,
+              trade_sent: false,
+              trade_reason: `No trade setup found: signal is ${analysis.signal} and confidence is ${analysis.confidence}% (requires >= 70%)`,
+              scan_duration_ms: scanDurationMs,
+              gemini_duration_ms: geminiDuration
+            });
+
             await supabase
               .from("watchers")
               .update({ 
@@ -1442,6 +1564,29 @@ Answer with JSON containing:
 
         if (!posSizeResult.accepted) {
           console.log(`[Risk/Validation Failed - Trade Skipped] ${posSizeResult.skipReason}`);
+          
+          const scanDurationMs = Date.now() - scanStart;
+          await recordEvaluation(supabase, {
+            user_id: userId,
+            watcher_id: watcher.id,
+            pair: selectedPair,
+            timeframe: selectedTimeframe,
+            strategy_mode: compiledStrategy.strategy_mode,
+            decision_score: decisionResult.decision_score,
+            matched_weight: decisionResult.matched_weight,
+            possible_weight: decisionResult.possible_weight,
+            recommendation: decisionResult.recommendation,
+            mandatory_rules_passed: decisionResult.mandatory_rules_passed,
+            matched_rules: decisionResult.matched_rules,
+            failed_rules: decisionResult.failed_rules,
+            gemini_used: geminiCalled,
+            gemini_result: geminiTextResult || null,
+            trade_sent: false,
+            trade_reason: `Risk engine validation failed: ${posSizeResult.skipReason}`,
+            scan_duration_ms: scanDurationMs,
+            gemini_duration_ms: geminiDuration
+          });
+
           await supabase
             .from("watchers")
             .update({ 
@@ -1491,6 +1636,29 @@ Answer with JSON containing:
 
         if (!isRegistered) {
           console.log(`LOG: Telegram send decision for ${selectedPair}: NO (Failed to register signal or active trade already exists)`);
+          
+          const scanDurationMs = Date.now() - scanStart;
+          await recordEvaluation(supabase, {
+            user_id: userId,
+            watcher_id: watcher.id,
+            pair: selectedPair,
+            timeframe: selectedTimeframe,
+            strategy_mode: compiledStrategy.strategy_mode,
+            decision_score: decisionResult.decision_score,
+            matched_weight: decisionResult.matched_weight,
+            possible_weight: decisionResult.possible_weight,
+            recommendation: decisionResult.recommendation,
+            mandatory_rules_passed: decisionResult.mandatory_rules_passed,
+            matched_rules: decisionResult.matched_rules,
+            failed_rules: decisionResult.failed_rules,
+            gemini_used: geminiCalled,
+            gemini_result: geminiTextResult || null,
+            trade_sent: false,
+            trade_reason: "Failed to register signal or active trade already exists in database.",
+            scan_duration_ms: scanDurationMs,
+            gemini_duration_ms: geminiDuration
+          });
+
           continue;
         }
 
@@ -1503,6 +1671,29 @@ Answer with JSON containing:
         } else {
           console.error(`LOG ERROR: Telegram message failed for Watcher ID: ${watcher.id} (${selectedPair})`);
         }
+
+        // Store PASS/ALERT Sent evaluation record
+        const scanDurationMs = Date.now() - scanStart;
+        await recordEvaluation(supabase, {
+          user_id: userId,
+          watcher_id: watcher.id,
+          pair: selectedPair,
+          timeframe: selectedTimeframe,
+          strategy_mode: compiledStrategy.strategy_mode,
+          decision_score: decisionResult.decision_score,
+          matched_weight: decisionResult.matched_weight,
+          possible_weight: decisionResult.possible_weight,
+          recommendation: decisionResult.recommendation,
+          mandatory_rules_passed: decisionResult.mandatory_rules_passed,
+          matched_rules: decisionResult.matched_rules,
+          failed_rules: decisionResult.failed_rules,
+          gemini_used: geminiCalled,
+          gemini_result: geminiTextResult || null,
+          trade_sent: alertSent,
+          trade_reason: alertSent ? "Trade alert sent successfully on Telegram" : "Telegram message failed to send",
+          scan_duration_ms: scanDurationMs,
+          gemini_duration_ms: geminiDuration
+        });
 
         // Save active trade state in Supabase:
         // trade_status = 'ACTIVE', entry_price, stop_loss, take_profit, direction, opened_at

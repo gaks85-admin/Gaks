@@ -2011,6 +2011,213 @@ async function inspector_watcher_details_handler(req: any, res: any) {
 }
 
 
+async function explainability_handler(req: any, res: any) {
+  const supabase = getSupabase();
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, PATCH, DELETE");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With");
+  res.setHeader("Content-Type", "application/json");
+
+  if (req.method === "OPTIONS") {
+    return res.status(200).end();
+  }
+
+  if (req.method !== 'GET') {
+    return res.status(405).json({ success: false, error: 'Method Not Allowed' });
+  }
+
+  const authHeader = req.headers.authorization || '';
+  const token = authHeader.startsWith('Bearer ') ? authHeader.substring(7) : authHeader;
+  
+  if (!token) {
+    return res.status(401).json({ success: false, error: "Unauthorized: Missing authentication token." });
+  }
+  
+  try {
+    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+    if (authError || !user) {
+      return res.status(401).json({ success: false, error: "Unauthorized: Invalid authentication token." });
+    }
+    
+    const email = user.email?.trim().toLowerCase();
+    const ADMIN_EMAIL = "gaks6535@gmail.com";
+    if (email !== ADMIN_EMAIL) {
+      return res.status(403).json({ success: false, error: "Unauthorized: Insufficient privileges." });
+    }
+
+    // 1. Fetch all profiles to map user IDs to emails
+    const { data: profiles, error: pErr } = await supabase.from('profiles').select('id, email');
+    const profileMap = new Map<string, string>();
+    if (profiles) {
+      profiles.forEach((p: any) => {
+        profileMap.set(p.id, p.email || p.id);
+      });
+    }
+
+    // 2. Fetch total count of evaluations
+    const { count: totalScans, error: countErr } = await supabase
+      .from('watcher_evaluations')
+      .select('*', { count: 'exact', head: true });
+
+    if (countErr) {
+      console.warn("Error getting watcher_evaluations count:", countErr.message);
+    }
+
+    // 3. Fetch latest 1000 evaluations to calculate statistics in memory
+    const { data: evaluations, error: evErr } = await supabase
+      .from('watcher_evaluations')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(1000);
+
+    if (evErr) {
+      throw evErr;
+    }
+
+    const evs = evaluations || [];
+
+    // Aggregations
+    let totalSignals = 0;
+    let passCount = 0;
+    let likelyPassCount = 0;
+    let ambiguousCount = 0;
+    let failCount = 0;
+
+    const modeCounts: Record<string, number> = { RULE_ONLY: 0, HYBRID: 0, AI_ONLY: 0 };
+    const userScans: Record<string, { email: string, count: number }> = {};
+    
+    // Performance Latencies
+    let totalScanDuration = 0;
+    let scanDurationCount = 0;
+    let totalGeminiDuration = 0;
+    let geminiDurationCount = 0;
+
+    // Rule Frequency tracking
+    const ruleMatches: Record<string, { matched: number, failed: number }> = {};
+
+    evs.forEach((ev: any) => {
+      // Recommendations
+      if (ev.recommendation === 'PASS') passCount++;
+      else if (ev.recommendation === 'LIKELY_PASS') likelyPassCount++;
+      else if (ev.recommendation === 'AMBIGUOUS') ambiguousCount++;
+      else if (ev.recommendation === 'FAIL') failCount++;
+
+      // Signals Sent
+      if (ev.trade_sent) totalSignals++;
+
+      // Mode
+      const mode = ev.strategy_mode || 'RULE_ONLY';
+      modeCounts[mode] = (modeCounts[mode] || 0) + 1;
+
+      // User rankings
+      const uId = ev.user_id;
+      if (uId) {
+        if (!userScans[uId]) {
+          userScans[uId] = {
+            email: profileMap.get(uId) || uId,
+            count: 0
+          };
+        }
+        userScans[uId].count++;
+      }
+
+      // Latencies
+      if (ev.scan_duration_ms) {
+        totalScanDuration += ev.scan_duration_ms;
+        scanDurationCount++;
+      }
+      if (ev.gemini_used && ev.gemini_duration_ms) {
+        totalGeminiDuration += ev.gemini_duration_ms;
+        geminiDurationCount++;
+      }
+
+      // Parse rules
+      let matchedList: string[] = [];
+      let failedList: string[] = [];
+
+      try {
+        if (ev.matched_rules) {
+          matchedList = typeof ev.matched_rules === 'string' ? JSON.parse(ev.matched_rules) : ev.matched_rules;
+        }
+      } catch (e) {}
+
+      try {
+        if (ev.failed_rules) {
+          failedList = typeof ev.failed_rules === 'string' ? JSON.parse(ev.failed_rules) : ev.failed_rules;
+        }
+      } catch (e) {}
+
+      if (Array.isArray(matchedList)) {
+        matchedList.forEach((rule: string) => {
+          if (!ruleMatches[rule]) ruleMatches[rule] = { matched: 0, failed: 0 };
+          ruleMatches[rule].matched++;
+        });
+      }
+
+      if (Array.isArray(failedList)) {
+        failedList.forEach((rule: string) => {
+          if (!ruleMatches[rule]) ruleMatches[rule] = { matched: 0, failed: 0 };
+          ruleMatches[rule].failed++;
+        });
+      }
+    });
+
+    const signalRate = evs.length > 0 ? (totalSignals / evs.length) * 100 : 0;
+    const avgScanDuration = scanDurationCount > 0 ? (totalScanDuration / scanDurationCount) : 0;
+    const avgGeminiDuration = geminiDurationCount > 0 ? (totalGeminiDuration / geminiDurationCount) : 0;
+
+    // Convert User rankings to sorted array
+    const userRankings = Object.entries(userScans).map(([id, data]) => ({
+      userId: id,
+      email: data.email,
+      count: data.count
+    })).sort((a, b) => b.count - a.count);
+
+    // Convert Rule Analytics to array
+    const ruleAnalytics = Object.entries(ruleMatches).map(([rule, counts]) => ({
+      rule,
+      matched: counts.matched,
+      failed: counts.failed,
+      total: counts.matched + counts.failed,
+      successRate: (counts.matched + counts.failed) > 0 ? (counts.matched / (counts.matched + counts.failed)) * 100 : 0
+    })).sort((a, b) => b.total - a.total);
+
+    // Return aggregated results plus latest 100 raw evaluation logs for history feed
+    const rawLogs = evs.slice(0, 100).map((ev: any) => ({
+      ...ev,
+      user_email: profileMap.get(ev.user_id) || ev.user_id
+    }));
+
+    return res.status(200).json({
+      success: true,
+      stats: {
+        totalScans: totalScans || evs.length,
+        signalRate: parseFloat(signalRate.toFixed(2)),
+        totalSignals,
+        passRatio: evs.length > 0 ? parseFloat(((passCount + likelyPassCount) / evs.length * 100).toFixed(2)) : 0,
+        distribution: {
+          PASS: passCount,
+          LIKELY_PASS: likelyPassCount,
+          AMBIGUOUS: ambiguousCount,
+          FAIL: failCount
+        },
+        modeBreakdown: modeCounts,
+        performance: {
+          avgScanDuration: Math.round(avgScanDuration),
+          avgGeminiDuration: Math.round(avgGeminiDuration)
+        },
+        userRankings,
+        ruleAnalytics
+      },
+      logs: rawLogs
+    });
+
+  } catch (err: any) {
+    console.error("Explainability statistics retrieval error:", err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+}
+
 
 export default async function handler(req: any, res: any) {
   try {
@@ -2020,6 +2227,9 @@ export default async function handler(req: any, res: any) {
 
     if (pathname.endsWith('/stats')) {
       return stats_handler(req, res);
+    }
+    if (pathname.endsWith('/explainability')) {
+      return explainability_handler(req, res);
     }
     if (pathname.endsWith('/users/action')) {
       return users_action_handler(req, res);

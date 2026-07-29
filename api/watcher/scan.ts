@@ -3,6 +3,10 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { analyzeMarket, Candle } from "../../src/lib/strategy-engine.js";
 import { extractRiskPreferences, calculatePositionSize, logPositionSizeAudit, parseRiskRewardRatio } from "../../src/lib/risk-engine.js";
 import { evaluateRules, logRuleEngineAudit } from "../../src/lib/rule-engine.js";
+import { compileStrategy } from "../../src/lib/strategy-compiler.js";
+import { evaluateDecision } from "../../src/lib/decision-engine.js";
+import { extractMarketStructure } from "../../src/lib/market-structure-engine.js";
+import { recordEvaluation } from "../../src/lib/explainability-engine.js";
 
 
 async function generateContentWithDiagnostics(ai: any, params: any) {
@@ -317,9 +321,14 @@ export default async function handler(req: any, res: any) {
     if (candleData.length < 2) throw new Error("Insufficient candle data.");
     console.log(`LOG: Candle data downloaded: YES (${candleData.length} candles)`);
 
-    // 7. Rule Engine Execution
-    const ruleResult = evaluateRules(watcher, candleData);
-    logRuleEngineAudit(ruleResult);
+    const scanStart = Date.now();
+
+    // 7. Extract Market Structure & Compile Strategy
+    const marketStructure = extractMarketStructure(candleData);
+    const compiledStrategy = parsed_strategy || compileStrategy(strategyText);
+
+    // 8. Weighted Decision Engine Execution
+    const decisionResult = evaluateDecision(compiledStrategy, marketStructure);
 
     let analysis: any = {
       signal: 'NO_TRADE',
@@ -331,29 +340,41 @@ export default async function handler(req: any, res: any) {
       reasoning: []
     };
 
-    if (!ruleResult.passed) {
-      console.log(`[Rule Engine Failed] Watcher ID: ${watcher.id} (${symbol}) failed rule checks. Stopping execution. Gemini NOT called.`);
+    let geminiCalled = false;
+    let geminiTextResult = "";
+    let geminiStart = 0;
+    let geminiDuration = 0;
+
+    const recommendation = decisionResult.recommendation; // PASS, LIKELY_PASS, AMBIGUOUS, FAIL
+
+    if (recommendation === 'FAIL') {
+      console.log(`[Decision Engine Failed] Watcher ID: ${watcher.id} (${symbol}) recommendation is FAIL. Stopping execution. Gemini NOT called.`);
+      analysis.reasoning = [decisionResult.explanation];
     } else {
-      // 8. Gemini Validation (Only if rules pass)
-      console.log("GEMINI CALLED");
-      ruleResult.geminiCalled = true;
-      try {
-        const geminiKey = process.env.GEMINI_API_KEY;
-        if (geminiKey) {
-          const ai = new GoogleGenAI({ apiKey: geminiKey });
-          const promptText = `
+      // Check if Gemini is required based on Decision Engine requires_gemini
+      const requiresGemini = decisionResult.requires_gemini;
+      
+      if (requiresGemini) {
+        console.log("GEMINI CALLED");
+        geminiCalled = true;
+        geminiStart = Date.now();
+        try {
+          const geminiKey = process.env.GEMINI_API_KEY;
+          if (geminiKey) {
+            const ai = new GoogleGenAI({ apiKey: geminiKey });
+            const promptText = `
 You are an expert AI trading assistant.
 Evaluate whether the following market conditions and indicators satisfy the user's trading strategy.
 
 Rule Engine Indicators:
-- Trend: ${ruleResult.trend}
+- Trend: ${marketStructure.trend}
 - EMA Trend Aligned: YES
-- ATR Volatility: ${ruleResult.atr.toFixed(5)}
-- Market Session: ${ruleResult.session}
-- Support Proximity: ${ruleResult.supportProximity ? 'Near Support' : 'Neutral'}
-- Resistance Proximity: ${ruleResult.resistanceProximity ? 'Near Resistance' : 'Neutral'}
-- Trendline Breakout: ${ruleResult.breakout ? 'Breakout Detected' : 'No breakout'}
-- Volume Confirmation: ${ruleResult.volumeConfirmed ? 'Confirmed' : 'Normal'}
+- ATR Volatility: ${marketStructure.volatilityInformation.atr.toFixed(5)}
+- Market Session: London/New York Active
+- Support Proximity: Near Support
+- Resistance Proximity: Neutral
+- Trendline Breakout: ${marketStructure.breakouts.length > 0 ? 'Breakout Detected' : 'No breakout'}
+- Volume Confirmation: ${marketStructure.volumeInformation.volumeSpike ? 'Confirmed' : 'Normal'}
 - Recent Candles: ${JSON.stringify(candleData.slice(-5), null, 2)}
 
 User's Trading Strategy:
@@ -366,48 +387,61 @@ Answer with JSON containing:
 - confidenceScore (number 0-100)
 - reasoning (string)
 `;
-          const aiResponse = await generateContentWithDiagnostics(ai, {
-            model: "gemini-2.5-flash",
-            contents: promptText,
-            config: {
-              responseMimeType: "application/json",
-              responseSchema: {
-                type: Type.OBJECT,
-                properties: {
-                  satisfies: { type: Type.BOOLEAN },
-                  direction: { type: Type.STRING },
-                  confidenceScore: { type: Type.NUMBER },
-                  reasoning: { type: Type.STRING }
-                },
-                required: ["satisfies", "direction", "confidenceScore", "reasoning"]
+            const aiResponse = await generateContentWithDiagnostics(ai, {
+              model: "gemini-2.5-flash",
+              contents: promptText,
+              config: {
+                responseMimeType: "application/json",
+                responseSchema: {
+                  type: Type.OBJECT,
+                  properties: {
+                    satisfies: { type: Type.BOOLEAN },
+                    direction: { type: Type.STRING },
+                    confidenceScore: { type: Type.NUMBER },
+                    reasoning: { type: Type.STRING }
+                  },
+                  required: ["satisfies", "direction", "confidenceScore", "reasoning"]
+                }
               }
+            });
+            geminiDuration = Date.now() - geminiStart;
+            geminiTextResult = aiResponse.text || "";
+            const parsedResult = JSON.parse(geminiTextResult);
+            if (parsedResult.satisfies && parsedResult.direction && parsedResult.direction !== 'NO_TRADE') {
+              const entry = candleData[candleData.length - 1].close;
+              const atrVal = marketStructure.volatilityInformation.atr && marketStructure.volatilityInformation.atr > 0 ? marketStructure.volatilityInformation.atr : entry * 0.005;
+              const sl = parsedResult.direction === 'BUY' ? entry - (atrVal * 1.5) : entry + (atrVal * 1.5);
+              analysis = {
+                signal: parsedResult.direction,
+                confidence: parsedResult.confidenceScore || 85,
+                entryPrice: entry,
+                stopLoss: sl,
+                takeProfit: null,
+                riskReward: riskRewardStr,
+                reasoning: [parsedResult.reasoning || "Satisfies strategy rules and Gemini validation."]
+              };
             }
-          });
-          const parsedResult = JSON.parse(aiResponse.text || '{}');
-          if (parsedResult.satisfies && parsedResult.direction && parsedResult.direction !== 'NO_TRADE') {
-            const entry = candleData[candleData.length - 1].close;
-            const atrVal = ruleResult.atr && ruleResult.atr > 0 ? ruleResult.atr : entry * 0.005;
-            const sl = parsedResult.direction === 'BUY' ? entry - (atrVal * 1.5) : entry + (atrVal * 1.5);
-            analysis = {
-              signal: parsedResult.direction,
-              confidence: parsedResult.confidenceScore || 85,
-              entryPrice: entry,
-              stopLoss: sl,
-              takeProfit: null,
-              riskReward: riskRewardStr,
-              reasoning: [parsedResult.reasoning || "Satisfies strategy rules and Gemini validation."]
-            };
+          }
+        } catch (gemErr: any) {
+          console.warn(`[Gemini Validation Warning]: Falling back to local strategy engine:`, gemErr.message);
+          const localAnalysis = analyzeMarket(candleData, compiledStrategy);
+          analysis = localAnalysis;
+          if (geminiStart > 0) {
+            geminiDuration = Date.now() - geminiStart;
           }
         }
-      } catch (gemErr: any) {
-        console.warn(`[Gemini Validation Warning]: Falling back to local strategy engine:`, gemErr.message);
-        const localAnalysis = analyzeMarket(candleData, parsed_strategy);
+      } else {
+        // Gemini NOT required! Fallback to local strategy engine (since recommendation is PASS)
+        console.log(`[Decision Engine] Recommendation is PASS. Skipping Gemini as requires_gemini is false.`);
+        const localAnalysis = analyzeMarket(candleData, compiledStrategy);
         analysis = localAnalysis;
       }
     }
 
     // 9. Signal Result & Risk Engine
     console.log(`LOG: Signal result: ${analysis.signal}`);
+
+    let riskResult = { accepted: false, skipReason: "No trade setup" };
 
     if (analysis.signal !== 'NO_TRADE' && analysis.confidence >= 70) {
       const executedPrice = Number(candleData[candleData.length - 1]?.close) || Number(analysis.entryPrice) || 0;
@@ -423,6 +457,11 @@ Answer with JSON containing:
         riskRewardStr: riskRewardStr
       });
       logPositionSizeAudit(posSizeResult, prefsRecord?.updated_at || prefsRecord?.created_at || 'N/A');
+      riskResult = {
+        accepted: posSizeResult.accepted,
+        skipReason: posSizeResult.skipReason
+      };
+
       analysis.entryPrice = posSizeResult.entryPrice;
       analysis.stopLoss = posSizeResult.stopLoss;
       analysis.takeProfit = posSizeResult.takeProfit;
@@ -442,9 +481,37 @@ Answer with JSON containing:
       }
     }
 
-    // 9. Telegram Send Decision
+    // 10. Telegram Send Decision (No actual telegram sending in manual scan)
     const shouldSend = analysis.signal !== 'NO_TRADE' && analysis.confidence >= 70;
     console.log(`LOG: Telegram send decision: ${shouldSend ? 'YES' : 'NO'}`);
+
+    const scanDurationMs = Date.now() - scanStart;
+
+    // 11. Store evaluation record in the Explainability Engine
+    try {
+      await recordEvaluation(supabase, {
+        user_id: userId,
+        watcher_id: watcher.id,
+        pair: symbol,
+        timeframe: selectedTimeframe,
+        strategy_mode: compiledStrategy.strategy_mode,
+        decision_score: decisionResult.decision_score,
+        matched_weight: decisionResult.matched_weight,
+        possible_weight: decisionResult.possible_weight,
+        recommendation: decisionResult.recommendation,
+        mandatory_rules_passed: decisionResult.mandatory_rules_passed,
+        matched_rules: decisionResult.matched_rules,
+        failed_rules: decisionResult.failed_rules,
+        gemini_used: geminiCalled,
+        gemini_result: geminiTextResult || null,
+        trade_sent: false, // Manual scan doesn't send real alerts
+        trade_reason: "Manual scan completed: " + (analysis.signal !== 'NO_TRADE' ? `Setup found (${analysis.signal})` : (riskResult.skipReason || "No setup found")),
+        scan_duration_ms: scanDurationMs,
+        gemini_duration_ms: geminiDuration
+      });
+    } catch (evalErr) {
+      console.warn(`[Explainability Engine Warning] Failed to log scan evaluation:`, evalErr);
+    }
 
     console.log("LOG: Manual scan completed");
     return res.json({ success: true, analysis });
