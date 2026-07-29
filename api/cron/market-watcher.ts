@@ -9,6 +9,7 @@ import { compileStrategy } from '../../src/lib/strategy-compiler.js';
 import { evaluateDecision } from '../../src/lib/decision-engine.js';
 import { extractMarketStructure } from '../../src/lib/market-structure-engine.js';
 import { recordEvaluation } from '../../src/lib/explainability-engine.js';
+import { logPipelineTrace } from '../../src/lib/pipeline-logger.js';
 
 // --- Inlined Gemini Wrapper ---
 
@@ -1078,6 +1079,8 @@ export default async function handler(req: any, res: any) {
         continue;
       }
 
+      let traceData: any = null;
+      let scanStart: number = 0;
       try {
         // Strategy Loaded
         const [{ data: prefsRecord }, { data: apiKeyRecord }] = await Promise.all([
@@ -1251,14 +1254,89 @@ export default async function handler(req: any, res: any) {
           continue;
         }
 
-        const scanStart = Date.now();
+        scanStart = Date.now();
+
+        traceData = {
+          watcherId: watcher.id,
+          userId: userId,
+          pair: selectedPair,
+          timeframe: selectedTimeframe,
+          currentCandleTime: candleData[candleData.length - 1]?.timestamp || '',
+          closedCandleTime: candleData[candleData.length - 2]?.timestamp || '',
+        };
 
         // Extract market structure & compile strategy
         const marketStructure = extractMarketStructure(candleData);
         const compiledStrategy = compileStrategy(strategyText);
 
+        // Stage 2
+        const cleanSymUpper = (selectedPair || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+        const pipSize = (cleanSymUpper.includes('JPY') || cleanSymUpper.includes('XAU') || cleanSymUpper.includes('GOLD')) ? 0.01 : 0.0001;
+
+        traceData.marketStructure = {
+          trend: marketStructure.trend || 'SIDEWAYS',
+          bos: (marketStructure.BOS && marketStructure.BOS.some((b: any) => b.type === 'BULLISH_BOS' || b.type === 'BEARISH_BOS')) ? 'YES' : 'NO',
+          choch: (marketStructure.CHOCH && marketStructure.CHOCH.some((c: any) => c.type === 'BULLISH_CHOCH' || c.type === 'BEARISH_CHOCH')) ? 'YES' : 'NO',
+          trendlineBreakout: ((marketStructure.breakouts && marketStructure.breakouts.some((b: any) => b.type === 'UPPER_BREAKOUT' || b.type === 'LOWER_BREAKOUT')) || (marketStructure.trendlines && marketStructure.trendlines.length > 0)) ? 'YES' : 'NO',
+          liquiditySweep: (marketStructure.liquiditySweeps && marketStructure.liquiditySweeps.some((l: any) => l.type === 'HIGH_SWEEP' || l.type === 'LOW_SWEEP')) ? 'YES' : 'NO',
+          support: (marketStructure.supportZones && marketStructure.supportZones.length > 0) ? 'YES' : 'NO',
+          resistance: (marketStructure.resistanceZones && marketStructure.resistanceZones.length > 0) ? 'YES' : 'NO',
+          volumeConfirmation: (marketStructure.volumeInformation?.volumeSpike) ? 'YES' : 'NO',
+          confirmationCandle: (marketStructure.candlePatterns && marketStructure.candlePatterns.length > 0) ? 'YES' : 'NO',
+          session: (() => {
+            const lastCandle = candleData[candleData.length - 1];
+            const date = lastCandle && lastCandle.timestamp ? new Date(lastCandle.timestamp) : new Date();
+            const hour = date.getUTCHours();
+            if (hour >= 8 && hour < 13) return "London";
+            if (hour >= 13 && hour < 17) return "London / NY";
+            if (hour >= 17 && hour < 21) return "NY";
+            if (hour >= 0 && hour < 8) return "Asia";
+            return "Asia";
+          })(),
+          atr: marketStructure.volatilityInformation?.atr?.toFixed(5) || '0.00000'
+        };
+
+        // Stage 3
+        const compiledRulesList: string[] = [];
+        const rules = compiledStrategy.compiled_rules || {};
+        if (rules.trendline_breakout) compiledRulesList.push("Trendline Breakout");
+        if (rules.break_and_retest) compiledRulesList.push("Break and Retest");
+        if (rules.confirmation_candle) compiledRulesList.push("Confirmation Candle");
+        if (rules.bos) compiledRulesList.push("Break of Structure (BOS)");
+        if (rules.choch) compiledRulesList.push("Change of Character (CHoCH)");
+        if (rules.liquidity_sweep) compiledRulesList.push("Liquidity Sweep");
+        if (rules.fair_value_gap) compiledRulesList.push("Fair Value Gap (FVG)");
+        if (rules.support) compiledRulesList.push("Support Zone");
+        if (rules.resistance) compiledRulesList.push("Resistance Zone");
+        if (rules.ema?.enabled) compiledRulesList.push(`EMA (Periods: ${rules.ema.periods?.join(', ')})`);
+        if (rules.rsi?.enabled) compiledRulesList.push(`RSI (OB: ${rules.rsi.overbought || 70}, OS: ${rules.rsi.oversold || 30})`);
+        if (rules.macd?.enabled) compiledRulesList.push("MACD");
+        if (rules.atr?.enabled) compiledRulesList.push("ATR");
+        if (rules.volume_confirmation) compiledRulesList.push("Volume Confirmation");
+        if (rules.session && rules.session.length > 0) compiledRulesList.push(`Session Filter: ${rules.session.join(', ')}`);
+        if (rules.timeframes && rules.timeframes.length > 0) compiledRulesList.push(`Timeframes: ${rules.timeframes.join(', ')}`);
+        if (rules.risk_reward?.min_ratio) compiledRulesList.push(`Min Risk Reward: ${rules.risk_reward.min_ratio}`);
+
+        traceData.strategyCompiler = {
+          strategyMode: compiledStrategy.strategy_mode || 'HYBRID',
+          compiledRules: compiledRulesList,
+          overallConfidence: `${compiledStrategy.overall_confidence || compiledStrategy.confidence || 0}%`,
+          matchedPhrases: compiledStrategy.matched_phrases || [],
+          canonicalRules: compiledStrategy.canonical_rules || []
+        };
+
         // Run Weighted Decision Engine
         const decisionResult = evaluateDecision(compiledStrategy, marketStructure);
+
+        // Stage 4
+        traceData.decisionEngine = {
+          decisionScore: `${decisionResult.matched_weight} / ${decisionResult.possible_weight} (${(decisionResult.decision_score * 100).toFixed(1)}%)`,
+          recommendation: decisionResult.recommendation,
+          mandatoryRulesPassed: decisionResult.mandatory_rules_passed ? 'YES' : 'NO',
+          matchedRules: decisionResult.matched_rules || [],
+          failedRules: decisionResult.failed_rules || [],
+          geminiRequired: decisionResult.requires_gemini ? 'YES' : 'NO'
+        };
 
         let analysis: any = {
           signal: 'NO_TRADE',
@@ -1311,6 +1389,46 @@ export default async function handler(req: any, res: any) {
                updated_at: new Date().toISOString()
             })
             .eq("id", watcher.id);
+
+          // Stage 5
+          traceData.gemini = {
+            called: 'NO',
+            duration: '0 ms',
+            promptSent: 'N/A',
+            rawResponse: 'N/A',
+            parsedSatisfaction: 'N/A',
+            parsedConfidence: 'N/A',
+            parsedDirection: 'N/A'
+          };
+
+          // Stage 6
+          traceData.riskEngine = {
+            accountSize: `$${accountSize.toFixed(2)}`,
+            riskPercentage: `${riskPercentage}%`,
+            riskAmount: `$${(accountSize * riskPercentage / 100).toFixed(2)}`,
+            stopLossDistance: '0.0 pips / 0.00%',
+            takeProfitDistance: '0.0 pips / 0.00%',
+            calculatedLotSize: '0.0',
+            lotType: 'Micro Lot',
+            accepted: 'NO',
+            rejectionReason: `Decision Engine recommendation is FAIL`
+          };
+
+          // Stage 7
+          traceData.telegram = {
+            sent: 'NO',
+            chatId: telegramChatId || 'None',
+            message: 'N/A (Failed scan)'
+          };
+
+          traceData.complete = {
+            status: 'SUCCESS',
+            duration: `${scanDurationMs} ms`,
+            timestamp: new Date().toISOString()
+          };
+
+          logPipelineTrace(traceData);
+
           watchersProcessedCount++;
           continue;
         } else {
@@ -1390,6 +1508,18 @@ Answer with JSON containing:
                 }
 
                 const parsedResult = JSON.parse(geminiTextResult);
+
+                // Stage 5
+                traceData.gemini = {
+                  called: 'YES',
+                  duration: `${geminiDuration} ms`,
+                  promptSent: promptText || 'N/A',
+                  rawResponse: geminiTextResult || 'N/A',
+                  parsedSatisfaction: parsedResult.satisfies ? 'YES' : 'NO',
+                  parsedConfidence: String(parsedResult.confidenceScore || 0),
+                  parsedDirection: parsedResult.direction || 'NO_TRADE'
+                };
+
                 if (parsedResult.satisfies && parsedResult.direction && parsedResult.direction !== 'NO_TRADE') {
                   geminiDirection = parsedResult.direction;
                   const entry = candleData[candleData.length - 1].close;
@@ -1404,6 +1534,17 @@ Answer with JSON containing:
                     takeProfit: null,
                     riskReward: riskRewardStr,
                     reasoning: [parsedResult.reasoning || "Satisfies strategy rules and Gemini validation."]
+                  };
+                } else {
+                  // If Gemini called but does not satisfy / direction is NO_TRADE, we should explicitly capture that in Gemini trace as well:
+                  traceData.gemini = {
+                    called: 'YES',
+                    duration: `${geminiDuration} ms`,
+                    promptSent: promptText || 'N/A',
+                    rawResponse: geminiTextResult || 'N/A',
+                    parsedSatisfaction: parsedResult.satisfies ? 'YES' : 'NO',
+                    parsedConfidence: String(parsedResult.confidenceScore || 0),
+                    parsedDirection: parsedResult.direction || 'NO_TRADE'
                   };
                 }
               }
@@ -1463,6 +1604,46 @@ Answer with JSON containing:
                 gemini_duration_ms: Date.now() - geminiStart
               });
 
+              // Stage 5
+              traceData.gemini = {
+                called: 'YES',
+                duration: `${Date.now() - geminiStart} ms`,
+                promptSent: 'See logs',
+                rawResponse: `Error: ${errMsg}`,
+                parsedSatisfaction: 'NO',
+                parsedConfidence: '0',
+                parsedDirection: 'NO_TRADE'
+              };
+
+              // Stage 6
+              traceData.riskEngine = {
+                accountSize: `$${accountSize.toFixed(2)}`,
+                riskPercentage: `${riskPercentage}%`,
+                riskAmount: `$${(accountSize * riskPercentage / 100).toFixed(2)}`,
+                stopLossDistance: '0.0 pips / 0.00%',
+                takeProfitDistance: '0.0 pips / 0.00%',
+                calculatedLotSize: '0.0',
+                lotType: 'Micro Lot',
+                accepted: 'NO',
+                rejectionReason: `Gemini API execution failed: ${errMsg}`
+              };
+
+              // Stage 7
+              traceData.telegram = {
+                sent: 'NO',
+                chatId: telegramChatId || 'None',
+                message: 'N/A'
+              };
+
+              // Stage 8
+              traceData.complete = {
+                status: 'FAILED',
+                duration: `${scanDurationMs} ms`,
+                timestamp: new Date().toISOString()
+              };
+
+              logPipelineTrace(traceData);
+
               skipped.push({ userId, reason: errMsg });
               watchersSkippedCount++;
               continue;
@@ -1470,6 +1651,18 @@ Answer with JSON containing:
           } else {
             // Gemini NOT required! Fallback to local strategy engine (since recommendation is PASS)
             console.log(`[Decision Engine] Recommendation is PASS. Skipping Gemini as requires_gemini is false.`);
+
+            // Stage 5
+            traceData.gemini = {
+              called: 'NO',
+              duration: '0 ms',
+              promptSent: 'N/A',
+              rawResponse: 'N/A',
+              parsedSatisfaction: 'N/A',
+              parsedConfidence: 'N/A',
+              parsedDirection: 'N/A'
+            };
+
             const mappedParsedStrategy: ParsedStrategy = {
               indicators: [],
               emaValues: compiledStrategy.compiled_rules.ema?.periods || [],
@@ -1526,6 +1719,36 @@ Answer with JSON containing:
                  updated_at: new Date().toISOString()
               })
               .eq("id", watcher.id);
+
+            // Stage 6
+            traceData.riskEngine = {
+              accountSize: `$${accountSize.toFixed(2)}`,
+              riskPercentage: `${riskPercentage}%`,
+              riskAmount: `$${(accountSize * riskPercentage / 100).toFixed(2)}`,
+              stopLossDistance: '0.0 pips / 0.00%',
+              takeProfitDistance: '0.0 pips / 0.00%',
+              calculatedLotSize: '0.0',
+              lotType: 'Micro Lot',
+              accepted: 'NO',
+              rejectionReason: `No trade setup: signal is ${analysis.signal} and confidence is ${analysis.confidence}%`
+            };
+
+            // Stage 7
+            traceData.telegram = {
+              sent: 'NO',
+              chatId: telegramChatId || 'None',
+              message: 'N/A (No setup)'
+            };
+
+            // Stage 8
+            traceData.complete = {
+              status: 'SUCCESS',
+              duration: `${scanDurationMs} ms`,
+              timestamp: new Date().toISOString()
+            };
+
+            logPipelineTrace(traceData);
+
             watchersProcessedCount++;
             continue;
         }
@@ -1595,6 +1818,40 @@ Answer with JSON containing:
                updated_at: new Date().toISOString()
             })
             .eq("id", watcher.id);
+
+          const stopDistance = Math.abs(executedPrice - (Number(posSizeResult.stopLoss) || Number(analysis.stopLoss) || 0));
+          const tpDistance = Math.abs((Number(posSizeResult.takeProfit) || Number(analysis.takeProfit) || executedPrice * 1.01) - executedPrice);
+          const slDistancePips = stopDistance / pipSize;
+          const slDistancePct = (stopDistance / executedPrice) * 100;
+          const tpDistancePips = tpDistance / pipSize;
+          const tpDistancePct = (tpDistance / executedPrice) * 100;
+
+          traceData.riskEngine = {
+            accountSize: `$${accountSize.toFixed(2)}`,
+            riskPercentage: `${riskPercentage}%`,
+            riskAmount: `$${posSizeResult.riskAmount.toFixed(2)}`,
+            stopLossDistance: `${slDistancePips.toFixed(1)} pips / ${slDistancePct.toFixed(2)}%`,
+            takeProfitDistance: `${tpDistancePips.toFixed(1)} pips / ${tpDistancePct.toFixed(2)}%`,
+            calculatedLotSize: String(posSizeResult.calculatedLotSize),
+            lotType: posSizeResult.lotType,
+            accepted: 'NO',
+            rejectionReason: posSizeResult.skipReason || 'None'
+          };
+
+          traceData.telegram = {
+            sent: 'NO',
+            chatId: telegramChatId || 'None',
+            message: 'N/A'
+          };
+
+          traceData.complete = {
+            status: 'SUCCESS',
+            duration: `${scanDurationMs} ms`,
+            timestamp: new Date().toISOString()
+          };
+
+          logPipelineTrace(traceData);
+
           watchersProcessedCount++;
           continue;
         }
@@ -1658,6 +1915,39 @@ Answer with JSON containing:
             scan_duration_ms: scanDurationMs,
             gemini_duration_ms: geminiDuration
           });
+
+          const stopDistance = Math.abs(executedPrice - (Number(posSizeResult.stopLoss) || Number(analysis.stopLoss) || 0));
+          const tpDistance = Math.abs((Number(posSizeResult.takeProfit) || Number(analysis.takeProfit) || executedPrice * 1.01) - executedPrice);
+          const slDistancePips = stopDistance / pipSize;
+          const slDistancePct = (stopDistance / executedPrice) * 100;
+          const tpDistancePips = tpDistance / pipSize;
+          const tpDistancePct = (tpDistance / executedPrice) * 100;
+
+          traceData.riskEngine = {
+            accountSize: `$${accountSize.toFixed(2)}`,
+            riskPercentage: `${riskPercentage}%`,
+            riskAmount: `$${posSizeResult.riskAmount.toFixed(2)}`,
+            stopLossDistance: `${slDistancePips.toFixed(1)} pips / ${slDistancePct.toFixed(2)}%`,
+            takeProfitDistance: `${tpDistancePips.toFixed(1)} pips / ${tpDistancePct.toFixed(2)}%`,
+            calculatedLotSize: String(posSizeResult.calculatedLotSize),
+            lotType: posSizeResult.lotType,
+            accepted: 'YES',
+            rejectionReason: 'None'
+          };
+
+          traceData.telegram = {
+            sent: 'NO',
+            chatId: telegramChatId || 'None',
+            message: 'N/A (Skipped: Active trade exists)'
+          };
+
+          traceData.complete = {
+            status: 'SUCCESS',
+            duration: `${scanDurationMs} ms`,
+            timestamp: new Date().toISOString()
+          };
+
+          logPipelineTrace(traceData);
 
           continue;
         }
@@ -1727,6 +2017,39 @@ Answer with JSON containing:
           console.log(`Whether DB update to ACTIVE succeeded: NO`);
         }
 
+        const stopDistance = Math.abs(executedPrice - (Number(posSizeResult.stopLoss) || Number(analysis.stopLoss) || 0));
+        const tpDistance = Math.abs((Number(posSizeResult.takeProfit) || Number(analysis.takeProfit) || executedPrice * 1.01) - executedPrice);
+        const slDistancePips = stopDistance / pipSize;
+        const slDistancePct = (stopDistance / executedPrice) * 100;
+        const tpDistancePips = tpDistance / pipSize;
+        const tpDistancePct = (tpDistance / executedPrice) * 100;
+
+        traceData.riskEngine = {
+          accountSize: `$${accountSize.toFixed(2)}`,
+          riskPercentage: `${riskPercentage}%`,
+          riskAmount: `$${posSizeResult.riskAmount.toFixed(2)}`,
+          stopLossDistance: `${slDistancePips.toFixed(1)} pips / ${slDistancePct.toFixed(2)}%`,
+          takeProfitDistance: `${tpDistancePips.toFixed(1)} pips / ${tpDistancePct.toFixed(2)}%`,
+          calculatedLotSize: String(posSizeResult.calculatedLotSize),
+          lotType: posSizeResult.lotType,
+          accepted: 'YES',
+          rejectionReason: 'None'
+        };
+
+        traceData.telegram = {
+          sent: alertSent ? 'YES' : 'NO',
+          chatId: telegramChatId || 'None',
+          message: alertMessage || 'N/A'
+        };
+
+        traceData.complete = {
+          status: 'SUCCESS',
+          duration: `${scanDurationMs} ms`,
+          timestamp: new Date().toISOString()
+        };
+
+        logPipelineTrace(traceData);
+
         watchersProcessedCount++;
         results.push({ userId, symbol, tradeStatus: 'ACTIVE', signalsFound: 1, signalsSent: alertSent ? 1 : 0 });
 
@@ -1734,6 +2057,17 @@ Answer with JSON containing:
         console.error(`LOG ERROR: Watcher ${watcher.id} failed`);
         console.error(`Exception: ${err.message}`);
         console.error(`Stack: ${err.stack}`);
+        
+        if (traceData) {
+          const scanDurationMs = typeof scanStart !== 'undefined' ? (Date.now() - scanStart) : 0;
+          traceData.complete = {
+            status: 'FAILED',
+            duration: `${scanDurationMs} ms`,
+            timestamp: new Date().toISOString()
+          };
+          logPipelineTrace(traceData);
+        }
+
         errors.push({ userId, error: err.message || "Unknown error" });
         watchersSkippedCount++;
       }

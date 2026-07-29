@@ -7,6 +7,7 @@ import { compileStrategy } from "../../src/lib/strategy-compiler.js";
 import { evaluateDecision } from "../../src/lib/decision-engine.js";
 import { extractMarketStructure } from "../../src/lib/market-structure-engine.js";
 import { recordEvaluation } from "../../src/lib/explainability-engine.js";
+import { logPipelineTrace } from "../../src/lib/pipeline-logger.js";
 
 
 async function generateContentWithDiagnostics(ai: any, params: any) {
@@ -323,12 +324,87 @@ export default async function handler(req: any, res: any) {
 
     const scanStart = Date.now();
 
+    const traceData: any = {
+      watcherId: watcher.id,
+      userId: userId,
+      pair: symbol,
+      timeframe: selectedTimeframe,
+      currentCandleTime: candleData[candleData.length - 1]?.timestamp || '',
+      closedCandleTime: candleData[candleData.length - 2]?.timestamp || '',
+    };
+
     // 7. Extract Market Structure & Compile Strategy
     const marketStructure = extractMarketStructure(candleData);
     const compiledStrategy = parsed_strategy || compileStrategy(strategyText);
 
+    // Stage 2
+    const cleanSymUpper = (symbol || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const pipSize = (cleanSymUpper.includes('JPY') || cleanSymUpper.includes('XAU') || cleanSymUpper.includes('GOLD')) ? 0.01 : 0.0001;
+
+    traceData.marketStructure = {
+      trend: marketStructure.trend || 'SIDEWAYS',
+      bos: (marketStructure.BOS && marketStructure.BOS.some((b: any) => b.type === 'BULLISH_BOS' || b.type === 'BEARISH_BOS')) ? 'YES' : 'NO',
+      choch: (marketStructure.CHOCH && marketStructure.CHOCH.some((c: any) => c.type === 'BULLISH_CHOCH' || c.type === 'BEARISH_CHOCH')) ? 'YES' : 'NO',
+      trendlineBreakout: ((marketStructure.breakouts && marketStructure.breakouts.some((b: any) => b.type === 'UPPER_BREAKOUT' || b.type === 'LOWER_BREAKOUT')) || (marketStructure.trendlines && marketStructure.trendlines.length > 0)) ? 'YES' : 'NO',
+      liquiditySweep: (marketStructure.liquiditySweeps && marketStructure.liquiditySweeps.some((l: any) => l.type === 'HIGH_SWEEP' || l.type === 'LOW_SWEEP')) ? 'YES' : 'NO',
+      support: (marketStructure.supportZones && marketStructure.supportZones.length > 0) ? 'YES' : 'NO',
+      resistance: (marketStructure.resistanceZones && marketStructure.resistanceZones.length > 0) ? 'YES' : 'NO',
+      volumeConfirmation: (marketStructure.volumeInformation?.volumeSpike) ? 'YES' : 'NO',
+      confirmationCandle: (marketStructure.candlePatterns && marketStructure.candlePatterns.length > 0) ? 'YES' : 'NO',
+      session: (() => {
+        const lastCandle = candleData[candleData.length - 1];
+        const date = lastCandle && lastCandle.timestamp ? new Date(lastCandle.timestamp) : new Date();
+        const hour = date.getUTCHours();
+        if (hour >= 8 && hour < 13) return "London";
+        if (hour >= 13 && hour < 17) return "London / NY";
+        if (hour >= 17 && hour < 21) return "NY";
+        if (hour >= 0 && hour < 8) return "Asia";
+        return "Asia";
+      })(),
+      atr: marketStructure.volatilityInformation?.atr?.toFixed(5) || '0.00000'
+    };
+
+    // Stage 3
+    const compiledRulesList: string[] = [];
+    const rules = compiledStrategy.compiled_rules || {};
+    if (rules.trendline_breakout) compiledRulesList.push("Trendline Breakout");
+    if (rules.break_and_retest) compiledRulesList.push("Break and Retest");
+    if (rules.confirmation_candle) compiledRulesList.push("Confirmation Candle");
+    if (rules.bos) compiledRulesList.push("Break of Structure (BOS)");
+    if (rules.choch) compiledRulesList.push("Change of Character (CHoCH)");
+    if (rules.liquidity_sweep) compiledRulesList.push("Liquidity Sweep");
+    if (rules.fair_value_gap) compiledRulesList.push("Fair Value Gap (FVG)");
+    if (rules.support) compiledRulesList.push("Support Zone");
+    if (rules.resistance) compiledRulesList.push("Resistance Zone");
+    if (rules.ema?.enabled) compiledRulesList.push(`EMA (Periods: ${rules.ema.periods?.join(', ')})`);
+    if (rules.rsi?.enabled) compiledRulesList.push(`RSI (OB: ${rules.rsi.overbought || 70}, OS: ${rules.rsi.oversold || 30})`);
+    if (rules.macd?.enabled) compiledRulesList.push("MACD");
+    if (rules.atr?.enabled) compiledRulesList.push("ATR");
+    if (rules.volume_confirmation) compiledRulesList.push("Volume Confirmation");
+    if (rules.session && rules.session.length > 0) compiledRulesList.push(`Session Filter: ${rules.session.join(', ')}`);
+    if (rules.timeframes && rules.timeframes.length > 0) compiledRulesList.push(`Timeframes: ${rules.timeframes.join(', ')}`);
+    if (rules.risk_reward?.min_ratio) compiledRulesList.push(`Min Risk Reward: ${rules.risk_reward.min_ratio}`);
+
+    traceData.strategyCompiler = {
+      strategyMode: compiledStrategy.strategy_mode || 'HYBRID',
+      compiledRules: compiledRulesList,
+      overallConfidence: `${compiledStrategy.overall_confidence || compiledStrategy.confidence || 0}%`,
+      matchedPhrases: compiledStrategy.matched_phrases || [],
+      canonicalRules: compiledStrategy.canonical_rules || []
+    };
+
     // 8. Weighted Decision Engine Execution
     const decisionResult = evaluateDecision(compiledStrategy, marketStructure);
+
+    // Stage 4
+    traceData.decisionEngine = {
+      decisionScore: `${decisionResult.matched_weight} / ${decisionResult.possible_weight} (${(decisionResult.decision_score * 100).toFixed(1)}%)`,
+      recommendation: decisionResult.recommendation,
+      mandatoryRulesPassed: decisionResult.mandatory_rules_passed ? 'YES' : 'NO',
+      matchedRules: decisionResult.matched_rules || [],
+      failedRules: decisionResult.failed_rules || [],
+      geminiRequired: decisionResult.requires_gemini ? 'YES' : 'NO'
+    };
 
     let analysis: any = {
       signal: 'NO_TRADE',
@@ -350,6 +426,45 @@ export default async function handler(req: any, res: any) {
     if (recommendation === 'FAIL') {
       console.log(`[Decision Engine Failed] Watcher ID: ${watcher.id} (${symbol}) recommendation is FAIL. Stopping execution. Gemini NOT called.`);
       analysis.reasoning = [decisionResult.explanation];
+
+      // Stage 5
+      traceData.gemini = {
+        called: 'NO',
+        duration: '0 ms',
+        promptSent: 'N/A',
+        rawResponse: 'N/A',
+        parsedSatisfaction: 'N/A',
+        parsedConfidence: 'N/A',
+        parsedDirection: 'N/A'
+      };
+
+      // Stage 6
+      traceData.riskEngine = {
+        accountSize: `$${accountSize.toFixed(2)}`,
+        riskPercentage: `${riskPercentage}%`,
+        riskAmount: `$${(accountSize * riskPercentage / 100).toFixed(2)}`,
+        stopLossDistance: '0.0 pips / 0.00%',
+        takeProfitDistance: '0.0 pips / 0.00%',
+        calculatedLotSize: '0.0',
+        lotType: 'Micro Lot',
+        accepted: 'NO',
+        rejectionReason: `Decision Engine recommendation is FAIL`
+      };
+
+      // Stage 7
+      traceData.telegram = {
+        sent: 'NO',
+        chatId: 'N/A (Manual Scan)',
+        message: 'N/A (Manual Scan)'
+      };
+
+      traceData.complete = {
+        status: 'SUCCESS',
+        duration: `${Date.now() - scanStart} ms`,
+        timestamp: new Date().toISOString()
+      };
+
+      logPipelineTrace(traceData);
     } else {
       // Check if Gemini is required based on Decision Engine requires_gemini
       const requiresGemini = decisionResult.requires_gemini;
@@ -407,6 +522,18 @@ Answer with JSON containing:
             geminiDuration = Date.now() - geminiStart;
             geminiTextResult = aiResponse.text || "";
             const parsedResult = JSON.parse(geminiTextResult);
+
+            // Stage 5
+            traceData.gemini = {
+              called: 'YES',
+              duration: `${geminiDuration} ms`,
+              promptSent: promptText || 'N/A',
+              rawResponse: geminiTextResult || 'N/A',
+              parsedSatisfaction: parsedResult.satisfies ? 'YES' : 'NO',
+              parsedConfidence: String(parsedResult.confidenceScore || 0),
+              parsedDirection: parsedResult.direction || 'NO_TRADE'
+            };
+
             if (parsedResult.satisfies && parsedResult.direction && parsedResult.direction !== 'NO_TRADE') {
               const entry = candleData[candleData.length - 1].close;
               const atrVal = marketStructure.volatilityInformation.atr && marketStructure.volatilityInformation.atr > 0 ? marketStructure.volatilityInformation.atr : entry * 0.005;
@@ -424,6 +551,17 @@ Answer with JSON containing:
           }
         } catch (gemErr: any) {
           console.warn(`[Gemini Validation Warning]: Falling back to local strategy engine:`, gemErr.message);
+
+          traceData.gemini = {
+            called: 'YES',
+            duration: `${Date.now() - geminiStart} ms`,
+            promptSent: 'See Prompt in logs',
+            rawResponse: `Error: ${gemErr.message}`,
+            parsedSatisfaction: 'NO',
+            parsedConfidence: '0',
+            parsedDirection: 'NO_TRADE'
+          };
+
           const localAnalysis = analyzeMarket(candleData, compiledStrategy);
           analysis = localAnalysis;
           if (geminiStart > 0) {
@@ -433,6 +571,18 @@ Answer with JSON containing:
       } else {
         // Gemini NOT required! Fallback to local strategy engine (since recommendation is PASS)
         console.log(`[Decision Engine] Recommendation is PASS. Skipping Gemini as requires_gemini is false.`);
+
+        // Stage 5
+        traceData.gemini = {
+          called: 'NO',
+          duration: '0 ms',
+          promptSent: 'N/A',
+          rawResponse: 'N/A',
+          parsedSatisfaction: 'N/A',
+          parsedConfidence: 'N/A',
+          parsedDirection: 'N/A'
+        };
+
         const localAnalysis = analyzeMarket(candleData, compiledStrategy);
         analysis = localAnalysis;
       }
@@ -462,6 +612,26 @@ Answer with JSON containing:
         skipReason: posSizeResult.skipReason
       };
 
+      // Stage 6
+      const stopDistance = Math.abs(executedPrice - (Number(analysis.stopLoss) || 0));
+      const tpDistance = Math.abs((Number(posSizeResult.takeProfit) || Number(analysis.takeProfit) || executedPrice * 1.01) - executedPrice);
+      const slDistancePips = stopDistance / pipSize;
+      const slDistancePct = (stopDistance / executedPrice) * 100;
+      const tpDistancePips = tpDistance / pipSize;
+      const tpDistancePct = (tpDistance / executedPrice) * 100;
+
+      traceData.riskEngine = {
+        accountSize: `$${accountSize.toFixed(2)}`,
+        riskPercentage: `${riskPercentage}%`,
+        riskAmount: `$${posSizeResult.riskAmount.toFixed(2)}`,
+        stopLossDistance: `${slDistancePips.toFixed(1)} pips / ${slDistancePct.toFixed(2)}%`,
+        takeProfitDistance: `${tpDistancePips.toFixed(1)} pips / ${tpDistancePct.toFixed(2)}%`,
+        calculatedLotSize: String(posSizeResult.calculatedLotSize),
+        lotType: posSizeResult.lotType,
+        accepted: posSizeResult.accepted ? 'YES' : 'NO',
+        rejectionReason: posSizeResult.skipReason || 'None'
+      };
+
       analysis.entryPrice = posSizeResult.entryPrice;
       analysis.stopLoss = posSizeResult.stopLoss;
       analysis.takeProfit = posSizeResult.takeProfit;
@@ -479,13 +649,44 @@ Answer with JSON containing:
         console.log(`[Risk Validation Failed - Trade Skipped] ${posSizeResult.skipReason}`);
         analysis.signal = 'NO_TRADE';
       }
+    } else {
+      // Stage 6 (No trade setup)
+      if (recommendation !== 'FAIL') {
+        traceData.riskEngine = {
+          accountSize: `$${accountSize.toFixed(2)}`,
+          riskPercentage: `${riskPercentage}%`,
+          riskAmount: `$${(accountSize * riskPercentage / 100).toFixed(2)}`,
+          stopLossDistance: '0.0 pips / 0.00%',
+          takeProfitDistance: '0.0 pips / 0.00%',
+          calculatedLotSize: '0.0',
+          lotType: 'Micro Lot',
+          accepted: 'NO',
+          rejectionReason: `No trade setup: signal is ${analysis.signal} and confidence is ${analysis.confidence}%`
+        };
+      }
     }
 
     // 10. Telegram Send Decision (No actual telegram sending in manual scan)
     const shouldSend = analysis.signal !== 'NO_TRADE' && analysis.confidence >= 70;
     console.log(`LOG: Telegram send decision: ${shouldSend ? 'YES' : 'NO'}`);
 
+    traceData.telegram = {
+      sent: 'NO',
+      chatId: 'N/A (Manual Scan)',
+      message: 'N/A (Manual Scan)'
+    };
+
     const scanDurationMs = Date.now() - scanStart;
+
+    traceData.complete = {
+      status: 'SUCCESS',
+      duration: `${scanDurationMs} ms`,
+      timestamp: new Date().toISOString()
+    };
+
+    if (recommendation !== 'FAIL') {
+      logPipelineTrace(traceData);
+    }
 
     // 11. Store evaluation record in the Explainability Engine
     try {
