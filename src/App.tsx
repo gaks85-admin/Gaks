@@ -334,11 +334,27 @@ export default function App() {
           history: Array.from({ length: 7 }, () => 0), // Default history to prevent crashes
           timeframe: item.selected_timeframe || 'H1'
         }));
-        setWatchlist(mapped);
-        localStorage.setItem('gaks_watchlist', JSON.stringify(mapped));
+        setWatchlist(prev => {
+          const nextList = [...prev];
+          mapped.forEach(incoming => {
+             const existingIdx = nextList.findIndex(w => w.symbol.replace(/[^a-zA-Z0-9]/g, '').toUpperCase() === incoming.symbol.replace(/[^a-zA-Z0-9]/g, '').toUpperCase());
+             if (existingIdx >= 0) {
+                // Update existing, preserving live price/change which loadWatchlistFromSupabase resets to 0
+                nextList[existingIdx] = { 
+                  ...nextList[existingIdx], 
+                  timeframe: incoming.timeframe,
+                  name: incoming.name
+                };
+             } else {
+                nextList.push(incoming);
+             }
+          });
+          console.log(`[Watchlist Debug] WATCHERS UPDATED\nPrevious: ${prev.length}\nCurrent: ${nextList.length}\nReason: API LOAD MERGE`);
+          localStorage.setItem('gaks_watchlist', JSON.stringify(nextList));
+          return nextList;
+        });
       } else {
-        setWatchlist([]);
-        localStorage.removeItem('gaks_watchlist');
+        console.log(`[Watchlist Debug] API returned empty for watchers. Relying on loadWatcherStatus for cleanup.`);
       }
     } catch (err) {
       console.error("Exception loading watchers from Supabase:", err);
@@ -421,6 +437,8 @@ export default function App() {
         setTelegramConnection(null);
         setTelegramSuccessMessage(null);
         setTelegramErrorMessage(null);
+        setWatchlist([]);
+        localStorage.removeItem('gaks_watchlist');
       }
     });
 
@@ -986,20 +1004,36 @@ export default function App() {
         .select('status, selected_pair, selected_timeframe, trade_status, last_scan_at, last_analyzed_closed_candle_time')
         .eq('user_id', userId);
         
-      if (data && data.length > 0) {
-        // If any watcher is active, we consider the watcher service "active" for the UI badge
+      if (data) {
         const anyActive = data.some(w => w.status === 'active');
         setIsWatcherActive(anyActive);
         
-        // Use the first active watcher to populate search/timeframe defaults
+        // Sync watchlist with actual DB statuses to remove crons/server-stopped watchers
+        // This avoids race conditions by ONLY removing if the DB explicitly says it's stopped/deleted.
+        setWatchlist(prev => {
+          if (!prev || prev.length === 0) return prev;
+          const nextList = prev.filter(w => {
+            const dbW = data.find(d => d.selected_pair && d.selected_pair.replace(/[^a-zA-Z0-9]/g, '').toUpperCase() === w.symbol.replace(/[^a-zA-Z0-9]/g, '').toUpperCase());
+            // If the DB explicitly says it's not active, remove it.
+            // If it's missing entirely from the DB result (e.g. out-of-order race condition), KEEP IT.
+            if (dbW && dbW.status !== 'active') return false;
+            return true;
+          });
+          if (nextList.length !== prev.length) {
+            if (nextList.length === 0) localStorage.removeItem('gaks_watchlist');
+            else localStorage.setItem('gaks_watchlist', JSON.stringify(nextList));
+          }
+          return nextList;
+        });
+      }
+
+      if (data && data.length > 0) {
         const activeOne = data.find(w => w.status === 'active') || data[0];
         if (activeOne.selected_pair) setWatcherSearch(activeOne.selected_pair);
         if (activeOne.selected_timeframe) setWatcherTimeframe(activeOne.selected_timeframe);
         if (activeOne.trade_status) setWatcherTradeStatus(activeOne.trade_status);
         if (activeOne.last_scan_at) setWatcherLastScanAt(activeOne.last_scan_at);
         if (activeOne.last_analyzed_closed_candle_time) setWatcherLastCandle(activeOne.last_analyzed_closed_candle_time);
-      } else {
-        setIsWatcherActive(false);
       }
     } catch (err) {
       console.error("Error loading watcher status:", err);
@@ -1223,6 +1257,32 @@ export default function App() {
       setWatcherErrorMessage(null);
       triggerNotification(result.message || "AI Market Watcher activated successfully!", "success");
 
+      // Optimistic update to guarantee visibility
+      const cleanTarget = normalizeSymbol(targetSymbol);
+      setWatchlist(prev => {
+        const nextList = [...prev];
+        const existingIdx = nextList.findIndex(w => w.symbol.replace(/[^a-zA-Z0-9]/g, '').toUpperCase() === cleanTarget.replace(/[^a-zA-Z0-9]/g, '').toUpperCase());
+        if (existingIdx >= 0) {
+           nextList[existingIdx] = { ...nextList[existingIdx], timeframe: targetTimeframe };
+        } else {
+           nextList.push({
+             symbol: cleanTarget,
+             name: getFullNameForSymbol(cleanTarget),
+             price: 0,
+             change: 0,
+             spread: 0,
+             volatility: 'Medium',
+             confidence: 0,
+             direction: 'Neutral',
+             history: [0,0,0,0,0,0,0],
+             timeframe: targetTimeframe,
+             status: 'active'
+           });
+        }
+        localStorage.setItem('gaks_watchlist', JSON.stringify(nextList));
+        return nextList;
+      });
+
       // Refresh source of truth from Supabase instead of just mocking locally
       await loadWatchlistFromSupabase(session.user.id);
       
@@ -1266,6 +1326,7 @@ export default function App() {
       }
     }
     setIsWatcherActive(false);
+    console.log(`[Watchlist Debug] WATCHERS UPDATED\nPrevious: ${watchlist.length}\nCurrent: 0\nReason: STOP`);
     setWatchlist([]);
     localStorage.removeItem('gaks_watchlist');
     triggerNotification("AI Market Watcher stopped.", "info");
@@ -2561,7 +2622,7 @@ export default function App() {
 
               {/* Watchlist Display area */}
               <div className="space-y-4">
-                {(watchlist || []).length === 0 || !isWatcherActive ? (
+                {(watchlist || []).length === 0 ? (
                   /* Empty state - Matches Screenshot 11 exactly */
                   <div className="p-12 rounded-3xl border border-zinc-800 bg-[#0c0c0e]/40 flex flex-col items-center text-center space-y-4">
                     <div className="w-12 h-12 rounded-full bg-zinc-950/80 border border-zinc-900 flex items-center justify-center text-zinc-400">
