@@ -10,6 +10,7 @@ import { evaluateDecision } from '../../src/lib/decision-engine.js';
 import { extractMarketStructure } from '../../src/lib/market-structure-engine.js';
 import { recordEvaluation } from '../../src/lib/explainability-engine.js';
 import { logPipelineTrace } from '../../src/lib/pipeline-logger.js';
+import { calculateHistoricalProbability, recordCompletedTrade } from '../../src/lib/learning-engine.js';
 
 // --- Inlined Gemini Wrapper ---
 
@@ -988,6 +989,48 @@ export default async function handler(req: any, res: any) {
             telegramMessagesSentCount++;
           }
 
+          // Record completed trade to Learning Engine
+          let latestEval: any = null;
+          try {
+            const { data } = await supabase
+              .from('watcher_evaluations')
+              .select('*')
+              .eq('watcher_id', watcher.id)
+              .order('created_at', { ascending: false })
+              .limit(1)
+              .maybeSingle();
+            latestEval = data;
+          } catch (e: any) {
+            console.warn('[Learning Engine] Could not fetch latest evaluation:', e.message);
+          }
+
+          await recordCompletedTrade(supabase, {
+            user_id: userId,
+            watcher_id: watcher.id,
+            evaluation_id: latestEval?.id || null,
+            pair: selectedPair,
+            timeframe: selectedTimeframe,
+            strategy_mode: latestEval?.strategy_mode || 'HYBRID',
+            entry_price: entryPrice || 0,
+            stop_loss: stopLoss,
+            take_profit: takeProfit,
+            exit_price: currentPrice,
+            direction: dir,
+            opened_at: watcher.opened_at || new Date(Date.now() - 30 * 60 * 1000).toISOString(),
+            closed_at: new Date().toISOString(),
+            decision_score: latestEval?.decision_score || null,
+            matched_weight: latestEval?.matched_weight || null,
+            possible_weight: latestEval?.possible_weight || null,
+            matched_rules: latestEval?.matched_rules || [],
+            failed_rules: latestEval?.failed_rules || [],
+            gemini_used: latestEval?.gemini_used || false,
+            gemini_confidence: null,
+            market_snapshot: {},
+            session: null,
+            volatility: 'MEDIUM',
+            notes: `Trade closed via TP. Exit Price: ${currentPrice}`
+          });
+
           // Transition to COOLDOWN
           const { data: tpCooldownData, error: tpCooldownErr } = await supabase
             .from("watchers")
@@ -1022,6 +1065,48 @@ export default async function handler(req: any, res: any) {
             await sendTelegramMessage(telegramChatId, slMsg);
             telegramMessagesSentCount++;
           }
+
+          // Record completed trade to Learning Engine
+          let latestEval: any = null;
+          try {
+            const { data } = await supabase
+              .from('watcher_evaluations')
+              .select('*')
+              .eq('watcher_id', watcher.id)
+              .order('created_at', { ascending: false })
+              .limit(1)
+              .maybeSingle();
+            latestEval = data;
+          } catch (e: any) {
+            console.warn('[Learning Engine] Could not fetch latest evaluation:', e.message);
+          }
+
+          await recordCompletedTrade(supabase, {
+            user_id: userId,
+            watcher_id: watcher.id,
+            evaluation_id: latestEval?.id || null,
+            pair: selectedPair,
+            timeframe: selectedTimeframe,
+            strategy_mode: latestEval?.strategy_mode || 'HYBRID',
+            entry_price: entryPrice || 0,
+            stop_loss: stopLoss,
+            take_profit: takeProfit,
+            exit_price: currentPrice,
+            direction: dir,
+            opened_at: watcher.opened_at || new Date(Date.now() - 30 * 60 * 1000).toISOString(),
+            closed_at: new Date().toISOString(),
+            decision_score: latestEval?.decision_score || null,
+            matched_weight: latestEval?.matched_weight || null,
+            possible_weight: latestEval?.possible_weight || null,
+            matched_rules: latestEval?.matched_rules || [],
+            failed_rules: latestEval?.failed_rules || [],
+            gemini_used: latestEval?.gemini_used || false,
+            gemini_confidence: null,
+            market_snapshot: {},
+            session: null,
+            volatility: 'MEDIUM',
+            notes: `Trade closed via SL. Exit Price: ${currentPrice}`
+          });
 
           // Transition to COOLDOWN
           const { data: slCooldownData, error: slCooldownErr } = await supabase
@@ -1325,17 +1410,39 @@ export default async function handler(req: any, res: any) {
           canonicalRules: compiledStrategy.canonical_rules || []
         };
 
-        // Run Weighted Decision Engine
-        const decisionResult = evaluateDecision(compiledStrategy, marketStructure);
+        // Run Weighted Decision Engine (Pass 1 to get matched rules)
+        const initialResult = evaluateDecision(compiledStrategy, marketStructure);
+
+        // Fetch Historical Probability from Learning Engine
+        const histResult = await calculateHistoricalProbability(
+          supabase,
+          userId,
+          selectedPair,
+          selectedTimeframe,
+          initialResult.matched_rules,
+          compiledStrategy.strategy_mode || 'HYBRID'
+        );
+
+        // Run Weighted Decision Engine (Pass 2 with historical context)
+        const decisionResult = evaluateDecision(
+          compiledStrategy,
+          marketStructure,
+          undefined,
+          histResult.historical_probability,
+          histResult.sample_size
+        );
 
         // Stage 4
         traceData.decisionEngine = {
-          decisionScore: `${decisionResult.matched_weight} / ${decisionResult.possible_weight} (${(decisionResult.decision_score * 100).toFixed(1)}%)`,
+          decisionScore: `${decisionResult.matched_weight} / ${decisionResult.possible_weight} (${decisionResult.decision_score.toFixed(1)}%)`,
           recommendation: decisionResult.recommendation,
           mandatoryRulesPassed: decisionResult.mandatory_rules_passed ? 'YES' : 'NO',
           matchedRules: decisionResult.matched_rules || [],
           failedRules: decisionResult.failed_rules || [],
-          geminiRequired: decisionResult.requires_gemini ? 'YES' : 'NO'
+          geminiRequired: decisionResult.requires_gemini ? 'YES' : 'NO',
+          historicalProbability: `${histResult.historical_probability}%`,
+          sampleSize: histResult.sample_size,
+          confidenceLevel: histResult.confidence_level
         };
 
         let analysis: any = {

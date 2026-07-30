@@ -38,7 +38,9 @@ export interface DecisionResult {
 export function evaluateDecision(
   compiledStrategy: CompilerOutput,
   marketStructure: any,
-  customWeights?: Record<string, number>
+  customWeights?: Record<string, number>,
+  historicalProbability?: number,
+  sampleSize?: number
 ): DecisionResult {
   const rules = compiledStrategy.compiled_rules || {};
   const weights = customWeights || RULE_WEIGHTS;
@@ -289,6 +291,17 @@ export function evaluateDecision(
     });
   }
 
+  // 20. Historical Probability
+  if (sampleSize !== undefined && sampleSize >= 30 && historicalProbability !== undefined) {
+    const matched = historicalProbability >= 60.0;
+    evaluatedRules.push({
+      name: "Historical Probability",
+      weightKey: "historical_probability" as any,
+      matched,
+      reason: `Historical Win Rate for this rule combination is ${historicalProbability}% (Sample: ${sampleSize} trades).`
+    });
+  }
+
   const matchedRulesObj = evaluatedRules.filter(r => r.matched);
   const failedRulesObj = evaluatedRules.filter(r => !r.matched);
 
@@ -300,7 +313,12 @@ export function evaluateDecision(
   let possible_weight = 0;
 
   evaluatedRules.forEach(rule => {
-    const ruleWeight = weights[rule.weightKey] ?? 0;
+    let ruleWeight = 0;
+    if (rule.name === "Historical Probability") {
+      ruleWeight = 20;
+    } else {
+      ruleWeight = weights[rule.weightKey] ?? 0;
+    }
     possible_weight += ruleWeight;
     if (rule.matched) {
       matched_weight += ruleWeight;

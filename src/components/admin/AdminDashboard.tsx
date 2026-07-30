@@ -10,6 +10,7 @@ import { supabase } from '../../supabaseClient';
 import GeminiTesterPage from './GeminiTesterPage';
 import StrategyEngineInspectorPage from './StrategyEngineInspectorPage';
 import SystemValidationPage from './SystemValidationPage';
+import LearningAnalyticsPage from './LearningAnalyticsPage';
 
 interface ToastState {
   message: string;
@@ -2622,6 +2623,7 @@ export default function AdminDashboard({ userProfile, session, authLoading }: { 
   const menuItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'explainability', label: 'Explainability & Analytics', icon: Activity },
+    { id: 'learning', label: 'Learning Analytics', icon: Activity },
     { id: 'users', label: 'Users', icon: Users },
     { id: 'watchers', label: 'Watchers', icon: Eye },
     { id: 'signals', label: 'Signals', icon: Zap },
@@ -2669,6 +2671,7 @@ export default function AdminDashboard({ userProfile, session, authLoading }: { 
         {/* Scrollable Subpage Frame */}
         <div className="flex-1 overflow-y-auto pb-16">
           {activeAdminTab === 'explainability' && <ExplainabilityPage fetchWithAuth={fetchWithAuth} />}
+          {activeAdminTab === 'learning' && <LearningAnalyticsPage fetchWithAuth={fetchWithAuth} />}
           {activeAdminTab === 'dashboard' && <DashboardPage fetchWithAuth={fetchWithAuth} />}
           {activeAdminTab === 'users' && <UsersPage fetchWithAuth={fetchWithAuth} showToast={showToast} />}
           {activeAdminTab === 'watchers' && <WatchersPage fetchWithAuth={fetchWithAuth} showToast={showToast} />}
