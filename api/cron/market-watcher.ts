@@ -1432,6 +1432,9 @@ export default async function handler(req: any, res: any) {
         };
 
         // Run Weighted Decision Engine (Pass 1 to get matched rules)
+        (marketStructure as any).pair = selectedPair;
+        (marketStructure as any).timeframe = selectedTimeframe;
+        (marketStructure as any).lastClosedCandleTimestamp = candleData[candleData.length - 2]?.timestamp || '';
         const initialResult = evaluateDecision(compiledStrategy, marketStructure);
 
         // Fetch Historical Probability from Learning Engine

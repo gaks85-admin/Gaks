@@ -68,6 +68,9 @@ export function evaluateDecision(
     weightKey: keyof typeof RULE_WEIGHTS;
     matched: boolean;
     reason: string;
+    expected: string;
+    actual: string;
+    weight: number;
   }[] = [];
 
   // 1. Trendline Breakout
@@ -77,7 +80,10 @@ export function evaluateDecision(
       name: "Trendline Breakout",
       weightKey: "trendline_breakout",
       matched: res.matched,
-      reason: res.reason
+      reason: res.reason,
+      expected: "TRUE",
+      actual: res.matched ? "TRUE" : "FALSE",
+      weight: weights.trendline_breakout ?? 0
     });
   }
 
@@ -88,7 +94,10 @@ export function evaluateDecision(
       name: "Break and Retest",
       weightKey: "break_and_retest",
       matched: res.matched,
-      reason: res.reason
+      reason: res.reason,
+      expected: "TRUE",
+      actual: res.matched ? "TRUE" : "FALSE",
+      weight: weights.break_and_retest ?? 0
     });
   }
 
@@ -99,7 +108,10 @@ export function evaluateDecision(
       name: "BOS",
       weightKey: "bos",
       matched: res.matched,
-      reason: res.reason
+      reason: res.reason,
+      expected: "TRUE",
+      actual: res.matched ? "TRUE" : "FALSE",
+      weight: weights.bos ?? 0
     });
   }
 
@@ -110,7 +122,10 @@ export function evaluateDecision(
       name: "CHOCH",
       weightKey: "choch",
       matched: res.matched,
-      reason: res.reason
+      reason: res.reason,
+      expected: "TRUE",
+      actual: res.matched ? "TRUE" : "FALSE",
+      weight: weights.choch ?? 0
     });
   }
 
@@ -121,7 +136,10 @@ export function evaluateDecision(
       name: "EMA Alignment",
       weightKey: "ema",
       matched: res.matched,
-      reason: res.reason
+      reason: res.reason,
+      expected: "TRUE",
+      actual: res.matched ? "TRUE" : "FALSE",
+      weight: weights.ema ?? 0
     });
   }
 
@@ -132,7 +150,10 @@ export function evaluateDecision(
       name: "RSI Filter",
       weightKey: "rsi",
       matched: res.matched,
-      reason: res.reason
+      reason: res.reason,
+      expected: "TRUE",
+      actual: res.matched ? "TRUE" : "FALSE",
+      weight: weights.rsi ?? 0
     });
   }
 
@@ -143,7 +164,10 @@ export function evaluateDecision(
       name: "MACD Filter",
       weightKey: "macd",
       matched: res.matched,
-      reason: res.reason
+      reason: res.reason,
+      expected: "TRUE",
+      actual: res.matched ? "TRUE" : "FALSE",
+      weight: weights.macd ?? 0
     });
   }
 
@@ -154,7 +178,10 @@ export function evaluateDecision(
       name: "ATR Volatility Filter",
       weightKey: "atr",
       matched: res.matched,
-      reason: res.reason
+      reason: res.reason,
+      expected: "TRUE",
+      actual: res.matched ? "TRUE" : "FALSE",
+      weight: weights.atr ?? 0
     });
   }
 
@@ -165,7 +192,10 @@ export function evaluateDecision(
       name: "Liquidity Sweep",
       weightKey: "liquidity_sweep",
       matched: res.matched,
-      reason: res.reason
+      reason: res.reason,
+      expected: "TRUE",
+      actual: res.matched ? "TRUE" : "FALSE",
+      weight: weights.liquidity_sweep ?? 0
     });
   }
 
@@ -176,7 +206,10 @@ export function evaluateDecision(
       name: "Fair Value Gap",
       weightKey: "fair_value_gap",
       matched: res.matched,
-      reason: res.reason
+      reason: res.reason,
+      expected: "TRUE",
+      actual: res.matched ? "TRUE" : "FALSE",
+      weight: weights.fair_value_gap ?? 0
     });
   }
 
@@ -187,7 +220,10 @@ export function evaluateDecision(
       name: "Support Zone",
       weightKey: "support",
       matched: res.matched,
-      reason: res.reason
+      reason: res.reason,
+      expected: "TRUE",
+      actual: res.matched ? "TRUE" : "FALSE",
+      weight: weights.support ?? 0
     });
   }
 
@@ -198,7 +234,10 @@ export function evaluateDecision(
       name: "Support Rejection",
       weightKey: "support",
       matched: res.matched,
-      reason: res.reason
+      reason: res.reason,
+      expected: "TRUE",
+      actual: res.matched ? "TRUE" : "FALSE",
+      weight: weights.support ?? 0
     });
   }
 
@@ -209,7 +248,10 @@ export function evaluateDecision(
       name: "Resistance Zone",
       weightKey: "resistance",
       matched: res.matched,
-      reason: res.reason
+      reason: res.reason,
+      expected: "TRUE",
+      actual: res.matched ? "TRUE" : "FALSE",
+      weight: weights.resistance ?? 0
     });
   }
 
@@ -220,7 +262,10 @@ export function evaluateDecision(
       name: "Resistance Rejection",
       weightKey: "resistance",
       matched: res.matched,
-      reason: res.reason
+      reason: res.reason,
+      expected: "TRUE",
+      actual: res.matched ? "TRUE" : "FALSE",
+      weight: weights.resistance ?? 0
     });
   }
 
@@ -231,7 +276,10 @@ export function evaluateDecision(
       name: "Volume Confirmation",
       weightKey: "volume_confirmation",
       matched: res.matched,
-      reason: res.reason
+      reason: res.reason,
+      expected: "TRUE",
+      actual: res.matched ? "TRUE" : "FALSE",
+      weight: weights.volume_confirmation ?? 0
     });
   }
 
@@ -250,7 +298,10 @@ export function evaluateDecision(
       name: friendlyName,
       weightKey: "session",
       matched: res.matched,
-      reason: res.reason
+      reason: res.reason,
+      expected: "TRUE",
+      actual: res.matched ? "TRUE" : "FALSE",
+      weight: weights.session ?? 0
     });
   }
 
@@ -265,7 +316,10 @@ export function evaluateDecision(
       name: friendlyName,
       weightKey: "timeframe",
       matched: res.matched,
-      reason: res.reason
+      reason: res.reason,
+      expected: "TRUE",
+      actual: res.matched ? "TRUE" : "FALSE",
+      weight: weights.timeframe ?? 0
     });
   }
 
@@ -276,7 +330,10 @@ export function evaluateDecision(
       name: "Risk Reward",
       weightKey: "risk_reward",
       matched: res.matched,
-      reason: res.reason
+      reason: res.reason,
+      expected: "TRUE",
+      actual: res.matched ? "TRUE" : "FALSE",
+      weight: weights.risk_reward ?? 0
     });
   }
 
@@ -287,18 +344,34 @@ export function evaluateDecision(
       name: "Confirmation Candle",
       weightKey: "confirmation_candle",
       matched: res.matched,
-      reason: res.reason
+      reason: res.reason,
+      expected: "TRUE",
+      actual: res.matched ? "TRUE" : "FALSE",
+      weight: weights.confirmation_candle ?? 0
     });
   }
 
   // 20. Historical Probability
   if (sampleSize !== undefined && historicalProbability !== undefined) {
     const matched = historicalProbability >= 60.0;
+    let otherPossibleWeight = 0;
+    evaluatedRules.forEach(rule => {
+      if (rule.name !== "Historical Probability") {
+        otherPossibleWeight += weights[rule.weightKey] ?? 0;
+      }
+    });
+    const histWeight = (sampleSize !== undefined && sampleSize >= 20)
+      ? (otherPossibleWeight > 0 ? Math.round(0.25 * otherPossibleWeight) : 20)
+      : 0;
+
     evaluatedRules.push({
       name: "Historical Probability",
       weightKey: "historical_probability" as any,
       matched,
-      reason: `Historical Win Rate for similar setups is ${historicalProbability}% (Sample: ${sampleSize} trades, Confidence: ${sampleSize >= 100 ? 'HIGH' : sampleSize >= 20 ? 'MEDIUM' : 'LOW'}).`
+      reason: `Historical Win Rate for similar setups is ${historicalProbability}% (Sample: ${sampleSize} trades, Confidence: ${sampleSize >= 100 ? 'HIGH' : sampleSize >= 20 ? 'MEDIUM' : 'LOW'}).`,
+      expected: "TRUE",
+      actual: matched ? "TRUE" : "FALSE",
+      weight: histWeight
     });
   }
 
@@ -385,7 +458,72 @@ export function evaluateDecision(
         ? `Market satisfies ${matched_weight} of ${possible_weight} possible weights (${decision_score}%).`
         : "No active rules to evaluate.");
 
-  // Structured Log Generation
+  // === TEMPORARY DECISION ENGINE DEBUG MODE ===
+  const pair = marketStructure.pair || "Unknown";
+  const timeframe = marketStructure.timeframe || "Unknown";
+  const latestCandles = marketStructure.latestCandles || [];
+  const lastClosedCandleTimestamp = marketStructure.lastClosedCandleTimestamp || (latestCandles.length >= 2
+    ? latestCandles[latestCandles.length - 2]?.timestamp
+    : (latestCandles[latestCandles.length - 1]?.timestamp || "N/A"));
+  const trend = marketStructure.trend || "SIDEWAYS";
+  const bos = (marketStructure.BOS && marketStructure.BOS.some((b: any) => b.type === 'BULLISH_BOS' || b.type === 'BEARISH_BOS')) ? 'YES' : 'NO';
+  const choch = (marketStructure.CHOCH && marketStructure.CHOCH.some((c: any) => c.type === 'BULLISH_CHOCH' || c.type === 'BEARISH_CHOCH')) ? 'YES' : 'NO';
+  const trendlineBreakout = ((marketStructure.breakouts && marketStructure.breakouts.some((b: any) => b.type === 'UPPER_BREAKOUT' || b.type === 'LOWER_BREAKOUT')) || (marketStructure.trendlines && marketStructure.trendlines.length > 0)) ? 'YES' : 'NO';
+  const breakAndRetest = (marketStructure.retests && marketStructure.retests.some((r: any) => r.confirmed === true)) ? 'YES' : 'NO';
+  const liquiditySweep = (marketStructure.liquiditySweeps && marketStructure.liquiditySweeps.some((l: any) => l.type === 'HIGH_SWEEP' || l.type === 'LOW_SWEEP')) ? 'YES' : 'NO';
+  const fairValueGap = (marketStructure.fairValueGaps && marketStructure.fairValueGaps.length > 0) ? 'YES' : 'NO';
+  const support = (marketStructure.supportZones && marketStructure.supportZones.length > 0) ? 'YES' : 'NO';
+  const resistance = (marketStructure.resistanceZones && marketStructure.resistanceZones.length > 0) ? 'YES' : 'NO';
+  const volumeConfirmation = (marketStructure.volumeInformation?.volumeSpike) ? 'YES' : 'NO';
+  const atr = marketStructure.volatilityInformation?.atr || 0;
+  const session = (() => {
+    const lastCandle = latestCandles[latestCandles.length - 1];
+    const date = lastCandle && lastCandle.timestamp ? new Date(lastCandle.timestamp) : new Date();
+    const hour = date.getUTCHours();
+    if (hour >= 8 && hour < 13) return "London";
+    if (hour >= 13 && hour < 17) return "London / NY";
+    if (hour >= 17 && hour < 21) return "NY";
+    if (hour >= 0 && hour < 8) return "Asia";
+    return "Asia";
+  })();
+  const timeframeDetected = marketStructure.timeframe || "Unknown";
+
+  console.log(`\n========================================`);
+  console.log(`[DECISION ENGINE DEBUG MODE]`);
+  console.log(`========================================`);
+  console.log(`1. Pair: ${pair}`);
+  console.log(`2. Timeframe: ${timeframe}`);
+  console.log(`3. Last closed candle timestamp: ${lastClosedCandleTimestamp}`);
+  console.log(`4. Trend: ${trend}`);
+  console.log(`5. BOS: ${bos}`);
+  console.log(`6. CHOCH: ${choch}`);
+  console.log(`7. Trendline Breakout: ${trendlineBreakout}`);
+  console.log(`8. Break & Retest: ${breakAndRetest}`);
+  console.log(`9. Liquidity Sweep: ${liquiditySweep}`);
+  console.log(`10. Fair Value Gap: ${fairValueGap}`);
+  console.log(`11. Support: ${support}`);
+  console.log(`12. Resistance: ${resistance}`);
+  console.log(`13. Volume Confirmation: ${volumeConfirmation}`);
+  console.log(`14. ATR: ${atr}`);
+  console.log(`15. Session: ${session}`);
+  console.log(`16. Timeframe detected by the Market Structure Engine: ${timeframeDetected}`);
+  console.log(`========================================`);
+
+  console.log(`\n--- Compiled Strategy Output ---`);
+  console.log(JSON.stringify(compiledStrategy, null, 2));
+  console.log(`========================================`);
+
+  console.log(`\n--- Rule Evaluation Details ---`);
+  for (const rule of evaluatedRules) {
+    console.log(`\nRule: ${rule.name}`);
+    console.log(`Expected: ${rule.expected}`);
+    console.log(`Actual: ${rule.actual}`);
+    console.log(`Match: ${rule.matched ? "YES" : "NO"}`);
+    console.log(`Weight: ${rule.matched ? rule.weight : -rule.weight}`);
+  }
+  console.log(`========================================`);
+
+  // Original Structured Log Generation (kept intact)
   console.log(`\n========== WEIGHTED DECISION ==========`);
   console.log(`Strategy Mode:`);
   console.log(`${compiledStrategy.strategy_mode || 'RULE_ONLY'}`);

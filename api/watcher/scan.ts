@@ -394,6 +394,9 @@ export default async function handler(req: any, res: any) {
     };
 
     // 8. Weighted Decision Engine Execution
+    (marketStructure as any).pair = symbol;
+    (marketStructure as any).timeframe = selectedTimeframe;
+    (marketStructure as any).lastClosedCandleTimestamp = candleData[candleData.length - 2]?.timestamp || '';
     const decisionResult = evaluateDecision(compiledStrategy, marketStructure);
 
     // Stage 4
