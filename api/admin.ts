@@ -2219,12 +2219,297 @@ async function explainability_handler(req: any, res: any) {
 }
 
 
+let systemHealthHistory: any[] = [];
+
+function getUptimeString() {
+  const seconds = Math.floor(process.uptime());
+  const d = Math.floor(seconds / (3600*24));
+  const h = Math.floor((seconds % (3600*24)) / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = seconds % 60;
+  
+  const parts = [];
+  if (d > 0) parts.push(`${d}d`);
+  if (h > 0) parts.push(`${h}h`);
+  if (m > 0) parts.push(`${m}m`);
+  parts.push(`${s}s`);
+  return parts.join(' ');
+}
+
+async function system_health_handler(req: any, res: any) {
+  const supabase = getSupabase();
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, PATCH, DELETE");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With");
+  res.setHeader("Content-Type", "application/json");
+
+  if (req.method === "OPTIONS") {
+    return res.status(200).end();
+  }
+
+  if (req.method !== 'GET') {
+    return res.status(405).json({ success: false, error: 'Method Not Allowed' });
+  }
+
+  const authHeader = req.headers.authorization || '';
+  const token = authHeader.startsWith('Bearer ') ? authHeader.substring(7) : authHeader;
+  
+  if (!token) {
+    return res.status(401).json({ success: false, error: "Unauthorized: Missing authentication token." });
+  }
+
+  try {
+    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+    if (authError || !user) {
+      return res.status(401).json({ success: false, error: "Unauthorized: Invalid authentication token." });
+    }
+    
+    const email = user.email?.trim().toLowerCase();
+    const ADMIN_EMAIL = "gaks6535@gmail.com";
+    if (email !== ADMIN_EMAIL) {
+      return res.status(403).json({ success: false, error: "Unauthorized: Insufficient privileges." });
+    }
+
+    // 1. Backend check
+    const backend = "healthy";
+
+    // 2. Database check
+    const startDb = Date.now();
+    let database = "healthy";
+    let database_latency_ms = 0;
+    try {
+      const { error: dbErr } = await supabase.from('profiles').select('id').limit(1);
+      database_latency_ms = Date.now() - startDb;
+      if (dbErr) {
+        database = "offline";
+      } else if (database_latency_ms > 200) {
+        database = "slow";
+      }
+    } catch {
+      database = "offline";
+      database_latency_ms = Date.now() - startDb;
+    }
+
+    // 3. Telegram check
+    let telegram = "offline";
+    let telegram_latency_ms = 0;
+    if (process.env.TELEGRAM_BOT_TOKEN) {
+      const startTg = Date.now();
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 120);
+        const resTg = await fetch("https://api.telegram.org", { signal: controller.signal });
+        clearTimeout(timeoutId);
+        telegram_latency_ms = Date.now() - startTg;
+        if (resTg.status < 500) {
+          telegram = "healthy";
+        } else {
+          telegram = "error";
+        }
+      } catch {
+        telegram = "offline";
+        telegram_latency_ms = Date.now() - startTg;
+      }
+    }
+
+    // 4. Gemini check
+    let gemini = "healthy";
+    let gemini_latency_ms = 0;
+    const startGemini = Date.now();
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 120);
+      await fetch("https://generativelanguage.googleapis.com", { signal: controller.signal });
+      clearTimeout(timeoutId);
+      gemini_latency_ms = Date.now() - startGemini;
+    } catch {
+      gemini_latency_ms = Date.now() - startGemini;
+    }
+
+    const geminiKey = process.env.GEMINI_API_KEY;
+    const { data: keyRecord } = await supabase
+      .from('user_api_keys')
+      .select('api_key, status, last_error')
+      .eq('provider', 'gemini')
+      .limit(1)
+      .maybeSingle();
+
+    if (!geminiKey && (!keyRecord || !keyRecord.api_key)) {
+      gemini = "Invalid Key";
+    } else if (keyRecord && keyRecord.status === 'disabled') {
+      gemini = "Disabled";
+    } else if (keyRecord && keyRecord.last_error === 'quota_exceeded') {
+      gemini = "Quota Exhausted";
+    } else if (keyRecord && keyRecord.last_error === 'invalid_key') {
+      gemini = "Invalid Key";
+    }
+
+    // 5. Cron check
+    let cron = "running";
+    const appSettings = loadSettings();
+    const scanInterval = appSettings.scanInterval || 15;
+
+    const { data: latestScans } = await supabase
+      .from('watchers')
+      .select('last_scan_at')
+      .order('last_scan_at', { ascending: false })
+      .limit(1);
+    const last_scan = (latestScans && latestScans[0]?.last_scan_at) || '';
+
+    const { count: activeWatchersCount } = await supabase
+      .from('watchers')
+      .select('*', { count: 'exact', head: true })
+      .eq('status', 'active');
+    
+    const watchers = activeWatchersCount || 0;
+
+    if (watchers > 0) {
+      if (!last_scan) {
+        cron = "stopped";
+      } else {
+        const diffMinutes = (Date.now() - new Date(last_scan).getTime()) / (1000 * 60);
+        if (diffMinutes > 2 * scanInterval) {
+          cron = "stopped";
+        }
+      }
+    }
+
+    // 6. Learning Engine check
+    let learning_engine = "healthy";
+    try {
+      const { error: leErr1 } = await supabase.from('trade_learning').select('id').limit(1);
+      const { error: leErr2 } = await supabase.from('watcher_evaluations').select('id').limit(1);
+      if (leErr1 || leErr2) {
+        learning_engine = "Database Error";
+      }
+    } catch {
+      learning_engine = "Database Error";
+    }
+
+    // 7. Active Users
+    const { data: activeWatchers } = await supabase.from('watchers').select('user_id').eq('status', 'active');
+    const activeUserIds = new Set(activeWatchers?.map(w => w.user_id) || []);
+    const active_users = activeUserIds.size;
+
+    // 8. Today's metrics (since 00:00 UTC)
+    const todayStartStr = new Date();
+    todayStartStr.setUTCHours(0,0,0,0);
+    const todayISO = todayStartStr.toISOString();
+
+    const { count: todayScans } = await supabase
+      .from('watcher_evaluations')
+      .select('*', { count: 'exact', head: true })
+      .gte('created_at', todayISO);
+    const today_scans = todayScans || 0;
+
+    const { count: todaySignals } = await supabase
+      .from('signals')
+      .select('*', { count: 'exact', head: true })
+      .gte('timestamp', todayISO);
+    const today_signals = todaySignals || 0;
+
+    const { count: todayFailures } = await supabase
+      .from('watcher_evaluations')
+      .select('*', { count: 'exact', head: true })
+      .eq('recommendation', 'FAIL')
+      .gte('created_at', todayISO);
+    const today_failures = todayFailures || 0;
+
+    // 9. Average Scan Times (from last 50 evaluations)
+    const { data: recentEvals } = await supabase
+      .from('watcher_evaluations')
+      .select('scan_duration_ms, gemini_duration_ms')
+      .order('created_at', { ascending: false })
+      .limit(50);
+
+    let average_scan_ms = 0;
+    let gemini_avg_duration_sum = 0;
+    let gemini_avg_duration_count = 0;
+    
+    if (recentEvals && recentEvals.length > 0) {
+      const validScans = recentEvals.filter(e => e.scan_duration_ms !== null);
+      if (validScans.length > 0) {
+        average_scan_ms = Math.round(validScans.reduce((sum, e) => sum + (e.scan_duration_ms || 0), 0) / validScans.length);
+      }
+      const validGeminis = recentEvals.filter(e => e.gemini_duration_ms !== null && e.gemini_duration_ms > 0);
+      if (validGeminis.length > 0) {
+        gemini_avg_duration_sum = validGeminis.reduce((sum, e) => sum + (e.gemini_duration_ms || 0), 0);
+        gemini_avg_duration_count = validGeminis.length;
+      }
+    }
+
+    const average_gemini_ms = gemini_avg_duration_count > 0 ? Math.round(gemini_avg_duration_sum / gemini_avg_duration_count) : gemini_latency_ms;
+
+    // Calculate dynamic average Telegram latency from systemHealthHistory
+    const validTgs = systemHealthHistory.filter(h => h.component === 'Telegram' && h.latency > 0);
+    const average_telegram_ms = validTgs.length > 0 ? Math.round(validTgs.reduce((sum, h) => sum + h.latency, 0) / validTgs.length) : telegram_latency_ms;
+
+    const uptime = getUptimeString();
+    const version = "1.0.0";
+
+    // Record History
+    const timestamp = new Date().toISOString();
+    const newHistoryEntries = [
+      { timestamp, component: 'Backend', status: backend, latency: 0, message: 'API is running' },
+      { timestamp, component: 'Database', status: database, latency: database_latency_ms, message: database === 'healthy' ? 'Connection healthy' : (database === 'slow' ? 'Slow response time' : 'Database query failed') },
+      { timestamp, component: 'Telegram', status: telegram, latency: telegram_latency_ms, message: telegram === 'healthy' ? 'Telegram API is reachable' : 'Telegram API unreachable or offline' },
+      { timestamp, component: 'Gemini', status: gemini, latency: gemini_latency_ms, message: gemini === 'healthy' ? 'API key status verified' : `Status: ${gemini}` },
+      { timestamp, component: 'Cron', status: cron, latency: 0, message: cron === 'running' ? 'Market Watcher cron is running' : 'Market Watcher cron has stopped' },
+      { timestamp, component: 'Learning Engine', status: learning_engine, latency: 0, message: learning_engine === 'healthy' ? 'Tables accessible' : 'Database Error' }
+    ];
+
+    systemHealthHistory.unshift(...newHistoryEntries);
+    if (systemHealthHistory.length > 200) {
+      systemHealthHistory = systemHealthHistory.slice(0, 200);
+    }
+
+    // Attempt to write logs asynchronously in background to avoid blocking
+    newHistoryEntries.forEach(entry => {
+      logHealthTest(entry.component, entry.status, entry.latency, entry.message, entry.status !== 'healthy' && entry.status !== 'running' ? entry.message : null).catch(() => {});
+    });
+
+    const resultPayload = {
+      backend,
+      database,
+      telegram,
+      gemini,
+      cron,
+      learning_engine,
+      watchers,
+      active_users,
+      today_scans,
+      today_signals,
+      today_failures,
+      last_scan,
+      average_scan_ms,
+      database_latency_ms,
+      gemini_latency_ms,
+      telegram_latency_ms,
+      average_gemini_ms,
+      average_telegram_ms,
+      uptime,
+      version,
+      history: systemHealthHistory.slice(0, 50)
+    };
+
+    return res.status(200).json(resultPayload);
+
+  } catch (err: any) {
+    console.error("System health check API error:", err);
+    return res.status(500).json({ success: false, error: err.message || 'Internal system health diagnostics exception' });
+  }
+}
+
+
 export default async function handler(req: any, res: any) {
   try {
     const matchedPath = req.headers['x-matched-path'] || req.headers['x-original-url'] || req.headers['x-forwarded-url'] || req.url || '';
     const parsedUrl = url.parse(matchedPath, true);
     const pathname = parsedUrl.pathname || '';
 
+    if (pathname.endsWith('/system-health')) {
+      return system_health_handler(req, res);
+    }
     if (pathname.endsWith('/stats')) {
       return stats_handler(req, res);
     }
