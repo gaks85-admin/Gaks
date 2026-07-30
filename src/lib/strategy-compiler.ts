@@ -181,8 +181,8 @@ export function compileStrategy(strategyText: string): CompilerOutput {
   return {
     strategy_mode,
     compiled_rules,
-    confidence,
-    overall_confidence: confidence,
+    confidence: Math.round(confidence <= 1.0 ? confidence * 100 : confidence),
+    overall_confidence: Math.round(confidence <= 1.0 ? confidence * 100 : confidence),
     module_confidence,
     matched_phrases,
     canonical_rules

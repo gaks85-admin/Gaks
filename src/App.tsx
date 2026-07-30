@@ -4,6 +4,7 @@ import { supabase } from './supabaseClient';
 import { getGeminiKey, saveGeminiKey, deleteGeminiKey } from './lib/apiKeys';
 import { toCanonicalSymbol, toDisplaySymbol, normalizeSymbol } from '../lib/market-utils';
 import { parseUserStrategy } from "./lib/strategy-parser";
+import { compileStrategy } from './lib/strategy-compiler';
 
 const Auth = React.lazy(() => import('./components/Auth'));
 import { AuthSkeleton } from './components/Auth';
@@ -267,6 +268,39 @@ export default function App() {
   const [watcherSearch, setWatcherSearch] = useState<string>('');
   const [watcherTimeframe, setWatcherTimeframe] = useState<string>('H1');
   const [watchlist, setWatchlist] = useState<WatchlistItem[]>([]);
+
+  // Real-time Watcher Status & Timeframe Validation States
+  const [watcherTradeStatus, setWatcherTradeStatus] = useState<string>('WAITING');
+  const [watcherLastScanAt, setWatcherLastScanAt] = useState<string>('');
+  const [watcherLastCandle, setWatcherLastCandle] = useState<string>('');
+
+  // Client-side Strategy Timeframe Compilation
+  const compiledStrategyTimeframes = useMemo(() => {
+    try {
+      if (!strategyText || !strategyText.trim()) return [];
+      const res = compileStrategy(strategyText);
+      return res.compiled_rules?.timeframes || [];
+    } catch (e) {
+      console.warn("Error compiling strategy on client-side:", e);
+      return [];
+    }
+  }, [strategyText]);
+
+  // Check if there is a timeframe mismatch
+  const isTimeframeMismatch = useMemo(() => {
+    if (compiledStrategyTimeframes.length === 0 || !watcherTimeframe) return false;
+    return !compiledStrategyTimeframes.some(
+      tf => tf.toLowerCase().trim() === watcherTimeframe.toLowerCase().trim()
+    );
+  }, [compiledStrategyTimeframes, watcherTimeframe]);
+
+  // Auto recommendation of timeframe
+  useEffect(() => {
+    if (compiledStrategyTimeframes.length === 1) {
+      const tf = compiledStrategyTimeframes[0];
+      setWatcherTimeframe(tf);
+    }
+  }, [compiledStrategyTimeframes]);
 
   // Watchlist Sync Helpers
   const loadWatchlistFromSupabase = async (userId: string) => {
@@ -944,7 +978,7 @@ export default function App() {
     try {
       const { data, error } = await supabase
         .from('watchers')
-        .select('status, selected_pair, selected_timeframe')
+        .select('status, selected_pair, selected_timeframe, trade_status, last_scan_at, last_analyzed_closed_candle_time')
         .eq('user_id', userId);
         
       if (data && data.length > 0) {
@@ -956,6 +990,9 @@ export default function App() {
         const activeOne = data.find(w => w.status === 'active') || data[0];
         if (activeOne.selected_pair) setWatcherSearch(activeOne.selected_pair);
         if (activeOne.selected_timeframe) setWatcherTimeframe(activeOne.selected_timeframe);
+        if (activeOne.trade_status) setWatcherTradeStatus(activeOne.trade_status);
+        if (activeOne.last_scan_at) setWatcherLastScanAt(activeOne.last_scan_at);
+        if (activeOne.last_analyzed_closed_candle_time) setWatcherLastCandle(activeOne.last_analyzed_closed_candle_time);
       } else {
         setIsWatcherActive(false);
       }
@@ -963,6 +1000,17 @@ export default function App() {
       console.error("Error loading watcher status:", err);
     }
   };
+
+  // Poll watcher status in real-time to show the active evaluation state
+  useEffect(() => {
+    if (!session?.user?.id || !isWatcherActive) return;
+
+    const interval = setInterval(() => {
+      loadWatcherStatus(session.user.id);
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [session?.user?.id, isWatcherActive]);
 
   const handleConnectTelegram = async () => {
     if (!session || !session.user) {
@@ -2289,9 +2337,30 @@ export default function App() {
                         </div>
                         <div>
                           <h4 className="text-xs font-bold text-white">AI Market Watcher Engine</h4>
-                          <p className="text-[10px] text-zinc-400">
-                            Status: <span className={isWatcherActive ? 'text-white font-bold' : 'text-zinc-500 font-bold'}>{isWatcherActive ? 'ACTIVE & MONITORED' : 'STANDBY'}</span>
-                          </p>
+                          <div className="text-[10px] text-zinc-400 space-y-0.5">
+                            <p>
+                              Status: <span className={isWatcherActive ? 'text-white font-bold' : 'text-zinc-500 font-bold'}>
+                                {isWatcherActive 
+                                  ? `ACTIVE & MONITORED (${watcherTradeStatus})` 
+                                  : 'STANDBY'}
+                              </span>
+                            </p>
+                            {isWatcherActive && watcherSearch && (
+                              <p className="text-[9px] text-zinc-500 font-mono">
+                                Action: Analyzing {watcherSearch} on {watcherTimeframe}
+                              </p>
+                            )}
+                            {isWatcherActive && watcherLastScanAt && (
+                              <p className="text-[9px] text-zinc-500 font-mono">
+                                Last Scan: {new Date(watcherLastScanAt).toLocaleTimeString()}
+                              </p>
+                            )}
+                            {isWatcherActive && watcherLastCandle && (
+                              <p className="text-[9px] text-zinc-500 font-mono">
+                                Last Candle: {watcherLastCandle}
+                              </p>
+                            )}
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -2348,7 +2417,7 @@ export default function App() {
                             className={`flex-1 min-w-[42px] py-2 rounded-xl text-[10px] font-bold transition-all cursor-pointer ${
                               isSelected
                                 ? 'bg-white text-zinc-950 shadow-sm'
-                                : 'text-zinc-400 hover:text-white hover:bg-zinc-900/40'
+                               : 'text-zinc-400 hover:text-white hover:bg-zinc-900/40'
                             }`}
                           >
                             {tf}
@@ -2358,11 +2427,28 @@ export default function App() {
                     </div>
                   </div>
 
+                  {/* Timeframe Mismatch Warning */}
+                  {isTimeframeMismatch && (
+                    <div className="p-4 rounded-2xl border border-red-500/10 bg-red-500/5 text-red-400 text-xs space-y-2">
+                      <div className="flex items-center gap-2 font-semibold">
+                        <AlertTriangle className="w-4 h-4 shrink-0 text-red-400 animate-pulse" />
+                        <span>Strategy Timeframe Mismatch</span>
+                      </div>
+                      <p className="text-[11px] text-zinc-400 leading-normal">
+                        Your strategy was written for: <span className="font-bold text-white">{compiledStrategyTimeframes.join(', ')}</span>.
+                        You selected: <span className="font-bold text-white">{watcherTimeframe}</span>.
+                        <br />
+                        Please select <span className="font-bold text-white">{compiledStrategyTimeframes.join(' or ')}</span> or edit your strategy.
+                      </p>
+                    </div>
+                  )}
+
                   {/* Activation Trigger */}
                   {(() => {
                     const isPairInWatchlist = (watchlist || []).some(w => w && w.symbol && normalizeSymbol(w.symbol) === normalizeSymbol(watcherSearch || ''));
                     
                     if (isWatcherActive && (isAdmin || isPairInWatchlist)) {
+                      const isUpdateDisabled = !watcherSearch.trim() || !watcherTimeframe || isTimeframeMismatch;
                       return (
                         <div className="flex items-center gap-2 mt-2">
                           <button
@@ -2373,24 +2459,24 @@ export default function App() {
                             <span>Stop Watcher</span>
                           </button>
                           <button
-                            disabled={!watcherSearch.trim() || !watcherTimeframe}
+                            disabled={isUpdateDisabled}
                             onClick={() => {
-                              if (!watcherSearch.trim() || !watcherTimeframe) return;
+                              if (isUpdateDisabled) return;
                               startAiMarketWatcher(watcherSearch, watcherTimeframe);
                             }}
                             className={`flex-1 flex items-center justify-center gap-2 px-5 py-3.5 rounded-full text-xs font-bold transition-all shadow-sm font-display ${
-                              !watcherSearch.trim() || !watcherTimeframe
+                              isUpdateDisabled
                                 ? 'bg-zinc-800 text-zinc-500 cursor-not-allowed opacity-70'
                                 : 'bg-white text-black hover:bg-zinc-200 active:scale-[0.98] cursor-pointer'
                             }`}
                           >
-                            <Play className={`w-3.5 h-3.5 fill-current ${(!watcherSearch.trim() || !watcherTimeframe) ? 'text-zinc-500' : 'text-zinc-950 stroke-zinc-950'}`} />
+                            <Play className={`w-3.5 h-3.5 fill-current ${isUpdateDisabled ? 'text-zinc-500' : 'text-zinc-950 stroke-zinc-950'}`} />
                             <span>Update Watcher</span>
                           </button>
                         </div>
                       );
                     } else {
-                      const isDisabled = (isWatcherActive && !isAdmin) || !watcherSearch.trim() || !watcherTimeframe;
+                      const isDisabled = (isWatcherActive && !isAdmin) || !watcherSearch.trim() || !watcherTimeframe || isTimeframeMismatch;
                       return (
                         <div className="space-y-3 mt-2">
                           <button

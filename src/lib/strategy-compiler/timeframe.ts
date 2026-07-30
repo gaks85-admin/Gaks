@@ -10,12 +10,12 @@ export class TimeframeParser implements StrategyParserModule<string[]> {
     const timeframes: string[] = [];
     
     const tfPatterns = [
-      { pattern: /\b1\s*m\b|\bm1\b|\b1\s*min\b|\b1\s*minute\b/i, label: '1m' },
-      { pattern: /\b5\s*m\b|\bm5\b|\b5\s*min\b|\b5\s*minute\b/i, label: '5m' },
-      { pattern: /\b15\s*m\b|\bm15\b|\b15\s*min\b|\b15\s*minute\b/i, label: '15m' },
-      { pattern: /\b30\s*m\b|\bm30\b|\b30\s*min\b|\b30\s*minute\b/i, label: '30m' },
-      { pattern: /\b1\s*h\b|\bh1\b|\b1\s*hour\b|\bhourly\b/i, label: '1h' },
-      { pattern: /\b4\s*h\b|\bh4\b|\b4\s*hour\b/i, label: '4h' },
+      { pattern: /\b1\s*m\b|\bm1\b|\b1\s*min\b|\b1\s*minute\b/i, label: 'M1' },
+      { pattern: /\b5\s*m\b|\bm5\b|\b5\s*min\b|\b5\s*minute\b/i, label: 'M5' },
+      { pattern: /\b15\s*m\b|\bm15\b|\b15\s*min\b|\b15\s*minute\b/i, label: 'M15' },
+      { pattern: /\b30\s*m\b|\bm30\b|\b30\s*min\b|\b30\s*minute\b/i, label: 'M30' },
+      { pattern: /\b1\s*h\b|\bh1\b|\b1\s*hour\b|\bhourly\b/i, label: 'H1' },
+      { pattern: /\b4\s*h\b|\bh4\b|\b4\s*hour\b/i, label: 'H4' },
       { pattern: /\bd1\b|\bdaily\b|\bday\b/i, label: 'Daily' }
     ];
     
