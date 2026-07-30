@@ -269,6 +269,10 @@ export default function App() {
   const [watcherTimeframe, setWatcherTimeframe] = useState<string>('H1');
   const [watchlist, setWatchlist] = useState<WatchlistItem[]>([]);
 
+  useEffect(() => {
+    console.log(`[Watchlist Debug] Final rendered watcher count: ${watchlist.length}`);
+  }, [watchlist.length]);
+
   // Real-time Watcher Status & Timeframe Validation States
   const [watcherTradeStatus, setWatcherTradeStatus] = useState<string>('WAITING');
   const [watcherLastScanAt, setWatcherLastScanAt] = useState<string>('');
@@ -316,6 +320,7 @@ export default function App() {
         return;
       }
 
+      console.log(`[Watchlist Debug] Refetched watcher count from DB: ${data ? data.length : 0}`);
       if (data && data.length > 0) {
         const mapped: WatchlistItem[] = data.map((item: any) => ({
           symbol: normalizeSymbol(item.selected_pair),
@@ -1350,7 +1355,7 @@ export default function App() {
   };
 
   // Market Watcher Add Ticker
-  const handleAddPair = (symbolToAdd: string, timeframeToWatch: string = 'H1') => {
+  const handleAddPair = async (symbolToAdd: string, timeframeToWatch: string = 'H1') => {
     const cleanSymbol = normalizeSymbol(symbolToAdd);
     if (!cleanSymbol) return;
 
@@ -1373,29 +1378,49 @@ export default function App() {
 
     setWatchlist(prev => {
       let updatedWatchlist;
-      if (isAdmin) {
-        if (prev.some(w => normalizeSymbol(w.symbol) === normalizeSymbol(cleanSymbol))) {
-          updatedWatchlist = prev.map(w => normalizeSymbol(w.symbol) === normalizeSymbol(cleanSymbol) ? { ...w, timeframe: timeframeToWatch } : w);
-        } else {
-          updatedWatchlist = [...prev, newPair];
-        }
+      if (prev.some(w => normalizeSymbol(w.symbol) === normalizeSymbol(cleanSymbol))) {
+        updatedWatchlist = prev.map(w => normalizeSymbol(w.symbol) === normalizeSymbol(cleanSymbol) ? { ...w, timeframe: timeframeToWatch } : w);
       } else {
-        updatedWatchlist = [newPair];
+        updatedWatchlist = [...prev, newPair];
       }
       localStorage.setItem('gaks_watchlist', JSON.stringify(updatedWatchlist));
       return updatedWatchlist;
     });
 
     setWatcherSearch(cleanSymbol);
-    
+      
     if (session?.user) {
-      if (isAdmin) {
-        // No-op for now, adding logic for admin multiple watchers if needed
-      } else {
-        // User is not admin, they only have one watcher. The startAiMarketWatcher handles upsert.
-      }
+      console.log(`[Watchlist Debug] Watchers before insert: ${watchlist.length}`);
+      
+      const doStartWatcher = async () => {
+        try {
+          const response = await fetch('/api/watcher/start', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${session.access_token || ''}`
+            },
+            body: JSON.stringify({
+              userId: session.user.id,
+              selectedPair: cleanSymbol,
+              selectedTimeframe: timeframeToWatch
+            })
+          });
+          
+          console.log(`[Watchlist Debug] Insert response status: ${response.status}`);
+          
+          // Immediate refetch from DB so the UI always reflects what the DB actually stored
+          await loadWatchlistFromSupabase(session.user.id);
+          
+          console.log(`[Watchlist Debug] Final rendered watcher count loaded from Supabase.`);
+        } catch (err) {
+          console.error("Error creating watcher in handleAddPair:", err);
+        }
+      };
+      
+      doStartWatcher();
     }
-    
+      
     triggerNotification(`${cleanSymbol} added to watchlist!`);
   };
 
