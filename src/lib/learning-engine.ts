@@ -408,15 +408,20 @@ export async function calculateSessionStatistics(supabase: any, userId: string):
   return stats;
 }
 
+import { calculateHistoricalProbability as calculateNewProb } from './rule-learning-engine.js';
+
 export interface HistoricalProbabilityResult {
   historical_probability: number;
   sample_size: number;
   confidence_level: 'HIGH' | 'MEDIUM' | 'LOW' | 'INSUFFICIENT_DATA';
+  confidence?: 'HIGH' | 'MEDIUM' | 'LOW';
+  win_rate?: number;
+  average_rr?: number;
 }
 
 /**
  * Queries database to compute the historical success rate of setups with similar
- * parameters: same pair, timeframe, strategy mode, and EXACT matched rules combination.
+ * parameters: same pair, timeframe, strategy mode, and similar matched rules combination.
  */
 export async function calculateHistoricalProbability(
   supabase: any,
@@ -426,62 +431,13 @@ export async function calculateHistoricalProbability(
   matchedRules: string[],
   strategyMode: string
 ): Promise<HistoricalProbabilityResult> {
-  const start = Date.now();
-  const client = supabase || defaultSupabase;
-
-  try {
-    // Query trades matching core criteria
-    const { data: records, error } = await client
-      .from('trade_learning')
-      .select('outcome, matched_rules')
-      .eq('user_id', userId)
-      .eq('pair', pair)
-      .eq('timeframe', timeframe)
-      .eq('strategy_mode', strategyMode);
-
-    if (error) {
-      console.error('[Learning Engine] Probability Query Error:', error.message);
-      return { historical_probability: 0, sample_size: 0, confidence_level: 'INSUFFICIENT_DATA' };
-    }
-
-    if (!records || records.length === 0) {
-      return { historical_probability: 0, sample_size: 0, confidence_level: 'INSUFFICIENT_DATA' };
-    }
-
-    // Match exact rules combination
-    const sortedCurrent = [...matchedRules].sort();
-    const similarTrades = records.filter(r => {
-      const sortedHist = Array.isArray(r.matched_rules)
-        ? [...r.matched_rules].sort()
-        : [];
-      if (sortedCurrent.length !== sortedHist.length) return false;
-      return sortedCurrent.every((val, idx) => val === sortedHist[idx]);
-    });
-
-    const sample_size = similarTrades.length;
-    if (sample_size === 0) {
-      return { historical_probability: 0, sample_size: 0, confidence_level: 'INSUFFICIENT_DATA' };
-    }
-
-    const wins = similarTrades.filter(r => r.outcome === 'WIN').length;
-    const historical_probability = Number(((wins / sample_size) * 100).toFixed(2));
-
-    let confidence_level: 'HIGH' | 'MEDIUM' | 'LOW' | 'INSUFFICIENT_DATA' = 'LOW';
-    if (sample_size >= 30) {
-      confidence_level = 'HIGH';
-    } else if (sample_size >= 10) {
-      confidence_level = 'MEDIUM';
-    }
-
-    console.log(`[Learning Engine] Historical lookup took ${Date.now() - start}ms. Sample size: ${sample_size}, Win Rate: ${historical_probability}%`);
-
-    return {
-      historical_probability,
-      sample_size,
-      confidence_level
-    };
-  } catch (err: any) {
-    console.error('[Learning Engine] Probability Exception:', err.message);
-    return { historical_probability: 0, sample_size: 0, confidence_level: 'INSUFFICIENT_DATA' };
-  }
+  const result = await calculateNewProb(supabase, userId, pair, timeframe, strategyMode, matchedRules);
+  return {
+    historical_probability: result.historical_probability,
+    sample_size: result.sample_size,
+    confidence_level: result.sample_size === 0 ? 'INSUFFICIENT_DATA' : result.confidence as any,
+    confidence: result.confidence,
+    win_rate: result.win_rate,
+    average_rr: result.average_rr
+  };
 }

@@ -23,6 +23,9 @@ export interface EvaluationRecord {
   gemini_duration_ms?: number;
   created_at?: string;
   decision_snapshot?: any;
+  historical_probability?: number;
+  sample_size?: number;
+  confidence_level?: string;
 }
 
 /**
@@ -99,6 +102,11 @@ export async function recordEvaluation(
   }
 
   // 3. Output standardized, high-visibility console log matching Gaks AI specs
+  const snap = record.decision_snapshot || {};
+  const hp = record.historical_probability !== undefined ? record.historical_probability : (snap.historical_probability ?? 'N/A');
+  const ss = record.sample_size !== undefined ? record.sample_size : (snap.historical_sample_size ?? 'N/A');
+  const conf = record.confidence_level !== undefined ? record.confidence_level : (snap.confidence_level ?? 'N/A');
+
   console.log(`\n========== EXPLAINABILITY ==========`);
   console.log(`Watcher:\n${record.watcher_id}`);
   console.log(`Pair:\n${record.pair}`);
@@ -106,6 +114,9 @@ export async function recordEvaluation(
   console.log(`Decision Score:\n${record.decision_score}%`);
   console.log(`Gemini:\n${record.gemini_used ? 'YES' : 'NO'}`);
   console.log(`Trade Sent:\n${record.trade_sent ? 'YES' : 'NO'}`);
+  console.log(`Historical Probability:\n${hp}%`);
+  console.log(`Sample Size:\n${ss}`);
+  console.log(`Confidence Level:\n${conf}`);
   console.log(`Evaluation Stored:\n${storedSuccessfully ? 'YES' : 'NO'}`);
   console.log(`Duration:\n${record.scan_duration_ms} ms`);
   console.log(`====================================\n`);

@@ -48,6 +48,7 @@ export function buildDecisionSnapshot(decisionResult: any, histResult: any, comp
     mandatory_rules_passed: decisionResult?.mandatory_rules_passed ?? false,
     historical_probability: histResult?.historical_probability ?? 0,
     historical_sample_size: histResult?.sample_size ?? 0,
+    confidence_level: histResult?.confidence_level || histResult?.confidence || 'LOW',
     strategy_mode: compiledStrategy?.strategy_mode || 'HYBRID',
     rule_weights_used: RULE_WEIGHTS
   };

@@ -292,13 +292,13 @@ export function evaluateDecision(
   }
 
   // 20. Historical Probability
-  if (sampleSize !== undefined && sampleSize >= 30 && historicalProbability !== undefined) {
+  if (sampleSize !== undefined && historicalProbability !== undefined) {
     const matched = historicalProbability >= 60.0;
     evaluatedRules.push({
       name: "Historical Probability",
       weightKey: "historical_probability" as any,
       matched,
-      reason: `Historical Win Rate for this rule combination is ${historicalProbability}% (Sample: ${sampleSize} trades).`
+      reason: `Historical Win Rate for similar setups is ${historicalProbability}% (Sample: ${sampleSize} trades, Confidence: ${sampleSize >= 100 ? 'HIGH' : sampleSize >= 20 ? 'MEDIUM' : 'LOW'}).`
     });
   }
 
@@ -312,10 +312,21 @@ export function evaluateDecision(
   let matched_weight = 0;
   let possible_weight = 0;
 
+  let otherPossibleWeight = 0;
+  evaluatedRules.forEach(rule => {
+    if (rule.name !== "Historical Probability") {
+      otherPossibleWeight += weights[rule.weightKey] ?? 0;
+    }
+  });
+
   evaluatedRules.forEach(rule => {
     let ruleWeight = 0;
     if (rule.name === "Historical Probability") {
-      ruleWeight = 20;
+      if (sampleSize !== undefined && sampleSize >= 20) {
+        ruleWeight = otherPossibleWeight > 0 ? Math.round(0.25 * otherPossibleWeight) : 20;
+      } else {
+        ruleWeight = 0;
+      }
     } else {
       ruleWeight = weights[rule.weightKey] ?? 0;
     }

@@ -40,7 +40,7 @@ export default function LearningAnalyticsPage({ fetchWithAuth }: { fetchWithAuth
   const [trades, setTrades] = useState<TradeLearning[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'overview' | 'rules' | 'pairs' | 'history'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'rules' | 'pairs' | 'history' | 'rule-learning'>('overview');
   
   // Replay modal state
   const [selectedEvaluation, setSelectedEvaluation] = useState<any | null>(null);
@@ -263,6 +263,43 @@ export default function LearningAnalyticsPage({ fetchWithAuth }: { fetchWithAuth
       avgRR: data.rrSum / data.total
     }));
 
+    // Advanced Rule Combination Performance
+    const comboMap = new Map<string, { wins: number; total: number; rrSum: number }>();
+    trades.forEach(t => {
+      const rules = Array.isArray(t.matched_rules) ? [...t.matched_rules].sort() : [];
+      const comboKey = rules.length > 0 ? rules.join(' + ') : 'No Rules Matched';
+      const cur = comboMap.get(comboKey) || { wins: 0, total: 0, rrSum: 0 };
+      cur.total += 1;
+      if (t.outcome === 'WIN') cur.wins += 1;
+      cur.rrSum += (t.rr_achieved || 0);
+      comboMap.set(comboKey, cur);
+    });
+
+    const ruleCombosList = Array.from(comboMap.entries()).map(([combination, data]) => ({
+      combination,
+      total: data.total,
+      winRate: (data.wins / data.total) * 100,
+      avgRR: data.rrSum / data.total
+    }));
+
+    const bestRuleCombos = [...ruleCombosList]
+      .filter(r => r.total >= 1)
+      .sort((a, b) => b.winRate - a.winRate || b.total - a.total);
+
+    const worstRuleCombos = [...ruleCombosList]
+      .filter(r => r.total >= 1)
+      .sort((a, b) => a.winRate - b.winRate || a.total - b.total);
+
+    // Best / Worst Pairs by Win Rate
+    const sortedPairsByWinRate = [...pairStatsList].sort((a, b) => b.winRate - a.winRate);
+    const bestPair = sortedPairsByWinRate[0] || null;
+    const worstPair = sortedPairsByWinRate.length > 1 ? sortedPairsByWinRate[sortedPairsByWinRate.length - 1] : sortedPairsByWinRate[0];
+
+    // Best / Worst Timeframes by Win Rate
+    const sortedTfsByWinRate = [...tfStatsList].sort((a, b) => b.winRate - a.winRate);
+    const bestTimeframe = sortedTfsByWinRate[0] || null;
+    const worstTimeframe = sortedTfsByWinRate.length > 1 ? sortedTfsByWinRate[sortedTfsByWinRate.length - 1] : sortedTfsByWinRate[0];
+
     return {
       total,
       wins,
@@ -280,7 +317,14 @@ export default function LearningAnalyticsPage({ fetchWithAuth }: { fetchWithAuth
       pairStatsList,
       tfStatsList,
       sessionStatsList,
-      modeStatsList
+      modeStatsList,
+      ruleCombosList,
+      bestRuleCombos,
+      worstRuleCombos,
+      bestPair,
+      worstPair,
+      bestTimeframe,
+      worstTimeframe
     };
   }, [trades]);
 
@@ -344,6 +388,7 @@ export default function LearningAnalyticsPage({ fetchWithAuth }: { fetchWithAuth
           { id: 'overview', label: 'Overview Metrics' },
           { id: 'rules', label: 'Rule Performance' },
           { id: 'pairs', label: 'Pair & Timeframe' },
+          { id: 'rule-learning', label: 'Rule Learning Engine' },
           { id: 'history', label: 'Trade Audit Ledger' },
         ].map(tab => (
           <button
@@ -600,6 +645,170 @@ export default function LearningAnalyticsPage({ fetchWithAuth }: { fetchWithAuth
                   ))}
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Rule Learning Engine Tab Content */}
+      {activeTab === 'rule-learning' && (
+        <div className="space-y-6">
+          {/* Best/Worst Pairs & Timeframes Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            {/* Best Asset Pair */}
+            <div className="bg-zinc-950 p-5 rounded-2xl border border-zinc-900 shadow-xl space-y-2">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-emerald-400">Best Performing Pair</span>
+              {stats.bestPair ? (
+                <div>
+                  <h4 className="text-2xl font-extrabold text-white font-display">{stats.bestPair.pair}</h4>
+                  <p className="text-xs text-zinc-400 mt-1">Win Rate: <span className="font-bold text-emerald-400">{stats.bestPair.winRate.toFixed(1)}%</span> ({stats.bestPair.total} trades)</p>
+                </div>
+              ) : (
+                <p className="text-xs text-zinc-500">No data available</p>
+              )}
+            </div>
+
+            {/* Worst Asset Pair */}
+            <div className="bg-zinc-950 p-5 rounded-2xl border border-zinc-900 shadow-xl space-y-2">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-red-400">Worst Performing Pair</span>
+              {stats.worstPair ? (
+                <div>
+                  <h4 className="text-2xl font-extrabold text-white font-display">{stats.worstPair.pair}</h4>
+                  <p className="text-xs text-zinc-400 mt-1">Win Rate: <span className="font-bold text-red-400">{stats.worstPair.winRate.toFixed(1)}%</span> ({stats.worstPair.total} trades)</p>
+                </div>
+              ) : (
+                <p className="text-xs text-zinc-500">No data available</p>
+              )}
+            </div>
+
+            {/* Best Timeframe */}
+            <div className="bg-zinc-950 p-5 rounded-2xl border border-zinc-900 shadow-xl space-y-2">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-emerald-400">Best Timeframe</span>
+              {stats.bestTimeframe ? (
+                <div>
+                  <h4 className="text-2xl font-extrabold text-white font-display">{stats.bestTimeframe.timeframe}</h4>
+                  <p className="text-xs text-zinc-400 mt-1">Win Rate: <span className="font-bold text-emerald-400">{stats.bestTimeframe.winRate.toFixed(1)}%</span> ({stats.bestTimeframe.total} trades)</p>
+                </div>
+              ) : (
+                <p className="text-xs text-zinc-500">No data available</p>
+              )}
+            </div>
+
+            {/* Worst Timeframe */}
+            <div className="bg-zinc-950 p-5 rounded-2xl border border-zinc-900 shadow-xl space-y-2">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-red-400">Worst Timeframe</span>
+              {stats.worstTimeframe ? (
+                <div>
+                  <h4 className="text-2xl font-extrabold text-white font-display">{stats.worstTimeframe.timeframe}</h4>
+                  <p className="text-xs text-zinc-400 mt-1">Win Rate: <span className="font-bold text-red-400">{stats.worstTimeframe.winRate.toFixed(1)}%</span> ({stats.worstTimeframe.total} trades)</p>
+                </div>
+              ) : (
+                <p className="text-xs text-zinc-500">No data available</p>
+              )}
+            </div>
+          </div>
+
+          {/* Rule Combinations Leaderboard */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Top 5 Best Rule Combos */}
+            <div className="bg-zinc-950 p-5 rounded-2xl border border-zinc-900 shadow-xl space-y-4">
+              <h3 className="text-xs font-extrabold uppercase tracking-wider text-emerald-400 flex items-center gap-2">
+                🏆 Best Performing Rule Combinations
+              </h3>
+              <div className="space-y-3">
+                {stats.bestRuleCombos.slice(0, 5).map((c, i) => (
+                  <div key={i} className="p-3 rounded-xl bg-zinc-900/30 border border-zinc-900 flex flex-col justify-between gap-2">
+                    <div className="flex flex-wrap gap-1">
+                      {c.combination.split(' + ').map((rule: string, idx: number) => (
+                        <span key={idx} className="px-1.5 py-0.5 rounded text-[9px] bg-sky-500/10 text-sky-400 font-medium">
+                          {rule}
+                        </span>
+                      ))}
+                    </div>
+                    <div className="flex justify-between items-center text-xs mt-1">
+                      <span className="text-zinc-500">Sample size: <strong className="text-zinc-300">{c.total}</strong></span>
+                      <div className="space-x-3">
+                        <span className="font-bold text-emerald-400">{c.winRate.toFixed(1)}% WR</span>
+                        <span className="text-zinc-400 font-medium">Avg R:R: 1:{c.avgRR.toFixed(1)}</span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                {stats.bestRuleCombos.length === 0 && (
+                  <p className="text-xs text-zinc-500">No rule combinations found</p>
+                )}
+              </div>
+            </div>
+
+            {/* Top 5 Worst Rule Combos */}
+            <div className="bg-zinc-950 p-5 rounded-2xl border border-zinc-900 shadow-xl space-y-4">
+              <h3 className="text-xs font-extrabold uppercase tracking-wider text-red-400 flex items-center gap-2">
+                ⚠️ Worst Performing Rule Combinations
+              </h3>
+              <div className="space-y-3">
+                {stats.worstRuleCombos.slice(0, 5).map((c, i) => (
+                  <div key={i} className="p-3 rounded-xl bg-zinc-900/30 border border-zinc-900 flex flex-col justify-between gap-2">
+                    <div className="flex flex-wrap gap-1">
+                      {c.combination.split(' + ').map((rule: string, idx: number) => (
+                        <span key={idx} className="px-1.5 py-0.5 rounded text-[9px] bg-sky-500/10 text-sky-400 font-medium">
+                          {rule}
+                        </span>
+                      ))}
+                    </div>
+                    <div className="flex justify-between items-center text-xs mt-1">
+                      <span className="text-zinc-500">Sample size: <strong className="text-zinc-300">{c.total}</strong></span>
+                      <div className="space-x-3">
+                        <span className="font-bold text-red-400">{c.winRate.toFixed(1)}% WR</span>
+                        <span className="text-zinc-400 font-medium">Avg R:R: 1:{c.avgRR.toFixed(1)}</span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                {stats.worstRuleCombos.length === 0 && (
+                  <p className="text-xs text-zinc-500">No rule combinations found</p>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* All Rule Combinations Data Matrix */}
+          <div className="bg-zinc-950 p-5 rounded-2xl border border-zinc-900 shadow-xl space-y-4">
+            <h3 className="text-xs font-extrabold uppercase tracking-wider text-zinc-400 flex items-center gap-2">
+              📊 Rule Combination Performance Matrix
+            </h3>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs text-zinc-400 border-collapse">
+                <thead>
+                  <tr className="border-b border-zinc-900 text-[10px] uppercase font-bold tracking-wider text-zinc-500">
+                    <th className="py-2.5">Rule Combination</th>
+                    <th className="py-2.5">Trades</th>
+                    <th className="py-2.5 text-center">Win Rate</th>
+                    <th className="py-2.5 text-right">Average R:R</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {stats.ruleCombosList.map((c, i) => (
+                    <tr key={i} className="border-b border-zinc-900/60 last:border-0 hover:bg-zinc-900/20 transition-colors">
+                      <td className="py-3">
+                        <div className="flex flex-wrap gap-1 max-w-xl">
+                          {c.combination.split(' + ').map((rule: string, idx: number) => (
+                            <span key={idx} className="px-1.5 py-0.5 rounded text-[9px] bg-zinc-900 text-zinc-300 border border-zinc-800">
+                              {rule}
+                            </span>
+                          ))}
+                        </div>
+                      </td>
+                      <td className="py-3 font-semibold text-zinc-300">{c.total}</td>
+                      <td className="py-3 text-center">
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-extrabold ${c.winRate >= 60 ? 'bg-emerald-500/10 text-emerald-400' : c.winRate >= 40 ? 'bg-amber-500/10 text-amber-400' : 'bg-red-500/10 text-red-400'}`}>
+                          {c.winRate.toFixed(1)}%
+                        </span>
+                      </td>
+                      <td className="py-3 text-right font-semibold text-zinc-300">1:{c.avgRR.toFixed(2)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </div>
         </div>
