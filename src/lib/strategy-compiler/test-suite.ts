@@ -381,6 +381,64 @@ export const semanticTestCases: TestCase[] = [
     strategyText: "Trade based on gut feeling and intuition.",
     expectedCategory: 'AI_ONLY',
     expectedKeys: ['ai_only_elements']
+  },
+
+  // --- Timeframes (51-58) ---
+  {
+    id: 51,
+    description: "Timeframes: M1",
+    strategyText: "Scalp on M1 chart.",
+    expectedCategory: 'RULE_ONLY',
+    expectedKeys: ['timeframes']
+  },
+  {
+    id: 52,
+    description: "Timeframes: M5",
+    strategyText: "Timeframe: M5 only.",
+    expectedCategory: 'RULE_ONLY',
+    expectedKeys: ['timeframes']
+  },
+  {
+    id: 53,
+    description: "Timeframes: M15",
+    strategyText: "M15 for confirmation.",
+    expectedCategory: 'RULE_ONLY',
+    expectedKeys: ['timeframes']
+  },
+  {
+    id: 54,
+    description: "Timeframes: M30",
+    strategyText: "M30 is the primary timeframe.",
+    expectedCategory: 'RULE_ONLY',
+    expectedKeys: ['timeframes']
+  },
+  {
+    id: 55,
+    description: "Timeframes: H1",
+    strategyText: "Execute on H1 timeframe.",
+    expectedCategory: 'RULE_ONLY',
+    expectedKeys: ['timeframes']
+  },
+  {
+    id: 56,
+    description: "Timeframes: H4",
+    strategyText: "H4 structure holds.",
+    expectedCategory: 'RULE_ONLY',
+    expectedKeys: ['timeframes']
+  },
+  {
+    id: 57,
+    description: "Timeframes: Daily",
+    strategyText: "Look at the Daily chart.",
+    expectedCategory: 'RULE_ONLY',
+    expectedKeys: ['timeframes']
+  },
+  {
+    id: 58,
+    description: "Timeframes: Multiple (M5 and M15)",
+    strategyText: "Check M5 and M15 charts.",
+    expectedCategory: 'RULE_ONLY',
+    expectedKeys: ['timeframes']
   }
 ];
 
