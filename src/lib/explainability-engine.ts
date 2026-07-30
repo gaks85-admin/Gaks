@@ -22,6 +22,7 @@ export interface EvaluationRecord {
   scan_duration_ms: number;
   gemini_duration_ms?: number;
   created_at?: string;
+  decision_snapshot?: any;
 }
 
 /**
@@ -54,7 +55,8 @@ export async function recordEvaluation(
     trade_reason: record.trade_reason || null,
     scan_duration_ms: record.scan_duration_ms,
     gemini_duration_ms: record.gemini_duration_ms || null,
-    created_at: record.created_at || new Date().toISOString()
+    created_at: record.created_at || new Date().toISOString(),
+    decision_snapshot: record.decision_snapshot || {}
   };
 
   // 1. Attempt database persistence if real Supabase client is available

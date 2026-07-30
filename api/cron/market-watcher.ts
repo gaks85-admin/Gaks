@@ -11,6 +11,7 @@ import { extractMarketStructure } from '../../src/lib/market-structure-engine.js
 import { recordEvaluation } from '../../src/lib/explainability-engine.js';
 import { logPipelineTrace } from '../../src/lib/pipeline-logger.js';
 import { calculateHistoricalProbability, recordCompletedTrade } from '../../src/lib/learning-engine.js';
+import { RULE_WEIGHTS } from '../../src/lib/rule-weight-engine.js';
 
 // --- Inlined Gemini Wrapper ---
 
@@ -33,6 +34,23 @@ export function getScanIntervalMinutes(watcher: any): number {
   if (tf === 'D1' || tf === '1D' || tf === '1440') return 1440;
 
   return 5;
+}
+
+export function buildDecisionSnapshot(decisionResult: any, histResult: any, compiledStrategy: any) {
+  return {
+    decision_score: decisionResult?.decision_score ?? null,
+    matched_weight: decisionResult?.matched_weight ?? null,
+    possible_weight: decisionResult?.possible_weight ?? null,
+    recommendation: decisionResult?.recommendation ?? null,
+    gemini_required: decisionResult?.requires_gemini ?? false,
+    matched_rules: decisionResult?.matched_rules || [],
+    failed_rules: decisionResult?.failed_rules || [],
+    mandatory_rules_passed: decisionResult?.mandatory_rules_passed ?? false,
+    historical_probability: histResult?.historical_probability ?? 0,
+    historical_sample_size: histResult?.sample_size ?? 0,
+    strategy_mode: compiledStrategy?.strategy_mode || 'HYBRID',
+    rule_weights_used: RULE_WEIGHTS
+  };
 }
 
 export type GeminiErrorType = 'invalid_key' | 'quota_exceeded' | 'rate_limited' | 'temporary_failure' | 'unknown_error';
@@ -1028,7 +1046,8 @@ export default async function handler(req: any, res: any) {
             market_snapshot: {},
             session: null,
             volatility: 'MEDIUM',
-            notes: `Trade closed via TP. Exit Price: ${currentPrice}`
+            notes: `Trade closed via TP. Exit Price: ${currentPrice}`,
+            decision_snapshot: latestEval?.decision_snapshot || null
           });
 
           // Transition to COOLDOWN
@@ -1105,7 +1124,8 @@ export default async function handler(req: any, res: any) {
             market_snapshot: {},
             session: null,
             volatility: 'MEDIUM',
-            notes: `Trade closed via SL. Exit Price: ${currentPrice}`
+            notes: `Trade closed via SL. Exit Price: ${currentPrice}`,
+            decision_snapshot: latestEval?.decision_snapshot || null
           });
 
           // Transition to COOLDOWN
@@ -1432,6 +1452,8 @@ export default async function handler(req: any, res: any) {
           histResult.sample_size
         );
 
+        const decisionSnapshot = buildDecisionSnapshot(decisionResult, histResult, compiledStrategy);
+
         // Stage 4
         traceData.decisionEngine = {
           decisionScore: `${decisionResult.matched_weight} / ${decisionResult.possible_weight} (${decisionResult.decision_score.toFixed(1)}%)`,
@@ -1484,7 +1506,8 @@ export default async function handler(req: any, res: any) {
             gemini_used: false,
             trade_sent: false,
             trade_reason: "Decision Engine recommendation is FAIL: " + decisionResult.explanation,
-            scan_duration_ms: scanDurationMs
+            scan_duration_ms: scanDurationMs,
+            decision_snapshot: decisionSnapshot
           });
 
           // Update last_scan_at and last_analyzed_closed_candle_time and exit
@@ -1708,7 +1731,8 @@ Answer with JSON containing:
                 trade_sent: false,
                 trade_reason: "Gemini API call failed: " + errMsg,
                 scan_duration_ms: scanDurationMs,
-                gemini_duration_ms: Date.now() - geminiStart
+                gemini_duration_ms: Date.now() - geminiStart,
+                decision_snapshot: decisionSnapshot
               });
 
               // Stage 5
@@ -1815,7 +1839,8 @@ Answer with JSON containing:
               trade_sent: false,
               trade_reason: `No trade setup found: signal is ${analysis.signal} and confidence is ${analysis.confidence}% (requires >= 70%)`,
               scan_duration_ms: scanDurationMs,
-              gemini_duration_ms: geminiDuration
+              gemini_duration_ms: geminiDuration,
+              decision_snapshot: decisionSnapshot
             });
 
             await supabase
@@ -1914,7 +1939,8 @@ Answer with JSON containing:
             trade_sent: false,
             trade_reason: `Risk engine validation failed: ${posSizeResult.skipReason}`,
             scan_duration_ms: scanDurationMs,
-            gemini_duration_ms: geminiDuration
+            gemini_duration_ms: geminiDuration,
+            decision_snapshot: decisionSnapshot
           });
 
           await supabase
@@ -2020,7 +2046,8 @@ Answer with JSON containing:
             trade_sent: false,
             trade_reason: "Failed to register signal or active trade already exists in database.",
             scan_duration_ms: scanDurationMs,
-            gemini_duration_ms: geminiDuration
+            gemini_duration_ms: geminiDuration,
+            decision_snapshot: decisionSnapshot
           });
 
           const stopDistance = Math.abs(executedPrice - (Number(posSizeResult.stopLoss) || Number(analysis.stopLoss) || 0));
@@ -2089,7 +2116,8 @@ Answer with JSON containing:
           trade_sent: alertSent,
           trade_reason: alertSent ? "Trade alert sent successfully on Telegram" : "Telegram message failed to send",
           scan_duration_ms: scanDurationMs,
-          gemini_duration_ms: geminiDuration
+          gemini_duration_ms: geminiDuration,
+          decision_snapshot: decisionSnapshot
         });
 
         // Save active trade state in Supabase:

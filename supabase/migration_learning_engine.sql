@@ -30,8 +30,12 @@ CREATE TABLE IF NOT EXISTS public.trade_learning (
     market_snapshot JSONB DEFAULT '{}'::jsonb,
     session TEXT,
     volatility TEXT,
-    notes TEXT
+    notes TEXT,
+    decision_snapshot JSONB DEFAULT '{}'::jsonb
 );
+
+-- Ensure decision_snapshot column exists for backward compatibility / existing tables
+ALTER TABLE public.trade_learning ADD COLUMN IF NOT EXISTS decision_snapshot JSONB DEFAULT '{}'::jsonb;
 
 -- Enable Row Level Security (RLS) for trade_learning
 ALTER TABLE public.trade_learning ENABLE ROW LEVEL SECURITY;
@@ -68,9 +72,18 @@ CREATE POLICY "Admin can select all trade learning"
   TO authenticated
   USING (auth.email() = 'gaks6535@gmail.com');
 
+-- Service role has full access
+CREATE POLICY "Service role full access"
+  ON public.trade_learning
+  FOR ALL
+  TO service_role
+  USING (true)
+  WITH CHECK (true);
+
 -- Indexes for performance optimization on analytical queries
 CREATE INDEX IF NOT EXISTS idx_trade_learning_user_id ON public.trade_learning(user_id);
 CREATE INDEX IF NOT EXISTS idx_trade_learning_watcher_id ON public.trade_learning(watcher_id);
+CREATE INDEX IF NOT EXISTS idx_trade_learning_evaluation_id ON public.trade_learning(evaluation_id);
 CREATE INDEX IF NOT EXISTS idx_trade_learning_created_at ON public.trade_learning(created_at);
 CREATE INDEX IF NOT EXISTS idx_trade_learning_outcome ON public.trade_learning(outcome);
 CREATE INDEX IF NOT EXISTS idx_trade_learning_pair ON public.trade_learning(pair);

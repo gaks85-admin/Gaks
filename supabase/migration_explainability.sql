@@ -21,8 +21,12 @@ CREATE TABLE IF NOT EXISTS public.watcher_evaluations (
     trade_reason TEXT,
     scan_duration_ms INTEGER,
     gemini_duration_ms INTEGER,
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    decision_snapshot JSONB DEFAULT '{}'::jsonb
 );
+
+-- Ensure decision_snapshot exists for backward compatibility / existing tables
+ALTER TABLE public.watcher_evaluations ADD COLUMN IF NOT EXISTS decision_snapshot JSONB DEFAULT '{}'::jsonb;
 
 -- Add indexes for performance optimization in analytics queries
 CREATE INDEX IF NOT EXISTS idx_watcher_eval_user_id ON public.watcher_evaluations(user_id);

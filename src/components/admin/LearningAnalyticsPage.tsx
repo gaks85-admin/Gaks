@@ -33,6 +33,7 @@ interface TradeLearning {
   session: string | null;
   volatility: string | null;
   notes: string | null;
+  decision_snapshot?: any;
 }
 
 export default function LearningAnalyticsPage({ fetchWithAuth }: { fetchWithAuth: any }) {
@@ -70,7 +71,34 @@ export default function LearningAnalyticsPage({ fetchWithAuth }: { fetchWithAuth
     fetchLearningData();
   }, []);
 
-  const handleReplay = async (evaluationId: string) => {
+  const handleReplay = async (tradeOrId: any) => {
+    // If we passed the full trade object and it has decision_snapshot, use it immediately
+    if (tradeOrId && typeof tradeOrId === 'object' && tradeOrId.decision_snapshot && Object.keys(tradeOrId.decision_snapshot).length > 0) {
+      const snap = tradeOrId.decision_snapshot;
+      setSelectedEvaluation({
+        id: tradeOrId.evaluation_id || tradeOrId.id,
+        pair: tradeOrId.pair,
+        timeframe: tradeOrId.timeframe,
+        strategy_mode: snap.strategy_mode || tradeOrId.strategy_mode,
+        decision_score: snap.decision_score ?? tradeOrId.decision_score,
+        matched_weight: snap.matched_weight ?? tradeOrId.matched_weight,
+        possible_weight: snap.possible_weight ?? tradeOrId.possible_weight,
+        recommendation: snap.recommendation || 'PASS',
+        matched_rules: snap.matched_rules || tradeOrId.matched_rules || [],
+        failed_rules: snap.failed_rules || tradeOrId.failed_rules || [],
+        gemini_used: tradeOrId.gemini_used,
+        gemini_result: tradeOrId.notes,
+        gemini_duration_ms: 0,
+      });
+      return;
+    }
+
+    const evaluationId = typeof tradeOrId === 'string' ? tradeOrId : tradeOrId?.evaluation_id;
+    if (!evaluationId) {
+      alert('Original evaluation record could not be found.');
+      return;
+    }
+
     setReplayLoading(true);
     setSelectedEvaluation(null);
     try {
@@ -616,9 +644,9 @@ export default function LearningAnalyticsPage({ fetchWithAuth }: { fetchWithAuth
                     </td>
                     <td className="p-4 whitespace-nowrap text-right text-zinc-300">1:{t.rr_achieved ? Number(t.rr_achieved).toFixed(2) : 'N/A'}</td>
                     <td className="p-4 whitespace-nowrap text-center">
-                      {t.evaluation_id ? (
+                      {(t.decision_snapshot && Object.keys(t.decision_snapshot).length > 0) || t.evaluation_id ? (
                         <button
-                          onClick={() => handleReplay(t.evaluation_id!)}
+                          onClick={() => handleReplay(t)}
                           disabled={replayLoading}
                           className="px-2.5 py-1 bg-sky-500/10 hover:bg-sky-500/20 text-sky-400 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all cursor-pointer"
                         >

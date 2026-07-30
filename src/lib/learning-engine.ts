@@ -29,6 +29,7 @@ export interface TradeLearningRecord {
   session?: string | null;
   volatility?: string | null;
   notes?: string | null;
+  decision_snapshot?: any;
 }
 
 // In-memory cache for stats calculations
@@ -86,6 +87,7 @@ export async function recordCompletedTrade(
     session?: string | null;
     volatility?: string | null;
     notes?: string | null;
+    decision_snapshot?: any;
   }
 ): Promise<TradeLearningRecord | null> {
   const client = supabase || defaultSupabase;
@@ -163,7 +165,8 @@ export async function recordCompletedTrade(
       market_snapshot: params.market_snapshot || {},
       session,
       volatility: params.volatility || 'MEDIUM',
-      notes: params.notes || `Auto-recorded by Learning Engine. Outcome: ${outcome}`
+      notes: params.notes || `Auto-recorded by Learning Engine. Outcome: ${outcome}`,
+      decision_snapshot: params.decision_snapshot || {}
     };
 
     console.log(`[Learning Engine] Recording completed trade: Pair ${payload.pair}, Outcome: ${payload.outcome}, Pips: ${payload.pips}`);
