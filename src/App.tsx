@@ -41,7 +41,6 @@ import {
   Minus
 } from 'lucide-react';
 
-import { MarketHeatMap } from './components/MarketHeatMap';
 import { getTelegramConnection, initiateTelegramConnection, getTelegramDeepLink } from './lib/telegram';
 import { ForexPair, WatchlistItem, Strategy } from './types';
 
@@ -1902,18 +1901,29 @@ export default function App() {
                   ) : liveRates.filter(r => r.status !== 'unavailable' && r.price > 0).length > 0 ? (
                     liveRates.filter(r => r.status !== 'unavailable' && r.price > 0).slice(0, 12).map((pair, idx) => {
                       const isBearish = pair.change < 0;
-                      const absChange = Math.abs(pair.change);
-                      const intensity = absChange > 1.5 ? '800' : absChange > 1.0 ? '900/80' : absChange > 0.5 ? '950' : '950/60';
-                      const colorBase = isBearish ? 'red' : 'emerald';
-                      const alphaClass = `bg-${colorBase}-${intensity} border-${colorBase}-${isBearish ? '700/60' : '700/60'}`;
-                      
+                      const { lineD } = getSparklinePaths(pair.history || [], 100, 24);
+
                       return (
                         <div
                           key={idx}
-                          className={`aspect-square rounded-2xl border flex flex-col justify-center items-center p-2 text-center transition-all hover:scale-[1.03] ${alphaClass}`}
+                          className={`rounded-2xl border p-3 flex flex-col justify-between transition-all hover:scale-[1.03] ${
+                            isBearish
+                              ? 'bg-gradient-to-br from-red-900/40 to-red-950/40 border-red-900/50 shadow-[0_0_10px_rgba(239,68,68,0.1)]'
+                              : 'bg-gradient-to-br from-emerald-900/40 to-emerald-950/40 border-emerald-900/50 shadow-[0_0_10px_rgba(16,185,129,0.1)]'
+                          }`}
                         >
-                          <span className="text-[11px] sm:text-[12px] font-semibold tracking-[-0.01em] text-white leading-none mb-1">{pair.symbol}</span>
-                          <span className="text-[10px] sm:text-[11px] font-medium tracking-normal text-zinc-100 leading-none">{pair.change >= 0 ? '+' : ''}{pair.change.toFixed(2)}%</span>
+                          <div className="flex justify-between items-start">
+                            <span className="text-[11px] sm:text-[12px] font-bold text-white tracking-wide">{pair.symbol}</span>
+                            {isBearish ? <TrendingDown className="w-3 h-3 text-red-500" /> : <TrendingUp className="w-3 h-3 text-emerald-500" />}
+                          </div>
+                          <div className="flex items-end justify-between mt-2">
+                             <span className={`text-[12px] font-bold ${isBearish ? 'text-red-400' : 'text-emerald-400'}`}>{pair.change >= 0 ? '+' : ''}{pair.change.toFixed(2)}%</span>
+                             <div className="h-4 w-12 opacity-70">
+                               <svg viewBox="0 0 100 24" preserveAspectRatio="none" className="w-full h-full">
+                                 <path d={lineD} fill="none" stroke={isBearish ? "#f87171" : "#34d399"} strokeWidth="2" />
+                               </svg>
+                             </div>
+                          </div>
                         </div>
                       );
                     })
@@ -2617,7 +2627,104 @@ export default function App() {
                     </div>
                   </div>
                 ) : (
-<MarketHeatMap watchlist={watchlist} onRemove={handleRemovePair} getSparklinePaths={getSparklinePaths} />                )}
+                  /* Watchlisted symbols cards deck */
+                  <div className="space-y-3">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-zinc-500 mb-1">Monitored Pair</h4>
+                    {(watchlist || []).map(pair => {
+                      if (!pair) return null;
+                      const isBullish = pair.direction === 'Bullish';
+                      const isBearish = pair.direction === 'Bearish';
+                      const { lineD, fillD } = getSparklinePaths(pair.history, 100, 24);
+                      
+                      return (
+                        <div
+                          key={pair.symbol}
+                          className="p-6 rounded-3xl border border-zinc-800/80 bg-[#111113]/90 flex flex-col gap-4 hover:border-zinc-700 transition-all relative overflow-hidden shadow-lg"
+                        >
+                          <div className="flex justify-between items-start">
+                            <div className="space-y-1">
+                              <h3 className="text-base font-bold text-white font-display tracking-tight flex items-center gap-2">
+                                <span>{pair.symbol}</span>
+                                <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wider uppercase border ${
+                                  isBullish
+                                    ? 'bg-[#0c1c0c] text-emerald-500 border-emerald-950/80'
+                                    : isBearish
+                                    ? 'bg-[#1c0c0c] text-red-500 border-red-950/80'
+                                    : 'bg-zinc-900 text-zinc-400 border-zinc-800'
+                                }`}>
+                                  {pair.direction}
+                                </span>
+                                <span className="px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wider bg-zinc-900 text-zinc-300 border border-zinc-800/80 uppercase">
+                                  {pair.timeframe || 'H1'}
+                                </span>
+                              </h3>
+                              <p className="text-[10px] text-zinc-500 font-medium">{pair.name}</p>
+                            </div>
+
+                            <button
+                              onClick={() => handleRemovePair(pair.symbol)}
+                              className="p-1 text-zinc-600 hover:text-red-400 transition-colors rounded-lg hover:bg-zinc-950/80 cursor-pointer"
+                              title="Remove pair"
+                            >
+                              <X className="w-4 h-4" />
+                            </button>
+                          </div>
+
+                          {/* Bid/Ask Price display & tiny sparkline wave */}
+                          <div className="flex justify-between items-end">
+                            {/* Wave graphics */}
+                            <div className="h-6 w-24 opacity-80 pointer-events-none">
+                              {pair.status !== 'unavailable' && pair.history.length > 0 && (
+                                <svg className="w-full h-full overflow-visible" viewBox="0 0 100 24" preserveAspectRatio="none">
+                                  <defs>
+                                    <linearGradient id={`watcher-grad-${pair.symbol}`} x1="0" y1="0" x2="0" y2="1">
+                                      <stop offset="0%" stopColor={isBearish ? "#ef4444" : "#10b981"} stopOpacity="0.25"/>
+                                      <stop offset="100%" stopColor={isBearish ? "#ef4444" : "#10b981"} stopOpacity="0.0"/>
+                                    </linearGradient>
+                                  </defs>
+                                  <path d={fillD} fill={`url(#watcher-grad-${pair.symbol})`} />
+                                  <path d={lineD} fill="none" stroke={isBearish ? "#ef4444" : "#10b981"} strokeWidth="1.2" />
+                                </svg>
+                              )}
+                            </div>
+
+                            <div className="text-right">
+                              {pair.status === 'unavailable' || pair.price === 0 ? (
+                                <div className="text-xs font-bold text-zinc-500 uppercase tracking-wider">Data unavailable</div>
+                              ) : (
+                                <>
+                                  <div className="text-lg font-bold text-white tracking-tight">{(pair.price || 0).toLocaleString(undefined, { minimumFractionDigits: (pair.price || 0) > 10 ? 2 : 4 })}</div>
+                                  <div className={`text-xs font-semibold flex items-center justify-end gap-0.5 ${pair.change >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
+                                    {pair.change >= 0 ? '+' : ''}{pair.change}%
+                                  </div>
+                                </>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Extra info panel: Spread, Volatility, AI Confidence meter */}
+                          <div className="pt-3 border-t border-zinc-900/60 grid grid-cols-3 gap-2">
+                            <div className="space-y-0.5">
+                              <div className="text-[9px] uppercase font-bold text-zinc-500">Spread</div>
+                              <div className="text-xs font-semibold text-zinc-300">{pair.spread} pips</div>
+                            </div>
+                            <div className="space-y-0.5">
+                              <div className="text-[9px] uppercase font-bold text-zinc-500">Volatility</div>
+                              <div className={`text-xs font-semibold ${pair.volatility === 'High' ? 'text-amber-400' : 'text-zinc-300'}`}>{pair.volatility}</div>
+                            </div>
+                            <div className="space-y-0.5">
+                              <div className="text-[9px] uppercase font-bold text-zinc-500">AI Confidence</div>
+                              <div className="text-xs font-bold text-white flex items-center gap-1">
+                                <span>{pair.confidence}%</span>
+                                <div className="w-1.5 h-1.5 rounded-full bg-white animate-pulse"></div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
 
             </div>
