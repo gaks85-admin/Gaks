@@ -24,7 +24,7 @@ export interface MarketStructure {
  * Reads candles and extracts factual observations only.
  * NEVER decides BUY or SELL. NEVER reads preferences, risk, or RR.
  */
-export function extractMarketStructure(candles: Candle[]): MarketStructure {
+export function extractMarketStructure(candles: Candle[], supportedDetectors?: string[]): MarketStructure {
   if (!candles || candles.length === 0) {
     return {
       trend: 'SIDEWAYS',
@@ -52,7 +52,9 @@ export function extractMarketStructure(candles: Candle[]): MarketStructure {
   const lows = sortedCandles.map(c => c.low);
   const volumes = sortedCandles.map(c => c.volume || 0);
 
-  // 1. Swing Highs & Lows (5-candle fractal method)
+  const shouldRun = (id: string) => !supportedDetectors || supportedDetectors.includes(id.toLowerCase());
+
+  // 1. Swing Highs & Lows (5-candle fractal method) - Always run for trend
   const swingHighs: { index: number; price: number; timestamp: any }[] = [];
   const swingLows: { index: number; price: number; timestamp: any }[] = [];
 
@@ -67,7 +69,7 @@ export function extractMarketStructure(candles: Candle[]): MarketStructure {
     }
   }
 
-  // 2. Trend determination
+  // 2. Trend determination - Always run
   let trend: 'BULLISH' | 'BEARISH' | 'SIDEWAYS' = 'SIDEWAYS';
   if (swingHighs.length >= 2 && swingLows.length >= 2) {
     const lastHigh = swingHighs[swingHighs.length - 1].price;
@@ -91,17 +93,16 @@ export function extractMarketStructure(candles: Candle[]): MarketStructure {
   // 3. Support & Resistance Zones
   const supportZones: { priceMin: number; priceMax: number; strength: number }[] = [];
   const resistanceZones: { priceMin: number; priceMax: number; strength: number }[] = [];
-
-  if (swingLows.length > 0) {
+  if (shouldRun('support') && swingLows.length > 0) {
     const recentLow = swingLows[swingLows.length - 1].price;
     supportZones.push({ priceMin: recentLow * 0.995, priceMax: recentLow * 1.005, strength: swingLows.length });
   }
-  if (swingHighs.length > 0) {
+  if (shouldRun('resistance') && swingHighs.length > 0) {
     const recentHigh = swingHighs[swingHighs.length - 1].price;
     resistanceZones.push({ priceMin: recentHigh * 0.995, priceMax: recentHigh * 1.005, strength: swingHighs.length });
   }
 
-  // 4. Volatility (ATR approx) & Volume
+  // 4. Volatility (ATR approx) & Volume - Always run
   let totalTrueRange = 0;
   for (let i = 1; i < sortedCandles.length; i++) {
     const tr = Math.max(
@@ -117,68 +118,71 @@ export function extractMarketStructure(candles: Candle[]): MarketStructure {
 
   // 5. Fair Value Gaps (FVG)
   const fairValueGaps: { type: 'BULLISH_FVG' | 'BEARISH_FVG'; top: number; bottom: number; candleIndex: number }[] = [];
-  for (let i = 2; i < sortedCandles.length; i++) {
-    // Bullish FVG: Low of candle[i] > High of candle[i-2]
-    if (lows[i] > highs[i - 2]) {
-      fairValueGaps.push({ type: 'BULLISH_FVG', top: lows[i], bottom: highs[i - 2], candleIndex: i });
-    }
-    // Bearish FVG: High of candle[i] < Low of candle[i-2]
-    if (highs[i] < lows[i - 2]) {
-      fairValueGaps.push({ type: 'BEARISH_FVG', top: lows[i - 2], bottom: highs[i], candleIndex: i });
+  if (shouldRun('fvg')) {
+    for (let i = 2; i < sortedCandles.length; i++) {
+      if (lows[i] > highs[i - 2]) {
+        fairValueGaps.push({ type: 'BULLISH_FVG', top: lows[i], bottom: highs[i - 2], candleIndex: i });
+      }
+      if (highs[i] < lows[i - 2]) {
+        fairValueGaps.push({ type: 'BEARISH_FVG', top: lows[i - 2], bottom: highs[i], candleIndex: i });
+      }
     }
   }
 
   // 6. Break of Structure (BOS) & Change of Character (CHOCH)
   const BOS: { type: 'BULLISH_BOS' | 'BEARISH_BOS' | 'NONE'; price: number; candleIndex: number }[] = [];
   const CHOCH: { type: 'BULLISH_CHOCH' | 'BEARISH_CHOCH' | 'NONE'; price: number; candleIndex: number }[] = [];
-
-  if (swingHighs.length >= 2) {
-    const lastSh = swingHighs[swingHighs.length - 1];
-    const prevSh = swingHighs[swingHighs.length - 2];
-    if (lastSh.price > prevSh.price) {
-      BOS.push({ type: 'BULLISH_BOS', price: prevSh.price, candleIndex: lastSh.index });
-    } else {
-      CHOCH.push({ type: 'BEARISH_CHOCH', price: prevSh.price, candleIndex: lastSh.index });
+  if (shouldRun('bos') || shouldRun('choch')) {
+    if (swingHighs.length >= 2) {
+      const lastSh = swingHighs[swingHighs.length - 1];
+      const prevSh = swingHighs[swingHighs.length - 2];
+      if (lastSh.price > prevSh.price) {
+        if (shouldRun('bos')) BOS.push({ type: 'BULLISH_BOS', price: prevSh.price, candleIndex: lastSh.index });
+      } else {
+        if (shouldRun('choch')) CHOCH.push({ type: 'BEARISH_CHOCH', price: prevSh.price, candleIndex: lastSh.index });
+      }
     }
-  }
 
-  if (swingLows.length >= 2) {
-    const lastSl = swingLows[swingLows.length - 1];
-    const prevSl = swingLows[swingLows.length - 2];
-    if (lastSl.price < prevSl.price) {
-      BOS.push({ type: 'BEARISH_BOS', price: prevSl.price, candleIndex: lastSl.index });
-    } else {
-      CHOCH.push({ type: 'BULLISH_CHOCH', price: prevSl.price, candleIndex: lastSl.index });
+    if (swingLows.length >= 2) {
+      const lastSl = swingLows[swingLows.length - 1];
+      const prevSl = swingLows[swingLows.length - 2];
+      if (lastSl.price < prevSl.price) {
+        if (shouldRun('bos')) BOS.push({ type: 'BEARISH_BOS', price: prevSl.price, candleIndex: lastSl.index });
+      } else {
+        if (shouldRun('choch')) CHOCH.push({ type: 'BULLISH_CHOCH', price: prevSl.price, candleIndex: lastSl.index });
+      }
     }
   }
 
   // 7. Candle Patterns (Pin bar, Engulfing)
   const candlePatterns: { pattern: string; candleIndex: number; direction: 'BULLISH' | 'BEARISH' }[] = [];
-  const lastIdx = sortedCandles.length - 1;
-  const lastC = sortedCandles[lastIdx];
-  const prevC = sortedCandles[lastIdx - 1] || lastC;
+  if (shouldRun('confirmation_candle')) {
+    const lastIdx = sortedCandles.length - 1;
+    const lastC = sortedCandles[lastIdx];
+    const prevC = sortedCandles[lastIdx - 1] || lastC;
 
-  const body = Math.abs(lastC.close - lastC.open);
-  const totalRange = lastC.high - lastC.low;
-  if (totalRange > 0) {
-    const upperShadow = lastC.high - Math.max(lastC.open, lastC.close);
-    const lowerShadow = Math.min(lastC.open, lastC.close) - lastC.low;
+    const body = Math.abs(lastC.close - lastC.open);
+    const totalRange = lastC.high - lastC.low;
+    if (totalRange > 0) {
+      const upperShadow = lastC.high - Math.max(lastC.open, lastC.close);
+      const lowerShadow = Math.min(lastC.open, lastC.close) - lastC.low;
 
-    if (lowerShadow > body * 2 && upperShadow < body * 0.5) {
-      candlePatterns.push({ pattern: 'Pin Bar / Hammer', candleIndex: lastIdx, direction: 'BULLISH' });
-    } else if (upperShadow > body * 2 && lowerShadow < body * 0.5) {
-      candlePatterns.push({ pattern: 'Shooting Star', candleIndex: lastIdx, direction: 'BEARISH' });
+      if (lowerShadow > body * 2 && upperShadow < body * 0.5) {
+        candlePatterns.push({ pattern: 'Pin Bar / Hammer', candleIndex: lastIdx, direction: 'BULLISH' });
+      } else if (upperShadow > body * 2 && lowerShadow < body * 0.5) {
+        candlePatterns.push({ pattern: 'Shooting Star', candleIndex: lastIdx, direction: 'BEARISH' });
+      }
     }
-  }
 
-  // Engulfing
-  if (lastIdx > 0) {
-    const prevBody = Math.abs(prevC.close - prevC.open);
-    const currBody = Math.abs(lastC.close - lastC.open);
-    if (lastC.close > lastC.open && prevC.close < prevC.open && currBody > prevBody) {
-      candlePatterns.push({ pattern: 'Bullish Engulfing', candleIndex: lastIdx, direction: 'BULLISH' });
-    } else if (lastC.close < lastC.open && prevC.close > prevC.open && currBody > prevBody) {
-      candlePatterns.push({ pattern: 'Bearish Engulfing', candleIndex: lastIdx, direction: 'BEARISH' });
+    // Engulfing
+    if (lastIdx > 0) {
+      const prevBody = Math.abs(prevC.close - prevC.open);
+      const currBody = Math.abs(lastC.close - lastC.open);
+      if (lastC.close > lastC.open && prevC.close < prevC.open && currBody > prevBody) {
+        candlePatterns.push({ pattern: 'Bullish Engulfing', candleIndex: lastIdx, direction: 'BULLISH' });
+      } else if (lastC.close < lastC.open && prevC.close > prevC.open && currBody > prevBody) {
+        candlePatterns.push({ pattern: 'Bearish Engulfing', candleIndex: lastIdx, direction: 'BEARISH' });
+      }
     }
   }
 

@@ -6,6 +6,7 @@ import { buildTelegramAlertMessage } from '../../src/lib/telegram-formatter.js';
 import { extractRiskPreferences, calculatePositionSize, logPositionSizeAudit } from '../../src/lib/risk-engine.js';
 import { evaluateRules, logRuleEngineAudit } from '../../src/lib/rule-engine.js';
 import { compileStrategy } from '../../src/lib/strategy-compiler.js';
+import { validateDetectors } from '../../src/lib/detector-capability-validator.js';
 import { evaluateDecision } from '../../src/lib/decision-engine.js';
 import { extractMarketStructure } from '../../src/lib/market-structure-engine.js';
 import { recordEvaluation } from '../../src/lib/explainability-engine.js';
@@ -1372,8 +1373,8 @@ export default async function handler(req: any, res: any) {
         };
 
         // Extract market structure & compile strategy
-        const marketStructure = extractMarketStructure(candleData);
         const compiledStrategy = compileStrategy(strategyText);
+        const marketStructure = extractMarketStructure(candleData, compiledStrategy.detector_validation?.supported_detectors);
 
         // Stage 2
         const cleanSymUpper = (selectedPair || '').toUpperCase().replace(/[^A-Z0-9]/g, '');

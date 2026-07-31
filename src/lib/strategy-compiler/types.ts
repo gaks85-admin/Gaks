@@ -54,6 +54,7 @@ export interface CompilerOutput {
   };
   matched_phrases: string[];
   canonical_rules: string[];
+  detector_validation?: any;
 }
 
 export interface StrategyParserModule<T = any> {

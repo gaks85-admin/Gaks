@@ -15,6 +15,7 @@ import { ConfirmationCandleParser } from './strategy-compiler/confirmation-candl
 import { RiskRewardParser } from './strategy-compiler/risk-reward.js';
 import { TimeframeParser } from './strategy-compiler/timeframe.js';
 import { ClassificationParser } from './strategy-compiler/classification.js';
+import { validateDetectors } from './detector-capability-validator.js';
 
 export * from './strategy-compiler/types.js';
 
@@ -178,6 +179,8 @@ export function compileStrategy(strategyText: string): CompilerOutput {
   console.log(`Canonical Rules: ${canonical_rules.join(', ')}`);
   console.log(`===============================`);
 
+  const detector_validation = validateDetectors(Object.keys(compiled_rules));
+
   return {
     strategy_mode,
     compiled_rules,
@@ -185,6 +188,7 @@ export function compileStrategy(strategyText: string): CompilerOutput {
     overall_confidence: Math.round(confidence <= 1.0 ? confidence * 100 : confidence),
     module_confidence,
     matched_phrases,
-    canonical_rules
+    canonical_rules,
+    detector_validation
   };
 }

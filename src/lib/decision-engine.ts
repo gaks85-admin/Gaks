@@ -25,6 +25,7 @@ export interface DecisionResult {
   possible_weight: number;
   matched_rules: string[];
   failed_rules: string[];
+  deferred_rules: string[];
   mandatory_rules_passed: boolean;
   recommendation: 'PASS' | 'LIKELY_PASS' | 'AMBIGUOUS' | 'FAIL';
   requires_gemini: boolean;
@@ -44,6 +45,8 @@ export function evaluateDecision(
 ): DecisionResult {
   const rules = compiledStrategy.compiled_rules || {};
   const weights = customWeights || RULE_WEIGHTS;
+  const supportedDetectors = compiledStrategy.detector_validation?.supported_detectors || [];
+  const deferred_rules: string[] = [];
 
   // Initialize evaluators
   const trendlineEval = new TrendlineEvaluator();
@@ -75,16 +78,20 @@ export function evaluateDecision(
 
   // 1. Trendline Breakout
   if (rules.trendline_breakout === true) {
-    const res = trendlineEval.evaluateBreakout(rules, marketStructure);
-    evaluatedRules.push({
-      name: "Trendline Breakout",
-      weightKey: "trendline_breakout",
-      matched: res.matched,
-      reason: res.reason,
-      expected: "TRUE",
-      actual: res.matched ? "TRUE" : "FALSE",
-      weight: weights.trendline_breakout ?? 0
-    });
+    if (supportedDetectors.includes('trendline_breakout')) {
+      const res = trendlineEval.evaluateBreakout(rules, marketStructure);
+      evaluatedRules.push({
+        name: "Trendline Breakout",
+        weightKey: "trendline_breakout",
+        matched: res.matched,
+        reason: res.reason,
+        expected: "TRUE",
+        actual: res.matched ? "TRUE" : "FALSE",
+        weight: weights.trendline_breakout ?? 0
+      });
+    } else {
+      deferred_rules.push("Trendline Breakout");
+    }
   }
 
   // 2. Break and Retest
