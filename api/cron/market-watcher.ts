@@ -1844,6 +1844,16 @@ Answer with JSON containing:
 
         console.log(`LOG: Signal result for ${selectedPair}: ${analysis.signal} (Confidence: ${analysis.confidence}%)`);
 
+        console.log("===== PIPELINE TRACE =====");
+        console.log(`Decision Recommendation: ${recommendation}`);
+        console.log(`Execution Mode: ${executionMode}`);
+        console.log(`Gemini Branch Entered: ${geminiInvoked}`);
+        console.log(`Gemini API Called: ${geminiInvoked}`);
+        console.log(`Gemini Response Received: ${geminiSucceeded}`);
+        console.log(`Gemini Parsed: ${geminiSucceeded}`);
+        console.log(`Analysis Before WAITING:`, JSON.stringify(analysis));
+        console.log("==========================");
+
         // If there is NO setup: Update last_scan_at, last_analyzed_closed_candle_time, save evaluation and Exit.
         const isWaiting = geminiInvoked 
           ? (geminiSucceeded && geminiDecision === 'NO_TRADE')
