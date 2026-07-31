@@ -339,7 +339,7 @@ const getSupabase = () => {
 /**
  * Canonicalizes a symbol to a standard internal format (uppercase, alphanumeric only).
  */
-const toCanonicalSymbol = (symbol: string): string => {
+export const toCanonicalSymbol = (symbol: string): string => {
   if (!symbol) return '';
   return symbol.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
 };
@@ -347,7 +347,7 @@ const toCanonicalSymbol = (symbol: string): string => {
 /**
  * Converts a canonical symbol to a human-friendly display format.
  */
-const toDisplaySymbol = (symbol: string): string => {
+export const toDisplaySymbol = (symbol: string): string => {
   const canonical = toCanonicalSymbol(symbol);
   const mappings: Record<string, string> = {
     'EURUSD': 'EUR/USD', 'GBPUSD': 'GBP/USD', 'USDJPY': 'USD/JPY', 'AUDUSD': 'AUD/USD',
@@ -365,7 +365,7 @@ const toDisplaySymbol = (symbol: string): string => {
 /**
  * Maps application timeframes to Twelve Data intervals.
  */
-const mapTimeframeToInterval = (tf: string): string => {
+export const mapTimeframeToInterval = (tf: string): string => {
   if (!tf) return '1h';
   const u = tf.toUpperCase();
   if (u === 'M1' || u === '1M') return '1min';
@@ -380,7 +380,7 @@ const mapTimeframeToInterval = (tf: string): string => {
   return '1h';
 };
 
-async function sendTelegramMessage(chatId: string | number, text: string): Promise<boolean> {
+export async function sendTelegramMessage(chatId: string | number, text: string): Promise<boolean> {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) {
     console.warn("TELEGRAM_BOT_TOKEN is not defined in environment variables.");
