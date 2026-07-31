@@ -19,32 +19,36 @@ const getSupabase = () => {
 
 export default async function testGeminiHandler(req: Request, res: Response) {
   try {
-    const supabase = getSupabase();
+    // Use production key if present, otherwise fetch from Supabase
+    let geminiKey = process.env.GEMINI_API_KEY;
     
-    // Read one Gemini API key from user_api_keys
-    const { data: keyData, error: keyError } = await supabase
-      .from('user_api_keys')
-      .select('api_key')
-      .eq('provider', 'gemini')
-      .limit(1)
-      .maybeSingle();
+    if (!geminiKey) {
+      const supabase = getSupabase();
+      const { data: keyData, error: keyError } = await supabase
+        .from('user_api_keys')
+        .select('api_key')
+        .eq('provider', 'gemini')
+        .limit(1)
+        .maybeSingle();
 
-    if (keyError) {
-      return res.status(500).json({
-        success: false,
-        error: keyError,
-        message: "Failed to fetch API key from Supabase"
-      });
+      if (keyError) {
+        return res.status(500).json({
+          success: false,
+          error: keyError,
+          message: "Failed to fetch API key from Supabase"
+        });
+      }
+
+      if (!keyData || !keyData.api_key) {
+        return res.status(404).json({
+          success: false,
+          error: "No Gemini API key found in user_api_keys table or environment"
+        });
+      }
+      geminiKey = keyData.api_key;
     }
 
-    if (!keyData || !keyData.api_key) {
-      return res.status(404).json({
-        success: false,
-        error: "No Gemini API key found in user_api_keys table"
-      });
-    }
-
-    const ai = new GoogleGenAI({ apiKey: keyData.api_key });
+    const ai = new GoogleGenAI({ apiKey: geminiKey });
     
     // Call Gemini
     const geminiResponse = await ai.models.generateContent({
@@ -65,6 +69,7 @@ export default async function testGeminiHandler(req: Request, res: Response) {
       status: 200,
       success: true,
       responseText: responseText,
+      model: 'gemini-2.5-flash',
       fullResponseObject: geminiResponse
     });
 

@@ -2,20 +2,18 @@ import React, { useState } from 'react';
 import { Shield, Key, AlertCircle, CheckCircle2 } from 'lucide-react';
 
 export default function GeminiTesterPage() {
-  const [apiKey, setApiKey] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [result, setResult] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
+  const [latency, setLatency] = useState<number | null>(null);
 
-  const handleTestKey = async () => {
-    if (!apiKey.trim()) {
-      setError("Please enter an API key.");
-      return;
-    }
-
+  const handleTestConnection = async () => {
     setIsLoading(true);
     setError(null);
     setResult(null);
+    setLatency(null);
+
+    const startTime = Date.now();
 
     try {
       // Determine base URL depending on if we are running in the preview or locally
@@ -24,17 +22,18 @@ export default function GeminiTesterPage() {
         baseUrl = 'http://localhost:3000';
       }
         
-      const response = await fetch(`${baseUrl}/api/debug/test-key`, {
-        method: 'POST',
+      const response = await fetch(`${baseUrl}/api/debug/test-gemini`, {
+        method: 'POST', // or GET
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ apiKey: apiKey.trim() }),
       });
 
       const data = await response.json();
+      setLatency(Date.now() - startTime);
       setResult(data);
     } catch (err: any) {
+      setLatency(Date.now() - startTime);
       setError(err.message || String(err));
     } finally {
       setIsLoading(false);
@@ -46,34 +45,20 @@ export default function GeminiTesterPage() {
       <div className="max-w-2xl mx-auto space-y-6">
         <div className="flex items-center gap-3 border-b border-zinc-800 pb-4">
           <Shield className="w-8 h-8 text-yellow-500" />
-          <h1 className="text-2xl font-bold tracking-tight">Gemini API Key Debugger</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Test Gemini Connection</h1>
         </div>
 
         <p className="text-sm text-zinc-400">
-          This is a temporary developer-only tool to test if a Gemini API key is valid and has quota.
-          It performs a simple <code className="text-pink-400 bg-pink-400/10 px-1 py-0.5 rounded">generateContent</code> request with the prompt "Say hello".
+          This uses the exact same production configuration (environment variable or Supabase-stored key) used by the Market Watcher.
         </p>
 
         <div className="space-y-4 bg-zinc-900/50 border border-zinc-800 p-6 rounded-2xl">
-          <div className="space-y-2">
-            <label className="text-xs font-bold text-zinc-300 uppercase tracking-wider flex items-center gap-2">
-              <Key className="w-4 h-4" /> Gemini API Key
-            </label>
-            <input
-              type="password"
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              placeholder="AIzaSy..."
-              className="w-full bg-black border border-zinc-700 px-4 py-3 rounded-xl text-sm text-white focus:outline-none focus:border-zinc-500 font-mono"
-            />
-          </div>
-
           <button
-            onClick={handleTestKey}
-            disabled={isLoading || !apiKey.trim()}
+            onClick={handleTestConnection}
+            disabled={isLoading}
             className="w-full flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-white text-sm font-bold text-black hover:bg-zinc-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {isLoading ? "Testing..." : "Test API Key"}
+            {isLoading ? "Testing..." : "Test Gemini Connection"}
           </button>
         </div>
 
@@ -93,59 +78,37 @@ export default function GeminiTesterPage() {
                 <AlertCircle className="w-6 h-6 text-red-400" />
               )}
               <h2 className={`text-lg font-bold ${result.success ? 'text-emerald-400' : 'text-red-400'}`}>
-                {result.success ? "Success" : "Failed"}
+                {result.success ? "Connection Successful" : "Connection Failed"}
               </h2>
             </div>
 
             <div className="grid grid-cols-2 gap-4">
               <div className="bg-black/50 border border-zinc-800 p-3 rounded-lg">
-                <div className="text-xs text-zinc-500 uppercase font-bold tracking-wider mb-1">HTTP Status</div>
+                <div className="text-xs text-zinc-500 uppercase font-bold tracking-wider mb-1">API Status</div>
                 <div className="font-mono text-sm">{result.status || 'N/A'}</div>
               </div>
-              
-              {!result.success && result.error && (
-                <div className="bg-black/50 border border-zinc-800 p-3 rounded-lg">
-                  <div className="text-xs text-zinc-500 uppercase font-bold tracking-wider mb-1">Error Code</div>
-                  <div className="font-mono text-sm text-red-400">{result.error.code || 'N/A'}</div>
-                </div>
-              )}
+              <div className="bg-black/50 border border-zinc-800 p-3 rounded-lg">
+                <div className="text-xs text-zinc-500 uppercase font-bold tracking-wider mb-1">Model Used</div>
+                <div className="font-mono text-sm">{result.model || 'N/A'}</div>
+              </div>
+              <div className="bg-black/50 border border-zinc-800 p-3 rounded-lg">
+                <div className="text-xs text-zinc-500 uppercase font-bold tracking-wider mb-1">Latency</div>
+                <div className="font-mono text-sm">{latency ? `${latency}ms` : 'N/A'}</div>
+              </div>
             </div>
-
-            {!result.success && result.error && (
-              <div className="bg-black/50 border border-zinc-800 p-4 rounded-lg space-y-2">
-                <div className="text-xs text-zinc-500 uppercase font-bold tracking-wider">Error Message</div>
-                <div className="font-mono text-sm text-red-400 break-words">{result.error.message || 'N/A'}</div>
-              </div>
-            )}
-
-            {!result.success && result.error?.details && (
-              <div className="bg-black/50 border border-zinc-800 p-4 rounded-lg space-y-2">
-                <div className="text-xs text-zinc-500 uppercase font-bold tracking-wider">Error Details (Quota, etc)</div>
-                <pre className="font-mono text-xs text-zinc-300 break-words whitespace-pre-wrap">
-                  {JSON.stringify(result.error.details, null, 2)}
-                </pre>
-              </div>
-            )}
 
             {result.success && (
               <div className="bg-black/50 border border-zinc-800 p-4 rounded-lg space-y-2">
-                <div className="text-xs text-zinc-500 uppercase font-bold tracking-wider">Response Text</div>
-                <div className="text-sm text-zinc-200">{result.responseText}</div>
+                <div className="text-xs text-zinc-500 uppercase font-bold tracking-wider">Response</div>
+                <div className="text-sm text-zinc-200 font-mono">{result.responseText}</div>
               </div>
             )}
             
-            {result.success && result.fullResponseObject && (
-              <details className="bg-black/50 border border-zinc-800 p-4 rounded-lg group">
-                <summary className="text-xs text-zinc-500 uppercase font-bold tracking-wider cursor-pointer list-none flex items-center justify-between">
-                  <span>Full Response Object</span>
-                  <span className="text-zinc-600 group-open:rotate-180 transition-transform">▼</span>
-                </summary>
-                <div className="pt-4">
-                  <pre className="font-mono text-xs text-zinc-400 break-words whitespace-pre-wrap max-h-60 overflow-y-auto custom-scrollbar">
-                    {JSON.stringify(result.fullResponseObject, null, 2)}
-                  </pre>
-                </div>
-              </details>
+            {!result.success && result.error && (
+              <div className="bg-black/50 border border-zinc-800 p-4 rounded-lg space-y-2">
+                <div className="text-xs text-zinc-500 uppercase font-bold tracking-wider">Error</div>
+                <div className="font-mono text-sm text-red-400 break-words">{result.error.message || 'N/A'}</div>
+              </div>
             )}
           </div>
         )}
