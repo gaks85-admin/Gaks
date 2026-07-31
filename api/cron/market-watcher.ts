@@ -1488,9 +1488,13 @@ export default async function handler(req: any, res: any) {
         let geminiDuration = 0;
 
         const recommendation = decisionResult.recommendation; // PASS, LIKELY_PASS, AMBIGUOUS, FAIL
+        const executionMode = compiledStrategy.detector_validation?.execution_mode || 'HYBRID';
 
-        if (recommendation === 'FAIL') {
-          console.log(`[Decision Engine Failed] Watcher ID: ${watcher.id} (${selectedPair}) recommendation is FAIL. Stopping execution. Gemini NOT called.`);
+        if (recommendation === 'FAIL' && executionMode === 'RULE_ONLY') {
+          console.log(`Execution Mode: ${executionMode}`);
+          console.log(`Decision: ${recommendation}`);
+          console.log(`Stopping execution.`);
+          
           analysis.reasoning = [decisionResult.explanation];
           
           // Store FAIL evaluation record
@@ -1566,6 +1570,10 @@ export default async function handler(req: any, res: any) {
 
           watchersProcessedCount++;
           continue;
+        } else if (recommendation === 'FAIL' && (executionMode === 'HYBRID' || executionMode === 'AI_ONLY')) {
+          console.log(`Execution Mode: ${executionMode}`);
+          console.log(`Decision: ${recommendation}`);
+          console.log(`Routing to Gemini...`);
         } else {
           // PASS, LIKELY_PASS, AMBIGUOUS
           const requiresGemini = decisionResult.requires_gemini;
