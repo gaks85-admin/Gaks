@@ -314,6 +314,7 @@ export default function App() {
         .select('*')
         .eq('user_id', userId)
         .eq('status', 'active');
+      console.log(`[WATCHER LIFECYCLE] WATCHER FETCHED (loadWatchlistFromSupabase): ${JSON.stringify(data)}`);
 
       if (error) {
         console.warn("Could not load watchers from Supabase:", error.message);
@@ -1001,8 +1002,9 @@ export default function App() {
     try {
       const { data, error } = await supabase
         .from('watchers')
-        .select('status, selected_pair, selected_timeframe, trade_status, last_scan_at, last_analyzed_closed_candle_time')
+        .select('id, status, selected_pair, selected_timeframe, trade_status, last_scan_at, last_analyzed_closed_candle_time')
         .eq('user_id', userId);
+      console.log(`[WATCHER LIFECYCLE] WATCHER FETCHED (loadWatcherStatus): ${JSON.stringify(data)}`);
         
       if (data) {
         const anyActive = data.some(w => w.status === 'active');
@@ -1016,11 +1018,17 @@ export default function App() {
             const dbW = data.find(d => d.selected_pair && d.selected_pair.replace(/[^a-zA-Z0-9]/g, '').toUpperCase() === w.symbol.replace(/[^a-zA-Z0-9]/g, '').toUpperCase());
             // If the DB explicitly says it's not active, remove it.
             // If it's missing entirely from the DB result (e.g. out-of-order race condition), KEEP IT.
-            if (dbW && dbW.status !== 'active') return false;
+            if (dbW && dbW.status !== 'active') {
+              console.log(`[WATCHER LIFECYCLE] WATCHER REMOVED from UI: ${w.symbol}, Status: ${dbW.status}`);
+              return false;
+            }
             return true;
           });
           if (nextList.length !== prev.length) {
-            if (nextList.length === 0) localStorage.removeItem('gaks_watchlist');
+            if (nextList.length === 0) {
+              console.log(`[WATCHER LIFECYCLE] WATCHER HIDDEN (Watchlist Empty)`);
+              localStorage.removeItem('gaks_watchlist');
+            }
             else localStorage.setItem('gaks_watchlist', JSON.stringify(nextList));
           }
           return nextList;
@@ -1221,6 +1229,7 @@ export default function App() {
         console.warn("Could not auto-sync trading preferences to Supabase:", playbookErr.message);
       }
 
+      console.log(`[WATCHER LIFECYCLE] Frontend payload sent to backend for ${targetSymbol} / ${targetTimeframe}`);
       // Call secure backend activation route
       const response = await fetch('/api/watcher/start', {
         method: 'POST',

@@ -93,8 +93,10 @@ export default async function handler(req: any, res: any) {
       if (action === 'delete') {
         // First update trade fields to ensure clean state before deletion
         await supabase.from("watchers").update(clearedFields).eq("id", w.id);
+        console.log(`[WATCHER LIFECYCLE] WATCHER DELETED for ID: ${w.id}`);
         await supabase.from("watchers").delete().eq("id", w.id);
       } else {
+        console.log(`[WATCHER LIFECYCLE] WATCHER UPDATED (status -> stopped) for ID: ${w.id}`);
         await supabase.from("watchers").update({
           status: 'stopped',
           stopped_at: new Date().toISOString(),

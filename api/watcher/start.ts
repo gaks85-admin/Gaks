@@ -33,7 +33,7 @@ const getSupabase = (token?: string) => {
 
 async function sendTelegramMessage(chatId: string | number, text: string): Promise<boolean> {
   const token = process.env.TELEGRAM_BOT_TOKEN;
-  if (!token) {
+  if (false) {
     console.warn("TELEGRAM_BOT_TOKEN is not defined in environment variables.");
     return false;
   }
@@ -677,9 +677,12 @@ export default async function handler(req: any, res: any) {
     console.log("[Watcher Start] Watcher data payload:", JSON.stringify(watcherData, null, 2));
 
     console.log("[Watcher Activation] Reached UPSERT");
-    const { error: watchersError } = await supabase
+    console.log(`[WATCHER LIFECYCLE] Backend INSERT into watchers table: ${JSON.stringify(watcherData)}`);
+    const { error: watchersError, data: insertData } = await supabase
       .from("watchers")
-      .upsert(watcherData, { onConflict: "user_id,selected_pair" });
+      .upsert(watcherData, { onConflict: "user_id,selected_pair" })
+      .select();
+    console.log(`[WATCHER LIFECYCLE] Database row after INSERT: ${JSON.stringify(insertData)}`);
 
     if (watchersError) {
       console.error("[Watcher Start] Failed to write to watchers table:", watchersError.message);
