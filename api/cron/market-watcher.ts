@@ -1636,6 +1636,12 @@ Answer with JSON containing:
                 geminiDuration = Date.now() - geminiStart;
                 geminiTextResult = aiResponse.text || "";
                 
+                if (process.env.NODE_ENV !== 'production') {
+                  console.log("========== RAW GEMINI RESPONSE ==========");
+                  console.log(geminiTextResult);
+                  console.log("=========================================");
+                }
+                
                 if (watcher.gemini_status !== 'READY') {
                   if (watcher.gemini_status === 'QUOTA_EXHAUSTED' && !watcher.resume_notification_sent && telegramChatId) {
                     const resumeMsg = `⚠️ Gaks AI Notice\n\nYour Gemini API key quota has reset.\nMarket monitoring has resumed.`;
