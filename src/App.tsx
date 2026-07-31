@@ -1890,45 +1890,43 @@ export default function App() {
                   <span className="text-[13px] text-zinc-500 mt-0.5 font-normal tracking-normal">Performance at a glance</span>
                 </div>
 
-                <div className="grid grid-cols-4 gap-2">
+                <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2">
                   {isRatesLoading && liveRates.length === 0 ? (
-                    [1, 2, 3, 4, 5, 6, 7, 8].map(i => (
+                    [1, 2, 3, 4, 5, 6].map(i => (
                       <div key={i} className="aspect-square rounded-2xl bg-zinc-900/50 border border-zinc-800/40 flex flex-col justify-center items-center p-2 animate-pulse gap-1">
                         <div className="h-3 w-8 bg-zinc-800 rounded"></div>
                         <div className="h-2.5 w-6 bg-zinc-900 rounded"></div>
                       </div>
                     ))
                   ) : liveRates.filter(r => r.status !== 'unavailable' && r.price > 0).length > 0 ? (
-                    liveRates.filter(r => r.status !== 'unavailable' && r.price > 0).slice(0, 12).map((pair, idx) => {
+                    liveRates.filter(r => r.status !== 'unavailable' && r.price > 0).slice(0, 18).map((pair, idx) => {
                       const isBearish = pair.change < 0;
-                      const { lineD } = getSparklinePaths(pair.history || [], 100, 24);
+                      const absChange = Math.abs(pair.change);
+                      
+                      // Intensity: Very Light, Medium, Strong, Vivid
+                      const intensity = absChange < 0.25 ? 'opacity-30' : absChange < 0.75 ? 'opacity-50' : absChange < 1.5 ? 'opacity-70' : 'opacity-100';
+                      
+                      const bgColor = isBearish 
+                        ? `bg-red-600 ${intensity}` 
+                        : `bg-emerald-600 ${intensity}`;
 
                       return (
                         <div
                           key={idx}
-                          className={`rounded-2xl border p-3 flex flex-col justify-between transition-all hover:scale-[1.03] ${
-                            isBearish
-                              ? 'bg-gradient-to-br from-red-900/40 to-red-950/40 border-red-900/50 shadow-[0_0_10px_rgba(239,68,68,0.1)]'
-                              : 'bg-gradient-to-br from-emerald-900/40 to-emerald-950/40 border-emerald-900/50 shadow-[0_0_10px_rgba(16,185,129,0.1)]'
-                          }`}
+                          className={`aspect-[4/3] rounded-2xl p-3 flex flex-col justify-between transition-all hover:scale-[1.05] cursor-pointer ${bgColor}`}
                         >
                           <div className="flex justify-between items-start">
-                            <span className="text-[11px] sm:text-[12px] font-bold text-white tracking-wide">{pair.symbol}</span>
-                            {isBearish ? <TrendingDown className="w-3 h-3 text-red-500" /> : <TrendingUp className="w-3 h-3 text-emerald-500" />}
+                            <span className="text-[10px] sm:text-[11px] font-bold text-white tracking-wide">{pair.symbol}</span>
+                            {isBearish ? <TrendingDown className="w-3 h-3 text-white/90" /> : <TrendingUp className="w-3 h-3 text-white/90" />}
                           </div>
-                          <div className="flex items-end justify-between mt-2">
-                             <span className={`text-[12px] font-bold ${isBearish ? 'text-red-400' : 'text-emerald-400'}`}>{pair.change >= 0 ? '+' : ''}{pair.change.toFixed(2)}%</span>
-                             <div className="h-4 w-12 opacity-70">
-                               <svg viewBox="0 0 100 24" preserveAspectRatio="none" className="w-full h-full">
-                                 <path d={lineD} fill="none" stroke={isBearish ? "#f87171" : "#34d399"} strokeWidth="2" />
-                               </svg>
-                             </div>
+                          <div className="text-[12px] sm:text-[13px] font-bold text-white text-right">
+                             {pair.change >= 0 ? '+' : ''}{pair.change.toFixed(2)}%
                           </div>
                         </div>
                       );
                     })
                   ) : (
-                    <div className="col-span-4 py-8 text-center text-zinc-500 text-xs font-medium">Generating heatmap from live data...</div>
+                    <div className="col-span-3 sm:col-span-4 lg:col-span-6 py-8 text-center text-zinc-500 text-xs font-medium">Generating heatmap from live data...</div>
                   )}
                 </div>
               </div>
