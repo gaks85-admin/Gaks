@@ -772,6 +772,9 @@ export default async function handler(req: any, res: any) {
 
     // Process each active watcher sequentially to respect Twelve Data free limits
     for (const watcher of watchers) {
+      let geminiInvoked = false;
+      let geminiSucceeded = false;
+      let geminiDecision: 'BUY' | 'SELL' | 'NO_TRADE' | null = null;
       if (!watcher || watcher.status !== 'active') {
         console.log(`LOG: Watcher ${watcher?.id} skipped - Status is '${watcher?.status}' (not active)`);
         skipped.push({ userId: watcher?.user_id || 'unknown', reason: `Watcher status is ${watcher?.status || 'stopped/deleted'}` });
@@ -1579,6 +1582,8 @@ export default async function handler(req: any, res: any) {
           const requiresGemini = decisionResult.requires_gemini;
           if (requiresGemini) {
             console.log("GEMINI CALLED");
+            geminiInvoked = true;
+            console.log("Gemini Invoked");
             geminiCalled = true;
             geminiStart = Date.now();
             try {
@@ -1651,6 +1656,10 @@ Answer with JSON containing:
                 }
 
                 const parsedResult = JSON.parse(geminiTextResult);
+                console.log("Gemini JSON Parsed");
+                geminiSucceeded = true;
+                geminiDecision = parsedResult.direction as 'BUY' | 'SELL' | 'NO_TRADE';
+                console.log(`Gemini Decision = ${geminiDecision}`);
 
                 // Stage 5
                 traceData.gemini = {
@@ -1830,7 +1839,11 @@ Answer with JSON containing:
         console.log(`LOG: Signal result for ${selectedPair}: ${analysis.signal} (Confidence: ${analysis.confidence}%)`);
 
         // If there is NO setup: Update last_scan_at, last_analyzed_closed_candle_time, save evaluation and Exit.
-        if (analysis.signal === 'NO_TRADE' || analysis.confidence < 70) {
+        const isWaiting = geminiInvoked 
+          ? (geminiSucceeded && geminiDecision === 'NO_TRADE')
+          : (analysis.signal === 'NO_TRADE' || analysis.confidence < 70);
+
+        if (isWaiting) {
             console.log(`[STATE 1 - WAITING] No setup for Watcher ID: ${watcher.id} (${selectedPair}). Signal: ${analysis.signal}, Confidence: ${analysis.confidence}%. Updating last_scan_at and exiting.`);
             
             const scanDurationMs = Date.now() - scanStart;
