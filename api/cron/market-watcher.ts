@@ -1596,28 +1596,37 @@ export default async function handler(req: any, res: any) {
                 const ai = new GoogleGenAI({ apiKey: geminiKey });
                 const promptText = `
 You are an expert AI trading assistant.
-Evaluate whether the following market conditions and indicators satisfy the user's trading strategy.
+Evaluate whether the market conditions satisfy the user's trading strategy based ONLY on the evidence provided below.
 
-Rule Engine Indicators:
+CRITICAL INSTRUCTIONS:
+1. ONLY evaluate the information provided in the "Market Evidence" section.
+2. DO NOT assume information that is missing.
+3. DO NOT reject a trade because information is not provided (e.g., if Trendline Breakout is missing, ignore that requirement).
+4. Only return "NO_TRADE" if the supplied evidence explicitly contradicts the strategy.
+5. If the evidence supports the strategy, set satisfies = true.
+6. If evidence is mixed, adjust confidenceScore accordingly.
+
+Market Evidence:
 - Trend: ${marketStructure.trend}
 - EMA Trend Aligned: YES
 - ATR Volatility: ${marketStructure.volatilityInformation.atr.toFixed(5)}
 - Market Session: London/New York Active
 - Support Proximity: Near Support
 - Resistance Proximity: Neutral
-- Trendline Breakout: ${marketStructure.breakouts.length > 0 ? 'Breakout Detected' : 'No breakout'}
-- Volume Confirmation: ${marketStructure.volumeInformation.volumeSpike ? 'Confirmed' : 'Normal'}
+- Trendline Breakout: ${marketStructure.breakouts.length > 0 ? 'Breakout Detected' : 'Not Provided'}
+- Volume Confirmation: ${marketStructure.volumeInformation.volumeSpike ? 'Confirmed' : 'Not Provided'}
 - Recent Candles: ${JSON.stringify(candleData.slice(-5), null, 2)}
 
 User's Trading Strategy:
 ${strategyText}
 
-Does this satisfy the user's strategy?
-Answer with JSON containing:
-- satisfies (boolean)
-- direction ('BUY' | 'SELL' | 'NO_TRADE')
-- confidenceScore (number 0-100)
-- reasoning (string)
+Output ONLY valid JSON. No markdown, no code fences, no extra text.
+{
+"satisfies": boolean,
+"direction": "BUY" | "SELL" | "NO_TRADE",
+"confidenceScore": number,
+"reasoning": "short explanation"
+}
 `;
                 const aiResponse = await generateContentWithDiagnostics(ai, {
                   model: "gemini-2.5-flash",
