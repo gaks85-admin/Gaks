@@ -585,6 +585,7 @@ export function evaluateDecision(
     possible_weight,
     matched_rules,
     failed_rules,
+    deferred_rules,
     mandatory_rules_passed,
     recommendation,
     requires_gemini,

@@ -1595,32 +1595,40 @@ export default async function handler(req: any, res: any) {
               if (geminiKey) {
                 const ai = new GoogleGenAI({ apiKey: geminiKey });
                 const promptText = `
-You are an expert AI trading assistant.
-Evaluate whether the market conditions satisfy the user's trading strategy based ONLY on the evidence provided below.
+You are an expert AI trading analyst.
 
-CRITICAL INSTRUCTIONS:
-1. ONLY evaluate the information provided in the "Market Evidence" section.
-2. DO NOT assume information that is missing.
-3. DO NOT reject a trade because information is not provided (e.g., if Trendline Breakout is missing, ignore that requirement).
-4. Only return "NO_TRADE" if the supplied evidence explicitly contradicts the strategy.
-5. If the evidence supports the strategy, set satisfies = true.
-6. If evidence is mixed, adjust confidenceScore accordingly.
+Strategy Summary:
+- Style: ${compiledStrategy.strategy_mode || 'HYBRID'}
+- Timeframe: ${selectedTimeframe}
+- Confirmation: ${traceData.strategyCompiler.compiledRules.join(', ')}
 
-Market Evidence:
+Available Market Evidence:
 - Trend: ${marketStructure.trend}
-- EMA Trend Aligned: YES
-- ATR Volatility: ${marketStructure.volatilityInformation.atr.toFixed(5)}
-- Market Session: London/New York Active
-- Support Proximity: Near Support
-- Resistance Proximity: Neutral
-- Trendline Breakout: ${marketStructure.breakouts.length > 0 ? 'Breakout Detected' : 'Not Provided'}
-- Volume Confirmation: ${marketStructure.volumeInformation.volumeSpike ? 'Confirmed' : 'Not Provided'}
-- Recent Candles: ${JSON.stringify(candleData.slice(-5), null, 2)}
+- BOS: ${marketStructure.BOS?.length > 0 ? 'Detected' : 'None'}
+- CHOCH: ${marketStructure.CHOCH?.length > 0 ? 'Detected' : 'None'}
+- Support: ${marketStructure.supportZones?.length > 0 ? 'Detected' : 'None'}
+- Resistance: ${marketStructure.resistanceZones?.length > 0 ? 'Detected' : 'None'}
+- Fair Value Gap: ${marketStructure.fairValueGaps?.length > 0 ? 'Detected' : 'None'}
+- Liquidity Sweep: ${marketStructure.liquiditySweeps?.length > 0 ? 'Detected' : 'None'}
+- Volume Confirmation: ${marketStructure.volumeInformation.volumeSpike ? 'Confirmed' : 'None'}
+- ATR: ${marketStructure.volatilityInformation.atr.toFixed(5)}
+- EMA Alignment: YES
 
-User's Trading Strategy:
-${strategyText}
+Missing Evidence:
+${!marketStructure.breakouts?.length ? '- Trendline Breakout' : ''}
+- Trendline Touches
+- Spread
+- High Impact News
 
-Output ONLY valid JSON. No markdown, no code fences, no extra text.
+AI Instructions:
+1. Evaluate ONLY the supplied market evidence.
+2. Never assume missing data.
+3. Missing evidence is UNKNOWN, not FALSE.
+4. Estimate whether the available confluence is enough to produce a BUY, SELL, or NO_TRADE.
+5. Use probabilistic reasoning instead of strict rule matching.
+6. Only return NO_TRADE when the supplied evidence clearly argues against taking a trade.
+
+Output ONLY valid JSON:
 {
 "satisfies": boolean,
 "direction": "BUY" | "SELL" | "NO_TRADE",
