@@ -449,6 +449,21 @@ export function evaluateDecision(
       requires_gemini = false;
     }
 
+    // Override FAIL if structural evidence exists
+    const hasStructuralEvidence = (
+      (marketStructure.BOS && marketStructure.BOS.length > 0) ||
+      (marketStructure.CHOCH && marketStructure.CHOCH.length > 0) ||
+      (marketStructure.supportZones && marketStructure.supportZones.length > 0) ||
+      (marketStructure.resistanceZones && marketStructure.resistanceZones.length > 0) ||
+      (marketStructure.liquiditySweeps && marketStructure.liquiditySweeps.length > 0) ||
+      (marketStructure.trend && marketStructure.trend !== 'SIDEWAYS')
+    );
+
+    if (recommendation === 'FAIL' && hasStructuralEvidence) {
+       recommendation = 'LIKELY_PASS';
+       requires_gemini = true;
+    }
+
     // Override requires_gemini if strategy_mode is AI_ONLY or HYBRID, unless it's a hard FAIL
     const hasSubjective = (rules.subjective_elements && rules.subjective_elements.length > 0) ||
                           (rules.ai_only_elements && rules.ai_only_elements.length > 0);
