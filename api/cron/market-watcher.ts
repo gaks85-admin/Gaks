@@ -1576,7 +1576,7 @@ export default async function handler(req: any, res: any) {
         } else {
           // Check if we force Gemini for FAIL in HYBRID/AI_ONLY
           const forceGemini = (recommendation === 'FAIL' && (executionMode === 'HYBRID' || executionMode === 'AI_ONLY'));
-          const requiresGemini = decisionResult.requires_gemini || forceGemini;
+          const requiresGemini = (compiledStrategy.strategy_mode !== 'RULE_ONLY') && (decisionResult.requires_gemini || forceGemini);
           
           if (forceGemini) {
             console.log(`Execution Mode: ${executionMode}`);
