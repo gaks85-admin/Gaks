@@ -1573,13 +1573,17 @@ export default async function handler(req: any, res: any) {
 
           watchersProcessedCount++;
           continue;
-        } else if (recommendation === 'FAIL' && (executionMode === 'HYBRID' || executionMode === 'AI_ONLY')) {
-          console.log(`Execution Mode: ${executionMode}`);
-          console.log(`Decision: ${recommendation}`);
-          console.log(`Routing to Gemini...`);
         } else {
-          // PASS, LIKELY_PASS, AMBIGUOUS
-          const requiresGemini = decisionResult.requires_gemini;
+          // Check if we force Gemini for FAIL in HYBRID/AI_ONLY
+          const forceGemini = (recommendation === 'FAIL' && (executionMode === 'HYBRID' || executionMode === 'AI_ONLY'));
+          const requiresGemini = decisionResult.requires_gemini || forceGemini;
+          
+          if (forceGemini) {
+            console.log(`Execution Mode: ${executionMode}`);
+            console.log(`Decision: ${recommendation}`);
+            console.log(`Routing to Gemini...`);
+          }
+
           if (requiresGemini) {
             console.log("GEMINI CALLED");
             geminiInvoked = true;
