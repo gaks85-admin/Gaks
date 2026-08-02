@@ -2052,32 +2052,40 @@ Output ONLY valid JSON:
           continue;
         }
 
-        analysis.entryPrice = posSizeResult.entryPrice;
-        analysis.stopLoss = posSizeResult.stopLoss;
-        analysis.takeProfit = posSizeResult.takeProfit;
+        let signal: any = null;
+        let isRegistered = false;
 
-        const signalReasoning = Array.isArray(analysis.reasoning) ? analysis.reasoning.join("; ") : (analysis.reasoning || "Strategy criteria matched");
-        console.log(`[SIGNAL GENERATED] Watcher ID: ${watcher.id}`);
-        console.log(`Exact reason new signal was generated: Strategy evaluation returned signal '${analysis.signal}' with confidence ${analysis.confidence}% (>= 70 threshold) on pair ${selectedPair}. Executed Entry: ${analysis.entryPrice}, Stop Loss: ${analysis.stopLoss}, Take Profit: ${analysis.takeProfit}. Reasoning: ${signalReasoning}`);
+        if (recommendation !== 'FAIL') {
+          analysis.entryPrice = posSizeResult.entryPrice;
+          analysis.stopLoss = posSizeResult.stopLoss;
+          analysis.takeProfit = posSizeResult.takeProfit;
 
-        const signal = {
-            pair: mappedSymbol,
-            timeframe: selectedTimeframe,
-            direction: analysis.signal,
-            strategySummary: prefsRecord?.strategy_summary || 'Custom Strategy',
-            entryPrice: analysis.entryPrice,
-            stopLoss: analysis.stopLoss,
-            takeProfit: analysis.takeProfit,
-            riskRewardRatio: riskRewardStr,
-            confidenceScore: analysis.confidence,
-            aiReasoning: analysis.reasoning,
-            lotSize: posSizeResult.calculatedLotSize,
-            riskAmount: posSizeResult.riskAmount,
-            expectedLoss: posSizeResult.expectedLoss,
-            lotType: posSizeResult.lotType
-        };
+          const signalReasoning = Array.isArray(analysis.reasoning) ? analysis.reasoning.join("; ") : (analysis.reasoning || "Strategy criteria matched");
+          console.log(`[SIGNAL GENERATED] Watcher ID: ${watcher.id}`);
+          console.log(`Exact reason new signal was generated: Strategy evaluation returned signal '${analysis.signal}' with confidence ${analysis.confidence}% (>= 70 threshold) on pair ${selectedPair}. Executed Entry: ${analysis.entryPrice}, Stop Loss: ${analysis.stopLoss}, Take Profit: ${analysis.takeProfit}. Reasoning: ${signalReasoning}`);
 
-        const isRegistered = await registerSignal(supabase, watcher, signal);
+          signal = {
+              pair: mappedSymbol,
+              timeframe: selectedTimeframe,
+              direction: analysis.signal,
+              strategySummary: prefsRecord?.strategy_summary || 'Custom Strategy',
+              entryPrice: analysis.entryPrice,
+              stopLoss: analysis.stopLoss,
+              takeProfit: analysis.takeProfit,
+              riskRewardRatio: riskRewardStr,
+              confidenceScore: analysis.confidence,
+              aiReasoning: analysis.reasoning,
+              lotSize: posSizeResult.calculatedLotSize,
+              riskAmount: posSizeResult.riskAmount,
+              expectedLoss: posSizeResult.expectedLoss,
+              lotType: posSizeResult.lotType
+          };
+
+          isRegistered = await registerSignal(supabase, watcher, signal);
+        } else {
+          console.log(`[SIGNAL SKIPPED] Watcher ID: ${watcher.id} - Recommendation is FAIL. Setting signal to NO_TRADE.`);
+          analysis.signal = 'NO_TRADE';
+        }
 
         // Also update last_analyzed_closed_candle_time on watcher
         await supabase
