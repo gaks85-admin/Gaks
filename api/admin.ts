@@ -2501,12 +2501,64 @@ async function system_health_handler(req: any, res: any) {
 }
 
 
+async function logs_handler(req: any, res: any) {
+  const supabase = getSupabase();
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, PATCH, DELETE");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With");
+  res.setHeader("Content-Type", "application/json");
+
+  if (req.method === "OPTIONS") {
+    return res.status(200).end();
+  }
+
+  if (req.method !== 'GET') {
+    return res.status(405).json({ success: false, error: 'Method Not Allowed' });
+  }
+
+  const authHeader = req.headers.authorization || '';
+  const token = authHeader.startsWith('Bearer ') ? authHeader.substring(7) : authHeader;
+  
+  if (!token) {
+    return res.status(401).json({ success: false, error: "Unauthorized: Missing authentication token." });
+  }
+  
+  try {
+    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+    if (authError || !user) {
+      return res.status(401).json({ success: false, error: "Unauthorized: Invalid authentication token." });
+    }
+    
+    const email = user.email?.trim().toLowerCase();
+    const ADMIN_EMAIL = "gaks6535@gmail.com";
+    if (email !== ADMIN_EMAIL) {
+      return res.status(403).json({ success: false, error: "Unauthorized: Insufficient privileges." });
+    }
+
+    const { data: logs, error: lErr } = await supabase
+      .from('execution_logs')
+      .select('*')
+      .order('run_time', { ascending: false })
+      .limit(50); // Show last 50 runs in UI
+    
+    if (lErr) throw lErr;
+
+    return res.status(200).json({ success: true, logs: logs || [] });
+  } catch (err: any) {
+    console.error("Failed to fetch execution logs:", err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+}
+
 export default async function handler(req: any, res: any) {
   try {
     const matchedPath = req.headers['x-matched-path'] || req.headers['x-original-url'] || req.headers['x-forwarded-url'] || req.url || '';
     const parsedUrl = url.parse(matchedPath, true);
     const pathname = parsedUrl.pathname || '';
 
+    if (pathname.endsWith('/logs')) {
+      return logs_handler(req, res);
+    }
     if (pathname.endsWith('/system-health')) {
       return system_health_handler(req, res);
     }

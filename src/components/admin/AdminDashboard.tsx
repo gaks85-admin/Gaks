@@ -7,16 +7,6 @@ import {
 } from 'lucide-react';
 import { supabase } from '../../supabaseClient';
 
-import GeminiTesterPage from './GeminiTesterPage';
-import StrategyEngineInspectorPage from './StrategyEngineInspectorPage';
-import SystemValidationPage from './SystemValidationPage';
-import LearningAnalyticsPage from './LearningAnalyticsPage';
-
-interface ToastState {
-  message: string;
-  type: 'success' | 'error';
-}
-
 // ----------------------------------------------------
 // Toast Component
 // ----------------------------------------------------
@@ -443,6 +433,20 @@ const UsersPage = ({ fetchWithAuth, showToast }: { fetchWithAuth: any; showToast
   const [aiStatusFilter, setAiStatusFilter] = useState('ALL');
   const [selectedUser, setSelectedUser] = useState<any | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [sortField, setSortField] = useState<string>('created_at');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
+
+  const handleSort = (field: string) => {
+    if (sortField === field) {
+      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortOrder('asc');
+    }
+    setCurrentPage(1);
+  };
 
   const fetchUsers = async () => {
     setLoading(true);
@@ -505,6 +509,21 @@ const UsersPage = ({ fetchWithAuth, showToast }: { fetchWithAuth: any; showToast
     return matchesSearch && uStatus === aiStatusFilter;
   });
 
+  const sortedUsers = [...filteredUsers].sort((a, b) => {
+    let valA = a[sortField] || '';
+    let valB = b[sortField] || '';
+    
+    if (typeof valA === 'string') valA = valA.toLowerCase();
+    if (typeof valB === 'string') valB = valB.toLowerCase();
+
+    if (valA < valB) return sortOrder === 'asc' ? -1 : 1;
+    if (valA > valB) return sortOrder === 'asc' ? 1 : -1;
+    return 0;
+  });
+
+  const totalPages = Math.ceil(sortedUsers.length / itemsPerPage);
+  const currentUsers = sortedUsers.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+
   return (
     <div className="p-6 space-y-6">
       {/* Header & Controls */}
@@ -563,16 +582,17 @@ const UsersPage = ({ fetchWithAuth, showToast }: { fetchWithAuth: any; showToast
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="border-b border-zinc-900 text-[10px] font-bold uppercase tracking-wider text-zinc-500 bg-zinc-950/50">
-                  <th className="py-4 px-5">User Profile / ID</th>
+                  <th className="py-4 px-5 cursor-pointer hover:text-zinc-300" onClick={() => handleSort('email')}>User Profile / ID</th>
                   <th className="py-4 px-5 text-center">Integrations</th>
-                  <th className="py-4 px-5 text-center">AI Status</th>
-                  <th className="py-4 px-5 text-center">Watcher Status</th>
+                  <th className="py-4 px-5 text-center cursor-pointer hover:text-zinc-300" onClick={() => handleSort('gemini_status')}>AI Status</th>
+                  <th className="py-4 px-5 text-center cursor-pointer hover:text-zinc-300" onClick={() => handleSort('watcher_status')}>Watcher Status</th>
                   <th className="py-4 px-5">Selected Setup</th>
+                  <th className="py-4 px-5 cursor-pointer hover:text-zinc-300" onClick={() => handleSort('created_at')}>Joined</th>
                   <th className="py-4 px-5 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {filteredUsers.map(user => (
+                {currentUsers.map(user => (
                   <tr key={user.id} className="border-b border-zinc-900 hover:bg-zinc-900/30 transition-colors">
                     <td className="py-4 px-5">
                       <div className="flex flex-col">
@@ -602,11 +622,23 @@ const UsersPage = ({ fetchWithAuth, showToast }: { fetchWithAuth: any; showToast
                         {user.gemini_status || 'READY'}
                       </span>
                     </td>
+                    <td className="py-4 px-5 text-center">
+                      <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border ${
+                        user.watcher_status === 'active' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
+                        user.watcher_status === 'paused' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' :
+                        'bg-zinc-900 text-zinc-500 border-zinc-900'
+                      }`}>
+                        {user.watcher_status || 'N/A'}
+                      </span>
+                    </td>
                     <td className="py-4 px-5">
                       <div className="flex flex-col text-[10px]">
                         <span className="text-zinc-300 font-semibold">{user.selected_pair} ({user.selected_timeframe})</span>
                         <span className="text-zinc-500 mt-1">Strategy: {user.selected_strategy}</span>
                       </div>
+                    </td>
+                    <td className="py-4 px-5 text-[10px] text-zinc-500 font-mono">
+                      {user.created_at ? new Date(user.created_at).toLocaleDateString() : 'N/A'}
                     </td>
                     <td className="py-4 px-5">
                       <div className="flex items-center justify-end gap-2.5">
@@ -652,6 +684,29 @@ const UsersPage = ({ fetchWithAuth, showToast }: { fetchWithAuth: any; showToast
               </tbody>
             </table>
           </div>
+
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <div className="px-5 py-4 bg-zinc-950/80 border-t border-zinc-900 flex items-center justify-between">
+              <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider">Page {currentPage} of {totalPages}</span>
+              <div className="flex items-center gap-2">
+                <button 
+                  disabled={currentPage === 1}
+                  onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                  className="px-3 py-1.5 bg-zinc-900 border border-zinc-800 rounded-lg text-[10px] font-bold text-zinc-400 hover:bg-zinc-800 disabled:opacity-50 transition-colors"
+                >
+                  Previous
+                </button>
+                <button 
+                  disabled={currentPage === totalPages}
+                  onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                  className="px-3 py-1.5 bg-zinc-900 border border-zinc-800 rounded-lg text-[10px] font-bold text-zinc-400 hover:bg-zinc-800 disabled:opacity-50 transition-colors"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -1828,419 +1883,108 @@ const SettingsPage = ({ fetchWithAuth, showToast }: { fetchWithAuth: any; showTo
 
 
 // ----------------------------------------------------
-// Explainability & Analytics Subpage
 // ----------------------------------------------------
-const ExplainabilityPage = ({ fetchWithAuth }: { fetchWithAuth: any }) => {
-  const [data, setData] = useState<any>(null);
+// 6. Live Logs Subpage
+// ----------------------------------------------------
+const LiveLogsPage = ({ fetchWithAuth }: { fetchWithAuth: any }) => {
+  const [logs, setLogs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [debugMode, setDebugMode] = useState(false);
-  const [expandedLogId, setExpandedLogId] = useState<string | null>(null);
 
-  const fetchExplainabilityData = async () => {
-    setLoading(true);
+  const fetchLogs = async () => {
     try {
-      const res = await fetchWithAuth('/api/admin/explainability');
+      const res = await fetchWithAuth('/api/admin/logs');
       const json = await res.json();
       if (json.success) {
-        setData(json);
-        setError(null);
-      } else {
-        setError(json.error || "Failed to load explainability analytics.");
+        setLogs(json.logs || []);
       }
-    } catch (err: any) {
-      setError(err.message || "Network error fetching explainability data.");
+    } catch (err) {
+      console.error("Error fetching logs:", err);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchExplainabilityData();
+    fetchLogs();
+    const interval = setInterval(fetchLogs, 10000); // Auto-refresh every 10s
+    return () => clearInterval(interval);
   }, []);
-
-  if (loading) {
-    return (
-      <div className="flex flex-col items-center justify-center py-20 text-zinc-400">
-        <RefreshCw className="w-8 h-8 animate-spin text-sky-500 mb-3" />
-        <span className="text-xs font-semibold">Loading explainability and scanning analytics...</span>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="p-6 m-6 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 flex items-center gap-3">
-        <AlertTriangle className="w-5 h-5" />
-        <span className="text-sm font-semibold">{error}</span>
-      </div>
-    );
-  }
-
-  const stats = data?.stats;
-  const logs = data?.logs || [];
 
   return (
     <div className="p-6 space-y-6">
-      {/* Header section */}
       <div className="flex justify-between items-center pb-2 border-b border-zinc-900">
         <div>
-          <h3 className="text-lg font-bold text-white font-display">Explainability & Analytics Engine</h3>
-          <p className="text-xs text-zinc-500">Live evaluation auditing of the Decision Engine, weights, and rules</p>
+          <h3 className="text-lg font-bold text-white font-display">Live Operational Logs</h3>
+          <p className="text-xs text-zinc-500">Real-time execution trace grouped by cron run. Auto-refreshes every 10s.</p>
         </div>
-        <button onClick={fetchExplainabilityData} className="p-2 bg-zinc-900 border border-zinc-800 rounded-lg hover:bg-zinc-800 text-zinc-300 transition-colors cursor-pointer" title="Refresh Analytics">
-          <RefreshCw className="w-4 h-4" />
+        <button onClick={fetchLogs} className="p-2 bg-zinc-900 border border-zinc-800 rounded-lg hover:bg-zinc-800 text-zinc-300 transition-colors">
+          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
         </button>
       </div>
 
-      {/* Grid of Key Performance Counters */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <div className="bg-zinc-950 p-5 rounded-2xl border border-zinc-900/80">
-          <span className="text-xs font-bold uppercase tracking-wider text-zinc-500">Total Scans Audited</span>
-          <p className="text-3xl font-extrabold text-white mt-1.5 font-display">{stats?.totalScans}</p>
-          <span className="text-[10px] text-zinc-500 block mt-2">Every manual and background scan logged</span>
+      {loading && logs.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-20">
+          <RefreshCw className="w-8 h-8 animate-spin text-sky-500 mb-3" />
+          <p className="text-xs text-zinc-500">Fetching latest execution logs...</p>
         </div>
-        <div className="bg-zinc-950 p-5 rounded-2xl border border-zinc-900/80">
-          <span className="text-xs font-bold uppercase tracking-wider text-zinc-500 font-display">Signal Generation Rate</span>
-          <p className="text-3xl font-extrabold text-sky-400 mt-1.5">{stats?.signalRate}%</p>
-          <span className="text-[10px] text-zinc-500 block mt-2">{stats?.totalSignals} trade alerts generated</span>
+      ) : logs.length === 0 ? (
+        <div className="p-12 text-center text-zinc-500 border border-dashed border-zinc-900 rounded-2xl bg-zinc-950/20">
+          <Terminal className="w-8 h-8 mx-auto mb-2 text-zinc-700" />
+          <p className="text-xs font-semibold">No execution logs found in Supabase.</p>
         </div>
-        <div className="bg-zinc-950 p-5 rounded-2xl border border-zinc-900/80">
-          <span className="text-xs font-bold uppercase tracking-wider text-zinc-500 font-display font-semibold">Average Scan Latency</span>
-          <p className="text-3xl font-extrabold text-emerald-400 mt-1.5">{stats?.performance?.avgScanDuration} ms</p>
-          <span className="text-[10px] text-zinc-500 block mt-2">Database + indicator computation speed</span>
-        </div>
-        <div className="bg-zinc-950 p-5 rounded-2xl border border-zinc-900/80">
-          <span className="text-xs font-bold uppercase tracking-wider text-zinc-500 font-display font-semibold">Gemini Processing Time</span>
-          <p className="text-3xl font-extrabold text-amber-400 mt-1.5">{stats?.performance?.avgGeminiDuration} ms</p>
-          <span className="text-[10px] text-zinc-500 block mt-2">Only called when decision engine requests validation</span>
-        </div>
-      </div>
-
-      {/* Distribution of Recommendations */}
-      <div className="bg-zinc-950 p-5 rounded-2xl border border-zinc-900/80">
-        <h4 className="text-xs font-bold uppercase tracking-wider text-zinc-400 mb-4">Decision Recommendations Distribution</h4>
-        <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-          <div className="p-4 rounded-xl bg-zinc-900/40 border border-zinc-900 flex justify-between items-center">
-            <div>
-              <span className="text-xs text-zinc-500">PASS</span>
-              <p className="text-lg font-bold text-emerald-400 mt-1">{stats?.distribution?.PASS || 0}</p>
-            </div>
-          </div>
-          <div className="p-4 rounded-xl bg-zinc-900/40 border border-zinc-900 flex justify-between items-center">
-            <div>
-              <span className="text-xs text-zinc-500">LIKELY_PASS</span>
-              <p className="text-lg font-bold text-sky-400 mt-1">{stats?.distribution?.LIKELY_PASS || 0}</p>
-            </div>
-          </div>
-          <div className="p-4 rounded-xl bg-zinc-900/40 border border-zinc-900 flex justify-between items-center">
-            <div>
-              <span className="text-xs text-zinc-500 font-semibold">AMBIGUOUS</span>
-              <p className="text-lg font-bold text-amber-500 mt-1">{stats?.distribution?.AMBIGUOUS || 0}</p>
-            </div>
-          </div>
-          <div className="p-4 rounded-xl bg-zinc-900/40 border border-zinc-900 flex justify-between items-center">
-            <div>
-              <span className="text-xs text-zinc-500">FAIL</span>
-              <p className="text-lg font-bold text-rose-500 mt-1">{stats?.distribution?.FAIL || 0}</p>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Strategy Modes and User Scanning Frequencies */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Strategy mode breakdown */}
-        <div className="bg-zinc-950 p-5 rounded-2xl border border-zinc-900/80">
-          <h4 className="text-xs font-bold uppercase tracking-wider text-zinc-400 mb-4">Strategy Modes Breakdown</h4>
-          <div className="space-y-4">
-            {['RULE_ONLY', 'HYBRID', 'AI_ONLY'].map((mode) => {
-              const count = stats?.modeBreakdown?.[mode] || 0;
-              const total = (stats?.modeBreakdown?.RULE_ONLY || 0) + (stats?.modeBreakdown?.HYBRID || 0) + (stats?.modeBreakdown?.AI_ONLY || 0) || 1;
-              const percentage = Math.round((count / total) * 100);
-              return (
-                <div key={mode} className="space-y-1.5">
-                  <div className="flex justify-between items-center text-xs">
-                    <span className="font-mono font-bold text-zinc-300">{mode}</span>
-                    <span className="text-zinc-500">{count} scans ({percentage}%)</span>
+      ) : (
+        <div className="space-y-4">
+          {logs.map((run) => (
+            <div key={run.id} className="bg-zinc-950 border border-zinc-900 rounded-2xl overflow-hidden shadow-xl">
+              <div className="px-5 py-3 bg-zinc-900/50 border-b border-zinc-900 flex justify-between items-center">
+                <div className="flex items-center gap-3">
+                  <div className={`w-2 h-2 rounded-full ${run.status === 'success' ? 'bg-emerald-500' : 'bg-red-500'}`} />
+                  <span className="text-xs font-bold text-zinc-200">{run.pair}</span>
+                  <span className="text-[10px] text-zinc-500 font-mono">{new Date(run.run_time).toLocaleString()}</span>
+                </div>
+                <div className="flex items-center gap-4">
+                  <div className="text-[10px]">
+                    <span className="text-zinc-500">Signal: </span>
+                    <span className={`font-bold ${run.final_signal === 'BUY' ? 'text-emerald-400' : run.final_signal === 'SELL' ? 'text-red-400' : 'text-zinc-400'}`}>
+                      {run.final_signal || 'N/A'}
+                    </span>
                   </div>
-                  <div className="w-full h-2 bg-zinc-900 rounded-full overflow-hidden">
-                    <div 
-                      className={`h-full rounded-full ${mode === 'RULE_ONLY' ? 'bg-indigo-500' : mode === 'HYBRID' ? 'bg-sky-500' : 'bg-emerald-500'}`} 
-                      style={{ width: `${percentage}%` }}
-                    />
+                  <div className="text-[10px]">
+                    <span className="text-zinc-500">Score: </span>
+                    <span className="font-bold text-zinc-200">{run.decision_score?.toFixed(1)}%</span>
                   </div>
                 </div>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* User scanning frequencies */}
-        <div className="bg-zinc-950 p-5 rounded-2xl border border-zinc-900/80">
-          <h4 className="text-xs font-bold uppercase tracking-wider text-zinc-400 mb-4">Multi-User Scanning Frequency</h4>
-          <div className="max-h-52 overflow-y-auto pr-1.5 space-y-2 text-xs">
-            {stats?.userRankings?.length === 0 ? (
-              <p className="text-zinc-500 py-4 text-center">No active scanner history recorded yet.</p>
-            ) : (
-              stats?.userRankings?.map((user: any, index: number) => (
-                <div key={user.userId} className="flex justify-between items-center py-2 px-3 rounded-xl bg-zinc-900/30 border border-zinc-900/60">
-                  <div className="flex items-center gap-3">
-                    <span className="font-mono text-zinc-500 font-bold">{index + 1}.</span>
-                    <span className="text-zinc-300 font-semibold truncate max-w-xs">{user.email}</span>
+              </div>
+              <div className="p-4 bg-black/40 font-mono text-[10px] space-y-1 max-h-60 overflow-y-auto">
+                {run.logs?.map((log: any, idx: number) => (
+                  <div key={idx} className="flex gap-3">
+                    <span className="text-zinc-600 shrink-0">[{log.time}]</span>
+                    <span className={`${
+                      log.type === 'success' ? 'text-emerald-500' : 
+                      log.type === 'error' ? 'text-red-500' : 
+                      log.type === 'warning' ? 'text-amber-500' : 
+                      'text-zinc-400'
+                    }`}>
+                      {log.message}
+                    </span>
                   </div>
-                  <span className="px-2.5 py-1 bg-zinc-900 text-zinc-400 border border-zinc-800 rounded-lg text-[10px] font-bold">
-                    {user.count} scans
-                  </span>
-                </div>
-              ))
-            )}
-          </div>
+                ))}
+              </div>
+            </div>
+          ))}
         </div>
-      </div>
-
-      {/* Rule Frequencies */}
-      <div className="bg-zinc-950 p-5 rounded-2xl border border-zinc-900/80">
-        <h4 className="text-xs font-bold uppercase tracking-wider text-zinc-400 mb-4">Rule Performance & Frequencies</h4>
-        <div className="overflow-x-auto">
-          <table className="w-full text-xs text-left text-zinc-300">
-            <thead className="bg-zinc-900/50 text-zinc-500 font-bold uppercase tracking-wider">
-              <tr>
-                <th className="px-4 py-3 rounded-l-lg">Rule Code</th>
-                <th className="px-4 py-3">Times Satisfied</th>
-                <th className="px-4 py-3">Times Failed</th>
-                <th className="px-4 py-3">Total Evaluated</th>
-                <th className="px-4 py-3 rounded-r-lg">Success Rate</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-zinc-900/50">
-              {stats?.ruleAnalytics?.length === 0 ? (
-                <tr>
-                  <td colSpan={5} className="text-center py-6 text-zinc-500">No rule evaluations logged yet.</td>
-                </tr>
-              ) : (
-                stats?.ruleAnalytics?.map((rule: any) => (
-                  <tr key={rule.rule} className="hover:bg-zinc-900/20">
-                    <td className="px-4 py-3 font-mono font-bold text-white">{rule.rule}</td>
-                    <td className="px-4 py-3 text-emerald-400 font-semibold">{rule.matched}</td>
-                    <td className="px-4 py-3 text-red-400 font-semibold">{rule.failed}</td>
-                    <td className="px-4 py-3 font-semibold">{rule.total}</td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <span className="font-semibold">{Math.round(rule.successRate)}%</span>
-                        <div className="w-16 h-1.5 bg-zinc-900 rounded-full overflow-hidden hidden sm:block">
-                          <div 
-                            className="h-full bg-sky-500 rounded-full" 
-                            style={{ width: `${rule.successRate}%` }}
-                          />
-                        </div>
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* Logs History Feed */}
-      <div className="bg-zinc-950 p-5 rounded-2xl border border-zinc-900/80">
-        <div className="flex flex-col sm:flex-row justify-between sm:items-center pb-4 border-b border-zinc-900 gap-4">
-          <div>
-            <h4 className="text-xs font-bold uppercase tracking-wider text-zinc-400">Evaluation Feed Audits</h4>
-            <span className="text-[10px] text-zinc-500">Browse detailed evaluation history with real-time logs</span>
-          </div>
-
-          {/* Toggle: Debug Mode */}
-          <div className="flex items-center gap-3">
-            <span className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Debug Mode (JSON View)</span>
-            <button 
-              onClick={() => setDebugMode(!debugMode)}
-              className={`w-12 h-6.5 rounded-full p-1 transition-colors duration-200 cursor-pointer ${debugMode ? 'bg-sky-500' : 'bg-zinc-800'}`}
-            >
-              <div className={`bg-white w-4.5 h-4.5 rounded-full shadow-md transform transition-transform duration-200 ${debugMode ? 'translate-x-5.5' : 'translate-x-0'}`} />
-            </button>
-          </div>
-        </div>
-
-        <div className="mt-4 space-y-4">
-          {logs.length === 0 ? (
-            <p className="text-zinc-500 py-12 text-center text-xs">No scan events recorded in the evaluations audit log yet.</p>
-          ) : (
-            logs.map((log: any) => {
-              const isExpanded = expandedLogId === log.id;
-              
-              // Helper to parse lists
-              let matchedList: string[] = [];
-              let failedList: string[] = [];
-              try {
-                matchedList = typeof log.matched_rules === 'string' ? JSON.parse(log.matched_rules) : (log.matched_rules || []);
-              } catch(e){}
-              try {
-                failedList = typeof log.failed_rules === 'string' ? JSON.parse(log.failed_rules) : (log.failed_rules || []);
-              } catch(e){}
-
-              return (
-                <div key={log.id} className="border border-zinc-900/80 rounded-xl bg-zinc-900/10 hover:border-zinc-800 overflow-hidden text-xs transition-colors">
-                  {/* Summary row */}
-                  <div 
-                    onClick={() => setExpandedLogId(isExpanded ? null : log.id)}
-                    className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 cursor-pointer select-none"
-                  >
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-2">
-                        <span className="font-extrabold text-white uppercase">{log.pair}</span>
-                        <span className="px-1.5 py-0.5 bg-zinc-900 text-zinc-500 border border-zinc-800 rounded font-mono text-[9px]">{log.timeframe}</span>
-                        <span className="text-[10px] text-zinc-500">{new Date(log.created_at).toLocaleTimeString()}</span>
-                      </div>
-                      <div className="text-[11px] text-zinc-400 font-semibold truncate max-w-xl">
-                        {log.trade_reason || "Evaluated strategy metrics."}
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-2.5 flex-wrap">
-                      {/* Decision Score Badge */}
-                      <span className="px-2 py-0.5 bg-zinc-900 text-zinc-400 border border-zinc-800 rounded-lg text-[10px] font-mono font-bold">
-                        Score: {log.decision_score}/100
-                      </span>
-
-                      {/* Recommendation Badge */}
-                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
-                        log.recommendation === 'PASS' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
-                        log.recommendation === 'LIKELY_PASS' ? 'bg-sky-500/10 text-sky-400 border-sky-500/20' :
-                        log.recommendation === 'AMBIGUOUS' ? 'bg-amber-500/10 text-amber-500/20 border-amber-500/30' :
-                        'bg-rose-500/10 text-rose-400 border-rose-500/20'
-                      }`}>
-                        {log.recommendation}
-                      </span>
-
-                      {/* Gemini badge */}
-                      {log.gemini_used && (
-                        <span className="px-2 py-0.5 bg-purple-500/10 text-purple-400 border border-purple-500/20 rounded-full text-[9px] font-bold uppercase">
-                          AI
-                        </span>
-                      )}
-
-                      {/* Trade Sent Badge */}
-                      {log.trade_sent ? (
-                        <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full text-[9px] font-bold uppercase">
-                          Signal Sent
-                        </span>
-                      ) : (
-                        <span className="px-2 py-0.5 bg-zinc-900 text-zinc-500 border border-zinc-800 rounded-full text-[9px] font-bold uppercase">
-                          Logged
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Expanded block */}
-                  {isExpanded && (
-                    <div className="p-4 bg-zinc-950 border-t border-zinc-900 space-y-4 font-sans text-zinc-300">
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div className="space-y-1.5">
-                          <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wide">Client Scan Owner</span>
-                          <p className="font-mono text-zinc-300">{log.user_email}</p>
-                        </div>
-                        <div className="space-y-1.5">
-                          <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wide font-semibold">Strategy Mode</span>
-                          <p className="font-mono text-indigo-400 font-bold">{log.strategy_mode}</p>
-                        </div>
-                      </div>
-
-                      {debugMode ? (
-                        /* Debug Mode: raw JSON outputs */
-                        <div className="space-y-3">
-                          <div className="space-y-1">
-                            <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wide">Matched Rules JSON</span>
-                            <pre className="p-3 bg-zinc-900 border border-zinc-800/80 rounded-xl font-mono text-[10px] text-zinc-300 overflow-x-auto">
-                              {JSON.stringify(matchedList, null, 2)}
-                            </pre>
-                          </div>
-                          <div className="space-y-1">
-                            <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wide">Failed Rules JSON</span>
-                            <pre className="p-3 bg-zinc-900 border border-zinc-800/80 rounded-xl font-mono text-[10px] text-zinc-300 overflow-x-auto">
-                              {JSON.stringify(failedList, null, 2)}
-                            </pre>
-                          </div>
-                          {log.gemini_used && (
-                            <div className="space-y-1">
-                              <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wide font-semibold">Gemini Raw Result</span>
-                              <pre className="p-3 bg-zinc-900 border border-zinc-800/80 rounded-xl font-mono text-[10px] text-zinc-300 overflow-x-auto whitespace-pre-wrap">
-                                {log.gemini_result || "No raw model output logged."}
-                              </pre>
-                            </div>
-                          )}
-                        </div>
-                      ) : (
-                        /* Non-Debug Mode: elegant summary charts/views */
-                        <div className="space-y-4">
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            {/* Matched list */}
-                            <div className="space-y-2">
-                              <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wide flex items-center gap-1.5">
-                                <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full" /> Rules Satisfied ({matchedList.length})
-                              </span>
-                              <div className="flex flex-wrap gap-1.5">
-                                {matchedList.length === 0 ? (
-                                  <span className="text-zinc-500 italic text-[11px]">No rules matched.</span>
-                                ) : (
-                                  matchedList.map((r) => (
-                                    <span key={r} className="px-2.5 py-1 bg-emerald-500/5 text-emerald-400 border border-emerald-500/10 rounded-lg font-mono font-bold text-[10px]">
-                                      {r}
-                                    </span>
-                                  ))
-                                )}
-                              </div>
-                            </div>
-
-                            {/* Failed list */}
-                            <div className="space-y-2">
-                              <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wide flex items-center gap-1.5">
-                                <span className="w-1.5 h-1.5 bg-red-500 rounded-full" /> Rules Broken / Unsatisfied ({failedList.length})
-                              </span>
-                              <div className="flex flex-wrap gap-1.5">
-                                {failedList.length === 0 ? (
-                                  <span className="text-zinc-500 italic text-[11px]">No rules broken.</span>
-                                ) : (
-                                  failedList.map((r) => (
-                                    <span key={r} className="px-2.5 py-1 bg-red-500/5 text-red-400 border border-red-500/10 rounded-lg font-mono font-bold text-[10px]">
-                                      {r}
-                                    </span>
-                                  ))
-                                )}
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* Recommendation explanation details */}
-                          <div className="space-y-1 bg-zinc-900/40 border border-zinc-900 p-3.5 rounded-xl">
-                            <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wide">Decision Explanation</span>
-                            <p className="text-[11px] text-zinc-300 font-semibold leading-relaxed mt-1">{log.trade_reason}</p>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              );
-            })
-          )}
-        </div>
-      </div>
+      )}
     </div>
   );
 };
-
 
 // ----------------------------------------------------
 // Main Admin Component
 // ----------------------------------------------------
 export default function AdminDashboard({ userProfile, session, authLoading }: { userProfile: any, session: any, authLoading: boolean }) {
-  const [activeAdminTab, setActiveAdminTab] = useState<'dashboard' | 'users' | 'watchers' | 'signals' | 'health' | 'settings' | 'gemini-tester' | 'inspector' | 'validation' | 'explainability'>('dashboard');
+  const [activeAdminTab, setActiveAdminTab] = useState<'dashboard' | 'users' | 'watchers' | 'signals' | 'health' | 'settings' | 'live-logs'>('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [toast, setToast] = useState<ToastState | null>(null);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
   const ADMIN_EMAIL = "gaks6535@gmail.com";
   
@@ -2324,16 +2068,12 @@ export default function AdminDashboard({ userProfile, session, authLoading }: { 
 
   const menuItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { id: 'explainability', label: 'Explainability & Analytics', icon: Activity },
-    { id: 'learning', label: 'Learning Analytics', icon: Activity },
+    { id: 'live-logs', label: 'Live Logs', icon: Terminal },
     { id: 'users', label: 'Users', icon: Users },
     { id: 'watchers', label: 'Watchers', icon: Eye },
     { id: 'signals', label: 'Signals', icon: Zap },
-    { id: 'inspector', label: 'Strategy Inspector', icon: Terminal },
-    { id: 'validation', label: 'System Validation', icon: ShieldCheck },
     { id: 'health', label: 'System Health', icon: Activity },
     { id: 'settings', label: 'Settings', icon: SettingsIcon },
-    { id: 'gemini-tester', label: 'Developer Tools', icon: Terminal },
   ];
 
   return (
@@ -2372,17 +2112,13 @@ export default function AdminDashboard({ userProfile, session, authLoading }: { 
 
         {/* Scrollable Subpage Frame */}
         <div className="flex-1 overflow-y-auto pb-16">
-          {activeAdminTab === 'explainability' && <ExplainabilityPage fetchWithAuth={fetchWithAuth} />}
-          {activeAdminTab === 'learning' && <LearningAnalyticsPage fetchWithAuth={fetchWithAuth} />}
           {activeAdminTab === 'dashboard' && <DashboardPage fetchWithAuth={fetchWithAuth} />}
+          {activeAdminTab === 'live-logs' && <LiveLogsPage fetchWithAuth={fetchWithAuth} />}
           {activeAdminTab === 'users' && <UsersPage fetchWithAuth={fetchWithAuth} showToast={showToast} />}
           {activeAdminTab === 'watchers' && <WatchersPage fetchWithAuth={fetchWithAuth} showToast={showToast} />}
           {activeAdminTab === 'signals' && <SignalsPage fetchWithAuth={fetchWithAuth} />}
-          {activeAdminTab === 'inspector' && <StrategyEngineInspectorPage fetchWithAuth={fetchWithAuth} />}
-          {activeAdminTab === 'validation' && <SystemValidationPage fetchWithAuth={fetchWithAuth} />}
           {activeAdminTab === 'health' && <SystemHealthPage fetchWithAuth={fetchWithAuth} />}
           {activeAdminTab === 'settings' && <SettingsPage fetchWithAuth={fetchWithAuth} showToast={showToast} />}
-          {activeAdminTab === 'gemini-tester' && <GeminiTesterPage />}
         </div>
       </div>
 

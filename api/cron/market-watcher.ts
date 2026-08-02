@@ -1173,6 +1173,14 @@ export default async function handler(req: any, res: any) {
 
       console.log(`[BRANCH EXECUTED] WAITING branch for Watcher ID: ${watcher.id}`);
 
+      let executionLogs: { time: string; message: string; type: 'info' | 'success' | 'error' | 'warning' }[] = [];
+      const addLog = (message: string, type: 'info' | 'success' | 'error' | 'warning' = 'info') => {
+        const time = new Date().toLocaleTimeString('en-GB', { hour12: false });
+        executionLogs.push({ time, message, type });
+      };
+
+      addLog("Cron Started", "success");
+
       // Determine if watcher is due for a scan
       let isDue = false;
       if (!lastScanDate) {
@@ -1192,7 +1200,9 @@ export default async function handler(req: any, res: any) {
       let traceData: any = null;
       let scanStart: number = 0;
       try {
-        // Strategy Loaded
+        addLog("Watcher Loaded", "success");
+        addLog(`Pair: ${selectedPair}`);
+
         const [{ data: prefsRecord }, { data: apiKeyRecord }] = await Promise.all([
           supabase.from("trading_preferences").select("*").eq("user_id", userId).maybeSingle(),
           supabase.from("user_api_keys").select("*").eq("user_id", userId).eq("provider", "gemini").maybeSingle()
@@ -1209,6 +1219,7 @@ export default async function handler(req: any, res: any) {
         }
 
         const strategyText = extractStrategyTextById(rawStrategyText, watcher.strategy_id);
+        addLog("Strategy Loaded", "success");
         console.log(`LOG: Strategy loaded for ${selectedPair}`);
 
         // Check Telegram connection
@@ -1292,11 +1303,13 @@ export default async function handler(req: any, res: any) {
         const tsCacheKey = `${finalSymbol}_${interval}`;
 
         if (cronTimeSeriesCache[tsCacheKey]) {
+          addLog("Candle Downloaded (Cache Hit)", "success");
           console.log(`[Cache Hit] Reusing cached Twelve Data time series for ${tsCacheKey}`);
           tdStats.cacheHits++;
           quoteData = cronTimeSeriesCache[tsCacheKey].quoteData;
           candleData = cronTimeSeriesCache[tsCacheKey].candleData;
         } else {
+          addLog("Candle Downloaded", "success");
           const timeSeriesUrl = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(finalSymbol)}&interval=${interval}&outputsize=20&apikey=${twelveDataKey}`;
           try {
             tdStats.requests++;
@@ -1376,6 +1389,7 @@ export default async function handler(req: any, res: any) {
         };
 
         // Extract market structure & compile strategy
+        addLog("Strategy Compiled", "success");
         const compiledStrategy = compileStrategy(strategyText);
         const marketStructure = extractMarketStructure(candleData, compiledStrategy.detector_validation?.supported_detectors);
 
@@ -1463,6 +1477,10 @@ export default async function handler(req: any, res: any) {
         const decisionSnapshot = buildDecisionSnapshot(decisionResult, histResult, compiledStrategy);
 
         // Stage 4
+        addLog("Decision Engine Complete", "success");
+        addLog(`Decision Score: ${decisionResult.decision_score.toFixed(1)}%`);
+        addLog(`Recommendation: ${decisionResult.recommendation}`);
+
         traceData.decisionEngine = {
           decisionScore: `${decisionResult.matched_weight} / ${decisionResult.possible_weight} (${decisionResult.decision_score.toFixed(1)}%)`,
           recommendation: decisionResult.recommendation,
@@ -1594,6 +1612,8 @@ export default async function handler(req: any, res: any) {
           }
 
           if (requiresGemini) {
+            addLog("Gemini Required", "success");
+            addLog("Calling Gemini", "success");
             console.log("[PIPELINE AUDIT] ENTER GEMINI BRANCH");
             console.log("GEMINI CALLED");
             geminiInvoked = true;
@@ -1708,6 +1728,8 @@ Output ONLY valid JSON:
                 }
 
                 parsedResult = JSON.parse(geminiTextResult);
+                addLog("Gemini Returned", "success");
+                addLog("Parsed Gemini Output", "success");
                 console.log("========== PARSED GEMINI OUTPUT ==========");
                 console.log(parsedResult);
 
@@ -1911,10 +1933,13 @@ Output ONLY valid JSON:
         console.log("Telegram Will Send:", analysis.signal !== "NO_TRADE");
         
         if (analysis.signal === 'BUY') {
+          addLog("Final Signal: BUY", "success");
           console.log("FINAL DECISION: BUY");
         } else if (analysis.signal === 'SELL') {
+          addLog("Final Signal: SELL", "success");
           console.log("FINAL DECISION: SELL");
         } else if (analysis.signal === 'NO_TRADE') {
+          addLog("Final Signal: NO_TRADE", "success");
           console.log("FINAL DECISION: NO_TRADE");
         }
         
@@ -2221,6 +2246,7 @@ Output ONLY valid JSON:
         const alertMessage = buildTelegramAlertMessage(signal);
         const alertSent = await sendTelegramMessage(telegramChatId, alertMessage);
         if (alertSent) {
+          addLog("Telegram Sent", "success");
           telegramMessagesSentCount++;
           console.log(`LOG: Telegram message sent successfully for Watcher ID: ${watcher.id} (${selectedPair})`);
         } else {
@@ -2316,6 +2342,19 @@ Output ONLY valid JSON:
 
         logPipelineTrace(traceData);
 
+        addLog("Scan Completed", "success");
+        // Save execution logs to Supabase
+        await supabase.from('execution_logs').insert({
+          watcher_id: watcher.id,
+          user_id: userId,
+          pair: selectedPair,
+          run_time: new Date().toISOString(),
+          logs: executionLogs,
+          final_signal: analysis.signal,
+          decision_score: decisionResult.decision_score,
+          status: 'success'
+        });
+
         console.log("[PIPELINE AUDIT] END OF PIPELINE REACHED");
         watchersProcessedCount++;
         results.push({ userId, symbol, tradeStatus: 'ACTIVE', signalsFound: 1, signalsSent: alertSent ? 1 : 0 });
@@ -2359,6 +2398,25 @@ Output ONLY valid JSON:
     console.log(`===================================\n`);
 
     console.log(`LOG: Cron completed (Processed: ${watchersProcessedCount}, Sent: ${telegramMessagesSentCount})`);
+
+    // Cleanup old logs (keep only last 500 runs)
+    try {
+      const { data: cutoffData } = await supabase
+        .from('execution_logs')
+        .select('run_time')
+        .order('run_time', { ascending: false })
+        .range(500, 500)
+        .maybeSingle();
+
+      if (cutoffData) {
+        await supabase
+          .from('execution_logs')
+          .delete()
+          .lt('run_time', cutoffData.run_time);
+      }
+    } catch (e) {
+      console.error("Failed to cleanup old logs:", e);
+    }
 
     return res.status(200).json({
       success: true,
