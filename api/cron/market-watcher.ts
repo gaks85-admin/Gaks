@@ -1603,6 +1603,15 @@ export default async function handler(req: any, res: any) {
             try {
               const geminiKey = apiKeyRecord?.api_key || process.env.GEMINI_API_KEY;
               if (geminiKey) {
+                console.log("========== CALLING GEMINI ==========");
+                console.log("Watcher ID:", watcher.id);
+                console.log("Pair:", selectedPair);
+                console.log("Timeframe:", selectedTimeframe);
+                console.log("Decision Score:", decisionResult.decision_score);
+                console.log("Recommendation:", recommendation);
+                console.log("Gemini Required:", requiresGemini);
+                console.log("Sending prompt to Gemini...");
+
                 console.log("[PIPELINE AUDIT] Gemini API request starting...");
                 const ai = new GoogleGenAI({ apiKey: geminiKey });
                 const promptText = `
@@ -1665,6 +1674,10 @@ Output ONLY valid JSON:
                   }
                 });
                 console.log("[PIPELINE AUDIT] Gemini API response received");
+                console.log("========== GEMINI RETURNED ==========");
+                console.log("Raw Gemini Response:");
+                console.dir(aiResponse, { depth: null });
+
                 geminiCallsExecutedCount++;
                 geminiDuration = Date.now() - geminiStart;
                 geminiTextResult = aiResponse.text || "";
@@ -1695,6 +1708,9 @@ Output ONLY valid JSON:
                 }
 
                 parsedResult = JSON.parse(geminiTextResult);
+                console.log("========== PARSED GEMINI OUTPUT ==========");
+                console.log(parsedResult);
+
                 console.log("[PIPELINE AUDIT] Parsed signal result from Gemini");
                 console.log("Gemini JSON Parsed");
                 geminiSucceeded = true;
@@ -1741,6 +1757,9 @@ Output ONLY valid JSON:
                 }
               }
             } catch (gemErr: any) {
+              console.error("========== GEMINI ERROR ==========");
+              console.error(gemErr);
+
               const errMsg = gemErr.message || String(gemErr);
               const errStatus = gemErr.status || 0;
               const lowerMsg = errMsg.toLowerCase();
@@ -1890,6 +1909,15 @@ Output ONLY valid JSON:
         console.log("Gemini Direction:", parsedResult?.direction);
         console.log("Final Analysis Signal:", analysis.signal);
         console.log("Telegram Will Send:", analysis.signal !== "NO_TRADE");
+        
+        if (analysis.signal === 'BUY') {
+          console.log("FINAL DECISION: BUY");
+        } else if (analysis.signal === 'SELL') {
+          console.log("FINAL DECISION: SELL");
+        } else if (analysis.signal === 'NO_TRADE') {
+          console.log("FINAL DECISION: NO_TRADE");
+        }
+        
         console.log("==================================");
 
         console.log(`LOG: Signal result for ${selectedPair}: ${analysis.signal} (Confidence: ${analysis.confidence}%)`);
