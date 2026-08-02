@@ -1494,6 +1494,9 @@ export default async function handler(req: any, res: any) {
         const recommendation = decisionResult.recommendation; // PASS, LIKELY_PASS, AMBIGUOUS, FAIL
         const executionMode = compiledStrategy.detector_validation?.execution_mode || 'HYBRID';
 
+        console.log(`[PIPELINE AUDIT] Watcher: ${watcher.id}, Pair: ${selectedPair}`);
+        console.log(`[PIPELINE AUDIT] Recommendation: ${recommendation}, Execution Mode: ${executionMode}`);
+
         if (recommendation === 'FAIL' && executionMode === 'RULE_ONLY') {
           console.log(`Execution Mode: ${executionMode}`);
           console.log(`Decision: ${recommendation}`);
@@ -1579,6 +1582,11 @@ export default async function handler(req: any, res: any) {
           const forceGemini = (recommendation === 'FAIL' && (executionMode === 'HYBRID' || executionMode === 'AI_ONLY'));
           const requiresGemini = (compiledStrategy.strategy_mode !== 'RULE_ONLY') && (decisionResult.requires_gemini || forceGemini);
           
+          console.log(`[PIPELINE AUDIT] strategy_mode: ${compiledStrategy.strategy_mode}`);
+          console.log(`[PIPELINE AUDIT] decisionResult.requires_gemini: ${decisionResult.requires_gemini}`);
+          console.log(`[PIPELINE AUDIT] forceGemini: ${forceGemini}`);
+          console.log(`[PIPELINE AUDIT] requiresGemini: ${requiresGemini}`);
+
           if (forceGemini) {
             console.log(`Execution Mode: ${executionMode}`);
             console.log(`Decision: ${recommendation}`);
@@ -1586,6 +1594,7 @@ export default async function handler(req: any, res: any) {
           }
 
           if (requiresGemini) {
+            console.log("[PIPELINE AUDIT] ENTER GEMINI BRANCH");
             console.log("GEMINI CALLED");
             geminiInvoked = true;
             console.log("Gemini Invoked");
@@ -1594,6 +1603,7 @@ export default async function handler(req: any, res: any) {
             try {
               const geminiKey = apiKeyRecord?.api_key || process.env.GEMINI_API_KEY;
               if (geminiKey) {
+                console.log("[PIPELINE AUDIT] Gemini API request starting...");
                 const ai = new GoogleGenAI({ apiKey: geminiKey });
                 const promptText = `
 You are an expert AI trading analyst.
@@ -1654,6 +1664,7 @@ Output ONLY valid JSON:
                     }
                   }
                 });
+                console.log("[PIPELINE AUDIT] Gemini API response received");
                 geminiCallsExecutedCount++;
                 geminiDuration = Date.now() - geminiStart;
                 geminiTextResult = aiResponse.text || "";
@@ -1684,6 +1695,7 @@ Output ONLY valid JSON:
                 }
 
                 parsedResult = JSON.parse(geminiTextResult);
+                console.log("[PIPELINE AUDIT] Parsed signal result from Gemini");
                 console.log("Gemini JSON Parsed");
                 geminiSucceeded = true;
                 geminiDecision = parsedResult.direction as 'BUY' | 'SELL' | 'NO_TRADE';
@@ -1966,6 +1978,7 @@ Output ONLY valid JSON:
         }
 
         const executedPrice = Number(candleData[candleData.length - 1]?.close) || Number(analysis.entryPrice) || 0;
+        console.log("[PIPELINE AUDIT] ENTERING RISK ENGINE STAGE");
         const posSizeResult = calculatePositionSize({
           accountSize: accountSize,
           riskPercentage: riskPercentage,
@@ -2099,6 +2112,7 @@ Output ONLY valid JSON:
           };
 
           isRegistered = await registerSignal(supabase, watcher, signal);
+          console.log("[PIPELINE AUDIT] SIGNAL REGISTERED IN DB");
         } else {
           console.log(`[SIGNAL SKIPPED] Watcher ID: ${watcher.id} - Recommendation is FAIL. Setting signal to NO_TRADE.`);
           analysis.signal = 'NO_TRADE';
@@ -2175,6 +2189,7 @@ Output ONLY valid JSON:
         }
 
         // Send ONE Telegram signal
+        console.log("[PIPELINE AUDIT] SENDING TELEGRAM ALERT");
         const alertMessage = buildTelegramAlertMessage(signal);
         const alertSent = await sendTelegramMessage(telegramChatId, alertMessage);
         if (alertSent) {
@@ -2273,6 +2288,7 @@ Output ONLY valid JSON:
 
         logPipelineTrace(traceData);
 
+        console.log("[PIPELINE AUDIT] END OF PIPELINE REACHED");
         watchersProcessedCount++;
         results.push({ userId, symbol, tradeStatus: 'ACTIVE', signalsFound: 1, signalsSent: alertSent ? 1 : 0 });
 
