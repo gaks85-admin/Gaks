@@ -1830,7 +1830,34 @@ Output ONLY valid JSON:
             }
           } else {
             // Gemini NOT required! Fallback to local strategy engine (since recommendation is PASS)
-            console.log(`[Decision Engine] Recommendation is PASS. Skipping Gemini as requires_gemini is false.`);
+            console.log(`[Decision Engine] Recommendation is ${recommendation}. Skipping Gemini as requires_gemini is false.`);
+
+            if (recommendation === 'FAIL') {
+              console.log(`[Decision Engine] Recommendation is FAIL. Forcing NO_TRADE in local fallback.`);
+              analysis = {
+                signal: 'NO_TRADE',
+                confidence: 0,
+                reasoning: ['Rejected by Decision Engine']
+              };
+            } else {
+              const mappedParsedStrategy: ParsedStrategy = {
+                indicators: [],
+                emaValues: compiledStrategy.compiled_rules.ema?.periods || [],
+                rsiThresholds: {
+                  overbought: compiledStrategy.compiled_rules.rsi?.overbought,
+                  oversold: compiledStrategy.compiled_rules.rsi?.oversold
+                },
+                bos: compiledStrategy.compiled_rules.bos,
+                choch: compiledStrategy.compiled_rules.choch,
+                liquiditySweep: compiledStrategy.compiled_rules.liquidity_sweep,
+                fairValueGap: compiledStrategy.compiled_rules.fair_value_gap,
+                session: compiledStrategy.compiled_rules.session?.[0],
+                timeframe: compiledStrategy.compiled_rules.timeframes?.[0],
+                minimumRiskReward: compiledStrategy.compiled_rules.risk_reward?.min_ratio
+              };
+              const localAnalysis = analyzeMarket(candleData, mappedParsedStrategy);
+              analysis = localAnalysis;
+            }
 
             // Stage 5
             traceData.gemini = {
@@ -1842,24 +1869,6 @@ Output ONLY valid JSON:
               parsedConfidence: 'N/A',
               parsedDirection: 'N/A'
             };
-
-            const mappedParsedStrategy: ParsedStrategy = {
-              indicators: [],
-              emaValues: compiledStrategy.compiled_rules.ema?.periods || [],
-              rsiThresholds: {
-                overbought: compiledStrategy.compiled_rules.rsi?.overbought,
-                oversold: compiledStrategy.compiled_rules.rsi?.oversold
-              },
-              bos: compiledStrategy.compiled_rules.bos,
-              choch: compiledStrategy.compiled_rules.choch,
-              liquiditySweep: compiledStrategy.compiled_rules.liquidity_sweep,
-              fairValueGap: compiledStrategy.compiled_rules.fair_value_gap,
-              session: compiledStrategy.compiled_rules.session?.[0],
-              timeframe: compiledStrategy.compiled_rules.timeframes?.[0],
-              minimumRiskReward: compiledStrategy.compiled_rules.risk_reward?.min_ratio
-            };
-            const localAnalysis = analyzeMarket(candleData, mappedParsedStrategy);
-            analysis = localAnalysis;
           }
         }
 
