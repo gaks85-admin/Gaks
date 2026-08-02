@@ -1484,6 +1484,7 @@ export default async function handler(req: any, res: any) {
           riskReward: null,
           reasoning: []
         };
+        let parsedResult: any = null;
         let geminiDirection = 'NO_TRADE';
         let geminiCalled = false;
         let geminiTextResult = "";
@@ -1682,7 +1683,7 @@ Output ONLY valid JSON:
                   watcher.resume_notification_sent = false;
                 }
 
-                const parsedResult = JSON.parse(geminiTextResult);
+                parsedResult = JSON.parse(geminiTextResult);
                 console.log("Gemini JSON Parsed");
                 geminiSucceeded = true;
                 geminiDecision = parsedResult.direction as 'BUY' | 'SELL' | 'NO_TRADE';
@@ -1871,6 +1872,13 @@ Output ONLY valid JSON:
             };
           }
         }
+
+        console.log("========== FINAL SIGNAL ==========");
+        console.log("Decision Recommendation:", recommendation);
+        console.log("Gemini Direction:", parsedResult?.direction);
+        console.log("Final Analysis Signal:", analysis.signal);
+        console.log("Telegram Will Send:", analysis.signal !== "NO_TRADE");
+        console.log("==================================");
 
         console.log(`LOG: Signal result for ${selectedPair}: ${analysis.signal} (Confidence: ${analysis.confidence}%)`);
 
