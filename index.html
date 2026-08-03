@@ -1,6 +1,22 @@
 <!doctype html>
 <html lang="en">
   <head>
+    <script>
+      window.onerror = function(message, source, lineno, colno, error) {
+        fetch('/api/log-error', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message, source, lineno, colno, stack: error ? error.stack : '' })
+        });
+      };
+      window.addEventListener('unhandledrejection', function(event) {
+        fetch('/api/log-error', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: event.reason ? event.reason.message : 'Unhandled Promise Rejection', stack: event.reason ? event.reason.stack : '' })
+        });
+      });
+    </script>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>My Google AI Studio App</title>

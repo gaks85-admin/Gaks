@@ -105,6 +105,11 @@ async function startServer() {
   app.post("/api/cron/market-watcher", marketWatcherCronHandler as any);
   app.all("/api/cron/test", testCronHandler as any);
 
+  app.post("/api/log-error", (req, res) => {
+    require('fs').writeFileSync('client-error.log', JSON.stringify(req.body, null, 2) + '\n', { flag: 'a' });
+    res.sendStatus(200);
+  });
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const { createServer: createViteServer } = await import("vite");
