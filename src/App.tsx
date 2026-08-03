@@ -2822,23 +2822,54 @@ export default function App() {
                         </div>
                       </div>
 
-                      <div className="space-y-2">
-                        <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-500 block ml-1">Subscription Plan</label>
-                        <div className="grid grid-cols-3 gap-2">
-                          {['Free', 'Premium', 'Premium Pro'].map((plan) => {
-                            const isSelected = profilePlan === plan;
+                      <div className="space-y-4">
+                        <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-500 block ml-1">Gaks Subscription Tier</label>
+                        <div className="space-y-3">
+                          {[
+                            { id: 'Free', price: '$0', desc: 'Basic market scanning and limited AI analysis.' },
+                            { id: 'Premium', price: '$29', desc: 'Advanced AI watchers and real-time Telegram alerts.' },
+                            { id: 'Premium Pro', price: '$99', desc: 'Enterprise-grade throughput and custom signal logic.' }
+                          ].map((plan) => {
+                            const isSelected = profilePlan === plan.id;
                             return (
                               <button
                                 type="button"
-                                key={plan}
-                                onClick={() => setProfilePlan(plan)}
-                                className={`py-2.5 px-1.5 rounded-xl text-[10px] font-bold border transition-all cursor-pointer ${
+                                key={plan.id}
+                                onClick={() => setProfilePlan(plan.id)}
+                                className={`w-full text-left p-4 rounded-2xl border transition-all cursor-pointer relative group ${
                                   isSelected
-                                    ? 'bg-zinc-900 dark:bg-white text-white dark:text-black border-zinc-900 dark:border-white'
-                                    : 'bg-white dark:bg-zinc-950/40 border-zinc-200 dark:border-zinc-900 text-zinc-500 hover:border-zinc-300 dark:hover:border-zinc-800 hover:text-zinc-700 dark:hover:text-zinc-300'
+                                    ? 'bg-zinc-950 dark:bg-zinc-900/40 border-emerald-500 shadow-[0_0_20px_rgba(16,185,129,0.1)]'
+                                    : 'bg-white dark:bg-zinc-950/20 border-zinc-200 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700'
                                 }`}
                               >
-                                {plan}
+                                <div className="flex items-center justify-between">
+                                  <div className="space-y-1">
+                                    <div className="flex items-center gap-2">
+                                      <span className={`text-[13px] font-bold tracking-tight ${isSelected ? 'text-white' : 'text-zinc-900 dark:text-zinc-300'}`}>
+                                        {plan.id}
+                                      </span>
+                                      {isSelected && (
+                                        <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 text-[8px] font-bold uppercase tracking-widest">
+                                          Active
+                                        </span>
+                                      )}
+                                    </div>
+                                    <p className="text-[10px] text-zinc-500 font-medium leading-relaxed max-w-[200px]">
+                                      {plan.desc}
+                                    </p>
+                                  </div>
+                                  <div className="text-right">
+                                    <div className={`text-[15px] font-bold tracking-tight ${isSelected ? 'text-emerald-500' : 'text-zinc-900 dark:text-zinc-100'}`}>
+                                      {plan.price}
+                                    </div>
+                                    <div className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest">Per Month</div>
+                                  </div>
+                                </div>
+                                {isSelected && (
+                                  <div className="absolute top-2 right-2">
+                                    <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,1)]"></div>
+                                  </div>
+                                )}
                               </button>
                             );
                           })}
