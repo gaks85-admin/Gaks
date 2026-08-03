@@ -42,8 +42,7 @@ import {
   CreditCard,
   Globe,
   Palette,
-  ChevronDown,
-  Mail
+  ChevronDown
 } from 'lucide-react';
 
 import { getTelegramConnection, initiateTelegramConnection, getTelegramDeepLink } from './lib/telegram';
@@ -908,22 +907,6 @@ export default function App() {
       triggerNotification("Signed out successfully!", "info");
     } catch (e) {
       triggerNotification("Logout failed.", "info");
-    }
-  };
-
-  const handleDeleteAccount = async () => {
-    if (!window.confirm("CRITICAL: Are you sure you want to delete your Gaks AI account? This action is permanent and will delete all your strategies, watchlist, and profile data from our servers.")) {
-      return;
-    }
-    
-    // In a real app, this would call a Supabase function to delete the user.
-    // For now, we just notify and logout.
-    try {
-      triggerNotification("Account deletion request initiated. Please contact support to finalize.", "info");
-      await supabase.auth.signOut();
-      setSession(null);
-    } catch (err: any) {
-      triggerNotification(err.message, "info");
     }
   };
 
@@ -2695,391 +2678,328 @@ export default function App() {
 
           {/* ==================== TAB 4: SETTINGS & PROFILE ==================== */}
           {activeTab === 'settings' && (
-            <div className="space-y-10 animate-fade-in pb-20">
+            <div className="space-y-8 animate-fade-in pb-12">
               
-              {/* Premium Profile Header */}
-              <div className="relative p-8 rounded-[32px] border border-zinc-800 bg-gradient-to-br from-[#0c0c0e] to-[#08080a] overflow-hidden">
-                <div className="absolute top-0 right-0 p-8 opacity-5">
-                  <UserIcon className="w-48 h-48 -mr-12 -mt-12" />
-                </div>
-                
-                <div className="relative flex flex-col md:flex-row items-center md:items-start gap-8">
-                  <div className="relative">
-                    <div className="w-24 h-24 rounded-3xl bg-zinc-900 border border-zinc-800 flex items-center justify-center text-white text-3xl font-bold uppercase overflow-hidden shadow-2xl">
-                      {profileAvatarUrl ? (
-                        <img src={profileAvatarUrl} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                      ) : (
-                        profileFullName ? profileFullName.charAt(0) : 'U'
-                      )}
+              {/* Header Title */}
+              <div className="space-y-2">
+                <h1 className="text-[32px] sm:text-[36px] font-semibold tracking-[-0.035em] text-white leading-[1.15] font-sans">Account & Profile</h1>
+                <p className="text-[15px] sm:text-[16px] font-normal tracking-[-0.01em] text-zinc-400 leading-[1.45] max-w-sm">
+                  Manage your personal user credentials, profiles database and live Gaks AI subscriptions.
+                </p>
+              </div>
+
+              {/* User Profile Form */}
+              <form onSubmit={handleUpdateProfile} className="p-6 rounded-3xl border border-zinc-800 bg-[#0c0c0e]/80 space-y-6">
+                <div className="flex items-center gap-4 border-b border-zinc-900 pb-5">
+                  <div className="relative w-14 h-14 rounded-2xl bg-zinc-950 border border-zinc-800 flex items-center justify-center text-white text-lg font-bold uppercase overflow-hidden shrink-0">
+                    {profileAvatarUrl ? (
+                      <img src={profileAvatarUrl} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                    ) : (
+                      profileFullName ? profileFullName.charAt(0) : 'U'
+                    )}
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-white">{profileFullName || 'Gaks User'}</h3>
+                    <p className="text-[11px] text-zinc-500">{session?.user?.email}</p>
+                    <div className="mt-1 flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                      <span className="text-[9px] uppercase tracking-wider font-bold text-zinc-400">Database Synchronized</span>
                     </div>
-                    <div className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-emerald-500 border-4 border-[#0c0c0e] flex items-center justify-center">
-                      <div className="w-2 h-2 rounded-full bg-white animate-pulse"></div>
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  {/* Full Name Input */}
+                  <div className="space-y-2">
+                    <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-500 block">Full Name</label>
+                    <div className="relative rounded-2xl border border-zinc-900 bg-zinc-950/60 focus-within:border-zinc-700 overflow-hidden">
+                      <input
+                        type="text"
+                        value={profileFullName}
+                        onChange={(e) => setProfileFullName(e.target.value)}
+                        placeholder="John Doe"
+                        required
+                        className="w-full bg-transparent border-0 px-4 py-3 text-xs text-white focus:outline-none focus:ring-0"
+                      />
                     </div>
                   </div>
 
-                  <div className="flex-1 text-center md:text-left space-y-2">
-                    <div className="flex flex-col md:flex-row md:items-center gap-3">
-                      <h2 className="text-2xl font-bold text-white tracking-tight">{profileFullName || 'Gaks User'}</h2>
-                      <span className="inline-flex px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-bold uppercase tracking-widest self-center md:self-auto">
-                        {profilePlan || 'Free'} Plan
+                  {/* Email Input (Read only) */}
+                  <div className="space-y-2">
+                    <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-500 block">Email Address (Primary)</label>
+                    <div className="relative rounded-2xl border border-zinc-900 bg-zinc-900/20 overflow-hidden cursor-not-allowed">
+                      <input
+                        type="email"
+                        value={session?.user?.email || ''}
+                        disabled
+                        className="w-full bg-transparent border-0 px-4 py-3 text-xs text-zinc-500 focus:outline-none focus:ring-0 cursor-not-allowed"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Avatar URL Input */}
+                  <div className="space-y-2">
+                    <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-500 block">Profile Image URL</label>
+                    <div className="relative rounded-2xl border border-zinc-900 bg-zinc-950/60 focus-within:border-zinc-700 overflow-hidden">
+                      <input
+                        type="url"
+                        value={profileAvatarUrl}
+                        onChange={(e) => setProfileAvatarUrl(e.target.value)}
+                        placeholder="https://images.unsplash.com/photo-..."
+                        className="w-full bg-transparent border-0 px-4 py-3 text-xs text-white focus:outline-none focus:ring-0"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Subscription Plan Selector */}
+                  <div className="space-y-2">
+                    <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-500 block">Gaks Subscription Plan</label>
+                    <div className="grid grid-cols-3 gap-2">
+                      {['Free', 'Premium', 'Premium Pro'].map((plan) => {
+                        const isSelected = profilePlan === plan;
+                        return (
+                          <button
+                            type="button"
+                            key={plan}
+                            onClick={() => setProfilePlan(plan)}
+                            className={`py-2 px-1.5 rounded-xl text-[10px] font-bold border transition-all cursor-pointer ${
+                              isSelected
+                                ? 'bg-white text-black border-white'
+                                : 'bg-zinc-950/40 border-zinc-900 text-zinc-500 hover:border-zinc-800 hover:text-zinc-300'
+                            }`}
+                          >
+                            {plan}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Telegram Notifications Integration */}
+                  <div className="flex items-center justify-between p-4 rounded-2xl border border-zinc-900 bg-zinc-950/30">
+                    <div className="space-y-0.5">
+                      <h4 className="text-xs font-bold text-white">Telegram Signal Alerts</h4>
+                      <p className="text-[10px] text-zinc-500">Receive real-time forex signal scans on Telegram.</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setProfileTelegram(!profileTelegram)}
+                      className={`w-11 h-6 rounded-full p-1 transition-colors duration-200 focus:outline-none ${
+                        profileTelegram ? 'bg-emerald-500' : 'bg-zinc-800'
+                      }`}
+                    >
+                      <div
+                        className={`w-4 h-4 rounded-full bg-white transition-transform duration-200 ${
+                          profileTelegram ? 'translate-x-5' : 'translate-x-0'
+                        }`}
+                      />
+                    </button>
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={isProfileUpdating}
+                  className="w-full flex items-center justify-center gap-2 px-5 py-3.5 rounded-full bg-white text-xs font-bold text-black hover:bg-zinc-200 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isProfileUpdating ? (
+                    <div className="w-4 h-4 rounded-full border-2 border-black border-t-transparent animate-spin"></div>
+                  ) : (
+                    <>
+                      <Check className="w-4 h-4 stroke-[2.5]" />
+                      <span>Save Profile & Settings</span>
+                    </>
+                  )}
+                </button>
+              </form>
+
+              {/* Telegram Connection Section */}
+              <div className="p-6 rounded-3xl border border-zinc-800 bg-[#0c0c0e]/80 space-y-6">
+                <div className="flex items-center gap-3 border-b border-zinc-900 pb-5">
+                  <div className="w-8 h-8 rounded-xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-center shrink-0">
+                    <Send className="w-4 h-4 text-sky-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-white">Telegram Connection</h3>
+                    <p className="text-[11px] text-zinc-400">
+                      Link your personal Telegram chat identifier to receive custom system alerts.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  {/* Connection Status Indicator */}
+                  <div className="p-4 rounded-2xl border border-zinc-900 bg-zinc-950/40 flex items-center justify-between">
+                    <div className="space-y-1">
+                      <span className="text-[9px] font-bold uppercase tracking-wider text-zinc-500 block">Connection Status</span>
+                      <div className="flex items-center gap-2">
+                        <span className={`w-2 h-2 rounded-full ${telegramConnection?.connected ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`}></span>
+                        <span className="text-xs font-bold text-white">
+                          {telegramConnection?.connected ? 'Connected' : 'Not Connected'}
+                        </span>
+                      </div>
+                      {telegramConnection?.connected && telegramConnection?.telegram_username && (
+                        <p className="text-[10px] text-zinc-500">
+                          Linked Username: <span className="font-mono text-sky-400">@{telegramConnection.telegram_username}</span>
+                        </p>
+                      )}
+                    </div>
+
+                    {telegramConnection?.connected ? (
+                      <span className="px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-bold">
+                        Active
                       </span>
+                    ) : (
+                      <span className="px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-400 text-[10px] font-bold">
+                        Pending
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Status Alerts */}
+                  {telegramSuccessMessage && (
+                    <div className="flex items-center gap-2 p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[11px]">
+                      <CheckCircle2 className="w-4 h-4 shrink-0" />
+                      <span>{telegramSuccessMessage}</span>
                     </div>
-                    <p className="text-zinc-400 font-medium">{session?.user?.email}</p>
-                    <div className="pt-2 flex flex-wrap items-center justify-center md:justify-start gap-4">
-                      <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-zinc-950/60 border border-zinc-900">
-                        <Shield className="w-3.5 h-3.5 text-emerald-500" />
-                        <span className="text-[10px] font-bold text-zinc-300 uppercase tracking-wider">Sync Status: Active</span>
-                      </div>
-                      <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-zinc-950/60 border border-zinc-900">
-                        <CheckCircle2 className="w-3.5 h-3.5 text-zinc-500" />
-                        <span className="text-[10px] font-bold text-zinc-300 uppercase tracking-wider">Identity Verified</span>
-                      </div>
+                  )}
+
+                  {telegramErrorMessage && (
+                    <div className="flex items-center gap-2 p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-400 text-[11px]">
+                      <Info className="w-4 h-4 shrink-0" />
+                      <span>{telegramErrorMessage}</span>
                     </div>
+                  )}
+
+                  {/* Connect / Reconnect Button */}
+                  <button
+                    type="button"
+                    onClick={handleConnectTelegram}
+                    disabled={isTelegramConnecting}
+                    className="w-full flex items-center justify-center gap-2 px-5 py-3.5 rounded-full bg-white text-xs font-bold text-black hover:bg-zinc-200 active:scale-[0.98] transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {isTelegramConnecting ? (
+                      <div className="w-4 h-4 rounded-full border-2 border-black border-t-transparent animate-spin"></div>
+                    ) : (
+                      <>
+                        <Send className="w-3.5 h-3.5" />
+                        <span>{telegramConnection?.connected ? 'Reconnect Telegram' : 'Connect Telegram'}</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {/* AI Settings Section */}
+              <div className="p-6 rounded-3xl border border-zinc-800 bg-[#0c0c0e]/80 space-y-6">
+                <div className="flex items-center gap-3 border-b border-zinc-900 pb-5">
+                  <Sparkles className="w-5 h-5 text-white" />
+                  <div>
+                    <h3 className="text-sm font-bold text-white">AI Settings</h3>
+                    <p className="text-[11px] text-zinc-500">Configure your personal Gemini API key for Gaks AI integrations.</p>
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  {/* AI Status Display */}
+                  {(() => {
+                    const status = userProfile?.gemini_status || 'READY';
+                    const isReady = status === 'READY';
+                    return (
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between p-3.5 rounded-2xl bg-zinc-950/80 border border-zinc-900">
+                          <span className="text-xs text-zinc-400 font-medium">AI Status</span>
+                          <span className={`text-xs font-bold uppercase tracking-wider ${
+                            isReady ? 'text-emerald-400' :
+                            status === 'INVALID_KEY' ? 'text-red-400' :
+                            'text-amber-400'
+                          }`}>
+                            {isReady ? '🟢 Ready' : status === 'INVALID_KEY' ? '🔴 API Key Needs Attention' : '🟡 AI Paused'}
+                          </span>
+                        </div>
+
+                        {!isReady && (
+                          <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-300 text-[11px] leading-relaxed">
+                            Your AI Market Watcher is currently paused because your AI key requires attention.
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+
+                  <div className="space-y-2">
+                    <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-500 block">Gemini API Key</label>
+                    <div className="relative rounded-2xl border border-zinc-900 bg-zinc-950/60 focus-within:border-zinc-700 overflow-hidden">
+                      <input
+                        type="password"
+                        value={geminiKey}
+                        onChange={(e) => {
+                          setGeminiKey(e.target.value);
+                          setGeminiKeySuccess(null);
+                          setGeminiKeyError(null);
+                        }}
+                        placeholder={geminiKeyExists ? "••••••••••••••••••••••••••••" : "Enter your AI Studio Gemini API Key"}
+                        className="w-full bg-transparent border-0 px-4 py-3 text-xs text-white focus:outline-none focus:ring-0"
+                      />
+                    </div>
+                    <p className="text-[10px] text-zinc-500 leading-normal">
+                      Your API key is stored securely in Supabase and only transmitted through protected channels to execute model inferences.
+                    </p>
+                  </div>
+
+                  {geminiKeySuccess && (
+                    <div className="flex items-center gap-2 p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[11px]">
+                      <CheckCircle2 className="w-4 h-4 shrink-0" />
+                      <span>{geminiKeySuccess}</span>
+                    </div>
+                  )}
+
+                  {geminiKeyError && (
+                    <div className="flex items-center gap-2 p-3.5 rounded-2xl bg-red-500/10 border border-red-500/20 text-red-400 text-[11px]">
+                      <Info className="w-4 h-4 shrink-0" />
+                      <span>{geminiKeyError}</span>
+                    </div>
+                  )}
+
+                  <div className="flex gap-3">
+                    <button
+                      type="button"
+                      onClick={handleSaveGeminiKey}
+                      disabled={isGeminiKeySaving || isGeminiKeyLoading}
+                      className="flex-1 flex items-center justify-center gap-2 px-5 py-3 rounded-full bg-white text-xs font-bold text-zinc-950 hover:bg-zinc-200 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {isGeminiKeySaving ? (
+                        <div className="w-4 h-4 rounded-full border-2 border-zinc-950 border-t-transparent animate-spin"></div>
+                      ) : (
+                        <>
+                          <RefreshCw className="w-3.5 h-3.5" />
+                          <span>Update API Key</span>
+                        </>
+                      )}
+                    </button>
+
+                    {geminiKeyExists && (
+                      <button
+                        type="button"
+                        onClick={handleDeleteGeminiKey}
+                        disabled={isGeminiKeySaving || isGeminiKeyLoading}
+                        className="px-4 py-3 rounded-full border border-zinc-800 text-xs font-semibold text-zinc-400 hover:text-red-400 hover:border-red-900/40 transition-all cursor-pointer"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
-                <div className="lg:col-span-2 space-y-10">
-                  
-                  {/* Account Information Form */}
-                  <section className="space-y-4">
-                    <div className="flex items-center justify-between px-2">
-                      <h3 className="text-sm font-bold text-white uppercase tracking-widest">Account Information</h3>
-                    </div>
-                    <form onSubmit={handleUpdateProfile} className="p-8 rounded-[32px] border border-zinc-900 bg-[#0c0c0e]/60 space-y-8">
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div className="space-y-2.5">
-                          <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-500 block ml-1">Display Name</label>
-                          <div className="relative rounded-2xl border border-zinc-800 bg-zinc-950/40 focus-within:border-zinc-700 focus-within:bg-zinc-950 transition-all overflow-hidden group">
-                            <UserIcon className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-600 group-focus-within:text-white transition-colors" />
-                            <input
-                              type="text"
-                              value={profileFullName}
-                              onChange={(e) => setProfileFullName(e.target.value)}
-                              placeholder="Your full name"
-                              required
-                              className="w-full bg-transparent border-0 pl-11 pr-4 py-3.5 text-xs text-white focus:outline-none focus:ring-0 font-medium"
-                            />
-                          </div>
-                        </div>
-
-                        <div className="space-y-2.5">
-                          <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-500 block ml-1">Email Address (Primary)</label>
-                          <div className="relative rounded-2xl border border-zinc-900 bg-zinc-900/10 overflow-hidden cursor-not-allowed group">
-                            <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-700" />
-                            <input
-                              type="email"
-                              value={session?.user?.email || ''}
-                              disabled
-                              className="w-full bg-transparent border-0 pl-11 pr-4 py-3.5 text-xs text-zinc-600 focus:outline-none focus:ring-0 cursor-not-allowed font-medium"
-                            />
-                          </div>
-                        </div>
-
-                        <div className="md:col-span-2 space-y-2.5">
-                          <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-500 block ml-1">Profile Image URL</label>
-                          <div className="relative rounded-2xl border border-zinc-800 bg-zinc-950/40 focus-within:border-zinc-700 focus-within:bg-zinc-950 transition-all overflow-hidden group">
-                            <Globe className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-600 group-focus-within:text-white transition-colors" />
-                            <input
-                              type="url"
-                              value={profileAvatarUrl}
-                              onChange={(e) => setProfileAvatarUrl(e.target.value)}
-                              placeholder="https://images.unsplash.com/photo-..."
-                              className="w-full bg-transparent border-0 pl-11 pr-4 py-3.5 text-xs text-white focus:outline-none focus:ring-0 font-medium"
-                            />
-                          </div>
-                          <p className="text-[10px] text-zinc-600 ml-1">Recommended: Square aspect ratio, minimum 400x400px.</p>
-                        </div>
-                      </div>
-
-                      <div className="pt-4">
-                        <button
-                          type="submit"
-                          disabled={isProfileUpdating}
-                          className="w-full md:w-auto min-w-[200px] flex items-center justify-center gap-2 px-8 py-4 rounded-full bg-white text-xs font-bold text-black hover:bg-zinc-200 active:scale-[0.98] transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-xl shadow-white/5"
-                        >
-                          {isProfileUpdating ? (
-                            <div className="w-4 h-4 rounded-full border-2 border-black border-t-transparent animate-spin"></div>
-                          ) : (
-                            <>
-                              <Check className="w-4 h-4 stroke-[2.5]" />
-                              <span>Update Profile Details</span>
-                            </>
-                          )}
-                        </button>
-                      </div>
-                    </form>
-                  </section>
-
-                  {/* Telegram Connection Section */}
-                  <section className="space-y-4">
-                    <div className="flex items-center justify-between px-2">
-                      <h3 className="text-sm font-bold text-white uppercase tracking-widest">Telegram Integration</h3>
-                    </div>
-                    <div className="p-8 rounded-[32px] border border-zinc-900 bg-[#0c0c0e]/60 space-y-6">
-                      <div className="flex items-start justify-between gap-6">
-                        <div className="space-y-2">
-                          <h4 className="text-white font-bold text-lg">System Signal Alerts</h4>
-                          <p className="text-xs text-zinc-500 leading-relaxed max-w-md">
-                            Connect your Telegram account to receive real-time strategy signals, market alerts, and system notifications directly in your preferred messaging app.
-                          </p>
-                        </div>
-                        <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 border ${
-                          telegramConnection?.connected ? 'bg-sky-500/10 border-sky-500/20' : 'bg-zinc-900 border-zinc-800'
-                        }`}>
-                          <Send className={`w-6 h-6 ${telegramConnection?.connected ? 'text-sky-400' : 'text-zinc-600'}`} />
-                        </div>
-                      </div>
-
-                      <div className="p-6 rounded-2xl border border-zinc-900 bg-zinc-950/40 flex flex-col md:flex-row md:items-center justify-between gap-6">
-                        <div className="space-y-3">
-                          <div className="flex items-center gap-2">
-                            <div className={`w-2 h-2 rounded-full ${telegramConnection?.connected ? 'bg-emerald-500 animate-pulse' : 'bg-zinc-700'}`}></div>
-                            <span className="text-xs font-bold text-zinc-300 uppercase tracking-widest">
-                              {telegramConnection?.connected ? 'Operational' : 'Disconnected'}
-                            </span>
-                          </div>
-                          {telegramConnection?.connected ? (
-                            <div className="space-y-1">
-                              <p className="text-sm font-bold text-white">@{telegramConnection.telegram_username || 'unknown_user'}</p>
-                              <p className="text-[10px] font-bold text-emerald-400/80 uppercase tracking-tighter">Instant Delivery Active</p>
-                            </div>
-                          ) : (
-                            <p className="text-sm font-bold text-zinc-500 italic">No account linked</p>
-                          )}
-                        </div>
-
-                        <button
-                          type="button"
-                          onClick={handleConnectTelegram}
-                          disabled={isTelegramConnecting}
-                          className={`px-6 py-3 rounded-full text-[10px] font-bold uppercase tracking-widest transition-all active:scale-[0.98] ${
-                            telegramConnection?.connected
-                              ? 'bg-zinc-900 text-zinc-400 border border-zinc-800 hover:bg-zinc-800 hover:text-white'
-                              : 'bg-sky-500 text-white hover:bg-sky-600 shadow-lg shadow-sky-500/20'
-                          } disabled:opacity-50 cursor-pointer`}
-                        >
-                          {isTelegramConnecting ? (
-                            <div className="w-4 h-4 rounded-full border-2 border-current border-t-transparent animate-spin mx-auto"></div>
-                          ) : (
-                            telegramConnection?.connected ? 'Reconnect' : 'Connect Telegram'
-                          )}
-                        </button>
-                      </div>
-
-                      {telegramSuccessMessage && (
-                        <div className="flex items-center gap-3 p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-medium">
-                          <CheckCircle2 className="w-4 h-4 shrink-0" />
-                          <span>{telegramSuccessMessage}</span>
-                        </div>
-                      )}
-                      {telegramErrorMessage && (
-                        <div className="flex items-center gap-3 p-4 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs font-medium">
-                          <Info className="w-4 h-4 shrink-0" />
-                          <span>{telegramErrorMessage}</span>
-                        </div>
-                      )}
-                    </div>
-                  </section>
-
-                  {/* AI & Security Section */}
-                  <section className="space-y-4">
-                    <div className="flex items-center justify-between px-2">
-                      <h3 className="text-sm font-bold text-white uppercase tracking-widest">AI & Data Security</h3>
-                    </div>
-                    <div className="p-8 rounded-[32px] border border-zinc-900 bg-[#0c0c0e]/60 space-y-8">
-                      {/* Gemini API Key */}
-                      <div className="space-y-4">
-                        <div className="flex items-center gap-2">
-                          <Sparkles className="w-4 h-4 text-emerald-400" />
-                          <h4 className="text-xs font-bold text-white uppercase tracking-wider">Gemini API Configuration</h4>
-                        </div>
-                        <div className="p-5 rounded-2xl bg-zinc-950/60 border border-zinc-900 space-y-4">
-                          <div className="flex items-center justify-between">
-                            <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Connection Status</span>
-                            <span className={`text-[10px] font-bold uppercase tracking-widest ${
-                              userProfile?.gemini_status === 'READY' ? 'text-emerald-400' : 'text-amber-500'
-                            }`}>
-                              {userProfile?.gemini_status === 'READY' ? 'Active' : 'Configuration Required'}
-                            </span>
-                          </div>
-                          
-                          <div className="space-y-2">
-                            <div className="relative rounded-2xl border border-zinc-800 bg-zinc-950 focus-within:border-zinc-700 transition-all overflow-hidden group">
-                              <Key className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-600 group-focus-within:text-white" />
-                              <input
-                                type="password"
-                                value={geminiKey}
-                                onChange={(e) => {
-                                  setGeminiKey(e.target.value);
-                                  setGeminiKeySuccess(null);
-                                  setGeminiKeyError(null);
-                                }}
-                                placeholder={geminiKeyExists ? "••••••••••••••••••••••••••••" : "Enter your AI Studio API Key"}
-                                className="w-full bg-transparent border-0 pl-11 pr-4 py-3.5 text-xs text-white focus:outline-none focus:ring-0 font-mono"
-                              />
-                            </div>
-                            <div className="flex flex-col md:flex-row gap-3">
-                              <button
-                                type="button"
-                                onClick={handleSaveGeminiKey}
-                                disabled={isGeminiKeySaving || isGeminiKeyLoading}
-                                className="flex-1 flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-zinc-800 text-[10px] font-bold text-white hover:bg-zinc-700 transition-all cursor-pointer disabled:opacity-50"
-                              >
-                                {isGeminiKeySaving ? 'Saving...' : 'Update API Key'}
-                              </button>
-                              {geminiKeyExists && (
-                                <button
-                                  type="button"
-                                  onClick={handleDeleteGeminiKey}
-                                  disabled={isGeminiKeySaving || isGeminiKeyLoading}
-                                  className="px-4 py-3 rounded-xl border border-zinc-800 text-[10px] font-bold text-zinc-500 hover:text-red-400 hover:border-red-900/40 transition-all cursor-pointer"
-                                >
-                                  Delete Key
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Security Options */}
-                      <div className="space-y-4 pt-4 border-t border-zinc-900">
-                        <div className="flex items-center gap-2">
-                          <Lock className="w-4 h-4 text-zinc-500" />
-                          <h4 className="text-xs font-bold text-white uppercase tracking-wider">Security Controls</h4>
-                        </div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          <button 
-                            type="button"
-                            className="p-4 rounded-2xl border border-zinc-900 bg-zinc-950/40 hover:border-zinc-800 transition-all text-left group"
-                          >
-                            <div className="flex items-center justify-between">
-                              <div className="space-y-1">
-                                <p className="text-[11px] font-bold text-white uppercase tracking-wider">Change Password</p>
-                                <p className="text-[10px] text-zinc-500">Update your account credentials</p>
-                              </div>
-                              <ChevronRight className="w-4 h-4 text-zinc-700 group-hover:text-white transition-colors" />
-                            </div>
-                          </button>
-                          <button 
-                            type="button"
-                            onClick={handleLogout}
-                            className="p-4 rounded-2xl border border-zinc-900 bg-zinc-950/40 hover:border-red-900/20 hover:bg-red-500/5 transition-all text-left group"
-                          >
-                            <div className="flex items-center justify-between">
-                              <div className="space-y-1">
-                                <p className="text-[11px] font-bold text-white uppercase tracking-wider group-hover:text-red-400">Sign Out</p>
-                                <p className="text-[10px] text-zinc-500">End your current active session</p>
-                              </div>
-                              <LogOut className="w-4 h-4 text-zinc-700 group-hover:text-red-400 transition-colors" />
-                            </div>
-                          </button>
-                        </div>
-                        <button 
-                          type="button"
-                          onClick={handleDeleteAccount}
-                          className="w-full p-4 rounded-2xl border border-dashed border-zinc-900 bg-zinc-950/20 hover:border-red-900/40 hover:bg-red-500/5 transition-all text-left group"
-                        >
-                          <div className="flex items-center justify-between">
-                            <div className="space-y-1">
-                              <p className="text-[11px] font-bold text-zinc-600 group-hover:text-red-400 uppercase tracking-wider transition-colors">Terminate Account</p>
-                              <p className="text-[10px] text-zinc-700 group-hover:text-red-900/60 transition-colors">Permanently delete all your data and subscription</p>
-                            </div>
-                            <Trash2 className="w-4 h-4 text-zinc-800 group-hover:text-red-400 transition-colors" />
-                          </div>
-                        </button>
-                      </div>
-                    </div>
-                  </section>
-                </div>
-
-                <div className="space-y-10">
-                  
-                  {/* Subscription Plans */}
-                  <section className="space-y-4">
-                    <div className="flex items-center justify-between px-2">
-                      <h3 className="text-sm font-bold text-white uppercase tracking-widest">Subscription</h3>
-                    </div>
-                    <div className="space-y-4">
-                      {[
-                        { name: 'Free', price: '$0', features: ['Basic Scans', 'Manual Execution', 'Standard Support'], color: 'zinc' },
-                        { name: 'Premium', price: '$49', features: ['Advanced AI Scans', 'Auto-Triggers', 'Priority Execution'], color: 'emerald' },
-                        { name: 'Premium Pro', price: '$99', features: ['Institutional Engine', 'Unlimited AI Usage', 'White-glove Setup'], color: 'sky' }
-                      ].map((plan) => {
-                        const isSelected = profilePlan === plan.name;
-                        return (
-                          <div
-                            key={plan.name}
-                            onClick={() => setProfilePlan(plan.name)}
-                            className={`p-6 rounded-[32px] border transition-all cursor-pointer relative group ${
-                              isSelected
-                                ? 'border-emerald-500 bg-emerald-500/5 ring-1 ring-emerald-500/20 shadow-xl shadow-emerald-500/5'
-                                : 'border-zinc-900 bg-[#0c0c0e]/60 hover:border-zinc-800'
-                            }`}
-                          >
-                            {isSelected && (
-                              <div className="absolute top-4 right-4">
-                                <div className="w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center">
-                                  <Check className="w-3 h-3 text-white stroke-[3]" />
-                                </div>
-                              </div>
-                            )}
-                            <div className="space-y-4">
-                              <div className="space-y-1">
-                                <h4 className="text-lg font-bold text-white">{plan.name}</h4>
-                                <div className="flex items-baseline gap-1">
-                                  <span className="text-2xl font-bold text-white">{plan.price}</span>
-                                  <span className="text-xs text-zinc-500 font-medium">/month</span>
-                                </div>
-                              </div>
-                              <ul className="space-y-2.5">
-                                {plan.features.map(f => (
-                                  <li key={f} className="flex items-center gap-2 text-[10px] font-bold text-zinc-400 uppercase tracking-tight">
-                                    <Check className={`w-3 h-3 ${isSelected ? 'text-emerald-400' : 'text-zinc-600'}`} />
-                                    <span>{f}</span>
-                                  </li>
-                                ))}
-                              </ul>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </section>
-
-                  {/* Appearance Section */}
-                  <section className="space-y-4">
-                    <div className="flex items-center justify-between px-2">
-                      <h3 className="text-sm font-bold text-white uppercase tracking-widest">Appearance</h3>
-                    </div>
-                    <div className="p-8 rounded-[32px] border border-zinc-900 bg-[#0c0c0e]/60 space-y-6 opacity-50 cursor-not-allowed">
-                      <div className="space-y-4">
-                        <div className="space-y-2">
-                          <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-600 flex items-center gap-2">
-                            <Palette className="w-3.5 h-3.5" />
-                            System Theme
-                          </label>
-                          <div className="p-3 rounded-2xl bg-zinc-950 border border-zinc-900 flex items-center justify-between">
-                            <span className="text-xs font-bold text-zinc-500 uppercase tracking-widest">Dark (Default)</span>
-                            <ChevronDown className="w-4 h-4 text-zinc-700" />
-                          </div>
-                        </div>
-                        <div className="space-y-2">
-                          <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-600 flex items-center gap-2">
-                            <Globe className="w-3.5 h-3.5" />
-                            Interface Language
-                          </label>
-                          <div className="p-3 rounded-2xl bg-zinc-950 border border-zinc-900 flex items-center justify-between">
-                            <span className="text-xs font-bold text-zinc-500 uppercase tracking-widest">English (US)</span>
-                            <ChevronDown className="w-4 h-4 text-zinc-700" />
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </section>
-
+              {/* Platform Security Badge */}
+              <div className="p-5 rounded-3xl border border-zinc-900 bg-zinc-950/40 flex items-start gap-3">
+                <Shield className="w-5 h-5 text-zinc-500 shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <h4 className="text-xs font-bold text-zinc-300">Row Level Security Enabled</h4>
+                  <p className="text-[10px] text-zinc-500 leading-relaxed">
+                    Your personal profile records and watchlist preferences are safely isolated with modern Postgres RLS policies. Only you have decryption authorization.
+                  </p>
                 </div>
               </div>
             </div>

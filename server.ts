@@ -126,32 +126,21 @@ async function startServer() {
   app.all("/api/debug/gemini", debugGeminiHandler as any);
   app.post("/api/debug/test-key", testKeyHandler as any);
 
-  // Catch-all route to serve API list/health indicator since we are an API-only server now
-  app.get("/", (req, res) => {
-    res.json({
-      status: "online",
-      service: "Gaks AI Backend API",
-      message: "This server is acting strictly as an API backend.",
-      endpoints: [
-        "GET /",
-        "GET /api/telegram/webhook",
-        "POST /api/telegram/webhook",
-        "POST /api/watcher/start",
-        "GET /api/live-rates",
-        "POST /api/cron/market-watcher"
-      ],
-      timestamp: new Date().toISOString()
+  // Vite middleware for development
+  if (process.env.NODE_ENV !== "production") {
+    const { createServer: createViteServer } = await import("vite");
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: "spa",
     });
-  });
-
-  // Catch-all 404 for other unhandled routes
-  app.use((req, res) => {
-    res.status(404).json({
-      success: false,
-      error: "Endpoint not found",
-      message: `The route ${req.method} ${req.path} is not registered on this backend.`
+    app.use(vite.middlewares);
+  } else {
+    const distPath = path.join(process.cwd(), 'dist');
+    app.use(express.static(distPath));
+    app.get('*', (req, res) => {
+      res.sendFile(path.join(distPath, 'index.html'));
     });
-  });
+  }
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
