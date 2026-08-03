@@ -34,14 +34,34 @@
 }
 
 html, body, #root {
-  background-color: #080808;
-  color: #f4f4f5;
+  background-color: var(--color-background, #080808);
+  color: var(--color-foreground, #f4f4f5);
   font-family: var(--font-sans);
   min-height: 100dvh;
   margin: 0;
   padding: 0;
   letter-spacing: -0.011em;
   line-height: 1.5;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* Light Mode Overrides */
+html.light {
+  --color-background: #ffffff;
+  --color-foreground: #09090b;
+}
+
+html.light h1, 
+html.light h2, 
+html.light h3, 
+html.light h4, 
+html.light h5, 
+html.light h6 {
+  color: #09090b;
+}
+
+html.light p {
+  color: #3f3f46;
 }
 
 /* Base typography rules for headings to ensure a cohesive, refined typography hierarchy */
