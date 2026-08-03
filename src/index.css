@@ -49,19 +49,22 @@ html, body, #root {
 html.light {
   --color-background: #ffffff;
   --color-foreground: #09090b;
+  --color-heading: #09090b;
+  --color-paragraph: #3f3f46;
+  --color-scrollbar-track: #f4f4f5;
+  --color-scrollbar-thumb: #d4d4d8;
+  --color-scrollbar-thumb-hover: #a1a1aa;
 }
 
-html.light h1, 
-html.light h2, 
-html.light h3, 
-html.light h4, 
-html.light h5, 
-html.light h6 {
-  color: #09090b;
-}
-
-html.light p {
-  color: #3f3f46;
+/* Dark Mode Defaults */
+html:not(.light) {
+  --color-background: #080808;
+  --color-foreground: #f4f4f5;
+  --color-heading: #fafafa;
+  --color-paragraph: #a1a1aa;
+  --color-scrollbar-track: #09090b;
+  --color-scrollbar-thumb: #27272a;
+  --color-scrollbar-thumb-hover: #3f3f46;
 }
 
 /* Base typography rules for headings to ensure a cohesive, refined typography hierarchy */
@@ -69,7 +72,7 @@ h1, h2, h3, h4, h5, h6 {
   font-family: var(--font-sans);
   letter-spacing: -0.022em;
   font-weight: 600;
-  color: #fafafa;
+  color: var(--color-heading);
   line-height: 1.25;
 }
 
@@ -82,6 +85,7 @@ h1 {
 p {
   letter-spacing: -0.01em;
   line-height: 1.55;
+  color: var(--color-paragraph);
 }
 
 /* Numbers, financial rates, and metrics: enable tabular figures and refined kerning */
@@ -102,14 +106,14 @@ button, input, select, textarea, label {
 }
 
 ::-webkit-scrollbar-track {
-  background: #09090b;
+  background: var(--color-scrollbar-track);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #27272a;
+  background: var(--color-scrollbar-thumb);
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #3f3f46;
+  background: var(--color-scrollbar-thumb-hover);
 }

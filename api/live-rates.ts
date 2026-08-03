@@ -1,13 +1,6 @@
-import yahooFinanceRaw from 'yahoo-finance2';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 import { determineMarketBias, Candle } from '../src/lib/strategy-engine.js';
-
-// Detect if we're in a bundled CJS environment where the default export is nested
-const YahooFinance = (yahooFinanceRaw as any).default || yahooFinanceRaw;
-const yahooFinance = new YahooFinance();
-
-// --- INLINED UTILITIES TO ENSURE SELF-CONTAINED DEPLOYMENT ---
 
 /**
  * Converts a symbol to Twelve Data format for time series requests.
@@ -25,15 +18,6 @@ function convertSymbolForTwelveData(sym: string): string {
   if (mapped.length === 6 && /^[A-Z]{6}$/.test(mapped)) return `${mapped.slice(0, 3)}/${mapped.slice(3)}`;
   return mapped;
 }
-
-interface CachedCandleData {
-  candles: Candle[];
-  timestamp: number;
-  sentiment: 'Bullish' | 'Bearish' | 'Neutral';
-  history: number[];
-}
-const candleCache: Record<string, CachedCandleData> = {};
-const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes cache TTL to protect Twelve Data rate limit (800 req/day)
 
 /**
  * Canonicalizes a symbol to a standard internal format (uppercase, alphanumeric only).
@@ -80,39 +64,7 @@ const getSupabase = () => {
   });
 };
 
-// --- YAHOO FINANCE INITIALIZATION ---
-
 const DEFAULT_SYMBOLS = ['EURUSD', 'GBPUSD', 'XAUUSD', 'BTCUSD', 'NAS100', 'US30'];
-
-/**
- * Converts symbols into Yahoo Finance tickers.
- */
-const symbolToYahooTicker = (symbol: string): string => {
-  const canonical = toCanonicalSymbol(symbol);
-  
-  if (canonical.endsWith('USD') && (canonical.startsWith('BTC') || canonical.startsWith('ETH') || canonical.startsWith('LTC') || canonical.startsWith('XRP'))) {
-    return `${canonical.slice(0, -3)}-USD`;
-  }
-  
-  if (canonical === 'XAUUSD') return 'GC=F';
-  if (canonical === 'XAGUSD') return 'SI=F';
-  
-  const indexMappings: Record<string, string> = {
-    'NAS100': 'NQ=F',
-    'US30': 'YM=F',
-    'SPX500': 'ES=F',
-    'GER30': 'DAX=F',
-    'UK100': 'Z=F'
-  };
-  
-  if (indexMappings[canonical]) return indexMappings[canonical];
-  
-  if (canonical.length === 6) {
-    return `${canonical}=X`;
-  }
-  
-  return canonical;
-};
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   // CORS Headers
@@ -126,144 +78,76 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     const supabase = getSupabase();
+    const twelveDataKey = process.env.TWELVE_DATA_API_KEY;
+
+    if (!twelveDataKey) {
+       throw new Error("TWELVE_DATA_API_KEY is not defined");
+    }
     
     // 1. Fetch active watchers
-    const { data: watchers, error: watcherError } = await supabase
+    const { data: watchers } = await supabase
       .from('watchers')
       .select('selected_pair')
       .eq('status', 'active');
       
-    if (watcherError) {
-      console.warn('[Live Rates] Watcher fetch partial failure:', watcherError.message);
-    }
-    
     // 2. Canonicalize and merge
     const watcherSymbols = (watchers || []).map(w => toCanonicalSymbol(w.selected_pair));
     const uniqueSymbols = Array.from(new Set([...DEFAULT_SYMBOLS, ...watcherSymbols])).filter(Boolean);
     
-    // 3. Pre-fetch / update Twelve Data candles in parallel for rate bias calculation
-    const twelveDataKey = process.env.TWELVE_DATA_API_KEY;
-    if (twelveDataKey) {
-      await Promise.allSettled(
-        uniqueSymbols.map(async (sym) => {
-          try {
-            const canonical = toCanonicalSymbol(sym);
-            if (candleCache[canonical] && (Date.now() - candleCache[canonical].timestamp < CACHE_TTL_MS)) {
-              return; // Cache valid and fresh
-            }
-            const mappedSymbol = convertSymbolForTwelveData(canonical);
-            const tsUrl = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(mappedSymbol)}&interval=1h&outputsize=60&apikey=${twelveDataKey}`;
-            const tsRes = await fetch(tsUrl, { signal: AbortSignal.timeout(3500) });
-            if (tsRes.ok) {
-              const tsData = await tsRes.json();
-              if (tsData.status === "ok" && Array.isArray(tsData.values) && tsData.values.length > 0) {
-                const candles: Candle[] = tsData.values.map((v: any) => ({
-                  timestamp: v.datetime,
-                  open: parseFloat(v.open),
-                  high: parseFloat(v.high),
-                  low: parseFloat(v.low),
-                  close: parseFloat(v.close),
-                  volume: v.volume ? parseFloat(v.volume) : undefined
-                })).reverse(); // Oldest to newest
-
-                const sentiment = determineMarketBias(candles);
-                const history = candles.slice(-20).map(c => Number(c.close)).filter(c => !isNaN(c));
-
-                candleCache[canonical] = {
-                  candles,
-                  timestamp: Date.now(),
-                  sentiment,
-                  history
-                };
-              } else if (tsData.status === "error" && tsData.code === 429) {
-                console.warn(`[Live Rates] Twelve Data rate limit 429 hit for ${mappedSymbol}`);
-              }
-            }
-          } catch (err: any) {
-            console.warn(`[Live Rates] Twelve Data fetch error for ${sym}:`, err.message || err);
-          }
-        })
-      );
-    }
-    
-    // 4. Fetch data from Yahoo
-    const pairsData = [];
-    for (const symbol of uniqueSymbols) {
-      const canonical = toCanonicalSymbol(symbol);
-      const ticker = symbolToYahooTicker(symbol);
-      const displaySymbol = toDisplaySymbol(symbol);
-      
-      let attempt = 1;
-      let quoteData = null;
-      let status = 'unavailable';
-
-      while (attempt <= 3) {
+    // 3. Fetch data from Twelve Data
+    const pairsData = await Promise.all(
+      uniqueSymbols.map(async (sym) => {
         try {
-          const start = Date.now();
-          const quote: any = await yahooFinance.quote(ticker);
-          const latency = Date.now() - start;
+          const canonical = toCanonicalSymbol(sym);
+          const mappedSymbol = convertSymbolForTwelveData(canonical);
+          const displaySymbol = toDisplaySymbol(sym);
           
-          console.log(`Attempt ${attempt} for ${ticker}: Success, latency: ${latency}ms`);
+          // Use complex request for quotes and basic time series (needed for sentiment/bias)
+          const url = `https://api.twelvedata.com/quote?symbol=${encodeURIComponent(mappedSymbol)}&apikey=${twelveDataKey}`;
+          const res = await fetch(url);
+          const quote = await res.json();
 
-          if (quote && quote.regularMarketPrice !== undefined) {
-            const cached = candleCache[canonical];
-            const sentiment = cached?.sentiment || 'Neutral';
-            const history = cached?.history && cached.history.length > 0
-              ? cached.history
-              : [quote.regularMarketPreviousClose || quote.regularMarketPrice, quote.regularMarketPrice];
+          if (quote.status === "error") {
+            return { symbol: displaySymbol, status: 'unavailable', error: quote.message };
+          }
 
-            quoteData = {
-              symbol: displaySymbol,
-              name: displaySymbol,
-              currentPrice: quote.regularMarketPrice,
-              basePrice: quote.regularMarketPreviousClose || quote.regularMarketPrice,
-              change: quote.regularMarketChangePercent || 0,
-              sentiment,
-              history,
-              status: 'active'
-            };
-            status = 'active';
-            break; // Success
-          }
-        } catch (err: any) {
-          const errMsg = err.message || '';
-          const isRetryable = errMsg.includes('ECONNRESET') || 
-                              errMsg.includes('connection termination') ||
-                              errMsg.includes('network') ||
-                              errMsg.includes('timeout') ||
-                              (err.status >= 500);
+          // Fetch recent candles for sentiment
+          const tsUrl = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(mappedSymbol)}&interval=1h&outputsize=20&apikey=${twelveDataKey}`;
+          const tsRes = await fetch(tsUrl);
+          const tsData = await tsRes.json();
           
-          console.log(`Attempt ${attempt} for ${ticker}: ${errMsg}. Retryable: ${isRetryable}`);
+          let sentiment: 'Bullish' | 'Bearish' | 'Neutral' = 'Neutral';
+          let history: number[] = [];
           
-          if (isRetryable && attempt < 3) {
-            const delay = attempt === 1 ? 300 : 600;
-            await new Promise(resolve => setTimeout(resolve, delay));
-            attempt++;
-            continue;
+          if (tsData.status === "ok" && Array.isArray(tsData.values)) {
+            const candles: Candle[] = tsData.values.map((v: any) => ({
+              timestamp: v.datetime,
+              open: parseFloat(v.open),
+              high: parseFloat(v.high),
+              low: parseFloat(v.low),
+              close: parseFloat(v.close),
+              volume: v.volume ? parseFloat(v.volume) : undefined
+            })).reverse();
+            
+            sentiment = determineMarketBias(candles);
+            history = candles.map(c => c.close);
           }
+
+          return {
+            symbol: displaySymbol,
+            name: displaySymbol,
+            currentPrice: parseFloat(quote.close || quote.price),
+            basePrice: parseFloat(quote.previous_close || quote.close),
+            change: parseFloat(quote.percent_change || 0),
+            sentiment,
+            history: history.length > 0 ? history : [parseFloat(quote.previous_close || quote.close), parseFloat(quote.close || quote.price)],
+            status: 'active'
+          };
+        } catch (err) {
+          return { symbol: sym, status: 'unavailable' };
         }
-        break; // Failed or not retryable
-      }
-      
-      if (!quoteData && candleCache[canonical] && candleCache[canonical].history.length > 0) {
-        const hist = candleCache[canonical].history;
-        const currentPrice = hist[hist.length - 1];
-        const basePrice = hist[hist.length - 2] || currentPrice;
-        const change = basePrice > 0 ? ((currentPrice - basePrice) / basePrice) * 100 : 0;
-        quoteData = {
-          symbol: displaySymbol,
-          name: displaySymbol,
-          currentPrice,
-          basePrice,
-          change,
-          sentiment: candleCache[canonical].sentiment,
-          history: hist,
-          status: 'active'
-        };
-      }
-
-      pairsData.push(quoteData || { symbol: displaySymbol, status: 'unavailable' });
-    }
+      })
+    );
 
     return res.status(200).json({
       success: true,

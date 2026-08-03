@@ -9,7 +9,7 @@ import { timeframeToMinutes } from '../../src/lib/timeframe.js';
  */
 const getSupabase = (token?: string) => {
   const url = process.env.VITE_SUPABASE_URL || "https://wkujrqmxivljnuvumfau.supabase.co";
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || "sb_publishable_BheqR2OkNYKqT7bj8xThWA_gGG2hcjf";
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY;
   
   if (!url || !key) {
     throw new Error('Supabase configuration missing (VITE_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required)');
@@ -294,14 +294,6 @@ export default async function handler(req: any, res: any) {
     // 4. Verify the user has saved a Gemini API key
     const tableName = 'user_api_keys';
     const providerFilter = 'gemini';
-
-    console.log(`[Gemini API Key Lookup Audit] Executing lookup in watcher start:`);
-    console.log(`- Table Name: ${tableName}`);
-    console.log(`- user_id: ${userId}`);
-    console.log(`- provider: ${providerFilter}`);
-    console.log(`- Supabase JS Query: supabase.from('${tableName}').select('api_key, id').eq('user_id', '${userId}').eq('provider', '${providerFilter}').maybeSingle()`);
-
-    // 1. Attempt the query for Gemini API key
     console.log("[Watcher] Logged in user:", userId);
     console.log("[Watcher] userId:", userId);
     console.log("[Watcher] selectedPair:", selectedPair);
@@ -327,7 +319,6 @@ export default async function handler(req: any, res: any) {
         ? `Supabase query error: ${apiKeyError.message}` 
         : `No row exists or api_key is missing in '${tableName}' for user_id='${userId}' and provider='${providerFilter}'.`;
 
-      console.log(`[Gemini API Key Lookup Audit] LOG EXACT WHY: ${errReason}`);
       console.log("[Watcher Start] Termination: Gemini API key lookup failed or key missing.");
 
       const failedStepLog = {
@@ -359,8 +350,6 @@ export default async function handler(req: any, res: any) {
         selected_timeframe: selectedTimeframe
       });
     }
-
-    console.log(`[Gemini API Key Lookup Audit] Success: API key successfully retrieved for user_id='${userId}'.`);
 
     // 5 & 6. Verify Strategy Playbook and Risk settings exist
     console.log("[Watcher Start] Fetching trading preferences...");
@@ -660,7 +649,7 @@ export default async function handler(req: any, res: any) {
       risk_percentage: riskPercentage,
       selected_pair: selectedPair,
       selected_timeframe: finalTimeframe,
-      gemini_model: "gemini-1.5-flash",
+      gemini_model: "gemini-2.5-flash",
       scan_interval_minutes: computedInterval,
       trade_status: "WAITING",
       entry_price: null,
@@ -677,12 +666,10 @@ export default async function handler(req: any, res: any) {
     console.log("[Watcher Start] Watcher data payload:", JSON.stringify(watcherData, null, 2));
 
     console.log("[Watcher Activation] Reached UPSERT");
-    console.log(`[WATCHER LIFECYCLE] Backend INSERT into watchers table: ${JSON.stringify(watcherData)}`);
     const { error: watchersError, data: insertData } = await supabase
       .from("watchers")
       .upsert(watcherData, { onConflict: "user_id,selected_pair" })
       .select();
-    console.log(`[WATCHER LIFECYCLE] Database row after INSERT: ${JSON.stringify(insertData)}`);
 
     if (watchersError) {
       console.error("[Watcher Start] Failed to write to watchers table:", watchersError.message);
@@ -714,7 +701,6 @@ export default async function handler(req: any, res: any) {
       throw new Error(`Failed to verify saved watcher: ${fetchSavedErr?.message || "Not found"}`);
     }
 
-    console.log(`\n[NEW WATCHER CREATED]\nWatcher ID: ${savedWatcherRow.id}\nPair: ${selectedPair}\nLifecycle initialized: WAITING\nNo previous ACTIVE trade detected.\n`);
     console.log(`Saved timeframe: ${savedWatcherRow.selected_timeframe}`);
     console.log(`Saved scan_interval_minutes: ${savedWatcherRow.scan_interval_minutes}`);
 

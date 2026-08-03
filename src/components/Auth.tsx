@@ -12,33 +12,33 @@ export interface AuthProps {
 
 export function AuthSkeleton() {
   return (
-    <div className="min-h-screen w-full bg-black text-white flex flex-col justify-center items-center px-6 py-12 font-sans select-none">
+    <div className="min-h-screen w-full bg-white dark:bg-black text-zinc-950 dark:text-white flex flex-col justify-center items-center px-6 py-12 font-sans select-none transition-colors duration-300">
       <div className="w-full max-w-[400px] flex flex-col items-center animate-pulse">
         {/* Logo box */}
-        <div className="w-16 h-16 rounded-[22px] bg-[#0c0c0e] border border-[#262626] mb-6" />
-        <div className="h-6 w-24 bg-[#141419] rounded mb-6" />
+        <div className="w-16 h-16 rounded-[22px] bg-zinc-50 dark:bg-[#0c0c0e] border border-zinc-200 dark:border-[#262626] mb-6" />
+        <div className="h-6 w-24 bg-zinc-100 dark:bg-[#141419] rounded mb-6" />
         {/* Title */}
-        <div className="h-8 w-64 bg-[#141419] rounded-lg mb-3" />
+        <div className="h-8 w-64 bg-zinc-100 dark:bg-[#141419] rounded-lg mb-3" />
         {/* Subtitle */}
-        <div className="h-4 w-48 bg-[#0c0c0e] rounded-md mb-8" />
+        <div className="h-4 w-48 bg-zinc-50 dark:bg-[#0c0c0e] rounded-md mb-8" />
         
         {/* Social buttons skeleton */}
         <div className="w-full space-y-3 mb-6">
-          <div className="h-[52px] w-full bg-[#0c0c0e] rounded-[20px] border border-[#1f1f24]" />
-          <div className="h-[52px] w-full bg-[#0c0c0e] rounded-[20px] border border-[#1f1f24]" />
+          <div className="h-[52px] w-full bg-zinc-50 dark:bg-[#0c0c0e] rounded-[20px] border border-zinc-100 dark:border-[#1f1f24]" />
+          <div className="h-[52px] w-full bg-zinc-50 dark:bg-[#0c0c0e] rounded-[20px] border border-zinc-100 dark:border-[#1f1f24]" />
         </div>
         
         {/* OR divider */}
-        <div className="w-full h-4 bg-[#0a0a0d] rounded my-4" />
+        <div className="w-full h-4 bg-zinc-50 dark:bg-[#0a0a0d] rounded my-4" />
         
         {/* Input skeletons */}
         <div className="w-full space-y-4 mb-6">
-          <div className="h-[56px] w-full bg-[#0c0c0e] rounded-[20px] border border-[#1f1f24]" />
-          <div className="h-[56px] w-full bg-[#0c0c0e] rounded-[20px] border border-[#1f1f24]" />
+          <div className="h-[56px] w-full bg-zinc-50 dark:bg-[#0c0c0e] rounded-[20px] border border-zinc-100 dark:border-[#1f1f24]" />
+          <div className="h-[56px] w-full bg-zinc-50 dark:bg-[#0c0c0e] rounded-[20px] border border-zinc-100 dark:border-[#1f1f24]" />
         </div>
         
         {/* Primary button skeleton */}
-        <div className="h-[54px] w-full bg-[#1a1a22] rounded-[20px]" />
+        <div className="h-[54px] w-full bg-zinc-200 dark:bg-[#1a1a22] rounded-[20px]" />
       </div>
     </div>
   );
@@ -74,12 +74,12 @@ const FloatingInput: React.FC<FloatingInputProps> = ({
   return (
     <div className="space-y-1.5">
       <div
-        className={`relative rounded-[20px] border bg-[#0c0c0e] transition-all duration-200 ${
+        className={`relative rounded-[20px] border bg-zinc-50 dark:bg-[#0c0c0e] transition-all duration-200 ${
           errorMessage
             ? 'border-red-500/60 focus-within:border-red-500 focus-within:ring-2 focus-within:ring-red-500/10'
             : isFocused
-            ? 'border-zinc-400 bg-[#101015] ring-2 ring-white/5'
-            : 'border-[#262626] hover:border-[#383838]'
+            ? 'border-zinc-400 dark:border-zinc-500 bg-white dark:bg-[#101015] ring-2 ring-zinc-500/5 dark:ring-white/5'
+            : 'border-zinc-200 dark:border-[#262626] hover:border-zinc-300 dark:hover:border-[#383838]'
         }`}
       >
         <input
@@ -91,7 +91,7 @@ const FloatingInput: React.FC<FloatingInputProps> = ({
           onFocus={() => setIsFocused(true)}
           onBlur={() => setIsFocused(false)}
           autoComplete={autoComplete}
-          className={`w-full bg-transparent px-4 pb-2 text-[14px] sm:text-[15px] font-medium text-white focus:outline-none transition-all rounded-[20px] ${
+          className={`w-full bg-transparent px-4 pb-2 text-[14px] sm:text-[15px] font-medium text-zinc-950 dark:text-white focus:outline-none transition-all rounded-[20px] ${
             rightElement ? 'pr-12' : 'pr-4'
           } ${isFloating ? 'pt-6' : 'pt-4'}`}
         />
@@ -99,8 +99,8 @@ const FloatingInput: React.FC<FloatingInputProps> = ({
           htmlFor={id}
           className={`absolute left-4 transition-all duration-200 pointer-events-none select-none ${
             isFloating
-              ? 'top-2 text-[10px] sm:text-[11px] font-semibold text-zinc-400 uppercase tracking-wider'
-              : 'top-1/2 -translate-y-1/2 text-[14px] font-normal text-zinc-500'
+              ? 'top-2 text-[10px] sm:text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider'
+              : 'top-1/2 -translate-y-1/2 text-[14px] font-normal text-zinc-400 dark:text-zinc-500'
           }`}
         >
           {label}
@@ -384,10 +384,10 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
   };
 
   return (
-    <div className="min-h-screen w-full bg-black text-white flex flex-col justify-center items-center px-5 py-12 font-sans antialiased select-none relative overflow-x-hidden">
+    <div className="min-h-screen w-full bg-white dark:bg-black text-zinc-950 dark:text-white flex flex-col justify-center items-center px-5 py-12 font-sans antialiased select-none relative overflow-x-hidden transition-colors duration-300">
       
       {/* Top ambient glow for high-end aesthetic without glassmorphism noise */}
-      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[600px] h-[300px] bg-gradient-to-b from-zinc-900/40 via-transparent to-transparent blur-[120px] pointer-events-none" />
+      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[600px] h-[300px] bg-gradient-to-b from-zinc-100/50 dark:from-zinc-900/40 via-transparent to-transparent blur-[120px] pointer-events-none" />
 
       {/* Main content container (mobile-first max-w-[400px]) */}
       <div className="w-full max-w-[400px] flex flex-col items-center relative z-10">
@@ -399,14 +399,14 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
           transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
           className="flex flex-col items-center mb-8"
         >
-          <div className="w-16 h-16 rounded-[22px] bg-[#0c0c0e] border border-[#262626] flex items-center justify-center shadow-[0_12px_36px_rgba(0,0,0,0.9)] mb-5 relative group overflow-hidden">
-            <div className="absolute inset-0 bg-gradient-to-tr from-white/[0.06] via-transparent to-transparent pointer-events-none" />
-            <span className="text-3xl font-black tracking-tighter text-white">G</span>
+          <div className="w-16 h-16 rounded-[22px] bg-white dark:bg-[#0c0c0e] border border-zinc-200 dark:border-[#262626] flex items-center justify-center shadow-[0_12px_36px_rgba(0,0,0,0.1)] dark:shadow-[0_12px_36px_rgba(0,0,0,0.9)] mb-5 relative group overflow-hidden">
+            <div className="absolute inset-0 bg-gradient-to-tr from-zinc-500/[0.03] dark:from-white/[0.06] via-transparent to-transparent pointer-events-none" />
+            <span className="text-3xl font-black tracking-tighter text-zinc-950 dark:text-white">G</span>
             <div className="absolute top-2.5 right-2.5 w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.8)]" />
           </div>
           <div className="flex items-center gap-1.5">
-            <span className="text-xl font-bold tracking-tight text-white">Gaks</span>
-            <span className="text-xl font-normal text-zinc-500">AI</span>
+            <span className="text-xl font-bold tracking-tight text-zinc-950 dark:text-white">Gaks</span>
+            <span className="text-xl font-normal text-zinc-400 dark:text-zinc-500">AI</span>
           </div>
         </motion.div>
 
@@ -421,13 +421,13 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
           >
             {/* Title & Subtitle */}
             <div className="text-center space-y-2 mb-8">
-              <h1 className="text-2xl sm:text-[28px] font-bold tracking-tight text-white leading-tight">
+              <h1 className="text-2xl sm:text-[28px] font-bold tracking-tight text-zinc-950 dark:text-white leading-tight">
                 {mode === 'signup' && 'Create your Gaks AI account'}
                 {mode === 'login' && 'Log in to Gaks AI'}
                 {mode === 'forgot' && 'Reset your password'}
                 {mode === 'reset' && 'Create new password'}
               </h1>
-              <p className="text-[13px] sm:text-sm text-zinc-400 font-normal leading-relaxed max-w-[340px] mx-auto">
+              <p className="text-[13px] sm:text-sm text-zinc-500 dark:text-zinc-400 font-normal leading-relaxed max-w-[340px] mx-auto">
                 {mode === 'signup' && 'Start using AI-powered market monitoring in minutes.'}
                 {mode === 'login' && 'Start using AI-powered market monitoring in minutes.'}
                 {mode === 'forgot' && "Enter your email address and we'll send a recovery link."}
@@ -451,9 +451,9 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
               <motion.div
                 initial={{ opacity: 0, y: -8 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="mb-6 p-4 rounded-[18px] bg-zinc-900 border border-zinc-800 text-zinc-300 flex items-start gap-3 text-[13px] leading-relaxed shadow-lg"
+                className="mb-6 p-4 rounded-[18px] bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 flex items-start gap-3 text-[13px] leading-relaxed shadow-lg"
               >
-                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-zinc-400" />
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-zinc-400 dark:text-zinc-500" />
                 <span className="flex-1">{infoToast}</span>
               </motion.div>
             )}
@@ -463,17 +463,17 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
               <motion.div
                 initial={{ opacity: 0, scale: 0.96 }}
                 animate={{ opacity: 1, scale: 1 }}
-                className="p-7 sm:p-8 rounded-[24px] border border-[#262626] bg-[#0c0c0e] text-center space-y-6 shadow-2xl relative overflow-hidden"
+                className="p-7 sm:p-8 rounded-[24px] border border-zinc-200 dark:border-[#262626] bg-white dark:bg-[#0c0c0e] text-center space-y-6 shadow-2xl relative overflow-hidden"
               >
-                <div className="absolute inset-0 bg-gradient-to-b from-white/[0.02] to-transparent pointer-events-none" />
-                <div className="w-14 h-14 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center mx-auto shadow-[0_0_30px_rgba(16,185,129,0.15)]">
+                <div className="absolute inset-0 bg-gradient-to-b from-zinc-500/[0.01] dark:from-white/[0.02] to-transparent pointer-events-none" />
+                <div className="w-14 h-14 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 dark:text-emerald-400 flex items-center justify-center mx-auto shadow-[0_0_30px_rgba(16,185,129,0.15)]">
                   <CheckCircle2 className="w-7 h-7 stroke-[2]" />
                 </div>
                 <div className="space-y-2">
-                  <h3 className="text-lg font-bold text-white tracking-tight">
+                  <h3 className="text-lg font-bold text-zinc-950 dark:text-white tracking-tight">
                     {mode === 'signup' ? 'Check your email' : 'Success!'}
                   </h3>
-                  <p className="text-[13px] text-zinc-400 leading-relaxed max-w-[280px] mx-auto">
+                  <p className="text-[13px] text-zinc-500 dark:text-zinc-400 leading-relaxed max-w-[280px] mx-auto">
                     {successMessage}
                   </p>
                 </div>
@@ -481,7 +481,7 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
                   <button
                     type="button"
                     onClick={() => switchMode('login')}
-                    className="w-full py-3.5 px-5 rounded-[20px] bg-white text-black font-semibold text-sm hover:bg-zinc-200 active:scale-[0.99] transition-all cursor-pointer shadow-md"
+                    className="w-full py-3.5 px-5 rounded-[20px] bg-zinc-950 dark:bg-white text-white dark:text-black font-semibold text-sm hover:bg-zinc-800 dark:hover:bg-zinc-200 active:scale-[0.99] transition-all cursor-pointer shadow-md"
                   >
                     Return to Sign In
                   </button>
@@ -496,7 +496,7 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
                       type="button"
                       onClick={handleGoogleSignIn}
                       disabled={isLoading}
-                      className="w-full py-3.5 px-5 rounded-[20px] bg-[#0c0c0e] hover:bg-[#141419] active:scale-[0.99] border border-[#262626] hover:border-zinc-700 text-white font-medium text-[13px] sm:text-sm flex items-center justify-center gap-3 transition-all duration-200 cursor-pointer shadow-sm disabled:opacity-50"
+                      className="w-full py-3.5 px-5 rounded-[20px] bg-white dark:bg-[#0c0c0e] hover:bg-zinc-50 dark:hover:bg-[#141419] active:scale-[0.99] border border-zinc-200 dark:border-[#262626] hover:border-zinc-300 dark:hover:border-zinc-700 text-zinc-950 dark:text-white font-medium text-[13px] sm:text-sm flex items-center justify-center gap-3 transition-all duration-200 cursor-pointer shadow-sm disabled:opacity-50"
                     >
                       <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
                         <path fill="#EA4335" d="M12 5.04c1.64 0 3.12.56 4.28 1.67l3.2-3.2C17.52 1.58 14.95 1 12 1 7.35 1 3.4 3.65 1.57 7.5l3.82 2.96C6.32 7.37 8.94 5.04 12 5.04z" />
@@ -511,7 +511,7 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
                       type="button"
                       onClick={handleTelegramSignIn}
                       disabled={isLoading}
-                      className="w-full py-3.5 px-5 rounded-[20px] bg-[#0c0c0e] hover:bg-[#141419] active:scale-[0.99] border border-[#262626] hover:border-zinc-700 text-white font-medium text-[13px] sm:text-sm flex items-center justify-center gap-3 transition-all duration-200 cursor-pointer shadow-sm disabled:opacity-50"
+                      className="w-full py-3.5 px-5 rounded-[20px] bg-white dark:bg-[#0c0c0e] hover:bg-zinc-50 dark:hover:bg-[#141419] active:scale-[0.99] border border-zinc-200 dark:border-[#262626] hover:border-zinc-300 dark:hover:border-zinc-700 text-zinc-950 dark:text-white font-medium text-[13px] sm:text-sm flex items-center justify-center gap-3 transition-all duration-200 cursor-pointer shadow-sm disabled:opacity-50"
                     >
                       <svg className="w-4 h-4 shrink-0 text-[#2AA1DD]" viewBox="0 0 24 24" fill="currentColor">
                         <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221l-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.446 1.394c-.14.18-.357.295-.6.295-.002 0-.003 0-.005 0l.213-3.054 5.56-5.022c.24-.213-.054-.334-.373-.121l-6.869 4.326-2.96-.924c-.64-.203-.658-.64.135-.954l11.566-4.458c.538-.196 1.006.128.832.94z"/>
@@ -521,9 +521,9 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
 
                     {/* OR Divider */}
                     <div className="flex items-center gap-4 my-6 py-2">
-                      <div className="h-[1px] flex-1 bg-[#262626]" />
-                      <span className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest">or</span>
-                      <div className="h-[1px] flex-1 bg-[#262626]" />
+                      <div className="h-[1px] flex-1 bg-zinc-200 dark:bg-[#262626]" />
+                      <span className="text-[11px] font-semibold text-zinc-400 dark:text-zinc-500 uppercase tracking-widest">or</span>
+                      <div className="h-[1px] flex-1 bg-zinc-200 dark:bg-[#262626]" />
                     </div>
                   </div>
                 )}
@@ -576,7 +576,7 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
                           <button
                             type="button"
                             onClick={() => setShowPassword(!showPassword)}
-                            className="p-1 text-zinc-500 hover:text-white transition-colors cursor-pointer"
+                            className="p-1 text-zinc-500 hover:text-zinc-950 dark:hover:text-white transition-colors cursor-pointer"
                             title={showPassword ? 'Hide password' : 'Show password'}
                           >
                             {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -590,7 +590,7 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
                           <button
                             type="button"
                             onClick={() => switchMode('forgot')}
-                            className="text-[12px] font-medium text-zinc-400 hover:text-white transition-colors cursor-pointer"
+                            className="text-[12px] font-medium text-zinc-500 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white transition-colors cursor-pointer"
                           >
                             Forgot password?
                           </button>
@@ -621,7 +621,7 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
                         <button
                           type="button"
                           onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                          className="p-1 text-zinc-500 hover:text-white transition-colors cursor-pointer"
+                          className="p-1 text-zinc-500 hover:text-zinc-950 dark:hover:text-white transition-colors cursor-pointer"
                           title={showConfirmPassword ? 'Hide password' : 'Show password'}
                         >
                           {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -644,7 +644,7 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
                           <button
                             type="button"
                             onClick={() => setShowPassword(!showPassword)}
-                            className="p-1 text-zinc-500 hover:text-white transition-colors cursor-pointer"
+                            className="p-1 text-zinc-500 hover:text-zinc-950 dark:hover:text-white transition-colors cursor-pointer"
                           >
                             {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                           </button>
@@ -666,7 +666,7 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
                           <button
                             type="button"
                             onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                            className="p-1 text-zinc-500 hover:text-white transition-colors cursor-pointer"
+                            className="p-1 text-zinc-500 hover:text-zinc-950 dark:hover:text-white transition-colors cursor-pointer"
                           >
                             {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                           </button>
@@ -680,7 +680,7 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
                     <button
                       type="submit"
                       disabled={!isFormValid() || isLoading}
-                      className="w-full py-4 px-6 rounded-[20px] bg-white text-black font-semibold text-[14px] sm:text-[15px] hover:bg-zinc-200 active:scale-[0.99] transition-all duration-200 cursor-pointer flex items-center justify-center gap-2.5 shadow-[0_4px_24px_rgba(255,255,255,0.14)] disabled:opacity-35 disabled:cursor-not-allowed disabled:hover:bg-white disabled:shadow-none"
+                      className="w-full py-4 px-6 rounded-[20px] bg-zinc-950 dark:bg-white text-white dark:text-black font-semibold text-[14px] sm:text-[15px] hover:bg-zinc-800 dark:hover:bg-zinc-200 active:scale-[0.99] transition-all duration-200 cursor-pointer flex items-center justify-center gap-2.5 shadow-[0_4px_24px_rgba(0,0,0,0.1)] dark:shadow-[0_4px_24px_rgba(255,255,255,0.14)] disabled:opacity-35 disabled:cursor-not-allowed disabled:hover:bg-zinc-950 dark:disabled:hover:bg-white disabled:shadow-none"
                     >
                       {isLoading ? (
                         <div className="flex items-center gap-2.5">
@@ -715,7 +715,7 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
                       <button
                         type="button"
                         onClick={() => switchMode('login')}
-                        className="text-white font-medium hover:underline cursor-pointer transition-colors"
+                        className="text-zinc-950 dark:text-white font-medium hover:underline cursor-pointer transition-colors"
                       >
                         Sign in
                       </button>
@@ -728,7 +728,7 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
                       <button
                         type="button"
                         onClick={() => switchMode('signup')}
-                        className="text-white font-medium hover:underline cursor-pointer transition-colors"
+                        className="text-zinc-950 dark:text-white font-medium hover:underline cursor-pointer transition-colors"
                       >
                         Create account
                       </button>
@@ -739,7 +739,7 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
                     <button
                       type="button"
                       onClick={() => switchMode('login')}
-                      className="inline-flex items-center gap-1.5 text-[13px] font-medium text-zinc-400 hover:text-white transition-colors cursor-pointer"
+                      className="inline-flex items-center gap-1.5 text-[13px] font-medium text-zinc-500 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white transition-colors cursor-pointer"
                     >
                       <ArrowLeft className="w-3.5 h-3.5" />
                       <span>Back to Sign In</span>

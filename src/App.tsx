@@ -1746,21 +1746,21 @@ export default function App() {
               
               {/* Live markets status & date row */}
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full border border-zinc-800/80 bg-[#121214] w-fit">
+                <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full border border-zinc-200 dark:border-zinc-800/80 bg-zinc-50 dark:bg-[#121214] w-fit">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                  <span className="text-[13px] text-zinc-300 font-normal tracking-normal">Live · markets open</span>
+                  <span className="text-[13px] text-zinc-600 dark:text-zinc-300 font-normal tracking-normal">Live · markets open</span>
                 </div>
-                <span className="text-[13px] text-zinc-400 font-normal tracking-normal">
+                <span className="text-[13px] text-zinc-400 dark:text-zinc-500 font-normal tracking-normal">
                   Updated {formattedTime}
                 </span>
               </div>
 
               {/* Title & Description Header */}
               <div className="space-y-2">
-                <h1 className="text-[32px] sm:text-[36px] font-semibold tracking-[-0.035em] text-white leading-[1.15] font-sans max-w-[280px] sm:max-w-md">
+                <h1 className="text-[32px] sm:text-[36px] font-semibold tracking-[-0.035em] text-zinc-950 dark:text-white leading-[1.15] font-sans max-w-[280px] sm:max-w-md">
                   Good signal, good trade.
                 </h1>
-                <p className="text-[15px] sm:text-[16px] font-normal tracking-[-0.01em] text-zinc-400 leading-[1.45] max-w-[340px] sm:max-w-lg">
+                <p className="text-[15px] sm:text-[16px] font-normal tracking-[-0.01em] text-zinc-500 dark:text-zinc-400 leading-[1.45] max-w-[340px] sm:max-w-lg">
                   Your AI-curated view of the forex market — refreshed every few seconds.
                 </p>
               </div>
@@ -1770,29 +1770,29 @@ export default function App() {
                 <button
                   onClick={handleRefresh}
                   disabled={isRefreshing}
-                  className="h-11 sm:h-12 flex-1 flex items-center justify-center gap-2 px-5 rounded-full border border-zinc-800/80 bg-[#141416] text-[14px] sm:text-[15px] font-medium tracking-[-0.01em] text-white hover:bg-[#1f1f22] hover:border-zinc-700 transition-all cursor-pointer shadow-sm"
+                  className="h-11 sm:h-12 flex-1 flex items-center justify-center gap-2 px-5 rounded-full border border-zinc-200 dark:border-zinc-800/80 bg-zinc-50 dark:bg-[#141416] text-[14px] sm:text-[15px] font-medium tracking-[-0.01em] text-zinc-950 dark:text-white hover:bg-zinc-100 dark:hover:bg-[#1f1f22] hover:border-zinc-300 dark:hover:border-zinc-700 transition-all cursor-pointer shadow-sm"
                 >
                   <RefreshCw className={`w-4 h-4 stroke-[1.8] ${isRefreshing ? 'animate-spin' : ''}`} />
                   <span>Refresh</span>
                 </button>
                 <button
                   onClick={handleQuickAnalyze}
-                  className="h-11 sm:h-12 flex-1 flex items-center justify-center gap-2 px-5 rounded-full bg-white text-[14px] sm:text-[15px] font-semibold tracking-[-0.01em] text-black hover:bg-zinc-100 transition-all cursor-pointer shadow-md"
+                  className="h-11 sm:h-12 flex-1 flex items-center justify-center gap-2 px-5 rounded-full bg-zinc-950 dark:bg-white text-[14px] sm:text-[15px] font-semibold tracking-[-0.01em] text-white dark:text-black hover:bg-zinc-800 dark:hover:bg-zinc-100 transition-all cursor-pointer shadow-md"
                 >
-                  <Zap className="w-4 h-4 stroke-[2] fill-black/10" />
+                  <Zap className="w-4 h-4 stroke-[2] fill-current opacity-10 dark:fill-black/10" />
                   <span>Quick Analyze</span>
                 </button>
               </div>
 
               {/* AI Quick Scan recommendation result if present */}
               {analysisResult && (
-                <div className="p-4 rounded-2xl border border-zinc-800 bg-zinc-900/30 flex gap-3.5 items-start">
-                  <div className="p-2 rounded-xl bg-amber-500/10 text-amber-400 shrink-0">
+                <div className="p-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/30 flex gap-3.5 items-start">
+                  <div className="p-2 rounded-xl bg-amber-500/10 text-amber-500 dark:text-amber-400 shrink-0">
                     <Sparkles className="w-4 h-4" />
                   </div>
                   <div className="space-y-1">
-                    <h4 className="text-xs font-bold text-white uppercase tracking-wider">Gaks AI Recommendation</h4>
-                    <p className="text-xs text-zinc-300 leading-relaxed">{analysisResult}</p>
+                    <h4 className="text-xs font-bold text-zinc-950 dark:text-white uppercase tracking-wider">Gaks AI Recommendation</h4>
+                    <p className="text-xs text-zinc-600 dark:text-zinc-300 leading-relaxed">{analysisResult}</p>
                   </div>
                 </div>
               )}
@@ -1800,7 +1800,7 @@ export default function App() {
               {/* Live Rates Card Deck */}
               <div className="space-y-3.5">
                 <div className="space-y-0.5">
-                  <h2 className="text-[19px] sm:text-[21px] font-semibold tracking-[-0.025em] text-white font-sans">Live Rates</h2>
+                  <h2 className="text-[19px] sm:text-[21px] font-semibold tracking-[-0.025em] text-zinc-950 dark:text-white font-sans">Live Rates</h2>
                   <p className="text-[13px] text-zinc-500 font-normal tracking-normal">Major forex pairs</p>
                 </div>
 
@@ -1809,20 +1809,20 @@ export default function App() {
                     [1, 2, 3].map(i => (
                       <div
                         key={i}
-                        className="p-6 rounded-3xl border border-zinc-800/60 bg-[#111113]/60 animate-pulse flex flex-col justify-between min-h-[140px]"
+                        className="p-6 rounded-3xl border border-zinc-100 dark:border-zinc-800/60 bg-zinc-50/50 dark:bg-[#111113]/60 animate-pulse flex flex-col justify-between min-h-[140px]"
                       >
                         <div className="flex justify-between items-start">
                           <div className="space-y-2">
-                            <div className="h-5 w-24 bg-zinc-800 rounded-lg"></div>
-                            <div className="h-3 w-32 bg-zinc-900 rounded-md"></div>
+                            <div className="h-5 w-24 bg-zinc-200 dark:bg-zinc-800 rounded-lg"></div>
+                            <div className="h-3 w-32 bg-zinc-100 dark:bg-zinc-900 rounded-md"></div>
                           </div>
-                          <div className="h-6 w-16 bg-zinc-800/80 rounded-full"></div>
+                          <div className="h-6 w-16 bg-zinc-200/80 dark:bg-zinc-800/80 rounded-full"></div>
                         </div>
                         <div className="mt-6 flex items-end justify-between gap-4">
-                          <div className="w-1/2 h-10 bg-zinc-900/80 rounded-xl"></div>
+                          <div className="w-1/2 h-10 bg-zinc-100/80 dark:bg-zinc-900/80 rounded-xl"></div>
                           <div className="space-y-2 flex flex-col items-end">
-                            <div className="h-7 w-28 bg-zinc-800 rounded-lg"></div>
-                            <div className="h-4 w-16 bg-zinc-900 rounded-md"></div>
+                            <div className="h-7 w-28 bg-zinc-200 dark:bg-zinc-800 rounded-lg"></div>
+                            <div className="h-4 w-16 bg-zinc-100 dark:bg-zinc-900 rounded-md"></div>
                           </div>
                         </div>
                       </div>
@@ -1836,20 +1836,20 @@ export default function App() {
                       return (
                         <div
                           key={pair.symbol}
-                          className="p-6 rounded-3xl border border-zinc-800/80 bg-[#111113]/90 relative overflow-hidden flex flex-col justify-between hover:border-zinc-700 transition-all shadow-lg"
+                          className="p-6 rounded-3xl border border-zinc-200 dark:border-zinc-800/80 bg-zinc-50 dark:bg-[#111113]/90 relative overflow-hidden flex flex-col justify-between hover:border-zinc-300 dark:hover:border-zinc-700 transition-all shadow-lg"
                         >
                           {/* Top Info Row */}
                           <div className="flex justify-between items-start z-10">
                             <div className="space-y-0.5">
-                              <h3 className="text-[17px] sm:text-[18px] font-semibold text-white tracking-[-0.02em] font-sans">{pair.symbol}</h3>
+                              <h3 className="text-[17px] sm:text-[18px] font-semibold text-zinc-950 dark:text-white tracking-[-0.02em] font-sans">{pair.symbol}</h3>
                               <p className="text-[13px] text-zinc-500 font-normal tracking-normal">{pair.name}</p>
                             </div>
                             <span className={`px-3 py-1 rounded-full text-[12px] font-medium tracking-normal border flex items-center gap-1.5 ${
                               pair.sentiment === 'Bullish'
-                                ? 'bg-[#081e14] text-[#10b981] border-[#133c29]'
+                                ? 'bg-emerald-50 dark:bg-[#081e14] text-emerald-600 dark:text-[#10b981] border-emerald-100 dark:border-[#133c29]'
                                 : pair.sentiment === 'Bearish'
-                                ? 'bg-[#200c0c] text-[#ef4444] border-[#3f1616]'
-                                : 'bg-[#1a1a1e] text-[#a1a1aa] border-[#27272a]'
+                                ? 'bg-red-50 dark:bg-[#200c0c] text-red-600 dark:text-[#ef4444] border-red-100 dark:border-[#3f1616]'
+                                : 'bg-zinc-50 dark:bg-[#1a1a1e] text-zinc-500 dark:text-[#a1a1aa] border-zinc-200 dark:border-[#27272a]'
                             }`}>
                               {pair.sentiment === 'Bullish' && <TrendingUp className="w-3.5 h-3.5 shrink-0" />}
                               {pair.sentiment === 'Bearish' && <TrendingDown className="w-3.5 h-3.5 shrink-0" />}
@@ -1877,11 +1877,11 @@ export default function App() {
                             {/* Right Rate / Badge Column */}
                             <div className="text-right space-y-1 z-10">
                               {pair.status === 'unavailable' ? (
-                                <div className="text-[12px] font-medium text-zinc-500 uppercase tracking-wider">Data unavailable</div>
+                                <div className="text-[12px] font-medium text-zinc-400 dark:text-zinc-500 uppercase tracking-wider">Data unavailable</div>
                               ) : (
                                 <>
-                                  <div className="text-[24px] sm:text-[26px] font-semibold text-white tracking-[-0.03em] font-sans tabular-nums">{pair.price.toLocaleString(undefined, { minimumFractionDigits: pair.price > 10 ? 2 : 4 })}</div>
-                                  <div className={`text-[13px] sm:text-[14px] font-medium tracking-normal flex items-center justify-end gap-1 ${isNegativeChange ? 'text-[#ef4444]' : 'text-[#10b981]'}`}>
+                                  <div className="text-[24px] sm:text-[26px] font-semibold text-zinc-950 dark:text-white tracking-[-0.03em] font-sans tabular-nums">{pair.price.toLocaleString(undefined, { minimumFractionDigits: pair.price > 10 ? 2 : 4 })}</div>
+                                  <div className={`text-[13px] sm:text-[14px] font-medium tracking-normal flex items-center justify-end gap-1 ${isNegativeChange ? 'text-red-500' : 'text-emerald-500'}`}>
                                     {isNegativeChange ? <ArrowDownRight className="w-4 h-4 stroke-[2]" /> : <ArrowUpRight className="w-4 h-4 stroke-[2]" />}
                                     <span>{isNegativeChange ? '' : '+'}{pair.change.toFixed(2)}%</span>
                                   </div>
@@ -1897,23 +1897,23 @@ export default function App() {
               </div>
 
               {/* Top Movers Section */}
-              <div className="p-6 rounded-3xl border border-zinc-800/80 bg-[#111113]/80 space-y-4">
+              <div className="p-6 rounded-3xl border border-zinc-200 dark:border-zinc-800/80 bg-zinc-50/50 dark:bg-[#111113]/80 space-y-4">
                 <div className="flex justify-between items-baseline">
-                  <h3 className="text-[16px] sm:text-[17px] font-semibold tracking-[-0.02em] text-white font-sans">Top Movers</h3>
+                  <h3 className="text-[16px] sm:text-[17px] font-semibold tracking-[-0.02em] text-zinc-950 dark:text-white font-sans">Top Movers</h3>
                   <span className="text-[12px] text-zinc-500 font-normal tracking-normal">Biggest % change today</span>
                 </div>
-                <div className="divide-y divide-zinc-900">
+                <div className="divide-y divide-zinc-200 dark:divide-zinc-900">
                   {isRatesLoading && liveRates.length === 0 ? (
                     <div className="space-y-3 py-2 animate-pulse">
                       {[1, 2, 3, 4].map(i => (
                         <div key={i} className="flex justify-between items-center py-2.5">
                           <div className="space-y-1.5">
-                            <div className="h-4 w-16 bg-zinc-800 rounded"></div>
-                            <div className="h-2.5 w-24 bg-zinc-900 rounded"></div>
+                            <div className="h-4 w-16 bg-zinc-200 dark:bg-zinc-800 rounded"></div>
+                            <div className="h-2.5 w-24 bg-zinc-100 dark:bg-zinc-900 rounded"></div>
                           </div>
                           <div className="space-y-1.5 flex flex-col items-end">
-                            <div className="h-4 w-14 bg-zinc-800 rounded"></div>
-                            <div className="h-2.5 w-10 bg-zinc-900 rounded"></div>
+                            <div className="h-4 w-14 bg-zinc-200 dark:bg-zinc-800 rounded"></div>
+                            <div className="h-2.5 w-10 bg-zinc-100 dark:bg-zinc-900 rounded"></div>
                           </div>
                         </div>
                       ))}
@@ -1926,12 +1926,12 @@ export default function App() {
                       .map((mover, idx) => (
                         <div key={idx} className="py-3 flex justify-between items-center first:pt-0 last:pb-0">
                           <div>
-                            <div className="text-[14px] sm:text-[15px] font-semibold tracking-[-0.015em] text-white">{mover.symbol}</div>
+                            <div className="text-[14px] sm:text-[15px] font-semibold tracking-[-0.015em] text-zinc-950 dark:text-white">{mover.symbol}</div>
                             <div className="text-[12px] text-zinc-500 font-normal tracking-normal">{mover.name}</div>
                           </div>
                           <div className="text-right">
-                            <div className="text-[14px] sm:text-[15px] font-semibold tracking-[-0.02em] text-white tabular-nums">{mover.price.toLocaleString(undefined, { minimumFractionDigits: mover.price > 10 ? 2 : 4 })}</div>
-                            <div className={`text-[13px] font-medium tracking-normal ${mover.change >= 0 ? 'text-[#10b981]' : 'text-[#ef4444]'}`}>
+                            <div className="text-[14px] sm:text-[15px] font-semibold tracking-[-0.02em] text-zinc-950 dark:text-white tabular-nums">{mover.price.toLocaleString(undefined, { minimumFractionDigits: mover.price > 10 ? 2 : 4 })}</div>
+                            <div className={`text-[13px] font-medium tracking-normal ${mover.change >= 0 ? 'text-emerald-600 dark:text-[#10b981]' : 'text-red-600 dark:text-[#ef4444]'}`}>
                               {mover.change >= 0 ? '+' : ''}{mover.change.toFixed(2)}%
                             </div>
                           </div>
@@ -1946,21 +1946,21 @@ export default function App() {
               </div>
 
               {/* Trending Pairs Grid - Matches Screenshot 2 */}
-              <div className="p-6 rounded-3xl border border-zinc-800/80 bg-[#111113]/80 space-y-4">
+              <div className="p-6 rounded-3xl border border-zinc-200 dark:border-zinc-800/80 bg-zinc-50/50 dark:bg-[#111113]/80 space-y-4">
                 <div className="flex flex-col">
-                  <span className="text-[19px] sm:text-[21px] font-semibold tracking-[-0.025em] text-white font-sans">Trending Pairs</span>
+                  <span className="text-[19px] sm:text-[21px] font-semibold tracking-[-0.025em] text-zinc-950 dark:text-white font-sans">Trending Pairs</span>
                   <span className="text-[13px] text-zinc-500 mt-0.5 font-normal tracking-normal">What traders are watching</span>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
                   {isRatesLoading && liveRates.length === 0 ? (
                     [1, 2, 3, 4].map(i => (
-                      <div key={i} className="p-4 rounded-2xl border border-zinc-800/60 bg-[#161618]/60 flex flex-col justify-between h-24 sm:h-28 animate-pulse">
+                      <div key={i} className="p-4 rounded-2xl border border-zinc-100 dark:border-zinc-800/60 bg-zinc-100/60 dark:bg-[#161618]/60 flex flex-col justify-between h-24 sm:h-28 animate-pulse">
                         <div className="flex justify-between items-center">
-                          <div className="h-4 w-14 bg-zinc-800 rounded"></div>
-                          <div className="h-3 w-10 bg-zinc-900 rounded"></div>
+                          <div className="h-4 w-14 bg-zinc-200 dark:bg-zinc-800 rounded"></div>
+                          <div className="h-3 w-10 bg-zinc-100 dark:bg-zinc-900 rounded"></div>
                         </div>
-                        <div className="w-full h-8 bg-zinc-900/80 rounded-lg mt-3"></div>
+                        <div className="w-full h-8 bg-zinc-200/80 dark:bg-zinc-900/80 rounded-lg mt-3"></div>
                       </div>
                     ))
                   ) : liveRates.filter(r => r.status !== 'unavailable' && r.price > 0).length > 0 ? (
@@ -1968,10 +1968,10 @@ export default function App() {
                       const isBearish = trend.change < 0;
                       const { lineD, fillD } = getSparklinePaths(trend.history.length > 0 ? trend.history : [10, 10, 10], 80, 18);
                       return (
-                        <div key={idx} className="p-4 rounded-2xl border border-zinc-800/80 bg-[#161618] relative overflow-hidden flex flex-col justify-between h-24 sm:h-28 hover:border-zinc-700 transition-all">
+                        <div key={idx} className="p-4 rounded-2xl border border-zinc-200 dark:border-zinc-800/80 bg-zinc-50 dark:bg-[#161618] relative overflow-hidden flex flex-col justify-between h-24 sm:h-28 hover:border-zinc-300 dark:hover:border-zinc-700 transition-all shadow-sm">
                           <div className="flex justify-between items-center z-10">
-                            <span className="text-[14px] sm:text-[15px] font-semibold tracking-[-0.02em] text-white">{trend.symbol}</span>
-                            <span className={`text-[13px] font-medium tracking-normal ${isBearish ? 'text-[#ef4444]' : 'text-[#10b981]'}`}>
+                            <span className="text-[14px] sm:text-[15px] font-semibold tracking-[-0.02em] text-zinc-950 dark:text-white">{trend.symbol}</span>
+                            <span className={`text-[13px] font-medium tracking-normal ${isBearish ? 'text-red-600 dark:text-[#ef4444]' : 'text-emerald-600 dark:text-[#10b981]'}`}>
                               {trend.change >= 0 ? '+' : ''}{trend.change.toFixed(2)}%
                             </span>
                           </div>
@@ -2000,18 +2000,18 @@ export default function App() {
               </div>
 
               {/* Market Heatmap Section - Matches Screenshot 2 */}
-              <div className="p-6 rounded-3xl border border-zinc-800/80 bg-[#111113]/80 space-y-4">
+              <div className="p-6 rounded-3xl border border-zinc-200 dark:border-zinc-800/80 bg-white dark:bg-[#111113]/80 space-y-4">
                 <div className="flex flex-col">
-                  <span className="text-[19px] sm:text-[21px] font-semibold tracking-[-0.025em] text-white font-sans">Market Heatmap</span>
-                  <span className="text-[13px] text-zinc-500 mt-0.5 font-normal tracking-normal">Performance at a glance</span>
+                  <span className="text-[19px] sm:text-[21px] font-semibold tracking-[-0.025em] text-zinc-950 dark:text-white font-sans">Market Heatmap</span>
+                  <span className="text-[13px] text-zinc-500 dark:text-zinc-400 mt-0.5 font-normal tracking-normal">Performance at a glance</span>
                 </div>
 
                 <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2">
                   {isRatesLoading && liveRates.length === 0 ? (
                     [1, 2, 3, 4, 5, 6].map(i => (
-                      <div key={i} className="aspect-square rounded-2xl bg-zinc-900/50 border border-zinc-800/40 flex flex-col justify-center items-center p-2 animate-pulse gap-1">
-                        <div className="h-3 w-8 bg-zinc-800 rounded"></div>
-                        <div className="h-2.5 w-6 bg-zinc-900 rounded"></div>
+                      <div key={i} className="aspect-square rounded-2xl bg-zinc-100 dark:bg-zinc-900/50 border border-zinc-200/40 dark:border-zinc-800/40 flex flex-col justify-center items-center p-2 animate-pulse gap-1">
+                        <div className="h-3 w-8 bg-zinc-200 dark:bg-zinc-800 rounded"></div>
+                        <div className="h-2.5 w-6 bg-zinc-100 dark:bg-zinc-900 rounded"></div>
                       </div>
                     ))
                   ) : liveRates.filter(r => r.status !== 'unavailable' && r.price > 0).length > 0 ? (
@@ -2023,13 +2023,13 @@ export default function App() {
                       const intensity = absChange < 0.25 ? 'opacity-30' : absChange < 0.75 ? 'opacity-50' : absChange < 1.5 ? 'opacity-70' : 'opacity-100';
                       
                       const bgColor = isBearish 
-                        ? `bg-red-600 ${intensity}` 
+                        ? `bg-rose-600 ${intensity}` 
                         : `bg-emerald-600 ${intensity}`;
 
                       return (
                         <div
                           key={idx}
-                          className={`aspect-[4/3] rounded-2xl p-3 flex flex-col justify-between transition-all hover:scale-[1.05] cursor-pointer ${bgColor}`}
+                          className={`aspect-[4/3] rounded-2xl p-3 flex flex-col justify-between transition-all hover:scale-[1.05] cursor-pointer ${bgColor} shadow-sm`}
                         >
                           <div className="flex justify-between items-start">
                             <span className="text-[10px] sm:text-[11px] font-bold text-white tracking-wide">{pair.symbol}</span>
@@ -2042,7 +2042,7 @@ export default function App() {
                       );
                     })
                   ) : (
-                    <div className="col-span-3 sm:col-span-4 lg:col-span-6 py-8 text-center text-zinc-500 text-xs font-medium">Generating heatmap from live data...</div>
+                    <div className="col-span-3 sm:col-span-4 lg:col-span-6 py-8 text-center text-zinc-400 dark:text-zinc-500 text-xs font-medium">Generating heatmap from live data...</div>
                   )}
                 </div>
               </div>
@@ -2062,8 +2062,8 @@ export default function App() {
                 
                 {/* Header Title */}
                 <div className="space-y-2">
-                  <h1 className="text-[32px] sm:text-[36px] font-semibold tracking-[-0.035em] text-white leading-[1.15] font-sans">Strategy</h1>
-                  <p className="text-[15px] sm:text-[16px] font-normal tracking-[-0.01em] text-zinc-400 leading-[1.45] max-w-sm">
+                  <h1 className="text-[32px] sm:text-[36px] font-semibold tracking-[-0.035em] text-zinc-950 dark:text-white leading-[1.15] font-sans">Strategy</h1>
+                  <p className="text-[15px] sm:text-[16px] font-normal tracking-[-0.01em] text-zinc-500 dark:text-zinc-400 leading-[1.45] max-w-sm">
                     Write the playbook your AI assistant trades with.
                   </p>
                   <div className="flex items-center gap-1.5 pt-0.5">
@@ -2075,7 +2075,7 @@ export default function App() {
                     ) : (
                       <>
                         <Check className="w-4 h-4 text-emerald-500 stroke-[2.5]" />
-                        <span className="text-xs text-zinc-400 font-medium">All changes saved</span>
+                        <span className="text-xs text-zinc-400 dark:text-zinc-500 font-medium">All changes saved</span>
                       </>
                     )}
                   </div>
@@ -2086,18 +2086,18 @@ export default function App() {
                 
                 {/* Full Width Strategy Editor */}
                 <div className="space-y-4">
-                  <div className="rounded-3xl border border-zinc-800 bg-[#0c0c0e]/80 overflow-hidden flex flex-col">
-                    <div className="px-5 py-4 border-b border-zinc-900 flex flex-wrap items-center justify-between gap-3 bg-[#08080a]">
+                  <div className="rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-[#0c0c0e]/80 overflow-hidden flex flex-col">
+                    <div className="px-5 py-4 border-b border-zinc-200 dark:border-zinc-900 flex flex-wrap items-center justify-between gap-3 bg-zinc-100/50 dark:bg-[#08080a]">
                       <div className="flex items-center gap-2.5">
                         <span className={`w-2 h-2 rounded-full ${selectedStrat.id === activeStrategyId ? 'bg-emerald-500 animate-pulse' : 'bg-zinc-600'}`}></span>
-                        <span className="text-xs font-bold text-white uppercase tracking-wider">Strategy Editor</span>
+                        <span className="text-xs font-bold text-zinc-700 dark:text-white uppercase tracking-wider">Strategy Editor</span>
                       </div>
 
                       <div className="flex items-center gap-2">
                         {/* Delete Button */}
                         <button
                           onClick={handleClearStrategy}
-                          className="px-3 py-1.5 rounded-xl border border-red-950/20 hover:border-red-900/40 bg-zinc-950/60 text-red-400 hover:text-red-300 transition-all cursor-pointer flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider"
+                          className="px-3 py-1.5 rounded-xl border border-red-950/20 dark:border-red-950/20 hover:border-red-500/40 bg-red-50 dark:bg-zinc-950/60 text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 transition-all cursor-pointer flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider"
                           title="Clear current strategy"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
@@ -2136,11 +2136,11 @@ export default function App() {
                         value={selectedStrat.text}
                         onChange={(e) => handleStrategyTextChange(e.target.value)}
                         placeholder="Describe your trading strategy in detail..."
-                        className="w-full min-h-[400px] bg-zinc-950/60 border border-zinc-900 rounded-2xl p-6 text-[13px] text-zinc-300 font-medium leading-relaxed resize-none font-sans focus:outline-none focus:border-zinc-700 transition-colors"
+                        className="w-full min-h-[400px] bg-white dark:bg-zinc-950/60 border border-zinc-200 dark:border-zinc-900 rounded-2xl p-6 text-[13px] text-zinc-800 dark:text-zinc-300 font-medium leading-relaxed resize-none font-sans focus:outline-none focus:border-zinc-400 dark:focus:border-zinc-700 transition-colors shadow-sm"
                       />
 
                       {selectedStrat.text.trim().length === 0 && (
-                        <p className="text-red-400 text-[11px] font-semibold flex items-center gap-1.5 px-1 animate-fade-in">
+                        <p className="text-rose-600 dark:text-red-400 text-[11px] font-semibold flex items-center gap-1.5 px-1 animate-fade-in">
                           <AlertTriangle className="w-3.5 h-3.5" />
                           <span>Strategy cannot be empty.</span>
                         </p>
@@ -2153,8 +2153,8 @@ export default function App() {
                           disabled={!canSave}
                           className={`px-10 py-3 rounded-full text-xs font-bold transition-all flex items-center gap-2 shadow-lg ${
                             canSave 
-                              ? 'bg-white text-black hover:bg-zinc-200 cursor-pointer active:scale-[0.98]' 
-                              : 'bg-[#5A5A5A] text-zinc-300 cursor-not-allowed opacity-75'
+                              ? 'bg-zinc-950 dark:bg-white text-white dark:text-black hover:bg-zinc-800 dark:hover:bg-zinc-200 cursor-pointer active:scale-[0.98]' 
+                              : 'bg-zinc-200 dark:bg-[#5A5A5A] text-zinc-400 dark:text-zinc-300 cursor-not-allowed'
                           }`}
                         >
                           <Check className="w-4 h-4 stroke-[2.5]" />
@@ -2168,9 +2168,9 @@ export default function App() {
               </div>
 
               {/* Trading Preferences Card - Matches Screenshot 9 */}
-              <div className="p-6 rounded-3xl border border-zinc-800 bg-[#0c0c0e]/80 space-y-6">
+              <div className="p-6 rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-[#0c0c0e]/80 space-y-6 shadow-sm">
                 <div className="space-y-1">
-                  <h3 className="text-base font-bold text-white font-display">Trading Preferences</h3>
+                  <h3 className="text-base font-bold text-zinc-950 dark:text-white font-display">Trading Preferences</h3>
                   <p className="text-xs text-zinc-500">Tune how your AI sizes and times trades.</p>
                 </div>
 
@@ -2188,8 +2188,8 @@ export default function App() {
                             onClick={() => setCapital(option)}
                             className={`px-4 py-2 rounded-full text-xs font-semibold border transition-all cursor-pointer ${
                               isSelected
-                                ? 'bg-zinc-100 text-zinc-900 border-zinc-100 shadow-md'
-                                : 'bg-zinc-950/40 text-zinc-400 border-zinc-900 hover:border-zinc-800 hover:text-white'
+                                ? 'bg-zinc-950 dark:bg-zinc-100 text-white dark:text-zinc-900 border-zinc-950 dark:border-zinc-100 shadow-md'
+                                : 'bg-white dark:bg-zinc-950/40 text-zinc-500 dark:text-zinc-400 border-zinc-200 dark:border-zinc-900 hover:border-zinc-400 dark:hover:border-zinc-800 hover:text-zinc-900 dark:hover:text-white'
                             }`}
                           >
                             {option}
@@ -2200,14 +2200,14 @@ export default function App() {
                     
                     {/* Render custom capital field if selected */}
                     {capital === 'Custom' && (
-                      <div className="mt-2.5 relative rounded-2xl border border-zinc-800 overflow-hidden bg-zinc-950/60 focus-within:border-zinc-700">
+                      <div className="mt-2.5 relative rounded-2xl border border-zinc-200 dark:border-zinc-800 overflow-hidden bg-white dark:bg-zinc-950/60 focus-within:border-zinc-400 dark:focus-within:border-zinc-700 shadow-sm">
                         <span className="absolute left-4 top-1/2 -translate-y-1/2 text-xs font-bold text-zinc-500">$</span>
                         <input
                           type="number"
                           value={customCapital}
                           onChange={(e) => setCustomCapital(e.target.value)}
                           placeholder="Enter your custom capital size..."
-                          className="w-full bg-transparent border-0 py-2.5 pl-8 pr-4 text-xs text-white focus:outline-none focus:ring-0"
+                          className="w-full bg-transparent border-0 py-2.5 pl-8 pr-4 text-xs text-zinc-800 dark:text-white focus:outline-none focus:ring-0"
                         />
                       </div>
                     )}
@@ -2221,7 +2221,7 @@ export default function App() {
                       value={preferredRisk}
                       onChange={(e) => setPreferredRisk(e.target.value)}
                       placeholder="e.g. 1% or 2.5%"
-                      className="w-full bg-zinc-950/60 border border-zinc-900 focus:border-zinc-700 rounded-2xl px-4 py-3 text-xs font-semibold text-white focus:outline-none"
+                      className="w-full bg-white dark:bg-zinc-950/60 border border-zinc-200 dark:border-zinc-900 focus:border-zinc-400 dark:focus:border-zinc-700 rounded-2xl px-4 py-3 text-xs font-semibold text-zinc-800 dark:text-white focus:outline-none shadow-sm transition-colors"
                     />
                   </div>
 
@@ -2233,7 +2233,7 @@ export default function App() {
                       value={riskReward}
                       onChange={(e) => setRiskReward(e.target.value)}
                       placeholder="e.g. 1:2 or 1:3"
-                      className="w-full bg-zinc-950/60 border border-zinc-900 focus:border-zinc-700 rounded-2xl px-4 py-3 text-xs font-semibold text-white focus:outline-none"
+                      className="w-full bg-white dark:bg-zinc-950/60 border border-zinc-200 dark:border-zinc-900 focus:border-zinc-400 dark:focus:border-zinc-700 rounded-2xl px-4 py-3 text-xs font-semibold text-zinc-800 dark:text-white focus:outline-none shadow-sm transition-colors"
                     />
                   </div>
 
@@ -2245,8 +2245,8 @@ export default function App() {
                         onClick={() => setAccountType('personal')}
                         className={`p-4 rounded-2xl border text-center transition-all cursor-pointer ${
                           accountType === 'personal'
-                            ? 'bg-zinc-100/5 border-zinc-200 text-white font-bold'
-                            : 'bg-zinc-950/40 border-zinc-900 text-zinc-500 hover:border-zinc-800'
+                            ? 'bg-zinc-50 dark:bg-zinc-100/5 border-zinc-300 dark:border-zinc-200 text-zinc-950 dark:text-white font-bold shadow-sm'
+                            : 'bg-white dark:bg-zinc-950/40 border-zinc-200 dark:border-zinc-900 text-zinc-500 hover:border-zinc-400 dark:hover:border-zinc-800'
                         }`}
                       >
                         <div className="text-xs font-semibold leading-relaxed">Personal</div>
@@ -2256,8 +2256,8 @@ export default function App() {
                         onClick={() => setAccountType('prop')}
                         className={`p-4 rounded-2xl border text-center transition-all cursor-pointer ${
                           accountType === 'prop'
-                            ? 'bg-zinc-100/5 border-zinc-200 text-white font-bold'
-                            : 'bg-zinc-950/40 border-zinc-900 text-zinc-500 hover:border-zinc-800'
+                            ? 'bg-zinc-50 dark:bg-zinc-100/5 border-zinc-300 dark:border-zinc-200 text-zinc-950 dark:text-white font-bold shadow-sm'
+                            : 'bg-white dark:bg-zinc-950/40 border-zinc-200 dark:border-zinc-900 text-zinc-500 hover:border-zinc-400 dark:hover:border-zinc-800'
                         }`}
                       >
                         <div className="text-xs font-semibold leading-relaxed">Prop Firm</div>
@@ -2278,8 +2278,8 @@ export default function App() {
                             onClick={() => toggleSession(session)}
                             className={`px-4 py-2 rounded-full text-xs font-semibold border flex items-center gap-1.5 transition-all cursor-pointer ${
                               isChecked
-                                ? 'bg-zinc-100/5 text-white border-zinc-300'
-                                : 'bg-zinc-950/40 text-zinc-500 border-zinc-900 hover:border-zinc-800'
+                                ? 'bg-zinc-950 dark:bg-zinc-100/5 text-white dark:text-white border-zinc-950 dark:border-zinc-300 shadow-sm'
+                                : 'bg-white dark:bg-zinc-950/40 text-zinc-500 border-zinc-200 dark:border-zinc-900 hover:border-zinc-400 dark:hover:border-zinc-800'
                             }`}
                           >
                             {isChecked && <Check className="w-3 h-3 text-white stroke-[3]" />}
@@ -2302,8 +2302,8 @@ export default function App() {
                             onClick={() => toggleTimeframe(tf)}
                             className={`w-11 h-11 rounded-full text-xs font-semibold border flex items-center justify-center transition-all cursor-pointer ${
                               isChecked
-                                ? 'bg-zinc-100/5 text-white border-zinc-300'
-                                : 'bg-zinc-950/40 text-zinc-500 border-zinc-900 hover:border-zinc-800'
+                                ? 'bg-zinc-950 dark:bg-zinc-100/5 text-white dark:text-white border-zinc-950 dark:border-zinc-300 shadow-sm'
+                                : 'bg-white dark:bg-zinc-950/40 text-zinc-500 border-zinc-200 dark:border-zinc-900 hover:border-zinc-400 dark:hover:border-zinc-800'
                             }`}
                           >
                             {tf}
@@ -2319,11 +2319,11 @@ export default function App() {
                     onClick={savePreferences}
                     className={`w-full flex items-center justify-center gap-2 px-5 py-3 rounded-full transition-all shadow-md mt-4 ${
                       isPrefsDirty
-                        ? 'bg-white text-zinc-950 hover:bg-zinc-200 cursor-pointer'
-                        : 'bg-zinc-800 text-zinc-500 cursor-not-allowed opacity-70'
+                        ? 'bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 hover:bg-zinc-800 dark:hover:bg-zinc-200 cursor-pointer'
+                        : 'bg-zinc-200 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500 cursor-not-allowed opacity-70'
                     }`}
                   >
-                    <Check className={`w-3.5 h-3.5 stroke-[2.5] ${isPrefsDirty ? 'text-zinc-950' : 'text-zinc-500'}`} />
+                    <Check className={`w-3.5 h-3.5 stroke-[2.5] ${isPrefsDirty ? 'text-white dark:text-zinc-950' : 'text-zinc-400 dark:text-zinc-500'}`} />
                     <span>Save Preferences</span>
                   </button>
 
@@ -2339,41 +2339,41 @@ export default function App() {
               
               {/* Header Title */}
               <div className="space-y-2">
-                <h1 className="text-[32px] sm:text-[36px] font-semibold tracking-[-0.035em] text-white leading-[1.15] font-sans">Market Watcher</h1>
-                <p className="text-[15px] sm:text-[16px] font-normal tracking-[-0.01em] text-zinc-400 leading-[1.45] max-w-sm">
+                <h1 className="text-[32px] sm:text-[36px] font-semibold tracking-[-0.035em] text-zinc-950 dark:text-white leading-[1.15] font-sans">Market Watcher</h1>
+                <p className="text-[15px] sm:text-[16px] font-normal tracking-[-0.01em] text-zinc-500 dark:text-zinc-400 leading-[1.45] max-w-sm">
                   Build a personal watchlist with AI signals and confidence scoring.
                 </p>
               </div>
 
               {/* AI Watcher Activation Widget */}
-              <div className="p-5 rounded-3xl border border-zinc-800 bg-[#0c0c0e]/60 space-y-4">
+              <div className="p-5 rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-[#0c0c0e]/60 space-y-4 shadow-sm">
                 {isTelegramLoading ? (
                   <div className="flex items-center justify-between py-2">
                     <div className="flex items-center gap-3">
-                      <div className="w-4 h-4 rounded-full border-2 border-zinc-700 border-t-zinc-400 animate-spin"></div>
+                      <div className="w-4 h-4 rounded-full border-2 border-zinc-200 dark:border-zinc-700 border-t-zinc-400 dark:border-t-zinc-400 animate-spin"></div>
                       <div>
-                        <h4 className="text-xs font-bold text-zinc-300">Checking Telegram Connection...</h4>
+                        <h4 className="text-xs font-bold text-zinc-700 dark:text-zinc-300">Checking Telegram Connection...</h4>
                         <p className="text-[10px] text-zinc-500">Querying secure alert routing states</p>
                       </div>
                     </div>
                   </div>
                 ) : !telegramConnection?.connected ? (
                   <div className="space-y-4 w-full">
-                    <div className="p-4 rounded-2xl border border-amber-500/10 bg-amber-500/5 text-amber-400 text-xs space-y-2">
+                    <div className="p-4 rounded-2xl border border-amber-500/10 bg-amber-500/5 text-amber-600 dark:text-amber-400 text-xs space-y-2">
                       <div className="flex items-center gap-2 font-semibold">
-                        <Info className="w-4 h-4 shrink-0 text-amber-400" />
+                        <Info className="w-4 h-4 shrink-0 text-amber-600 dark:text-amber-400" />
                         <span>Telegram Connection Required</span>
                       </div>
-                      <p className="text-[11px] text-zinc-400 leading-normal">
+                      <p className="text-[11px] text-zinc-500 dark:text-zinc-400 leading-normal">
                         Please connect your Telegram account before activating the AI Market Watcher.
                       </p>
                     </div>
 
                     <div className="flex items-center justify-between gap-4 pt-1">
                       <div className="flex items-center gap-3">
-                        <div className="w-3.5 h-3.5 rounded-full bg-zinc-700"></div>
+                        <div className="w-3.5 h-3.5 rounded-full bg-zinc-200 dark:bg-zinc-700"></div>
                         <div>
-                          <h4 className="text-xs font-bold text-white">AI Market Watcher Engine</h4>
+                          <h4 className="text-xs font-bold text-zinc-950 dark:text-white">AI Market Watcher Engine</h4>
                           <p className="text-[10px] text-zinc-500">Status: <span className="font-bold">STANDBY (LINK REQUIRED)</span></p>
                         </div>
                       </div>
@@ -2381,10 +2381,10 @@ export default function App() {
                       <button
                         onClick={handleConnectTelegram}
                         disabled={isTelegramConnecting}
-                        className="px-5 py-2.5 rounded-full text-xs font-bold bg-white text-black hover:bg-zinc-200 active:scale-95 transition-all flex items-center gap-1.5 cursor-pointer shadow-md disabled:opacity-50"
+                        className="px-5 py-2.5 rounded-full text-xs font-bold bg-zinc-950 dark:bg-white text-white dark:text-black hover:bg-zinc-800 dark:hover:bg-zinc-200 active:scale-95 transition-all flex items-center gap-1.5 cursor-pointer shadow-md disabled:opacity-50"
                       >
                         {isTelegramConnecting ? (
-                          <div className="w-3.5 h-3.5 rounded-full border-2 border-black border-t-transparent animate-spin"></div>
+                          <div className="w-3.5 h-3.5 rounded-full border-2 border-white dark:border-black border-t-transparent animate-spin"></div>
                         ) : (
                           <>
                             <Send className="w-3.5 h-3.5" />
@@ -2397,13 +2397,13 @@ export default function App() {
                 ) : (
                   <div className="w-full space-y-4">
                     {/* Connection status bar */}
-                    <div className="p-4 rounded-2xl border border-emerald-500/10 bg-emerald-500/5 text-emerald-400 text-xs flex items-center justify-between">
+                    <div className="p-4 rounded-2xl border border-emerald-500/10 bg-emerald-500/5 text-emerald-600 dark:text-emerald-400 text-xs flex items-center justify-between">
                       <div className="flex items-center gap-2 font-semibold">
-                        <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
+                        <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
                         <span>Telegram Connected</span>
                       </div>
                       {telegramConnection?.telegram_username && (
-                        <span className="text-[10px] font-mono text-emerald-400/80 bg-emerald-500/10 px-2 py-0.5 rounded-full">
+                        <span className="text-[10px] font-mono text-emerald-600 dark:text-emerald-400/80 bg-emerald-500/10 px-2 py-0.5 rounded-full">
                           @{telegramConnection.telegram_username}
                         </span>
                       )}
@@ -2412,14 +2412,14 @@ export default function App() {
                     <div className="flex items-center justify-between gap-4">
                       <div className="flex items-center gap-3">
                         <div className="relative">
-                          <div className={`w-3.5 h-3.5 rounded-full ${isWatcherActive ? 'bg-white animate-pulse' : 'bg-zinc-700'}`}></div>
-                          {isWatcherActive && <div className="absolute inset-0 rounded-full bg-white animate-ping opacity-70"></div>}
+                          <div className={`w-3.5 h-3.5 rounded-full ${isWatcherActive ? 'bg-zinc-950 dark:bg-white animate-pulse' : 'bg-zinc-200 dark:bg-zinc-700'}`}></div>
+                          {isWatcherActive && <div className="absolute inset-0 rounded-full bg-zinc-950 dark:bg-white animate-ping opacity-70"></div>}
                         </div>
                         <div>
-                          <h4 className="text-xs font-bold text-white">AI Market Watcher Engine</h4>
-                          <div className="text-[10px] text-zinc-400 space-y-0.5">
+                          <h4 className="text-xs font-bold text-zinc-950 dark:text-white">AI Market Watcher Engine</h4>
+                          <div className="text-[10px] text-zinc-500 dark:text-zinc-400 space-y-0.5">
                             <p>
-                              Status: <span className={isWatcherActive ? 'text-white font-bold' : 'text-zinc-500 font-bold'}>
+                              Status: <span className={isWatcherActive ? 'text-zinc-950 dark:text-white font-bold' : 'text-zinc-400 dark:text-zinc-500 font-bold'}>
                                 {isWatcherActive 
                                   ? `ACTIVE & MONITORED (${watcherTradeStatus})` 
                                   : 'STANDBY'}
@@ -2456,18 +2456,18 @@ export default function App() {
               </div>
 
               {/* Add Custom Forex Ticker Form with Timeframe and Activate Button */}
-              <div className="p-6 rounded-3xl border border-zinc-800 bg-[#0c0c0e]/80 space-y-5">
+              <div className="p-6 rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-[#0c0c0e]/80 space-y-5 shadow-sm">
                 <div className="flex items-center gap-2">
-                  <Sparkles className="w-4 h-4 text-white animate-pulse" />
-                  <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-300">Configure Market Watcher</h3>
+                  <Sparkles className="w-4 h-4 text-zinc-950 dark:text-white animate-pulse" />
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-600 dark:text-zinc-300">Configure Market Watcher</h3>
                 </div>
                 
                 <div className="space-y-4">
                   {/* Pair input */}
                   <div className="space-y-2">
                     <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-500 block">Forex Pair / Asset Symbol</label>
-                    <div className="relative rounded-2xl border border-zinc-900 bg-zinc-950/60 overflow-hidden focus-within:border-zinc-700">
-                      <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
+                    <div className="relative rounded-2xl border border-zinc-200 dark:border-zinc-900 bg-white dark:bg-zinc-950/60 overflow-hidden focus-within:border-zinc-400 dark:focus-within:border-zinc-700 shadow-sm">
+                      <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400 dark:text-zinc-500" />
                       <input
                         type="text"
                         value={watcherSearch}
@@ -2477,16 +2477,15 @@ export default function App() {
                             e.currentTarget.blur();
                           }
                         }}
-                        placeholder="Enter symbol... e.g. EURUSD, GBPUSD, XAUUSD"
-                        className="w-full bg-transparent border-0 py-3.5 pl-11 pr-4 text-xs font-semibold text-white focus:outline-none"
+                        className="w-full bg-transparent border-0 py-3.5 pl-11 pr-4 text-xs font-semibold text-zinc-800 dark:text-white focus:outline-none"
                       />
                     </div>
                   </div>
 
-                  {/* Timeframe selector */}
+                   {/* Timeframe selector */}
                   <div className="space-y-2">
                     <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-500 block">Analysis Timeframe</label>
-                    <div className="flex flex-wrap gap-1.5 p-1 rounded-2xl border border-zinc-900 bg-zinc-950/40">
+                    <div className="flex flex-wrap gap-1.5 p-1 rounded-2xl border border-zinc-200 dark:border-zinc-900 bg-zinc-50 dark:bg-zinc-950/40 shadow-inner">
                       {['M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'Daily'].map(tf => {
                         const isSelected = watcherTimeframe === tf;
                         return (
@@ -2496,8 +2495,8 @@ export default function App() {
                             onClick={() => setWatcherTimeframe(tf)}
                             className={`flex-1 min-w-[42px] py-2 rounded-xl text-[10px] font-bold transition-all cursor-pointer ${
                               isSelected
-                                ? 'bg-white text-zinc-950 shadow-sm'
-                               : 'text-zinc-400 hover:text-white hover:bg-zinc-900/40'
+                                ? 'bg-white dark:bg-zinc-900 text-zinc-950 dark:text-white shadow-sm border border-zinc-200 dark:border-zinc-800'
+                                : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white hover:bg-white/50 dark:hover:bg-zinc-900/40'
                             }`}
                           >
                             {tf}
@@ -2509,16 +2508,16 @@ export default function App() {
 
                   {/* Timeframe Mismatch Warning */}
                   {isTimeframeMismatch && (
-                    <div className="p-4 rounded-2xl border border-red-500/10 bg-red-500/5 text-red-400 text-xs space-y-2">
+                    <div className="p-4 rounded-2xl border border-rose-500/10 bg-rose-500/5 text-rose-600 dark:text-rose-400 text-xs space-y-2">
                       <div className="flex items-center gap-2 font-semibold">
-                        <AlertTriangle className="w-4 h-4 shrink-0 text-red-400 animate-pulse" />
+                        <AlertTriangle className="w-4 h-4 shrink-0 text-rose-600 dark:text-rose-400 animate-pulse" />
                         <span>Strategy Timeframe Mismatch</span>
                       </div>
-                      <p className="text-[11px] text-zinc-400 leading-normal">
-                        Your strategy was written for: <span className="font-bold text-white">{compiledStrategyTimeframes.join(', ')}</span>.
-                        You selected: <span className="font-bold text-white">{watcherTimeframe}</span>.
+                      <p className="text-[11px] text-zinc-500 dark:text-zinc-400 leading-normal">
+                        Your strategy was written for: <span className="font-bold text-zinc-950 dark:text-white">{compiledStrategyTimeframes.join(', ')}</span>.
+                        You selected: <span className="font-bold text-zinc-950 dark:text-white">{watcherTimeframe}</span>.
                         <br />
-                        Please select <span className="font-bold text-white">{compiledStrategyTimeframes.join(' or ')}</span> or edit your strategy.
+                        Please select <span className="font-bold text-zinc-950 dark:text-white">{compiledStrategyTimeframes.join(' or ')}</span> or edit your strategy.
                       </p>
                     </div>
                   )}
@@ -2533,7 +2532,7 @@ export default function App() {
                         <div className="flex items-center gap-2 mt-2">
                           <button
                             onClick={stopAiMarketWatcher}
-                            className="flex-1 flex items-center justify-center gap-2 px-5 py-3.5 rounded-full text-xs font-bold transition-all shadow-sm font-display bg-zinc-900 border border-zinc-800 text-zinc-300 hover:text-white hover:border-zinc-700 cursor-pointer"
+                            className="flex-1 flex items-center justify-center gap-2 px-5 py-3.5 rounded-full text-xs font-bold transition-all shadow-sm font-display bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-300 hover:text-zinc-950 dark:hover:text-white hover:border-zinc-400 dark:hover:border-zinc-700 cursor-pointer"
                           >
                             <X className="w-3.5 h-3.5" />
                             <span>Stop Watcher</span>
@@ -2546,11 +2545,11 @@ export default function App() {
                             }}
                             className={`flex-1 flex items-center justify-center gap-2 px-5 py-3.5 rounded-full text-xs font-bold transition-all shadow-sm font-display ${
                               isUpdateDisabled
-                                ? 'bg-zinc-800 text-zinc-500 cursor-not-allowed opacity-70'
-                                : 'bg-white text-black hover:bg-zinc-200 active:scale-[0.98] cursor-pointer'
+                                ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500 cursor-not-allowed'
+                                : 'bg-zinc-950 dark:bg-white text-white dark:text-black hover:bg-zinc-800 dark:hover:bg-zinc-200 active:scale-[0.98] cursor-pointer'
                             }`}
                           >
-                            <Play className={`w-3.5 h-3.5 fill-current ${isUpdateDisabled ? 'text-zinc-500' : 'text-zinc-950 stroke-zinc-950'}`} />
+                            <Play className={`w-3.5 h-3.5 fill-current ${isUpdateDisabled ? 'text-zinc-400 dark:text-zinc-500' : 'text-white dark:text-zinc-950 stroke-white dark:stroke-zinc-950'}`} />
                             <span>Update Watcher</span>
                           </button>
                         </div>
@@ -2567,16 +2566,16 @@ export default function App() {
                             }}
                             className={`w-full flex items-center justify-center gap-2 px-5 py-3.5 rounded-full text-xs font-bold transition-all shadow-sm font-display ${
                               isDisabled
-                                ? 'bg-zinc-800 text-zinc-500 cursor-not-allowed opacity-70'
-                                : 'bg-white text-black hover:bg-zinc-200 active:scale-[0.98] cursor-pointer'
+                                ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500 cursor-not-allowed'
+                                : 'bg-zinc-950 dark:bg-white text-white dark:text-black hover:bg-zinc-800 dark:hover:bg-zinc-200 active:scale-[0.98] cursor-pointer'
                             }`}
                           >
-                            <Play className={`w-3.5 h-3.5 fill-current ${isDisabled ? 'text-zinc-500' : 'text-zinc-950 stroke-zinc-950'}`} />
+                            <Play className={`w-3.5 h-3.5 fill-current ${isDisabled ? 'text-zinc-400 dark:text-zinc-500' : 'text-white dark:text-zinc-950 stroke-white dark:stroke-zinc-950'}`} />
                             <span>Activate Market Watcher</span>
                           </button>
                           
                           {isWatcherActive && !isAdmin && (
-                            <div className="p-3 rounded-2xl bg-zinc-900/50 border border-zinc-800 text-zinc-400 text-center text-[11px] leading-relaxed">
+                            <div className="p-3 rounded-2xl bg-zinc-50 dark:bg-zinc-900/50 border border-zinc-100 dark:border-zinc-800 text-zinc-500 dark:text-zinc-400 text-center text-[11px] leading-relaxed shadow-inner">
                               Free accounts can monitor one market at a time.
                             </div>
                           )}
@@ -2602,8 +2601,8 @@ export default function App() {
                         }}
                         className={`px-3.5 py-1.5 rounded-full text-xs font-semibold border transition-all cursor-pointer flex items-center gap-1.5 ${
                           isSelected
-                            ? 'border-white bg-white text-black'
-                            : 'border-zinc-900 bg-zinc-950/40 text-zinc-300 hover:text-white hover:border-zinc-800'
+                            ? 'border-zinc-950 dark:border-white bg-zinc-950 dark:bg-white text-white dark:text-black shadow-md'
+                            : 'border-zinc-200 dark:border-zinc-900 bg-white dark:bg-zinc-950/40 text-zinc-500 dark:text-zinc-300 hover:text-zinc-950 dark:hover:text-white hover:border-zinc-400 dark:hover:border-zinc-800'
                         }`}
                       >
                         {isSelected && <Check className="w-3.5 h-3.5" />}
@@ -2618,12 +2617,12 @@ export default function App() {
               <div className="space-y-4">
                 {(watchlist || []).length === 0 ? (
                   /* Empty state - Matches Screenshot 11 exactly */
-                  <div className="p-12 rounded-3xl border border-zinc-800 bg-[#0c0c0e]/40 flex flex-col items-center text-center space-y-4">
-                    <div className="w-12 h-12 rounded-full bg-zinc-950/80 border border-zinc-900 flex items-center justify-center text-zinc-400">
-                      <Search className="w-5 h-5 text-zinc-400 stroke-[1.8]" />
+                  <div className="p-12 rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-[#0c0c0e]/40 flex flex-col items-center text-center space-y-4 shadow-sm">
+                    <div className="w-12 h-12 rounded-full bg-zinc-50 dark:bg-zinc-950/80 border border-zinc-100 dark:border-zinc-900 flex items-center justify-center text-zinc-400">
+                      <Search className="w-5 h-5 text-zinc-400 dark:text-zinc-500 stroke-[1.8]" />
                     </div>
                     <div className="space-y-1.5 max-w-[240px]">
-                      <h3 className="text-sm font-bold text-white">No pair selected</h3>
+                      <h3 className="text-sm font-bold text-zinc-950 dark:text-white">No pair selected</h3>
                       <p className="text-[11px] text-zinc-500 leading-relaxed">
                         Select a symbol above to configure the Market Watcher.
                       </p>
@@ -2642,31 +2641,31 @@ export default function App() {
                       return (
                         <div
                           key={pair.symbol}
-                          className="p-6 rounded-3xl border border-zinc-800/80 bg-[#111113]/90 flex flex-col gap-4 hover:border-zinc-700 transition-all relative overflow-hidden shadow-lg"
+                          className="p-6 rounded-3xl border border-zinc-200 dark:border-zinc-800/80 bg-white dark:bg-[#111113]/90 flex flex-col gap-4 hover:border-zinc-400 dark:hover:border-zinc-700 transition-all relative overflow-hidden shadow-lg"
                         >
                           <div className="flex justify-between items-start">
                             <div className="space-y-1">
-                              <h3 className="text-base font-bold text-white font-display tracking-tight flex items-center gap-2">
+                              <h3 className="text-base font-bold text-zinc-950 dark:text-white font-display tracking-tight flex items-center gap-2">
                                 <span>{pair.symbol}</span>
                                 <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wider uppercase border ${
                                   isBullish
-                                    ? 'bg-[#0c1c0c] text-emerald-500 border-emerald-950/80'
+                                    ? 'bg-emerald-50 dark:bg-[#0c1c0c] text-emerald-600 dark:text-emerald-500 border-emerald-200 dark:border-emerald-950/80'
                                     : isBearish
-                                    ? 'bg-[#1c0c0c] text-red-500 border-red-950/80'
-                                    : 'bg-zinc-900 text-zinc-400 border-zinc-800'
+                                    ? 'bg-rose-50 dark:bg-[#1c0c0c] text-rose-600 dark:text-red-500 border-rose-200 dark:border-red-950/80'
+                                    : 'bg-zinc-50 dark:bg-zinc-900 text-zinc-500 dark:text-zinc-400 border-zinc-200 dark:border-zinc-800'
                                 }`}>
                                   {pair.direction}
                                 </span>
-                                <span className="px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wider bg-zinc-900 text-zinc-300 border border-zinc-800/80 uppercase">
+                                <span className="px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wider bg-zinc-50 dark:bg-zinc-900 text-zinc-500 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-800/80 uppercase">
                                   {pair.timeframe || 'H1'}
                                 </span>
                               </h3>
-                              <p className="text-[10px] text-zinc-500 font-medium">{pair.name}</p>
+                              <p className="text-[10px] text-zinc-500 dark:text-zinc-400 font-medium">{pair.name}</p>
                             </div>
 
                             <button
                               onClick={() => handleRemovePair(pair.symbol)}
-                              className="p-1 text-zinc-600 hover:text-red-400 transition-colors rounded-lg hover:bg-zinc-950/80 cursor-pointer"
+                              className="p-1 text-zinc-400 dark:text-zinc-600 hover:text-rose-600 dark:hover:text-rose-400 transition-colors rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-950/80 cursor-pointer"
                               title="Remove pair"
                             >
                               <X className="w-4 h-4" />
@@ -2693,11 +2692,11 @@ export default function App() {
 
                             <div className="text-right">
                               {pair.status === 'unavailable' || pair.price === 0 ? (
-                                <div className="text-xs font-bold text-zinc-500 uppercase tracking-wider">Data unavailable</div>
+                                <div className="text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider">Data unavailable</div>
                               ) : (
                                 <>
-                                  <div className="text-lg font-bold text-white tracking-tight">{(pair.price || 0).toLocaleString(undefined, { minimumFractionDigits: (pair.price || 0) > 10 ? 2 : 4 })}</div>
-                                  <div className={`text-xs font-semibold flex items-center justify-end gap-0.5 ${pair.change >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
+                                  <div className="text-lg font-bold text-zinc-950 dark:text-white tracking-tight">{(pair.price || 0).toLocaleString(undefined, { minimumFractionDigits: (pair.price || 0) > 10 ? 2 : 4 })}</div>
+                                  <div className={`text-xs font-semibold flex items-center justify-end gap-0.5 ${pair.change >= 0 ? 'text-emerald-600 dark:text-emerald-500' : 'text-rose-600 dark:text-red-500'}`}>
                                     {pair.change >= 0 ? '+' : ''}{pair.change}%
                                   </div>
                                 </>
@@ -2706,20 +2705,20 @@ export default function App() {
                           </div>
 
                           {/* Extra info panel: Spread, Volatility, AI Confidence meter */}
-                          <div className="pt-3 border-t border-zinc-900/60 grid grid-cols-3 gap-2">
+                          <div className="pt-3 border-t border-zinc-100 dark:border-zinc-900/60 grid grid-cols-3 gap-2">
                             <div className="space-y-0.5">
                               <div className="text-[9px] uppercase font-bold text-zinc-500">Spread</div>
-                              <div className="text-xs font-semibold text-zinc-300">{pair.spread} pips</div>
+                              <div className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">{pair.spread} pips</div>
                             </div>
                             <div className="space-y-0.5">
                               <div className="text-[9px] uppercase font-bold text-zinc-500">Volatility</div>
-                              <div className={`text-xs font-semibold ${pair.volatility === 'High' ? 'text-amber-400' : 'text-zinc-300'}`}>{pair.volatility}</div>
+                              <div className={`text-xs font-semibold ${pair.volatility === 'High' ? 'text-amber-600 dark:text-amber-400' : 'text-zinc-700 dark:text-zinc-300'}`}>{pair.volatility}</div>
                             </div>
                             <div className="space-y-0.5">
                               <div className="text-[9px] uppercase font-bold text-zinc-500">AI Confidence</div>
-                              <div className="text-xs font-bold text-white flex items-center gap-1">
+                              <div className="text-xs font-bold text-zinc-950 dark:text-white flex items-center gap-1">
                                 <span>{pair.confidence}%</span>
-                                <div className="w-1.5 h-1.5 rounded-full bg-white animate-pulse"></div>
+                                <div className="w-1.5 h-1.5 rounded-full bg-zinc-950 dark:bg-white animate-pulse"></div>
                               </div>
                             </div>
                           </div>

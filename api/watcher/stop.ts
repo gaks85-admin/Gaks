@@ -2,7 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 
 const getSupabase = (token?: string) => {
   const url = process.env.VITE_SUPABASE_URL || "https://wkujrqmxivljnuvumfau.supabase.co";
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || "sb_publishable_BheqR2OkNYKqT7bj8xThWA_gGG2hcjf";
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY;
   
   if (!url || !key) {
     throw new Error('Supabase configuration missing (VITE_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required)');
@@ -93,10 +93,8 @@ export default async function handler(req: any, res: any) {
       if (action === 'delete') {
         // First update trade fields to ensure clean state before deletion
         await supabase.from("watchers").update(clearedFields).eq("id", w.id);
-        console.log(`[WATCHER LIFECYCLE] WATCHER DELETED for ID: ${w.id}`);
         await supabase.from("watchers").delete().eq("id", w.id);
       } else {
-        console.log(`[WATCHER LIFECYCLE] WATCHER UPDATED (status -> stopped) for ID: ${w.id}`);
         await supabase.from("watchers").update({
           status: 'stopped',
           stopped_at: new Date().toISOString(),

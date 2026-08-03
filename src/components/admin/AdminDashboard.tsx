@@ -17,12 +17,12 @@ const Toast = ({ message, type, onClose }: { message: string; type: 'success' | 
   }, [onClose]);
 
   return (
-    <div className="fixed bottom-6 right-6 z-50 max-w-sm px-4 py-3 rounded-xl bg-zinc-900 border border-zinc-800 flex items-center gap-2.5 shadow-2xl animate-fade-in">
-      <div className={`p-1 rounded-full ${type === 'success' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'}`}>
+    <div className="fixed bottom-6 right-6 z-50 max-w-sm px-4 py-3 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 flex items-center gap-2.5 shadow-2xl animate-fade-in">
+      <div className={`p-1 rounded-full ${type === 'success' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'bg-red-500/10 text-red-600 dark:text-red-400'}`}>
         {type === 'success' ? <Check className="w-4 h-4 stroke-[2.5]" /> : <AlertTriangle className="w-4 h-4" />}
       </div>
-      <span className="text-xs font-semibold text-zinc-200">{message}</span>
-      <button onClick={onClose} className="ml-2 text-zinc-500 hover:text-white transition-colors">
+      <span className="text-xs font-semibold text-zinc-800 dark:text-zinc-200">{message}</span>
+      <button onClick={onClose} className="ml-2 text-zinc-400 dark:text-zinc-500 hover:text-zinc-950 dark:hover:text-white transition-colors">
         <X className="w-3.5 h-3.5" />
       </button>
     </div>
@@ -89,12 +89,12 @@ const DashboardPage = ({ fetchWithAuth }: { fetchWithAuth: any }) => {
   return (
     <div className="p-6 space-y-6">
       {/* Header section */}
-      <div className="flex justify-between items-center pb-2 border-b border-zinc-900">
+      <div className="flex justify-between items-center pb-2 border-b border-zinc-200 dark:border-zinc-900">
         <div>
-          <h3 className="text-lg font-bold text-white font-display">Overview Stats</h3>
+          <h3 className="text-lg font-bold text-zinc-950 dark:text-white font-display">Overview Stats</h3>
           <p className="text-xs text-zinc-500">Real-time statistics fetched from Supabase using Service Role privilege</p>
         </div>
-        <button onClick={fetchStats} className="p-2 bg-zinc-900 border border-zinc-800 rounded-lg hover:bg-zinc-800 text-zinc-300 transition-colors cursor-pointer" title="Refresh Stats">
+        <button onClick={fetchStats} className="p-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300 transition-colors cursor-pointer" title="Refresh Stats">
           <RefreshCw className="w-4 h-4" />
         </button>
       </div>
@@ -102,11 +102,11 @@ const DashboardPage = ({ fetchWithAuth }: { fetchWithAuth: any }) => {
       {/* Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {statCards.map((card, i) => (
-          <div key={i} className={`bg-zinc-950 p-5 rounded-2xl border flex flex-col justify-between shadow-lg relative overflow-hidden transition-all hover:scale-[1.01] ${card.color.split(' ')[2]}`}>
+          <div key={i} className={`bg-zinc-50 dark:bg-zinc-950 p-5 rounded-2xl border flex flex-col justify-between shadow-sm dark:shadow-lg relative overflow-hidden transition-all hover:scale-[1.01] ${card.color.split(' ')[2]}`}>
             <div className="flex justify-between items-start">
               <div>
                 <span className="text-xs font-bold uppercase tracking-wider text-zinc-500">{card.label}</span>
-                <p className="text-3xl font-extrabold text-white mt-1.5 font-display">{card.value}</p>
+                <p className="text-3xl font-extrabold text-zinc-950 dark:text-white mt-1.5 font-display">{card.value}</p>
               </div>
               <div className={`p-2.5 rounded-xl ${card.color.split(' ')[1]} ${card.color.split(' ')[0]}`}>
                 <card.icon className="w-5 h-5 stroke-[1.8]" />
@@ -119,42 +119,42 @@ const DashboardPage = ({ fetchWithAuth }: { fetchWithAuth: any }) => {
 
       {/* Auxiliary Info */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
-        <div className="bg-zinc-950 p-5 rounded-2xl border border-zinc-900/80">
-          <h4 className="text-xs font-bold uppercase tracking-wider text-zinc-400 mb-4 flex items-center gap-2">
-            <Clock className="w-4 h-4 text-sky-400" /> Cron Status
+        <div className="bg-zinc-50 dark:bg-zinc-950 p-5 rounded-2xl border border-zinc-200 dark:border-zinc-900/80">
+          <h4 className="text-xs font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 mb-4 flex items-center gap-2">
+            <Clock className="w-4 h-4 text-sky-500 dark:text-sky-400" /> Cron Status
           </h4>
           <div className="space-y-3.5">
-            <div className="flex justify-between items-center py-2 border-b border-zinc-900/60">
-              <span className="text-xs text-zinc-400">System Status</span>
-              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">OPERATIONAL</span>
+            <div className="flex justify-between items-center py-2 border-b border-zinc-200 dark:border-zinc-900/60">
+              <span className="text-xs text-zinc-500 dark:text-zinc-400">System Status</span>
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">OPERATIONAL</span>
             </div>
-            <div className="flex justify-between items-center py-2 border-b border-zinc-900/60">
-              <span className="text-xs text-zinc-400">Last Scanner Run</span>
-              <span className="text-xs font-mono text-zinc-200">{stats?.lastCronRun ? new Date(stats.lastCronRun).toLocaleString() : "None"}</span>
+            <div className="flex justify-between items-center py-2 border-b border-zinc-200 dark:border-zinc-900/60">
+              <span className="text-xs text-zinc-500 dark:text-zinc-400">Last Scanner Run</span>
+              <span className="text-xs font-mono text-zinc-800 dark:text-zinc-200">{stats?.lastCronRun ? new Date(stats.lastCronRun).toLocaleString() : "None"}</span>
             </div>
             <div className="flex justify-between items-center py-2">
-              <span className="text-xs text-zinc-400">Server Host Ingress</span>
-              <span className="text-xs font-mono text-zinc-500">Port 3000 / Cloud Run</span>
+              <span className="text-xs text-zinc-500 dark:text-zinc-400">Server Host Ingress</span>
+              <span className="text-xs font-mono text-zinc-400 dark:text-zinc-500">Port 3000 / Cloud Run</span>
             </div>
           </div>
         </div>
 
-        <div className="bg-zinc-950 p-5 rounded-2xl border border-zinc-900/80">
-          <h4 className="text-xs font-bold uppercase tracking-wider text-zinc-400 mb-4 flex items-center gap-2">
+        <div className="bg-zinc-50 dark:bg-zinc-950 p-5 rounded-2xl border border-zinc-200 dark:border-zinc-900/80">
+          <h4 className="text-xs font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 mb-4 flex items-center gap-2">
             <Heart className="w-4 h-4 text-rose-500" /> Administrative Info
           </h4>
           <div className="space-y-3.5">
-            <div className="flex justify-between items-center py-2 border-b border-zinc-900/60">
-              <span className="text-xs text-zinc-400">Primary Database</span>
-              <span className="text-xs font-semibold text-zinc-200">Supabase (PostgreSQL)</span>
+            <div className="flex justify-between items-center py-2 border-b border-zinc-200 dark:border-zinc-900/60">
+              <span className="text-xs text-zinc-500 dark:text-zinc-400">Primary Database</span>
+              <span className="text-xs font-semibold text-zinc-800 dark:text-zinc-200">Supabase (PostgreSQL)</span>
             </div>
-            <div className="flex justify-between items-center py-2 border-b border-zinc-900/60">
-              <span className="text-xs text-zinc-400">Authorized Admin</span>
-              <span className="text-xs font-mono text-sky-400 font-semibold">gaks6535@gmail.com</span>
+            <div className="flex justify-between items-center py-2 border-b border-zinc-200 dark:border-zinc-900/60">
+              <span className="text-xs text-zinc-500 dark:text-zinc-400">Authorized Admin</span>
+              <span className="text-xs font-mono text-sky-600 dark:text-sky-400 font-semibold">gaks6535@gmail.com</span>
             </div>
             <div className="flex justify-between items-center py-2">
-              <span className="text-xs text-zinc-400">Active API Key Mode</span>
-              <span className="text-xs font-semibold text-zinc-500">Server proxy via /api/*</span>
+              <span className="text-xs text-zinc-500 dark:text-zinc-400">Active API Key Mode</span>
+              <span className="text-xs font-semibold text-zinc-400 dark:text-zinc-500">Server proxy via /api/*</span>
             </div>
           </div>
         </div>
@@ -265,10 +265,10 @@ const SendTestNotificationCard = ({ fetchWithAuth }: { fetchWithAuth: any }) => 
   };
 
   return (
-    <div className="bg-zinc-950 p-6 rounded-2xl border border-zinc-900/80">
+    <div className="bg-zinc-50 dark:bg-zinc-950 p-6 rounded-2xl border border-zinc-200 dark:border-zinc-900/80 shadow-sm dark:shadow-none">
       <div className="flex items-center gap-2 mb-2">
-        <Send className="w-4.5 h-4.5 text-sky-400" />
-        <h4 className="text-xs font-bold uppercase tracking-wider text-zinc-400 font-display">
+        <Send className="w-4.5 h-4.5 text-sky-600 dark:text-sky-400" />
+        <h4 className="text-xs font-bold uppercase tracking-wider text-zinc-950 dark:text-zinc-400 font-display">
           Send Test Notification
         </h4>
       </div>
@@ -278,25 +278,25 @@ const SendTestNotificationCard = ({ fetchWithAuth }: { fetchWithAuth: any }) => 
 
       <form onSubmit={handleSendTest} className="space-y-4">
         {/* Target selection tabs */}
-        <div className="grid grid-cols-3 gap-1 p-0.5 bg-zinc-900 border border-zinc-800 rounded-xl text-[10px]">
+        <div className="grid grid-cols-3 gap-1 p-0.5 bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl text-[10px]">
           <button
             type="button"
             onClick={() => { setTargetType('list'); setStatus(null); }}
-            className={`py-1.5 rounded-lg font-bold uppercase transition-all cursor-pointer ${targetType === 'list' ? 'bg-zinc-800 text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-300'}`}
+            className={`py-1.5 rounded-lg font-bold uppercase transition-all cursor-pointer ${targetType === 'list' ? 'bg-white dark:bg-zinc-800 text-zinc-950 dark:text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-300'}`}
           >
             User List
           </button>
           <button
             type="button"
             onClick={() => { setTargetType('email'); setStatus(null); }}
-            className={`py-1.5 rounded-lg font-bold uppercase transition-all cursor-pointer ${targetType === 'email' ? 'bg-zinc-800 text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-300'}`}
+            className={`py-1.5 rounded-lg font-bold uppercase transition-all cursor-pointer ${targetType === 'email' ? 'bg-white dark:bg-zinc-800 text-zinc-950 dark:text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-300'}`}
           >
             Email
           </button>
           <button
             type="button"
             onClick={() => { setTargetType('telegram'); setStatus(null); }}
-            className={`py-1.5 rounded-lg font-bold uppercase transition-all cursor-pointer ${targetType === 'telegram' ? 'bg-zinc-800 text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-300'}`}
+            className={`py-1.5 rounded-lg font-bold uppercase transition-all cursor-pointer ${targetType === 'telegram' ? 'bg-white dark:bg-zinc-800 text-zinc-950 dark:text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-300'}`}
           >
             Telegram
           </button>
@@ -306,7 +306,7 @@ const SendTestNotificationCard = ({ fetchWithAuth }: { fetchWithAuth: any }) => 
         <div>
           {targetType === 'list' && (
             <div className="space-y-1">
-              <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Select Registered User</label>
+              <label className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Select Registered User</label>
               {usersLoading ? (
                 <div className="flex items-center gap-2 py-2 text-xs text-zinc-500">
                   <RefreshCw className="w-3 h-3 animate-spin text-sky-500" /> Loading users list...
@@ -315,7 +315,7 @@ const SendTestNotificationCard = ({ fetchWithAuth }: { fetchWithAuth: any }) => 
                 <select
                   value={selectedUserId}
                   onChange={(e) => { setSelectedUserId(e.target.value); setStatus(null); }}
-                  className="w-full bg-zinc-900 border border-zinc-800 text-white rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-1 focus:ring-sky-500 cursor-pointer"
+                  className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-zinc-950 dark:text-white rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-1 focus:ring-sky-500 cursor-pointer"
                 >
                   <option value="">-- Choose registered user --</option>
                   {users.map((u) => (
@@ -330,20 +330,20 @@ const SendTestNotificationCard = ({ fetchWithAuth }: { fetchWithAuth: any }) => 
 
           {targetType === 'email' && (
             <div className="space-y-1">
-              <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Search by User Email</label>
+              <label className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Search by User Email</label>
               <input
                 type="email"
                 placeholder="user@example.com"
                 value={emailQuery}
                 onChange={(e) => { setEmailQuery(e.target.value); setStatus(null); }}
-                className="w-full bg-zinc-900 border border-zinc-800 text-white rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-1 focus:ring-sky-500"
+                className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-zinc-950 dark:text-white rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-1 focus:ring-sky-500"
               />
             </div>
           )}
 
           {targetType === 'telegram' && (
             <div className="space-y-1">
-              <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Search by Telegram Username</label>
+              <label className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Search by Telegram Username</label>
               <div className="relative">
                 <span className="absolute left-3 top-2 text-zinc-500 text-xs font-semibold">@</span>
                 <input
@@ -351,7 +351,7 @@ const SendTestNotificationCard = ({ fetchWithAuth }: { fetchWithAuth: any }) => 
                   placeholder="username"
                   value={telegramQuery}
                   onChange={(e) => { setTelegramQuery(e.target.value); setStatus(null); }}
-                  className="w-full bg-zinc-900 border border-zinc-800 text-white rounded-xl pl-7 pr-3 py-2 text-xs focus:outline-none focus:ring-1 focus:ring-sky-500"
+                  className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-zinc-950 dark:text-white rounded-xl pl-7 pr-3 py-2 text-xs focus:outline-none focus:ring-1 focus:ring-sky-500"
                 />
               </div>
             </div>
@@ -361,23 +361,23 @@ const SendTestNotificationCard = ({ fetchWithAuth }: { fetchWithAuth: any }) => 
         {/* Optional fields */}
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-1">
-            <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Symbol (Optional)</label>
+            <label className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Symbol (Optional)</label>
             <input
               type="text"
               placeholder="BTCUSD"
               value={symbol}
               onChange={(e) => setSymbol(e.target.value)}
-              className="w-full bg-zinc-900 border border-zinc-800 text-white rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-1 focus:ring-sky-500"
+              className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-zinc-950 dark:text-white rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-1 focus:ring-sky-500"
             />
           </div>
           <div className="space-y-1">
-            <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Timeframe (Optional)</label>
+            <label className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Timeframe (Optional)</label>
             <input
               type="text"
               placeholder="1H"
               value={timeframe}
               onChange={(e) => setTimeframe(e.target.value)}
-              className="w-full bg-zinc-900 border border-zinc-800 text-white rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-1 focus:ring-sky-500"
+              className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-zinc-950 dark:text-white rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-1 focus:ring-sky-500"
             />
           </div>
         </div>
@@ -386,8 +386,8 @@ const SendTestNotificationCard = ({ fetchWithAuth }: { fetchWithAuth: any }) => 
         {status && (
           <div className={`p-3 rounded-xl text-xs flex items-start gap-2.5 border ${
             status.type === 'success' 
-              ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' 
-              : 'bg-red-500/10 border-red-500/20 text-red-400'
+              ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-400' 
+              : 'bg-red-500/10 border-red-500/20 text-red-600 dark:text-red-400'
           }`}>
             {status.type === 'success' ? (
               <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
@@ -402,7 +402,7 @@ const SendTestNotificationCard = ({ fetchWithAuth }: { fetchWithAuth: any }) => 
         <button
           type="submit"
           disabled={sending}
-          className="w-full bg-sky-500 hover:bg-sky-400 disabled:bg-sky-500/50 text-black font-extrabold text-xs uppercase tracking-wider py-2.5 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-2 mt-2"
+          className="w-full bg-sky-500 hover:bg-sky-400 disabled:bg-sky-500/50 text-black font-extrabold text-xs uppercase tracking-wider py-2.5 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-2 mt-2 shadow-sm"
         >
           {sending ? (
             <>
@@ -527,16 +527,16 @@ const UsersPage = ({ fetchWithAuth, showToast }: { fetchWithAuth: any; showToast
   return (
     <div className="p-6 space-y-6">
       {/* Header & Controls */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-zinc-900">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-zinc-200 dark:border-zinc-900">
         <div>
-          <h3 className="text-lg font-bold text-white font-display">User Accounts</h3>
+          <h3 className="text-lg font-bold text-zinc-950 dark:text-white font-display">User Accounts</h3>
           <p className="text-xs text-zinc-500">Audit registered users, check integration status, or manage their market scanners.</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <select 
             value={aiStatusFilter}
             onChange={e => setAiStatusFilter(e.target.value)}
-            className="bg-zinc-950 text-xs text-zinc-300 border border-zinc-900 rounded-xl px-3 py-2 focus:outline-none focus:border-zinc-800"
+            className="bg-white dark:bg-zinc-950 text-xs text-zinc-600 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-900 rounded-xl px-3 py-2 focus:outline-none focus:border-zinc-400 dark:focus:border-zinc-800 cursor-pointer"
           >
             <option value="ALL">All AI Statuses</option>
             <option value="READY">READY</option>
@@ -546,16 +546,16 @@ const UsersPage = ({ fetchWithAuth, showToast }: { fetchWithAuth: any; showToast
             <option value="BILLING_REQUIRED">BILLING_REQUIRED</option>
           </select>
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400 dark:text-zinc-500" />
             <input 
               type="text" 
               placeholder="Search by email..."
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
-              className="bg-zinc-950 text-xs text-zinc-200 border border-zinc-900 rounded-xl pl-9 pr-4 py-2 w-48 sm:w-64 focus:outline-none focus:border-zinc-800"
+              className="bg-white dark:bg-zinc-950 text-xs text-zinc-800 dark:text-zinc-200 border border-zinc-200 dark:border-zinc-900 rounded-xl pl-9 pr-4 py-2 w-48 sm:w-64 focus:outline-none focus:border-zinc-400 dark:focus:border-zinc-800"
             />
           </div>
-          <button onClick={fetchUsers} className="p-2 bg-zinc-900 border border-zinc-800 rounded-lg hover:bg-zinc-800 text-zinc-300 transition-colors cursor-pointer" title="Refresh Users">
+          <button onClick={fetchUsers} className="p-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300 transition-colors cursor-pointer" title="Refresh Users">
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
           </button>
         </div>
@@ -572,68 +572,68 @@ const UsersPage = ({ fetchWithAuth, showToast }: { fetchWithAuth: any; showToast
           <span className="text-sm font-semibold">{error}</span>
         </div>
       ) : filteredUsers.length === 0 ? (
-        <div className="p-12 text-center text-zinc-500 border border-dashed border-zinc-900 rounded-2xl bg-zinc-950/20">
-          <Search className="w-8 h-8 mx-auto mb-2 text-zinc-700" />
+        <div className="p-12 text-center text-zinc-400 dark:text-zinc-500 border border-dashed border-zinc-200 dark:border-zinc-900 rounded-2xl bg-zinc-50 dark:bg-zinc-950/20">
+          <Search className="w-8 h-8 mx-auto mb-2 text-zinc-300 dark:text-zinc-700" />
           <p className="text-xs font-semibold">No users found matching "{searchQuery}"</p>
         </div>
       ) : (
-        <div className="bg-zinc-950 border border-zinc-900 rounded-2xl overflow-hidden shadow-xl">
+        <div className="bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-900 rounded-2xl overflow-hidden shadow-sm dark:shadow-xl">
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <thead>
-                <tr className="border-b border-zinc-900 text-[10px] font-bold uppercase tracking-wider text-zinc-500 bg-zinc-950/50">
-                  <th className="py-4 px-5 cursor-pointer hover:text-zinc-300" onClick={() => handleSort('email')}>User Profile / ID</th>
+                <tr className="border-b border-zinc-200 dark:border-zinc-900 text-[10px] font-bold uppercase tracking-wider text-zinc-500 bg-zinc-100 dark:bg-zinc-950/50">
+                  <th className="py-4 px-5 cursor-pointer hover:text-zinc-950 dark:hover:text-zinc-300" onClick={() => handleSort('email')}>User Profile / ID</th>
                   <th className="py-4 px-5 text-center">Integrations</th>
-                  <th className="py-4 px-5 text-center cursor-pointer hover:text-zinc-300" onClick={() => handleSort('gemini_status')}>AI Status</th>
-                  <th className="py-4 px-5 text-center cursor-pointer hover:text-zinc-300" onClick={() => handleSort('watcher_status')}>Watcher Status</th>
+                  <th className="py-4 px-5 text-center cursor-pointer hover:text-zinc-950 dark:hover:text-zinc-300" onClick={() => handleSort('gemini_status')}>AI Status</th>
+                  <th className="py-4 px-5 text-center cursor-pointer hover:text-zinc-950 dark:hover:text-zinc-300" onClick={() => handleSort('watcher_status')}>Watcher Status</th>
                   <th className="py-4 px-5">Selected Setup</th>
-                  <th className="py-4 px-5 cursor-pointer hover:text-zinc-300" onClick={() => handleSort('created_at')}>Joined</th>
+                  <th className="py-4 px-5 cursor-pointer hover:text-zinc-950 dark:hover:text-zinc-300" onClick={() => handleSort('created_at')}>Joined</th>
                   <th className="py-4 px-5 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {currentUsers.map(user => (
-                  <tr key={user.id} className="border-b border-zinc-900 hover:bg-zinc-900/30 transition-colors">
+                  <tr key={user.id} className="border-b border-zinc-200 dark:border-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-900/30 transition-colors">
                     <td className="py-4 px-5">
                       <div className="flex flex-col">
-                        <span className="text-xs font-bold text-zinc-200">{user.email}</span>
+                        <span className="text-xs font-bold text-zinc-800 dark:text-zinc-200">{user.email}</span>
                         <span className="text-[10px] font-mono text-zinc-500 mt-1">{user.full_name || "No name set"}</span>
-                        <span className="text-[9px] text-zinc-600 font-mono mt-0.5">{user.id}</span>
+                        <span className="text-[9px] text-zinc-400 dark:text-zinc-600 font-mono mt-0.5">{user.id}</span>
                       </div>
                     </td>
                     <td className="py-4 px-5">
                       <div className="flex justify-center items-center gap-3">
-                        <span className={`flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full font-semibold border ${user.telegram_connected ? 'bg-sky-500/10 text-sky-400 border-sky-500/10' : 'bg-zinc-900 text-zinc-500 border-zinc-900'}`}>
+                        <span className={`flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full font-semibold border ${user.telegram_connected ? 'bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/10' : 'bg-zinc-100 dark:bg-zinc-900 text-zinc-500 border-zinc-200 dark:border-zinc-900'}`}>
                           TG
                         </span>
-                        <span className={`flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full font-semibold border ${user.gemini_configured ? 'bg-amber-500/10 text-amber-400 border-amber-500/10' : 'bg-zinc-900 text-zinc-500 border-zinc-900'}`}>
+                        <span className={`flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full font-semibold border ${user.gemini_configured ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/10' : 'bg-zinc-100 dark:bg-zinc-900 text-zinc-500 border-zinc-200 dark:border-zinc-900'}`}>
                           Gemini
                         </span>
                       </div>
                     </td>
                     <td className="py-4 px-5 text-center">
                       <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border ${
-                        (!user.gemini_status || user.gemini_status === 'READY') ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
-                        user.gemini_status === 'QUOTA_EXHAUSTED' ? 'bg-purple-500/10 text-purple-400 border-purple-500/20' :
-                        user.gemini_status === 'INVALID_KEY' ? 'bg-red-500/10 text-red-400 border-red-500/20' :
-                        user.gemini_status === 'BILLING_REQUIRED' ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' :
-                        'bg-amber-500/10 text-amber-400 border-amber-500/20'
+                        (!user.gemini_status || user.gemini_status === 'READY') ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20' :
+                        user.gemini_status === 'QUOTA_EXHAUSTED' ? 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/20' :
+                        user.gemini_status === 'INVALID_KEY' ? 'bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/20' :
+                        user.gemini_status === 'BILLING_REQUIRED' ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20' :
+                        'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20'
                       }`}>
                         {user.gemini_status || 'READY'}
                       </span>
                     </td>
                     <td className="py-4 px-5 text-center">
                       <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border ${
-                        user.watcher_status === 'active' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
-                        user.watcher_status === 'paused' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' :
-                        'bg-zinc-900 text-zinc-500 border-zinc-900'
+                        user.watcher_status === 'active' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20' :
+                        user.watcher_status === 'paused' ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20' :
+                        'bg-zinc-100 dark:bg-zinc-900 text-zinc-500 border-zinc-200 dark:border-zinc-900'
                       }`}>
                         {user.watcher_status || 'N/A'}
                       </span>
                     </td>
                     <td className="py-4 px-5">
                       <div className="flex flex-col text-[10px]">
-                        <span className="text-zinc-300 font-semibold">{user.selected_pair} ({user.selected_timeframe})</span>
+                        <span className="text-zinc-700 dark:text-zinc-300 font-semibold">{user.selected_pair} ({user.selected_timeframe})</span>
                         <span className="text-zinc-500 mt-1">Strategy: {user.selected_strategy}</span>
                       </div>
                     </td>
@@ -644,7 +644,7 @@ const UsersPage = ({ fetchWithAuth, showToast }: { fetchWithAuth: any; showToast
                       <div className="flex items-center justify-end gap-2.5">
                         <button 
                           onClick={() => setSelectedUser(user)}
-                          className="px-2.5 py-1 text-[10px] font-bold bg-zinc-900 border border-zinc-800 rounded-lg hover:bg-zinc-800 text-zinc-300 transition-colors cursor-pointer"
+                          className="px-2.5 py-1 text-[10px] font-bold bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300 transition-colors cursor-pointer"
                         >
                           View
                         </button>
@@ -653,7 +653,7 @@ const UsersPage = ({ fetchWithAuth, showToast }: { fetchWithAuth: any; showToast
                           <button 
                             onClick={() => handleUserAction(user.id, 'pause')}
                             disabled={actionLoading !== null}
-                            className="p-1.5 text-amber-400 hover:bg-amber-500/10 rounded-lg transition-colors cursor-pointer"
+                            className="p-1.5 text-amber-600 dark:text-amber-400 hover:bg-amber-500/10 rounded-lg transition-colors cursor-pointer"
                             title="Pause Scanner"
                           >
                             <Pause className="w-3.5 h-3.5" />
@@ -662,7 +662,7 @@ const UsersPage = ({ fetchWithAuth, showToast }: { fetchWithAuth: any; showToast
                           <button 
                             onClick={() => handleUserAction(user.id, 'resume')}
                             disabled={actionLoading !== null}
-                            className="p-1.5 text-emerald-400 hover:bg-emerald-500/10 rounded-lg transition-colors cursor-pointer"
+                            className="p-1.5 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 rounded-lg transition-colors cursor-pointer"
                             title="Resume Scanner"
                           >
                             <Play className="w-3.5 h-3.5" />
@@ -672,7 +672,7 @@ const UsersPage = ({ fetchWithAuth, showToast }: { fetchWithAuth: any; showToast
                         <button 
                           onClick={() => handleUserAction(user.id, 'delete')}
                           disabled={actionLoading !== null}
-                          className="p-1.5 text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors cursor-pointer"
+                          className="p-1.5 text-rose-600 dark:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors cursor-pointer"
                           title="Delete Watcher"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
@@ -687,20 +687,20 @@ const UsersPage = ({ fetchWithAuth, showToast }: { fetchWithAuth: any; showToast
 
           {/* Pagination */}
           {totalPages > 1 && (
-            <div className="px-5 py-4 bg-zinc-950/80 border-t border-zinc-900 flex items-center justify-between">
+            <div className="px-5 py-4 bg-zinc-100 dark:bg-zinc-950/80 border-t border-zinc-200 dark:border-zinc-900 flex items-center justify-between">
               <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider">Page {currentPage} of {totalPages}</span>
               <div className="flex items-center gap-2">
                 <button 
                   disabled={currentPage === 1}
                   onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
-                  className="px-3 py-1.5 bg-zinc-900 border border-zinc-800 rounded-lg text-[10px] font-bold text-zinc-400 hover:bg-zinc-800 disabled:opacity-50 transition-colors"
+                  className="px-3 py-1.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg text-[10px] font-bold text-zinc-400 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 disabled:opacity-50 transition-colors"
                 >
                   Previous
                 </button>
                 <button 
                   disabled={currentPage === totalPages}
                   onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
-                  className="px-3 py-1.5 bg-zinc-900 border border-zinc-800 rounded-lg text-[10px] font-bold text-zinc-400 hover:bg-zinc-800 disabled:opacity-50 transition-colors"
+                  className="px-3 py-1.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg text-[10px] font-bold text-zinc-400 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 disabled:opacity-50 transition-colors"
                 >
                   Next
                 </button>
@@ -713,55 +713,55 @@ const UsersPage = ({ fetchWithAuth, showToast }: { fetchWithAuth: any; showToast
       {/* User details Modal overlay */}
       {selectedUser && (
         <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 backdrop-blur-xs">
-          <div className="bg-[#0c0c0e] border border-zinc-900 rounded-2xl p-6 w-full max-w-md shadow-2xl space-y-5 animate-fade-in text-white">
-            <div className="flex justify-between items-start border-b border-zinc-900 pb-3">
+          <div className="bg-white dark:bg-[#0c0c0e] border border-zinc-200 dark:border-zinc-900 rounded-2xl p-6 w-full max-w-md shadow-2xl space-y-5 animate-fade-in text-zinc-950 dark:text-white">
+            <div className="flex justify-between items-start border-b border-zinc-100 dark:border-zinc-900 pb-3">
               <div>
-                <h4 className="text-sm font-bold text-white">User Inspection details</h4>
+                <h4 className="text-sm font-bold text-zinc-950 dark:text-white">User Inspection details</h4>
                 <p className="text-[10px] text-zinc-500 font-mono mt-0.5">{selectedUser.id}</p>
               </div>
-              <button onClick={() => setSelectedUser(null)} className="text-zinc-500 hover:text-white cursor-pointer">
+              <button onClick={() => setSelectedUser(null)} className="text-zinc-400 hover:text-zinc-950 dark:hover:text-white cursor-pointer">
                 <X className="w-4 h-4" />
               </button>
             </div>
 
             <div className="space-y-4 text-xs">
               <div className="grid grid-cols-2 gap-4">
-                <div className="p-3 bg-zinc-950 rounded-xl border border-zinc-900/40">
+                <div className="p-3 bg-zinc-50 dark:bg-zinc-950 rounded-xl border border-zinc-100 dark:border-zinc-900/40">
                   <span className="text-[9px] font-bold text-zinc-500 uppercase tracking-wider block mb-1">Email Address</span>
-                  <span className="font-bold text-zinc-200">{selectedUser.email}</span>
+                  <span className="font-bold text-zinc-800 dark:text-zinc-200">{selectedUser.email}</span>
                 </div>
-                <div className="p-3 bg-zinc-950 rounded-xl border border-zinc-900/40">
+                <div className="p-3 bg-zinc-50 dark:bg-zinc-950 rounded-xl border border-zinc-100 dark:border-zinc-900/40">
                   <span className="text-[9px] font-bold text-zinc-500 uppercase tracking-wider block mb-1">Registration Date</span>
-                  <span className="font-bold text-zinc-200">{new Date(selectedUser.created_at).toLocaleDateString()}</span>
+                  <span className="font-bold text-zinc-800 dark:text-zinc-200">{new Date(selectedUser.created_at).toLocaleDateString()}</span>
                 </div>
               </div>
 
               <div className="grid grid-cols-2 gap-4">
-                <div className="p-3 bg-zinc-950 rounded-xl border border-zinc-900/40">
+                <div className="p-3 bg-zinc-50 dark:bg-zinc-950 rounded-xl border border-zinc-100 dark:border-zinc-900/40">
                   <span className="text-[9px] font-bold text-zinc-500 uppercase tracking-wider block mb-1">Telegram Connected</span>
-                  <span className={`font-bold ${selectedUser.telegram_connected ? 'text-sky-400' : 'text-zinc-500'}`}>
+                  <span className={`font-bold ${selectedUser.telegram_connected ? 'text-sky-600 dark:text-sky-400' : 'text-zinc-400'}`}>
                     {selectedUser.telegram_connected ? 'Connected' : 'Disconnected'}
                   </span>
                 </div>
-                <div className="p-3 bg-zinc-950 rounded-xl border border-zinc-900/40">
+                <div className="p-3 bg-zinc-50 dark:bg-zinc-950 rounded-xl border border-zinc-100 dark:border-zinc-900/40">
                   <span className="text-[9px] font-bold text-zinc-500 uppercase tracking-wider block mb-1">Gemini Configured</span>
-                  <span className={`font-bold ${selectedUser.gemini_configured ? 'text-amber-400' : 'text-zinc-500'}`}>
+                  <span className={`font-bold ${selectedUser.gemini_configured ? 'text-amber-600 dark:text-amber-400' : 'text-zinc-400'}`}>
                     {selectedUser.gemini_configured ? 'Key Set' : 'Missing'}
                   </span>
                 </div>
               </div>
 
-              <div className="p-3 bg-zinc-950 rounded-xl border border-zinc-900/40 space-y-2">
+              <div className="p-3 bg-zinc-50 dark:bg-zinc-950 rounded-xl border border-zinc-100 dark:border-zinc-900/40 space-y-2">
                 <span className="text-[9px] font-bold text-zinc-500 uppercase tracking-wider block">Watcher Information</span>
-                <div className="grid grid-cols-2 gap-2 text-[11px] text-zinc-400">
-                  <span>Status: <strong className="text-zinc-200 uppercase">{selectedUser.watcher_status}</strong></span>
-                  <span>Trading Pair: <strong className="text-zinc-200">{selectedUser.selected_pair}</strong></span>
-                  <span>Timeframe: <strong className="text-zinc-200">{selectedUser.selected_timeframe}</strong></span>
-                  <span>Strategy: <strong className="text-zinc-200">{selectedUser.selected_strategy}</strong></span>
+                <div className="grid grid-cols-2 gap-2 text-[11px] text-zinc-500">
+                  <span>Status: <strong className="text-zinc-800 dark:text-zinc-200 uppercase">{selectedUser.watcher_status}</strong></span>
+                  <span>Trading Pair: <strong className="text-zinc-800 dark:text-zinc-200">{selectedUser.selected_pair}</strong></span>
+                  <span>Timeframe: <strong className="text-zinc-800 dark:text-zinc-200">{selectedUser.selected_timeframe}</strong></span>
+                  <span>Strategy: <strong className="text-zinc-800 dark:text-zinc-200">{selectedUser.selected_strategy}</strong></span>
                 </div>
               </div>
 
-              <div className="p-3 bg-zinc-950 rounded-xl border border-zinc-900/40 text-[10px] font-mono flex justify-between items-center text-zinc-500">
+              <div className="p-3 bg-zinc-50 dark:bg-zinc-950 rounded-xl border border-zinc-100 dark:border-zinc-900/40 text-[10px] font-mono flex justify-between items-center text-zinc-500">
                 <span>Last Scan execution</span>
                 <span>{selectedUser.last_scan_at ? new Date(selectedUser.last_scan_at).toLocaleString() : 'Never Scanned'}</span>
               </div>
@@ -771,21 +771,21 @@ const UsersPage = ({ fetchWithAuth, showToast }: { fetchWithAuth: any; showToast
               {selectedUser.watcher_status === 'active' ? (
                 <button 
                   onClick={() => handleUserAction(selectedUser.id, 'pause')}
-                  className="flex-1 py-2 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs font-bold hover:bg-amber-500/20 transition-all cursor-pointer"
+                  className="flex-1 py-2 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 text-xs font-bold hover:bg-amber-500/20 transition-all cursor-pointer"
                 >
                   Pause Scanner
                 </button>
               ) : (
                 <button 
                   onClick={() => handleUserAction(selectedUser.id, 'resume')}
-                  className="flex-1 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-bold hover:bg-emerald-500/20 transition-all cursor-pointer"
+                  className="flex-1 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-xs font-bold hover:bg-emerald-500/20 transition-all cursor-pointer"
                 >
                   Activate Scanner
                 </button>
               )}
               <button 
                 onClick={() => handleUserAction(selectedUser.id, 'delete')}
-                className="py-2 px-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs font-bold hover:bg-rose-500/20 transition-all cursor-pointer flex items-center justify-center"
+                className="py-2 px-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-400 text-xs font-bold hover:bg-rose-500/20 transition-all cursor-pointer flex items-center justify-center"
                 title="Delete Scanner"
               >
                 <Trash2 className="w-4 h-4" />
@@ -922,20 +922,20 @@ const WatchersPage = ({ fetchWithAuth, showToast }: { fetchWithAuth: any; showTo
   return (
     <div className="p-6 space-y-6">
       {/* Header & Controls */}
-      <div className="flex justify-between items-center pb-2 border-b border-zinc-900">
+      <div className="flex justify-between items-center pb-2 border-b border-zinc-200 dark:border-zinc-900">
         <div>
-          <h3 className="text-lg font-bold text-white font-display">Active Scanners</h3>
+          <h3 className="text-lg font-bold text-zinc-950 dark:text-white font-display">Active Scanners</h3>
           <p className="text-xs text-zinc-500">Autonomous market watchers currently registered in Supabase.</p>
         </div>
         <div className="flex items-center gap-3">
           <button 
             onClick={() => setShowAddPairModal(true)}
-            className="flex items-center gap-1.5 px-4 py-2 bg-sky-500 hover:bg-sky-400 text-black text-xs font-bold rounded-lg transition-colors cursor-pointer"
+            className="flex items-center gap-1.5 px-4 py-2 bg-sky-500 hover:bg-sky-400 text-black text-xs font-bold rounded-lg transition-colors cursor-pointer shadow-sm"
             title="Add Custom Watcher"
           >
             <Plus className="w-3.5 h-3.5" /> Add Pair
           </button>
-          <button onClick={fetchWatchers} className="p-2 bg-zinc-900 border border-zinc-800 rounded-lg hover:bg-zinc-800 text-zinc-300 transition-colors cursor-pointer" title="Refresh Watchers">
+          <button onClick={fetchWatchers} className="p-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300 transition-colors cursor-pointer" title="Refresh Watchers">
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
           </button>
         </div>
@@ -952,16 +952,16 @@ const WatchersPage = ({ fetchWithAuth, showToast }: { fetchWithAuth: any; showTo
           <span className="text-sm font-semibold">{error}</span>
         </div>
       ) : watchers.length === 0 ? (
-        <div className="p-12 text-center text-zinc-500 border border-dashed border-zinc-900 rounded-2xl bg-zinc-950/20">
-          <Eye className="w-8 h-8 mx-auto mb-2 text-zinc-700" />
+        <div className="p-12 text-center text-zinc-400 dark:text-zinc-500 border border-dashed border-zinc-200 dark:border-zinc-900 rounded-2xl bg-zinc-50 dark:bg-zinc-950/20">
+          <Eye className="w-8 h-8 mx-auto mb-2 text-zinc-300 dark:text-zinc-700" />
           <p className="text-xs font-semibold">No scanner entries in database.</p>
         </div>
       ) : (
-        <div className="bg-zinc-950 border border-zinc-900 rounded-2xl overflow-hidden shadow-xl">
+        <div className="bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-900 rounded-2xl overflow-hidden shadow-sm dark:shadow-xl">
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <thead>
-                <tr className="border-b border-zinc-900 text-[10px] font-bold uppercase tracking-wider text-zinc-500 bg-zinc-950/50">
+                <tr className="border-b border-zinc-200 dark:border-zinc-900 text-[10px] font-bold uppercase tracking-wider text-zinc-500 bg-zinc-100 dark:bg-zinc-950/50">
                   <th className="py-4 px-5">User Account</th>
                   <th className="py-4 px-5">Pair</th>
                   <th className="py-4 px-5">Timeframe</th>
@@ -986,20 +986,20 @@ const WatchersPage = ({ fetchWithAuth, showToast }: { fetchWithAuth: any; showTo
                     'bg-rose-500/10 text-rose-400 border-rose-500/10';
 
                   return (
-                    <tr key={watcher.id} className="border-b border-zinc-900 hover:bg-zinc-900/30 transition-colors">
+                    <tr key={watcher.id} className="border-b border-zinc-200 dark:border-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-900/30 transition-colors">
                       <td className="py-4 px-5">
                         <div className="flex flex-col">
-                          <span className="text-xs font-bold text-zinc-200">{watcher.email}</span>
-                          <span className="text-[9px] font-mono text-zinc-600 mt-0.5">Watcher ID: {watcher.id.substring(0, 8)}...</span>
+                          <span className="text-xs font-bold text-zinc-800 dark:text-zinc-200">{watcher.email}</span>
+                          <span className="text-[9px] font-mono text-zinc-400 dark:text-zinc-600 mt-0.5">Watcher ID: {watcher.id.substring(0, 8)}...</span>
                         </div>
                       </td>
-                      <td className="py-4 px-5 font-bold text-xs text-zinc-300">{watcher.selected_pair}</td>
-                      <td className="py-4 px-5 text-xs text-zinc-400 font-semibold">{watcher.selected_timeframe}</td>
+                      <td className="py-4 px-5 font-bold text-xs text-zinc-700 dark:text-zinc-300">{watcher.selected_pair}</td>
+                      <td className="py-4 px-5 text-xs text-zinc-500 dark:text-zinc-400 font-semibold">{watcher.selected_timeframe}</td>
                       <td className="py-4 px-5">
                         <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border ${
-                          watcher.status === 'active' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/10' :
-                          watcher.status === 'paused' ? 'bg-amber-500/10 text-amber-400 border-amber-500/10' :
-                          'bg-zinc-900 text-zinc-500 border-zinc-900'
+                          watcher.status === 'active' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20' :
+                          watcher.status === 'paused' ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20' :
+                          'bg-zinc-100 dark:bg-zinc-900 text-zinc-400 dark:text-zinc-500 border-zinc-200 dark:border-zinc-900'
                         }`}>
                           {watcher.status}
                         </span>
@@ -1010,12 +1010,12 @@ const WatchersPage = ({ fetchWithAuth, showToast }: { fetchWithAuth: any; showTo
                             {gStatusLabel}
                           </span>
                           {watcher.next_gemini_retry_at && (
-                            <span className="text-[10px] font-mono text-zinc-400">
+                            <span className="text-[10px] font-mono text-zinc-500 dark:text-zinc-400">
                               Retry: {new Date(watcher.next_gemini_retry_at).toLocaleTimeString()}
                             </span>
                           )}
                           {watcher.last_gemini_error && (
-                            <span className="text-[9px] font-mono text-rose-400 max-w-[200px] truncate" title={watcher.last_gemini_error}>
+                            <span className="text-[9px] font-mono text-rose-600 dark:text-rose-400 max-w-[200px] truncate" title={watcher.last_gemini_error}>
                               Err: {watcher.last_gemini_error}
                             </span>
                           )}
@@ -1077,11 +1077,11 @@ const WatchersPage = ({ fetchWithAuth, showToast }: { fetchWithAuth: any; showTo
       {/* Force Scan Interactive Modal */}
       {scanWatcherId && (
         <div className="fixed inset-0 bg-black/85 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-          <div className="bg-[#0c0c0e] border border-zinc-900 rounded-2xl p-6 w-full max-w-lg shadow-2xl space-y-5 animate-fade-in text-white">
-            <div className="flex justify-between items-start border-b border-zinc-900 pb-3">
+          <div className="bg-white dark:bg-[#0c0c0e] border border-zinc-200 dark:border-zinc-900 rounded-2xl p-6 w-full max-w-lg shadow-2xl space-y-5 animate-fade-in text-zinc-950 dark:text-white">
+            <div className="flex justify-between items-start border-b border-zinc-100 dark:border-zinc-900 pb-3">
               <div className="flex items-center gap-2">
-                <Terminal className="w-4 h-4 text-sky-400" />
-                <h4 className="text-sm font-bold text-white">Force Scan Interactive Shell</h4>
+                <Terminal className="w-4 h-4 text-sky-600 dark:text-sky-400" />
+                <h4 className="text-sm font-bold text-zinc-950 dark:text-white">Force Scan Interactive Shell</h4>
               </div>
               {foundSignals !== null && (
                 <button onClick={() => setScanWatcherId(null)} className="text-zinc-500 hover:text-white cursor-pointer">
@@ -1149,15 +1149,15 @@ const WatchersPage = ({ fetchWithAuth, showToast }: { fetchWithAuth: any; showTo
       {/* Add Pair Modal */}
       {showAddPairModal && (
         <div className="fixed inset-0 bg-black/85 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-          <div className="bg-[#0c0c0e] border border-zinc-900 rounded-2xl p-6 w-full max-w-md shadow-2xl space-y-5 animate-fade-in text-white">
-            <div className="flex justify-between items-start border-b border-zinc-900 pb-3">
+          <div className="bg-white dark:bg-[#0c0c0e] border border-zinc-200 dark:border-zinc-900 rounded-2xl p-6 w-full max-w-md shadow-2xl space-y-5 animate-fade-in text-zinc-950 dark:text-white">
+            <div className="flex justify-between items-start border-b border-zinc-100 dark:border-zinc-900 pb-3">
               <div>
-                <h4 className="text-sm font-bold text-white font-display">Add Custom Watcher</h4>
+                <h4 className="text-sm font-bold text-zinc-950 dark:text-white font-display">Add Custom Watcher</h4>
                 <p className="text-[10px] text-zinc-500">Quickly spin up a background watcher for any registered user profile.</p>
               </div>
               <button 
                 onClick={() => setShowAddPairModal(false)} 
-                className="text-zinc-500 hover:text-white p-1 rounded-lg hover:bg-zinc-900 transition-colors cursor-pointer"
+                className="text-zinc-400 dark:text-zinc-500 hover:text-zinc-950 dark:hover:text-white p-1 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-900 transition-colors cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -1172,7 +1172,7 @@ const WatchersPage = ({ fetchWithAuth, showToast }: { fetchWithAuth: any; showTo
                   placeholder="e.g. client@domain.com"
                   value={addEmail} 
                   onChange={e => setAddEmail(e.target.value)}
-                  className="w-full bg-zinc-950 border border-zinc-900 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-zinc-700 transition-colors"
+                  className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-900 rounded-xl px-3.5 py-2.5 text-xs text-zinc-950 dark:text-white focus:outline-none focus:border-zinc-400 dark:focus:border-zinc-700 transition-colors shadow-sm"
                 />
               </div>
 
@@ -1182,7 +1182,7 @@ const WatchersPage = ({ fetchWithAuth, showToast }: { fetchWithAuth: any; showTo
                   <select 
                     value={addSymbol} 
                     onChange={e => setAddSymbol(e.target.value)}
-                    className="w-full bg-zinc-950 border border-zinc-900 rounded-xl px-3 py-2.5 text-xs text-white focus:outline-none focus:border-zinc-700 transition-colors cursor-pointer"
+                    className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-900 rounded-xl px-3 py-2.5 text-xs text-zinc-950 dark:text-white focus:outline-none focus:border-zinc-400 dark:focus:border-zinc-700 transition-colors cursor-pointer shadow-sm"
                   >
                     <option value="EURUSD">EURUSD</option>
                     <option value="GBPUSD">GBPUSD</option>
@@ -1198,7 +1198,7 @@ const WatchersPage = ({ fetchWithAuth, showToast }: { fetchWithAuth: any; showTo
                   <select 
                     value={addTimeframe} 
                     onChange={e => setAddTimeframe(e.target.value)}
-                    className="w-full bg-zinc-950 border border-zinc-900 rounded-xl px-3 py-2.5 text-xs text-white focus:outline-none focus:border-zinc-700 transition-colors cursor-pointer"
+                    className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-900 rounded-xl px-3 py-2.5 text-xs text-zinc-950 dark:text-white focus:outline-none focus:border-zinc-400 dark:focus:border-zinc-700 transition-colors cursor-pointer shadow-sm"
                   >
                     <option value="M1">M1 (1 Minute)</option>
                     <option value="M5">M5 (5 Minutes)</option>
@@ -1211,18 +1211,18 @@ const WatchersPage = ({ fetchWithAuth, showToast }: { fetchWithAuth: any; showTo
                 </div>
               </div>
 
-              <div className="pt-3 border-t border-zinc-900/60 flex justify-end gap-3">
+              <div className="pt-3 border-t border-zinc-100 dark:border-zinc-900/60 flex justify-end gap-3">
                 <button 
                   type="button" 
                   onClick={() => setShowAddPairModal(false)}
-                  className="px-4 py-2.5 border border-zinc-900 bg-zinc-950 hover:bg-zinc-900 text-zinc-300 text-xs font-semibold rounded-lg transition-all cursor-pointer"
+                  className="px-4 py-2.5 border border-zinc-200 dark:border-zinc-900 bg-white dark:bg-zinc-950 hover:bg-zinc-50 dark:hover:bg-zinc-900 text-zinc-600 dark:text-zinc-300 text-xs font-semibold rounded-lg transition-all cursor-pointer shadow-sm"
                 >
                   Cancel
                 </button>
                 <button 
                   type="submit" 
                   disabled={addLoading}
-                  className="px-5 py-2.5 bg-sky-500 hover:bg-sky-400 text-black text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="px-5 py-2.5 bg-sky-600 dark:bg-sky-500 hover:bg-sky-700 dark:hover:bg-sky-400 text-white dark:text-black text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-md"
                 >
                   {addLoading ? (
                     <RefreshCw className="w-3.5 h-3.5 animate-spin" />
@@ -1748,7 +1748,7 @@ const SystemHealthPage = ({ fetchWithAuth }: { fetchWithAuth: any }) => {
 const SettingsPage = ({ fetchWithAuth, showToast }: { fetchWithAuth: any; showToast: any }) => {
   const [settings, setSettings] = useState<any>({
     defaultStrategy: "",
-    defaultGeminiModel: "gemini-1.5-flash",
+    defaultGeminiModel: "gemini-2.5-flash",
     scanInterval: 15,
     maintenanceMode: false
   });
@@ -1819,11 +1819,11 @@ const SettingsPage = ({ fetchWithAuth, showToast }: { fetchWithAuth: any; showTo
           <select 
             value={settings.defaultGeminiModel}
             onChange={e => setSettings((prev: any) => ({ ...prev, defaultGeminiModel: e.target.value }))}
-            className="w-full bg-[#0c0c0e] border border-zinc-900 text-xs font-semibold rounded-xl px-4 py-3 focus:outline-none focus:border-zinc-800 text-zinc-300"
+            className="w-full bg-zinc-50 dark:bg-[#0c0c0e] border border-zinc-200 dark:border-zinc-900 text-xs font-semibold rounded-xl px-4 py-3 focus:outline-none focus:border-zinc-300 dark:focus:border-zinc-800 text-zinc-950 dark:text-zinc-300 shadow-sm"
           >
-            <option value="gemini-1.5-flash">Gemini 1.5 Flash (Default / High Speed)</option>
+            <option value="gemini-2.5-flash">Gemini 1.5 Flash (Default / High Speed)</option>
             <option value="gemini-1.5-pro">Gemini 1.5 Pro (Deep Reasoning)</option>
-            <option value="gemini-1.5-flash">Gemini 1.5 Flash (Legacy)</option>
+            <option value="gemini-2.5-flash">Gemini 1.5 Flash (Legacy)</option>
             <option value="gemini-1.5-pro">Gemini 1.5 Pro (Legacy)</option>
           </select>
         </div>
@@ -1838,7 +1838,7 @@ const SettingsPage = ({ fetchWithAuth, showToast }: { fetchWithAuth: any; showTo
             max="1440"
             value={settings.scanInterval}
             onChange={e => setSettings((prev: any) => ({ ...prev, scanInterval: parseInt(e.target.value) || 5 }))}
-            className="w-full bg-[#0c0c0e] border border-zinc-900 text-xs font-semibold rounded-xl px-4 py-3 focus:outline-none focus:border-zinc-800 text-zinc-300"
+            className="w-full bg-zinc-50 dark:bg-[#0c0c0e] border border-zinc-200 dark:border-zinc-900 text-xs font-semibold rounded-xl px-4 py-3 focus:outline-none focus:border-zinc-300 dark:focus:border-zinc-800 text-zinc-950 dark:text-zinc-300 shadow-sm"
           />
         </div>
 
@@ -1850,7 +1850,7 @@ const SettingsPage = ({ fetchWithAuth, showToast }: { fetchWithAuth: any; showTo
             rows={5}
             value={settings.defaultStrategy}
             onChange={e => setSettings((prev: any) => ({ ...prev, defaultStrategy: e.target.value }))}
-            className="w-full bg-[#0c0c0e] border border-zinc-900 text-xs font-semibold rounded-xl px-4 py-3 focus:outline-none focus:border-zinc-800 text-zinc-300 font-mono"
+            className="w-full bg-zinc-50 dark:bg-[#0c0c0e] border border-zinc-200 dark:border-zinc-900 text-xs font-semibold rounded-xl px-4 py-3 focus:outline-none focus:border-zinc-300 dark:focus:border-zinc-800 text-zinc-950 dark:text-zinc-300 font-mono shadow-sm"
             placeholder="E.g. Identify high-probability SMA support and RSI oversold setups..."
           />
         </div>
@@ -2080,7 +2080,7 @@ export default function AdminDashboard({ userProfile, session, authLoading }: { 
     <div className="flex h-[90vh] bg-[#080808] border-t border-zinc-900 text-white rounded-t-3xl overflow-hidden mt-2 relative">
       
       {/* Sidebar for desktop, drawer for mobile */}
-      <div className={`fixed inset-y-0 left-0 z-40 w-64 bg-[#0c0c0e] border-r border-zinc-900/80 transform transition-transform duration-200 ease-in-out ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 md:relative md:h-full`}>
+      <div className={`fixed inset-y-0 left-0 z-40 w-64 bg-white dark:bg-[#0c0c0e] border-r border-zinc-200 dark:border-zinc-900/80 transform transition-transform duration-200 ease-in-out ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 md:relative md:h-full`}>
         <div className="p-5 border-b border-zinc-900 flex justify-between items-center bg-zinc-950/40">
           <span className="text-white font-extrabold text-sm flex items-center gap-2 tracking-tight">
             <Shield className="w-4.5 h-4.5 text-sky-400" /> Administrative Shield

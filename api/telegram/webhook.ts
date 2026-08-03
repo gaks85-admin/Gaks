@@ -93,8 +93,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method === "POST") {
     try {
       const body = req.body;
-      console.log("[Telegram Webhook Vercel] Received update payload:", JSON.stringify(body, null, 2));
-
       const message = body.message;
       if (!message) {
         // Return 200 for other update types (e.g., callback_query) to prevent Telegram from retrying

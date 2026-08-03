@@ -1,27 +1,6 @@
 import express from "express";
 import adminHandler from "./api/admin";
 import path from "path";
-import { createClient } from "@supabase/supabase-js";
-
-/**
- * Self-contained Supabase client initialization.
- */
-const getSupabase = () => {
-  const url = process.env.VITE_SUPABASE_URL || "https://wkujrqmxivljnuvumfau.supabase.co";
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY;
-  
-  if (!url || !key) {
-    throw new Error('Supabase configuration missing (VITE_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required)');
-  }
-
-  return createClient(url, key, {
-    auth: {
-      persistSession: false,
-      autoRefreshToken: false
-    }
-  });
-};
-
 import marketWatcherCronHandler from "./api/cron/market-watcher";
 import testCronHandler from "./api/cron/test";
 import liveRatesHandler from "./api/live-rates";
@@ -30,8 +9,6 @@ import watcherStartHandler from "./api/watcher/start";
 import watcherScanHandler from "./api/watcher/scan";
 import watcherStopHandler from "./api/watcher/stop";
 import strategySummaryHandler from "./api/strategy/summary";
-import debugGeminiHandler from "./api/debug/gemini";
-import testKeyHandler from "./api/debug/test-key";
 
 async function startServer() {
   const app = express();
@@ -79,7 +56,13 @@ async function startServer() {
     }
     
     try {
-      const supabase = getSupabase();
+      const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://wkujrqmxivljnuvumfau.supabase.co";
+      const supabaseKey = process.env.VITE_SUPABASE_ANON_KEY;
+      if (!supabaseUrl || !supabaseKey) {
+        throw new Error('Supabase configuration missing');
+      }
+      const { createClient } = await import("@supabase/supabase-js");
+      const supabase = createClient(supabaseUrl, supabaseKey);
       const { data: { user }, error: authError } = await supabase.auth.getUser(token);
       if (authError || !user) {
         return res.status(401).json({ success: false, error: "Unauthorized: Invalid authentication token." });
@@ -121,10 +104,6 @@ async function startServer() {
   // Scheduled Cron execution for active market watchers
   app.post("/api/cron/market-watcher", marketWatcherCronHandler as any);
   app.all("/api/cron/test", testCronHandler as any);
-
-  // Temporary debug endpoint
-  app.all("/api/debug/gemini", debugGeminiHandler as any);
-  app.post("/api/debug/test-key", testKeyHandler as any);
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {

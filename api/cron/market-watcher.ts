@@ -3,14 +3,13 @@ import { GoogleGenAI, Type } from '@google/genai';
 import { analyzeMarket, Candle } from '../../src/lib/strategy-engine.js';
 import { ParsedStrategy } from '../../src/lib/strategy-parser.js';
 import { buildTelegramAlertMessage } from '../../src/lib/telegram-formatter.js';
-import { extractRiskPreferences, calculatePositionSize, logPositionSizeAudit } from '../../src/lib/risk-engine.js';
-import { evaluateRules, logRuleEngineAudit } from '../../src/lib/rule-engine.js';
+import { extractRiskPreferences, calculatePositionSize } from '../../src/lib/risk-engine.js';
+import { evaluateRules } from '../../src/lib/rule-engine.js';
 import { compileStrategy } from '../../src/lib/strategy-compiler.js';
 import { validateDetectors } from '../../src/lib/detector-capability-validator.js';
 import { evaluateDecision } from '../../src/lib/decision-engine.js';
 import { extractMarketStructure } from '../../src/lib/market-structure-engine.js';
 import { recordEvaluation } from '../../src/lib/explainability-engine.js';
-import { logPipelineTrace } from '../../src/lib/pipeline-logger.js';
 import { calculateHistoricalProbability, recordCompletedTrade } from '../../src/lib/learning-engine.js';
 import { RULE_WEIGHTS } from '../../src/lib/rule-weight-engine.js';
 
@@ -77,72 +76,19 @@ export async function runGeminiRequest(
     supabase: any,
     userId: string,
     prompt: string,
-    model: string = 'gemini-2.5-flash',
+    model: string = 'gemini-1.5-flash',
     config?: any
 ) {
-    const tableName = 'user_api_keys';
-    const providerFilter = 'gemini';
-    const statusFilter = 'none (removed: column does not exist in schema)';
-
-    console.log(`[Gemini API Key Lookup Audit] Executing lookup:`);
-    console.log(`- Table Name: ${tableName}`);
-    console.log(`- user_id: ${userId}`);
-    console.log(`- provider: ${providerFilter}`);
-    console.log(`- status filter: ${statusFilter}`);
-    console.log(`- Supabase JS Query: supabase.from('${tableName}').select('api_key').eq('user_id', '${userId}').eq('provider', '${providerFilter}').maybeSingle()`);
-    console.log(`- Exact SQL Query: SELECT api_key FROM public.${tableName} WHERE user_id = '${userId}' AND provider = '${providerFilter}' LIMIT 1;`);
-
-    // 1. Fetch the Gemini API key using only existing database columns
     const { data: apiKeyData, error: apiKeyError } = await supabase
-        .from(tableName)
+        .from('user_api_keys')
         .select('api_key')
         .eq('user_id', userId)
-        .eq('provider', providerFilter)
+        .eq('provider', 'gemini')
         .maybeSingle();
 
-    if (apiKeyError) {
-        console.error("[Gemini API Key Lookup Audit] Supabase query error:", JSON.stringify(apiKeyError, null, 2));
-        console.log("error.code =", apiKeyError?.code);
-        console.log("error.message =", apiKeyError?.message);
-        console.log("error.details =", apiKeyError?.details);
-        console.log("error.hint =", apiKeyError?.hint);
-    }
-
-    // 2. Schema Comparison & Audit Verification
-    console.log(`[Gemini API Key Lookup Audit] Comparing query filters against actual schema of '${tableName}':`);
-    console.log(`- Correct Table Queried: Yes ('${tableName}')`);
-    console.log(`- Correct user_id Used: Yes ('${userId}')`);
-    console.log(`- Provider matches stored schema type: Yes ('${providerFilter}' matches TEXT column 'provider')`);
-    console.log(`- Status filter matches stored schema type: Yes (Verified: No status filter is applied as the 'status' column does not exist in 'user_api_keys' schema)`);
-
-    if (!apiKeyData || !apiKeyData.api_key) {
-        console.log(`[Gemini API Key Lookup Audit] Row NOT found. Investigating the exact reason...`);
-        
-        // Let's see if we can find ANY key for this user regardless of provider to provide better debug logs
-        const { data: anyKeyData, error: anyKeyError } = await supabase
-            .from(tableName)
-            .select('provider')
-            .eq('user_id', userId);
-
-        if (anyKeyError) {
-            console.error("[Gemini API Key Lookup Audit] Error running any-key query:", JSON.stringify(anyKeyError, null, 2));
-            console.log("error.code =", anyKeyError?.code);
-            console.log("error.message =", anyKeyError?.message);
-            console.log("error.details =", anyKeyError?.details);
-            console.log("error.hint =", anyKeyError?.hint);
-        }
-
-        if (!anyKeyData || anyKeyData.length === 0) {
-            console.log(`[Gemini API Key Lookup Audit] LOG EXACT WHY: There are zero entries in '${tableName}' for user_id='${userId}'. The user has not registered any API keys yet.`);
-        } else {
-            console.log(`[Gemini API Key Lookup Audit] LOG EXACT WHY: Entries exist for user_id='${userId}', but none for provider='${providerFilter}'. Stored providers: ${anyKeyData.map((k: any) => k.provider).join(', ')}`);
-        }
-        
+    if (apiKeyError || !apiKeyData || !apiKeyData.api_key) {
         throw new Error('Gemini API key not found for user.');
     }
-
-    console.log(`[Gemini API Key Lookup Audit] Success: Gemini API key successfully retrieved for user_id='${userId}'.`);
-
 
     const { data: watcher, error: watcherError } = await supabase
         .from('watchers')
@@ -156,7 +102,6 @@ export async function runGeminiRequest(
         throw new Error('Watcher skipped because no active watcher found.');
     }
 
-    console.log("GEMINI CALLED");
     const ai = new GoogleGenAI({ apiKey: apiKeyData.api_key });
 
     try {
@@ -166,11 +111,6 @@ export async function runGeminiRequest(
             config: config
         });
 
-        console.log(
-          "[FULL GEMINI RESPONSE]\n" +
-          JSON.stringify(geminiResponse, null, 2)
-        );
-
         if (typeof geminiResponse.text === 'function') {
             return await (geminiResponse.text as any)();
         } else if (typeof geminiResponse.text === 'string') {
@@ -179,45 +119,8 @@ export async function runGeminiRequest(
             return (geminiResponse as any).candidates?.[0]?.content?.parts?.[0]?.text ?? "";
         }
     } catch (error: any) {
-        const errorType = classifyGeminiError(error);
-        console.error(`[Gemini API Request Error] Request failed: ${errorType}`, error);
         throw error;
     }
-}
-
-
-async function generateContentWithDiagnostics(ai: any, params: any) {
-   const contents = params.contents;
-   let promptText = "";
-   if (typeof contents === "string") promptText = contents;
-   else if (Array.isArray(contents)) promptText = JSON.stringify(contents);
-   else promptText = contents?.toString() || "";
-
-   if (!promptText || promptText.trim().length === 0) {
-      throw new Error("Invalid prompt: prompt is empty or only whitespace.");
-   }
-   
-   console.log(`\n=== GEMINI REQUEST DIAGNOSTIC ===`);
-   const apiKeyPresent = !!process.env.GEMINI_API_KEY;
-   console.log(`API key present: ${apiKeyPresent}`);
-   console.log(`Model: ${params.model}`);
-   console.log(`Request Payload: ${JSON.stringify(params).substring(0, 500)}`);
-   console.log(`Prompt Length: ${promptText.length}`);
-   
-   try {
-      const response = await ai.models.generateContent(params);
-      console.log(`=== GEMINI RESPONSE ===\n${JSON.stringify(response)}\n=======================`);
-      return response;
-   } catch (error: any) {
-      console.error(`=== GEMINI ERROR DIAGNOSTIC ===`);
-      console.error(`Error Message: ${error.message}`);
-      console.error(`Status: ${error.status}`);
-      console.error(`Stack: ${error.stack}`);
-      console.error(`Response Body:`, error.response || error.responseBody || 'None');
-      console.error(`Full Error Object: ${JSON.stringify(error, Object.getOwnPropertyNames(error))}`);
-      console.error(`===============================`);
-      throw error;
-   }
 }
 
 
@@ -253,32 +156,22 @@ export async function registerSignal(
   }
 
   const signalHash = `${signal.pair}_${signal.direction}_${signal.entryPrice}`;
-  console.log(`[registerSignal] Processing signal registration for watcher ${watcher.id}...`);
-  console.log(`[registerSignal] Signal payload:`, JSON.stringify(signal, null, 2));
-  console.log(`[registerSignal] Signal hash generated: ${signalHash}`);
 
   try {
     // 1. Duplicate Check
-    console.log("[REGISTER] About to check duplicate");
     const cached = registeredSignalsCache.get(watcher.id);
     const now = Date.now();
     const isDuplicate = !!(cached && cached.hash === signalHash && (now - cached.timestamp < 15 * 60 * 1000));
 
-    console.log("[REGISTER] Duplicate query result:", { cached, isDuplicate }, null);
-
     if (isDuplicate) {
-      console.log(`[registerSignal] Genuine duplicate signal detected for ${signal.pair} on watcher ${watcher.id}. Skipping.`);
-      console.log("[REGISTER] Returning:", false);
       return false;
     }
 
     // 2. Insert/Update registration log in database
-    console.log("[REGISTER] About to update watcher");
     const payload = {
       last_scan_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
     };
-    console.log("[REGISTER] Update payload:", payload);
 
     const { data: updatedRows, error: updateError } = await supabase
       .from("watchers")
@@ -287,18 +180,7 @@ export async function registerSignal(
       .eq("trade_status", "WAITING")
       .select();
 
-    console.log("[REGISTER] Update result:", updatedRows);
-    console.log("[REGISTER] Update error:", updateError);
-
-    if (updateError) {
-      console.error(`[registerSignal] Database update failed for watcher ${watcher.id}:`, updateError.message);
-      console.log("[REGISTER] Returning:", false);
-      return false;
-    }
-
-    if (!updatedRows || updatedRows.length === 0) {
-      console.log(`[registerSignal] No rows returned from update for watcher ${watcher.id}`);
-      console.log("[REGISTER] Returning:", false);
+    if (updateError || !updatedRows || updatedRows.length === 0) {
       return false;
     }
 
@@ -322,7 +204,7 @@ export async function registerSignal(
  */
 const getSupabase = () => {
   const url = process.env.VITE_SUPABASE_URL || "https://wkujrqmxivljnuvumfau.supabase.co";
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || "sb_publishable_BheqR2OkNYKqT7bj8xThWA_gGG2hcjf";
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY;
   
   if (!url || !key) {
     throw new Error('Supabase configuration missing (VITE_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required)');
@@ -1197,7 +1079,6 @@ export default async function handler(req: any, res: any) {
         continue;
       }
 
-      let traceData: any = null;
       let scanStart: number = 0;
       try {
         addLog("Watcher Loaded", "success");
@@ -1379,15 +1260,6 @@ export default async function handler(req: any, res: any) {
 
         scanStart = Date.now();
 
-        traceData = {
-          watcherId: watcher.id,
-          userId: userId,
-          pair: selectedPair,
-          timeframe: selectedTimeframe,
-          currentCandleTime: candleData[candleData.length - 1]?.timestamp || '',
-          closedCandleTime: candleData[candleData.length - 2]?.timestamp || '',
-        };
-
         // Extract market structure & compile strategy
         addLog("Strategy Compiled", "success");
         const compiledStrategy = compileStrategy(strategyText);
@@ -1396,58 +1268,6 @@ export default async function handler(req: any, res: any) {
         // Stage 2
         const cleanSymUpper = (selectedPair || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
         const pipSize = (cleanSymUpper.includes('JPY') || cleanSymUpper.includes('XAU') || cleanSymUpper.includes('GOLD')) ? 0.01 : 0.0001;
-
-        traceData.marketStructure = {
-          trend: marketStructure.trend || 'SIDEWAYS',
-          bos: (marketStructure.BOS && marketStructure.BOS.some((b: any) => b.type === 'BULLISH_BOS' || b.type === 'BEARISH_BOS')) ? 'YES' : 'NO',
-          choch: (marketStructure.CHOCH && marketStructure.CHOCH.some((c: any) => c.type === 'BULLISH_CHOCH' || c.type === 'BEARISH_CHOCH')) ? 'YES' : 'NO',
-          trendlineBreakout: ((marketStructure.breakouts && marketStructure.breakouts.some((b: any) => b.type === 'UPPER_BREAKOUT' || b.type === 'LOWER_BREAKOUT')) || (marketStructure.trendlines && marketStructure.trendlines.length > 0)) ? 'YES' : 'NO',
-          liquiditySweep: (marketStructure.liquiditySweeps && marketStructure.liquiditySweeps.some((l: any) => l.type === 'HIGH_SWEEP' || l.type === 'LOW_SWEEP')) ? 'YES' : 'NO',
-          support: (marketStructure.supportZones && marketStructure.supportZones.length > 0) ? 'YES' : 'NO',
-          resistance: (marketStructure.resistanceZones && marketStructure.resistanceZones.length > 0) ? 'YES' : 'NO',
-          volumeConfirmation: (marketStructure.volumeInformation?.volumeSpike) ? 'YES' : 'NO',
-          confirmationCandle: (marketStructure.candlePatterns && marketStructure.candlePatterns.length > 0) ? 'YES' : 'NO',
-          session: (() => {
-            const lastCandle = candleData[candleData.length - 1];
-            const date = lastCandle && lastCandle.timestamp ? new Date(lastCandle.timestamp) : new Date();
-            const hour = date.getUTCHours();
-            if (hour >= 8 && hour < 13) return "London";
-            if (hour >= 13 && hour < 17) return "London / NY";
-            if (hour >= 17 && hour < 21) return "NY";
-            if (hour >= 0 && hour < 8) return "Asia";
-            return "Asia";
-          })(),
-          atr: marketStructure.volatilityInformation?.atr?.toFixed(5) || '0.00000'
-        };
-
-        // Stage 3
-        const compiledRulesList: string[] = [];
-        const rules = compiledStrategy.compiled_rules || {};
-        if (rules.trendline_breakout) compiledRulesList.push("Trendline Breakout");
-        if (rules.break_and_retest) compiledRulesList.push("Break and Retest");
-        if (rules.confirmation_candle) compiledRulesList.push("Confirmation Candle");
-        if (rules.bos) compiledRulesList.push("Break of Structure (BOS)");
-        if (rules.choch) compiledRulesList.push("Change of Character (CHoCH)");
-        if (rules.liquidity_sweep) compiledRulesList.push("Liquidity Sweep");
-        if (rules.fair_value_gap) compiledRulesList.push("Fair Value Gap (FVG)");
-        if (rules.support) compiledRulesList.push("Support Zone");
-        if (rules.resistance) compiledRulesList.push("Resistance Zone");
-        if (rules.ema?.enabled) compiledRulesList.push(`EMA (Periods: ${rules.ema.periods?.join(', ')})`);
-        if (rules.rsi?.enabled) compiledRulesList.push(`RSI (OB: ${rules.rsi.overbought || 70}, OS: ${rules.rsi.oversold || 30})`);
-        if (rules.macd?.enabled) compiledRulesList.push("MACD");
-        if (rules.atr?.enabled) compiledRulesList.push("ATR");
-        if (rules.volume_confirmation) compiledRulesList.push("Volume Confirmation");
-        if (rules.session && rules.session.length > 0) compiledRulesList.push(`Session Filter: ${rules.session.join(', ')}`);
-        if (rules.timeframes && rules.timeframes.length > 0) compiledRulesList.push(`Timeframes: ${rules.timeframes.join(', ')}`);
-        if (rules.risk_reward?.min_ratio) compiledRulesList.push(`Min Risk Reward: ${rules.risk_reward.min_ratio}`);
-
-        traceData.strategyCompiler = {
-          strategyMode: compiledStrategy.strategy_mode || 'HYBRID',
-          compiledRules: compiledRulesList,
-          overallConfidence: `${compiledStrategy.overall_confidence || compiledStrategy.confidence || 0}%`,
-          matchedPhrases: compiledStrategy.matched_phrases || [],
-          canonicalRules: compiledStrategy.canonical_rules || []
-        };
 
         // Run Weighted Decision Engine (Pass 1 to get matched rules)
         (marketStructure as any).pair = selectedPair;
@@ -1481,18 +1301,6 @@ export default async function handler(req: any, res: any) {
         addLog(`Decision Score: ${decisionResult.decision_score.toFixed(1)}%`);
         addLog(`Recommendation: ${decisionResult.recommendation}`);
 
-        traceData.decisionEngine = {
-          decisionScore: `${decisionResult.matched_weight} / ${decisionResult.possible_weight} (${decisionResult.decision_score.toFixed(1)}%)`,
-          recommendation: decisionResult.recommendation,
-          mandatoryRulesPassed: decisionResult.mandatory_rules_passed ? 'YES' : 'NO',
-          matchedRules: decisionResult.matched_rules || [],
-          failedRules: decisionResult.failed_rules || [],
-          geminiRequired: decisionResult.requires_gemini ? 'YES' : 'NO',
-          historicalProbability: `${histResult.historical_probability}%`,
-          sampleSize: histResult.sample_size,
-          confidenceLevel: histResult.confidence_level
-        };
-
         let analysis: any = {
           signal: 'NO_TRADE',
           confidence: 0,
@@ -1511,9 +1319,6 @@ export default async function handler(req: any, res: any) {
 
         const recommendation = decisionResult.recommendation; // PASS, LIKELY_PASS, AMBIGUOUS, FAIL
         const executionMode = compiledStrategy.detector_validation?.execution_mode || 'HYBRID';
-
-        console.log(`[PIPELINE AUDIT] Watcher: ${watcher.id}, Pair: ${selectedPair}`);
-        console.log(`[PIPELINE AUDIT] Recommendation: ${recommendation}, Execution Mode: ${executionMode}`);
 
         if (recommendation === 'FAIL' && executionMode === 'RULE_ONLY') {
           console.log(`Execution Mode: ${executionMode}`);
@@ -1554,45 +1359,6 @@ export default async function handler(req: any, res: any) {
             })
             .eq("id", watcher.id);
 
-          // Stage 5
-          traceData.gemini = {
-            called: 'NO',
-            duration: '0 ms',
-            promptSent: 'N/A',
-            rawResponse: 'N/A',
-            parsedSatisfaction: 'N/A',
-            parsedConfidence: 'N/A',
-            parsedDirection: 'N/A'
-          };
-
-          // Stage 6
-          traceData.riskEngine = {
-            accountSize: `$${accountSize.toFixed(2)}`,
-            riskPercentage: `${riskPercentage}%`,
-            riskAmount: `$${(accountSize * riskPercentage / 100).toFixed(2)}`,
-            stopLossDistance: '0.0 pips / 0.00%',
-            takeProfitDistance: '0.0 pips / 0.00%',
-            calculatedLotSize: '0.0',
-            lotType: 'Micro Lot',
-            accepted: 'NO',
-            rejectionReason: `Decision Engine recommendation is FAIL`
-          };
-
-          // Stage 7
-          traceData.telegram = {
-            sent: 'NO',
-            chatId: telegramChatId || 'None',
-            message: 'N/A (Failed scan)'
-          };
-
-          traceData.complete = {
-            status: 'SUCCESS',
-            duration: `${scanDurationMs} ms`,
-            timestamp: new Date().toISOString()
-          };
-
-          logPipelineTrace(traceData);
-
           watchersProcessedCount++;
           continue;
         } else {
@@ -1600,11 +1366,6 @@ export default async function handler(req: any, res: any) {
           const forceGemini = (recommendation === 'FAIL' && (executionMode === 'HYBRID' || executionMode === 'AI_ONLY'));
           const requiresGemini = (compiledStrategy.strategy_mode !== 'RULE_ONLY') && (decisionResult.requires_gemini || forceGemini);
           
-          console.log(`[PIPELINE AUDIT] strategy_mode: ${compiledStrategy.strategy_mode}`);
-          console.log(`[PIPELINE AUDIT] decisionResult.requires_gemini: ${decisionResult.requires_gemini}`);
-          console.log(`[PIPELINE AUDIT] forceGemini: ${forceGemini}`);
-          console.log(`[PIPELINE AUDIT] requiresGemini: ${requiresGemini}`);
-
           if (forceGemini) {
             console.log(`Execution Mode: ${executionMode}`);
             console.log(`Decision: ${recommendation}`);
@@ -1614,8 +1375,6 @@ export default async function handler(req: any, res: any) {
           if (requiresGemini) {
             addLog("Gemini Required", "success");
             addLog("Calling Gemini", "success");
-            console.log("[PIPELINE AUDIT] ENTER GEMINI BRANCH");
-            console.log("GEMINI CALLED");
             geminiInvoked = true;
             console.log("Gemini Invoked");
             geminiCalled = true;
@@ -1632,7 +1391,6 @@ export default async function handler(req: any, res: any) {
                 console.log("Gemini Required:", requiresGemini);
                 console.log("Sending prompt to Gemini...");
 
-                console.log("[PIPELINE AUDIT] Gemini API request starting...");
                 const ai = new GoogleGenAI({ apiKey: geminiKey });
                 const promptText = `
 You are an expert AI trading analyst.
@@ -1640,7 +1398,6 @@ You are an expert AI trading analyst.
 Strategy Summary:
 - Style: ${compiledStrategy.strategy_mode || 'HYBRID'}
 - Timeframe: ${selectedTimeframe}
-- Confirmation: ${traceData.strategyCompiler.compiledRules.join(', ')}
 
 Available Market Evidence:
 - Trend: ${marketStructure.trend}
@@ -1676,8 +1433,8 @@ Output ONLY valid JSON:
 "reasoning": "short explanation"
 }
 `;
-                const aiResponse = await generateContentWithDiagnostics(ai, {
-                  model: "gemini-2.5-flash",
+                const aiResponse = await ai.models.generateContent({
+                  model: "gemini-1.5-flash",
                   contents: promptText,
                   config: {
                     responseMimeType: "application/json",
@@ -1693,11 +1450,6 @@ Output ONLY valid JSON:
                     }
                   }
                 });
-                console.log("[PIPELINE AUDIT] Gemini API response received");
-                console.log("========== GEMINI RETURNED ==========");
-                console.log("Raw Gemini Response:");
-                console.dir(aiResponse, { depth: null });
-
                 geminiCallsExecutedCount++;
                 geminiDuration = Date.now() - geminiStart;
                 geminiTextResult = aiResponse.text || "";
@@ -1733,22 +1485,10 @@ Output ONLY valid JSON:
                 console.log("========== PARSED GEMINI OUTPUT ==========");
                 console.log(parsedResult);
 
-                console.log("[PIPELINE AUDIT] Parsed signal result from Gemini");
                 console.log("Gemini JSON Parsed");
                 geminiSucceeded = true;
                 geminiDecision = parsedResult.direction as 'BUY' | 'SELL' | 'NO_TRADE';
                 console.log(`Gemini Decision = ${geminiDecision}`);
-
-                // Stage 5
-                traceData.gemini = {
-                  called: 'YES',
-                  duration: `${geminiDuration} ms`,
-                  promptSent: promptText || 'N/A',
-                  rawResponse: geminiTextResult || 'N/A',
-                  parsedSatisfaction: parsedResult.satisfies ? 'YES' : 'NO',
-                  parsedConfidence: String(parsedResult.confidenceScore || 0),
-                  parsedDirection: parsedResult.direction || 'NO_TRADE'
-                };
 
                 if (parsedResult.satisfies && parsedResult.direction && parsedResult.direction !== 'NO_TRADE') {
                   geminiDirection = parsedResult.direction;
@@ -1764,17 +1504,6 @@ Output ONLY valid JSON:
                     takeProfit: null,
                     riskReward: riskRewardStr,
                     reasoning: [parsedResult.reasoning || "Satisfies strategy rules and Gemini validation."]
-                  };
-                } else {
-                  // If Gemini called but does not satisfy / direction is NO_TRADE, we should explicitly capture that in Gemini trace as well:
-                  traceData.gemini = {
-                    called: 'YES',
-                    duration: `${geminiDuration} ms`,
-                    promptSent: promptText || 'N/A',
-                    rawResponse: geminiTextResult || 'N/A',
-                    parsedSatisfaction: parsedResult.satisfies ? 'YES' : 'NO',
-                    parsedConfidence: String(parsedResult.confidenceScore || 0),
-                    parsedDirection: parsedResult.direction || 'NO_TRADE'
                   };
                 }
               }
@@ -1814,7 +1543,7 @@ Output ONLY valid JSON:
               console.log(`Action: Skipped`);
               console.log(`===============================`);
 
-              // Save Gemini failed evaluation record
+              // Update last_scan_at and last_analyzed_closed_candle_time and exit
               const scanDurationMs = Date.now() - scanStart;
               await recordEvaluation(supabase, {
                 user_id: userId,
@@ -1837,46 +1566,6 @@ Output ONLY valid JSON:
                 gemini_duration_ms: Date.now() - geminiStart,
                 decision_snapshot: decisionSnapshot
               });
-
-              // Stage 5
-              traceData.gemini = {
-                called: 'YES',
-                duration: `${Date.now() - geminiStart} ms`,
-                promptSent: 'See logs',
-                rawResponse: `Error: ${errMsg}`,
-                parsedSatisfaction: 'NO',
-                parsedConfidence: '0',
-                parsedDirection: 'NO_TRADE'
-              };
-
-              // Stage 6
-              traceData.riskEngine = {
-                accountSize: `$${accountSize.toFixed(2)}`,
-                riskPercentage: `${riskPercentage}%`,
-                riskAmount: `$${(accountSize * riskPercentage / 100).toFixed(2)}`,
-                stopLossDistance: '0.0 pips / 0.00%',
-                takeProfitDistance: '0.0 pips / 0.00%',
-                calculatedLotSize: '0.0',
-                lotType: 'Micro Lot',
-                accepted: 'NO',
-                rejectionReason: `Gemini API execution failed: ${errMsg}`
-              };
-
-              // Stage 7
-              traceData.telegram = {
-                sent: 'NO',
-                chatId: telegramChatId || 'None',
-                message: 'N/A'
-              };
-
-              // Stage 8
-              traceData.complete = {
-                status: 'FAILED',
-                duration: `${scanDurationMs} ms`,
-                timestamp: new Date().toISOString()
-              };
-
-              logPipelineTrace(traceData);
 
               skipped.push({ userId, reason: errMsg });
               watchersSkippedCount++;
@@ -1912,17 +1601,6 @@ Output ONLY valid JSON:
               const localAnalysis = analyzeMarket(candleData, mappedParsedStrategy);
               analysis = localAnalysis;
             }
-
-            // Stage 5
-            traceData.gemini = {
-              called: 'NO',
-              duration: '0 ms',
-              promptSent: 'N/A',
-              rawResponse: 'N/A',
-              parsedSatisfaction: 'N/A',
-              parsedConfidence: 'N/A',
-              parsedDirection: 'N/A'
-            };
           }
         }
 
@@ -1946,16 +1624,6 @@ Output ONLY valid JSON:
         console.log("==================================");
 
         console.log(`LOG: Signal result for ${selectedPair}: ${analysis.signal} (Confidence: ${analysis.confidence}%)`);
-
-        console.log("===== PIPELINE TRACE =====");
-        console.log(`Decision Recommendation: ${recommendation}`);
-        console.log(`Execution Mode: ${executionMode}`);
-        console.log(`Gemini Branch Entered: ${geminiInvoked}`);
-        console.log(`Gemini API Called: ${geminiInvoked}`);
-        console.log(`Gemini Response Received: ${geminiSucceeded}`);
-        console.log(`Gemini Parsed: ${geminiSucceeded}`);
-        console.log(`Analysis Before WAITING:`, JSON.stringify(analysis));
-        console.log("==========================");
 
         // If there is NO setup: Update last_scan_at, last_analyzed_closed_candle_time, save evaluation and Exit.
         const isWaiting = geminiInvoked 
@@ -1997,41 +1665,11 @@ Output ONLY valid JSON:
               })
               .eq("id", watcher.id);
 
-            // Stage 6
-            traceData.riskEngine = {
-              accountSize: `$${accountSize.toFixed(2)}`,
-              riskPercentage: `${riskPercentage}%`,
-              riskAmount: `$${(accountSize * riskPercentage / 100).toFixed(2)}`,
-              stopLossDistance: '0.0 pips / 0.00%',
-              takeProfitDistance: '0.0 pips / 0.00%',
-              calculatedLotSize: '0.0',
-              lotType: 'Micro Lot',
-              accepted: 'NO',
-              rejectionReason: `No trade setup: signal is ${analysis.signal} and confidence is ${analysis.confidence}%`
-            };
-
-            // Stage 7
-            traceData.telegram = {
-              sent: 'NO',
-              chatId: telegramChatId || 'None',
-              message: 'N/A (No setup)'
-            };
-
-            // Stage 8
-            traceData.complete = {
-              status: 'SUCCESS',
-              duration: `${scanDurationMs} ms`,
-              timestamp: new Date().toISOString()
-            };
-
-            logPipelineTrace(traceData);
-
             watchersProcessedCount++;
             continue;
         }
 
         const executedPrice = Number(candleData[candleData.length - 1]?.close) || Number(analysis.entryPrice) || 0;
-        console.log("[PIPELINE AUDIT] ENTERING RISK ENGINE STAGE");
         const posSizeResult = calculatePositionSize({
           accountSize: accountSize,
           riskPercentage: riskPercentage,
@@ -2043,25 +1681,6 @@ Output ONLY valid JSON:
           direction: analysis.signal,
           riskRewardStr: riskRewardStr
         });
-        logPositionSizeAudit(posSizeResult, prefsRecord?.updated_at || prefsRecord?.created_at || 'N/A');
-
-        // Phase 7: Full Audit Report before Telegram / registration decision
-        console.log(`\n========== PHASE 7: FULL DIAGNOSTIC AUDIT REPORT ==========`);
-        console.log(`ENTRY: ${posSizeResult.entryPrice}`);
-        console.log(`STOP LOSS: ${posSizeResult.stopLoss}`);
-        console.log(`TAKE PROFIT: ${posSizeResult.takeProfit}`);
-        console.log(`RISK DISTANCE: ${posSizeResult.actualRisk.toFixed(5)}`);
-        console.log(`REWARD DISTANCE: ${posSizeResult.actualReward.toFixed(5)}`);
-        console.log(`CONFIGURED RR: ${riskRewardStr}`);
-        console.log(`ACTUAL RR: ${posSizeResult.actualRr.toFixed(4)}`);
-        console.log(`GEMINI DIRECTION: ${geminiDirection}`);
-        console.log(`BACKEND DIRECTION: ${analysis.signal}`);
-        console.log(`NEW CANDLE: ${isNewCandle ? 'YES' : 'NO'}`);
-        console.log(`ACTIVE TRADE: ${watcher.trade_status === 'ACTIVE' ? 'YES' : 'NO'}`);
-        console.log(`COOLDOWN: ${watcher.trade_status === 'COOLDOWN' ? 'YES' : 'NO'}`);
-        console.log(`TRADE ACCEPTED: ${posSizeResult.accepted ? 'YES' : 'NO'}`);
-        console.log(`REJECTION REASON: ${posSizeResult.skipReason || 'None'}`);
-        console.log(`===========================================================\n`);
 
         if (!posSizeResult.accepted) {
           console.log(`[Risk/Validation Failed - Trade Skipped] ${posSizeResult.skipReason}`);
@@ -2098,39 +1717,6 @@ Output ONLY valid JSON:
             })
             .eq("id", watcher.id);
 
-          const stopDistance = Math.abs(executedPrice - (Number(posSizeResult.stopLoss) || Number(analysis.stopLoss) || 0));
-          const tpDistance = Math.abs((Number(posSizeResult.takeProfit) || Number(analysis.takeProfit) || executedPrice * 1.01) - executedPrice);
-          const slDistancePips = stopDistance / pipSize;
-          const slDistancePct = (stopDistance / executedPrice) * 100;
-          const tpDistancePips = tpDistance / pipSize;
-          const tpDistancePct = (tpDistance / executedPrice) * 100;
-
-          traceData.riskEngine = {
-            accountSize: `$${accountSize.toFixed(2)}`,
-            riskPercentage: `${riskPercentage}%`,
-            riskAmount: `$${posSizeResult.riskAmount.toFixed(2)}`,
-            stopLossDistance: `${slDistancePips.toFixed(1)} pips / ${slDistancePct.toFixed(2)}%`,
-            takeProfitDistance: `${tpDistancePips.toFixed(1)} pips / ${tpDistancePct.toFixed(2)}%`,
-            calculatedLotSize: String(posSizeResult.calculatedLotSize),
-            lotType: posSizeResult.lotType,
-            accepted: 'NO',
-            rejectionReason: posSizeResult.skipReason || 'None'
-          };
-
-          traceData.telegram = {
-            sent: 'NO',
-            chatId: telegramChatId || 'None',
-            message: 'N/A'
-          };
-
-          traceData.complete = {
-            status: 'SUCCESS',
-            duration: `${scanDurationMs} ms`,
-            timestamp: new Date().toISOString()
-          };
-
-          logPipelineTrace(traceData);
-
           watchersProcessedCount++;
           continue;
         }
@@ -2165,7 +1751,6 @@ Output ONLY valid JSON:
           };
 
           isRegistered = await registerSignal(supabase, watcher, signal);
-          console.log("[PIPELINE AUDIT] SIGNAL REGISTERED IN DB");
         } else {
           console.log(`[SIGNAL SKIPPED] Watcher ID: ${watcher.id} - Recommendation is FAIL. Setting signal to NO_TRADE.`);
           analysis.signal = 'NO_TRADE';
@@ -2205,44 +1790,10 @@ Output ONLY valid JSON:
             decision_snapshot: decisionSnapshot
           });
 
-          const stopDistance = Math.abs(executedPrice - (Number(posSizeResult.stopLoss) || Number(analysis.stopLoss) || 0));
-          const tpDistance = Math.abs((Number(posSizeResult.takeProfit) || Number(analysis.takeProfit) || executedPrice * 1.01) - executedPrice);
-          const slDistancePips = stopDistance / pipSize;
-          const slDistancePct = (stopDistance / executedPrice) * 100;
-          const tpDistancePips = tpDistance / pipSize;
-          const tpDistancePct = (tpDistance / executedPrice) * 100;
-
-          traceData.riskEngine = {
-            accountSize: `$${accountSize.toFixed(2)}`,
-            riskPercentage: `${riskPercentage}%`,
-            riskAmount: `$${posSizeResult.riskAmount.toFixed(2)}`,
-            stopLossDistance: `${slDistancePips.toFixed(1)} pips / ${slDistancePct.toFixed(2)}%`,
-            takeProfitDistance: `${tpDistancePips.toFixed(1)} pips / ${tpDistancePct.toFixed(2)}%`,
-            calculatedLotSize: String(posSizeResult.calculatedLotSize),
-            lotType: posSizeResult.lotType,
-            accepted: 'YES',
-            rejectionReason: 'None'
-          };
-
-          traceData.telegram = {
-            sent: 'NO',
-            chatId: telegramChatId || 'None',
-            message: 'N/A (Skipped: Active trade exists)'
-          };
-
-          traceData.complete = {
-            status: 'SUCCESS',
-            duration: `${scanDurationMs} ms`,
-            timestamp: new Date().toISOString()
-          };
-
-          logPipelineTrace(traceData);
-
           continue;
         }
 
         // Send ONE Telegram signal
-        console.log("[PIPELINE AUDIT] SENDING TELEGRAM ALERT");
         const alertMessage = buildTelegramAlertMessage(signal);
         const alertSent = await sendTelegramMessage(telegramChatId, alertMessage);
         if (alertSent) {
@@ -2309,39 +1860,6 @@ Output ONLY valid JSON:
           console.log(`Whether DB update to ACTIVE succeeded: NO`);
         }
 
-        const stopDistance = Math.abs(executedPrice - (Number(posSizeResult.stopLoss) || Number(analysis.stopLoss) || 0));
-        const tpDistance = Math.abs((Number(posSizeResult.takeProfit) || Number(analysis.takeProfit) || executedPrice * 1.01) - executedPrice);
-        const slDistancePips = stopDistance / pipSize;
-        const slDistancePct = (stopDistance / executedPrice) * 100;
-        const tpDistancePips = tpDistance / pipSize;
-        const tpDistancePct = (tpDistance / executedPrice) * 100;
-
-        traceData.riskEngine = {
-          accountSize: `$${accountSize.toFixed(2)}`,
-          riskPercentage: `${riskPercentage}%`,
-          riskAmount: `$${posSizeResult.riskAmount.toFixed(2)}`,
-          stopLossDistance: `${slDistancePips.toFixed(1)} pips / ${slDistancePct.toFixed(2)}%`,
-          takeProfitDistance: `${tpDistancePips.toFixed(1)} pips / ${tpDistancePct.toFixed(2)}%`,
-          calculatedLotSize: String(posSizeResult.calculatedLotSize),
-          lotType: posSizeResult.lotType,
-          accepted: 'YES',
-          rejectionReason: 'None'
-        };
-
-        traceData.telegram = {
-          sent: alertSent ? 'YES' : 'NO',
-          chatId: telegramChatId || 'None',
-          message: alertMessage || 'N/A'
-        };
-
-        traceData.complete = {
-          status: 'SUCCESS',
-          duration: `${scanDurationMs} ms`,
-          timestamp: new Date().toISOString()
-        };
-
-        logPipelineTrace(traceData);
-
         addLog("Scan Completed", "success");
         // Save execution logs to Supabase
         await supabase.from('execution_logs').insert({
@@ -2355,7 +1873,6 @@ Output ONLY valid JSON:
           status: 'success'
         });
 
-        console.log("[PIPELINE AUDIT] END OF PIPELINE REACHED");
         watchersProcessedCount++;
         results.push({ userId, symbol, tradeStatus: 'ACTIVE', signalsFound: 1, signalsSent: alertSent ? 1 : 0 });
 
@@ -2364,16 +1881,6 @@ Output ONLY valid JSON:
         console.error(`Exception: ${err.message}`);
         console.error(`Stack: ${err.stack}`);
         
-        if (traceData) {
-          const scanDurationMs = typeof scanStart !== 'undefined' ? (Date.now() - scanStart) : 0;
-          traceData.complete = {
-            status: 'FAILED',
-            duration: `${scanDurationMs} ms`,
-            timestamp: new Date().toISOString()
-          };
-          logPipelineTrace(traceData);
-        }
-
         errors.push({ userId, error: err.message || "Unknown error" });
         watchersSkippedCount++;
       }
