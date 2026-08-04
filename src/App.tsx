@@ -9,6 +9,17 @@ import { compileStrategy } from './lib/strategy-compiler';
 const Auth = React.lazy(() => import('./components/Auth'));
 import { AuthSkeleton } from './components/Auth';
 const AdminDashboard = React.lazy(() => import('./components/admin/AdminDashboard'));
+const StrategyTab = React.lazy(() => import('./components/StrategyTab'));
+const WatcherTab = React.lazy(() => import('./components/WatcherTab'));
+const SettingsTab = React.lazy(() => import('./components/SettingsTab'));
+
+const TabLoading = () => (
+  <div className="space-y-8 animate-pulse p-4">
+    <div className="h-8 bg-zinc-200 dark:bg-zinc-800 rounded w-1/3"></div>
+    <div className="h-4 bg-zinc-200 dark:bg-zinc-800 rounded w-2/3"></div>
+    <div className="h-64 bg-zinc-200 dark:bg-zinc-800 rounded"></div>
+  </div>
+);
 import {
   Home as HomeIcon,
   TrendingUp,
@@ -2051,946 +2062,93 @@ export default function App() {
           )}
 
           {/* ==================== TAB 2: STRATEGY ==================== */}
-          {activeTab === 'strategy' && (() => {
-            const selectedStrat = strategies.find(s => s.id === selectedStrategyId) || GAKS_DEFAULT_STRATEGY;
-            const currentStrategyText = selectedStrat.text || '';
-            const isDirty = lastSavedStrategyText !== currentStrategyText;
-            const canSave = isDirty && currentStrategyText.trim().length > 0;
-
-            return (
-              <div className="space-y-8 animate-fade-in">
-                
-                {/* Header Title */}
-                <div className="space-y-2">
-                  <h1 className="text-[32px] sm:text-[36px] font-semibold tracking-[-0.035em] text-zinc-950 dark:text-white leading-[1.15] font-sans">Strategy</h1>
-                  <p className="text-[15px] sm:text-[16px] font-normal tracking-[-0.01em] text-zinc-500 dark:text-zinc-400 leading-[1.45] max-w-sm">
-                    Write the playbook your AI assistant trades with.
-                  </p>
-                  <div className="flex items-center gap-1.5 pt-0.5">
-                    {isDirty ? (
-                      <>
-                        <AlertTriangle className="w-4 h-4 text-amber-500 animate-pulse" />
-                        <span className="text-xs text-amber-500 font-medium">Unsaved changes in editor</span>
-                      </>
-                    ) : (
-                      <>
-                        <Check className="w-4 h-4 text-emerald-500 stroke-[2.5]" />
-                        <span className="text-xs text-zinc-400 dark:text-zinc-500 font-medium">All changes saved</span>
-                      </>
-                    )}
-                  </div>
-                </div>
-
-              {/* Strategy Board & Editor */}
-              <div className="grid grid-cols-1 gap-8">
-                
-                {/* Full Width Strategy Editor */}
-                <div className="space-y-4">
-                  <div className="rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-[#0c0c0e]/80 overflow-hidden flex flex-col">
-                    <div className="px-5 py-4 border-b border-zinc-200 dark:border-zinc-900 flex flex-wrap items-center justify-between gap-3 bg-zinc-100/50 dark:bg-[#08080a]">
-                      <div className="flex items-center gap-2.5">
-                        <span className={`w-2 h-2 rounded-full ${selectedStrat.id === activeStrategyId ? 'bg-emerald-500 animate-pulse' : 'bg-zinc-600'}`}></span>
-                        <span className="text-xs font-bold text-zinc-700 dark:text-white uppercase tracking-wider">Strategy Editor</span>
-                      </div>
-
-                      <div className="flex items-center gap-2">
-                        {/* Delete Button */}
-                        <button
-                          onClick={handleClearStrategy}
-                          className="px-3 py-1.5 rounded-xl border border-red-950/20 dark:border-red-950/20 hover:border-red-500/40 bg-red-50 dark:bg-zinc-950/60 text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 transition-all cursor-pointer flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider"
-                          title="Clear current strategy"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                          <span>Delete</span>
-                        </button>
-                        
-                        {/* Restore Button */}
-                        <button
-                          onClick={handleRestoreStrategy}
-                          className="px-3 py-1.5 rounded-xl border border-zinc-800 hover:border-zinc-700 bg-zinc-950/40 text-zinc-400 hover:text-white transition-all cursor-pointer flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider"
-                          title="Restore last saved or default version"
-                        >
-                          <RefreshCw className="w-3.5 h-3.5" />
-                          <span>Restore</span>
-                        </button>
-
-                        {selectedStrat.id === activeStrategyId ? (
-                          <span className="text-[10px] bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 px-2.5 py-1 rounded-full font-bold uppercase tracking-wider flex items-center gap-1.5">
-                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-                            Active
-                          </span>
-                        ) : (
-                          <button
-                            onClick={() => handleSetActiveStrategy(selectedStrat.id)}
-                            className="px-3 py-1 text-[10px] bg-white text-black hover:bg-zinc-200 transition-all rounded-full font-bold uppercase tracking-wider cursor-pointer shadow-md"
-                          >
-                            Activate
-                          </button>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="p-5 flex flex-col gap-4">
-                      <textarea
-                        ref={strategyTextareaRef}
-                        value={selectedStrat.text}
-                        onChange={(e) => handleStrategyTextChange(e.target.value)}
-                        placeholder="Describe your trading strategy in detail..."
-                        className="w-full min-h-[400px] bg-white dark:bg-zinc-950/60 border border-zinc-200 dark:border-zinc-900 rounded-2xl p-6 text-[13px] text-zinc-800 dark:text-zinc-300 font-medium leading-relaxed resize-none font-sans focus:outline-none focus:border-zinc-400 dark:focus:border-zinc-700 transition-colors shadow-sm"
-                      />
-
-                      {selectedStrat.text.trim().length === 0 && (
-                        <p className="text-rose-600 dark:text-red-400 text-[11px] font-semibold flex items-center gap-1.5 px-1 animate-fade-in">
-                          <AlertTriangle className="w-3.5 h-3.5" />
-                          <span>Strategy cannot be empty.</span>
-                        </p>
-                      )}
-
-                      {/* Card Actions */}
-                      <div className="flex justify-center items-center pt-2">
-                        <button
-                          onClick={saveStrategyPlaybook}
-                          disabled={!canSave}
-                          className={`px-10 py-3 rounded-full text-xs font-bold transition-all flex items-center gap-2 shadow-lg ${
-                            canSave 
-                              ? 'bg-zinc-950 dark:bg-white text-white dark:text-black hover:bg-zinc-800 dark:hover:bg-zinc-200 cursor-pointer active:scale-[0.98]' 
-                              : 'bg-zinc-200 dark:bg-[#5A5A5A] text-zinc-400 dark:text-zinc-300 cursor-not-allowed'
-                          }`}
-                        >
-                          <Check className="w-4 h-4 stroke-[2.5]" />
-                          <span>Save Changes</span>
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-              </div>
-
-              {/* Trading Preferences Card - Matches Screenshot 9 */}
-              <div className="p-6 rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-[#0c0c0e]/80 space-y-6 shadow-sm">
-                <div className="space-y-1">
-                  <h3 className="text-base font-bold text-zinc-950 dark:text-white font-display">Trading Preferences</h3>
-                  <p className="text-xs text-zinc-500">Tune how your AI sizes and times trades.</p>
-                </div>
-
-                <div className="space-y-5">
-                  
-                  {/* Capital Size Selection */}
-                  <div className="space-y-2.5">
-                    <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">Capital</label>
-                    <div className="flex flex-wrap gap-2">
-                      {['$100', '$500', '$1,000', '$10,000', 'Custom'].map(option => {
-                        const isSelected = capital === option;
-                        return (
-                          <button
-                            key={option}
-                            onClick={() => setCapital(option)}
-                            className={`px-4 py-2 rounded-full text-xs font-semibold border transition-all cursor-pointer ${
-                              isSelected
-                                ? 'bg-zinc-950 dark:bg-zinc-100 text-white dark:text-zinc-900 border-zinc-950 dark:border-zinc-100 shadow-md'
-                                : 'bg-white dark:bg-zinc-950/40 text-zinc-500 dark:text-zinc-400 border-zinc-200 dark:border-zinc-900 hover:border-zinc-400 dark:hover:border-zinc-800 hover:text-zinc-900 dark:hover:text-white'
-                            }`}
-                          >
-                            {option}
-                          </button>
-                        );
-                      })}
-                    </div>
-                    
-                    {/* Render custom capital field if selected */}
-                    {capital === 'Custom' && (
-                      <div className="mt-2.5 relative rounded-2xl border border-zinc-200 dark:border-zinc-800 overflow-hidden bg-white dark:bg-zinc-950/60 focus-within:border-zinc-400 dark:focus-within:border-zinc-700 shadow-sm">
-                        <span className="absolute left-4 top-1/2 -translate-y-1/2 text-xs font-bold text-zinc-500">$</span>
-                        <input
-                          type="number"
-                          value={customCapital}
-                          onChange={(e) => setCustomCapital(e.target.value)}
-                          placeholder="Enter your custom capital size..."
-                          className="w-full bg-transparent border-0 py-2.5 pl-8 pr-4 text-xs text-zinc-800 dark:text-white focus:outline-none focus:ring-0"
-                        />
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Preferred Risk Input */}
-                  <div className="space-y-2">
-                    <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">Preferred Risk</label>
-                    <input
-                      type="text"
-                      value={preferredRisk}
-                      onChange={(e) => setPreferredRisk(e.target.value)}
-                      placeholder="e.g. 1% or 2.5%"
-                      className="w-full bg-white dark:bg-zinc-950/60 border border-zinc-200 dark:border-zinc-900 focus:border-zinc-400 dark:focus:border-zinc-700 rounded-2xl px-4 py-3 text-xs font-semibold text-zinc-800 dark:text-white focus:outline-none shadow-sm transition-colors"
-                    />
-                  </div>
-
-                  {/* Risk : Reward Ratio Input */}
-                  <div className="space-y-2">
-                    <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">Risk : Reward Ratio</label>
-                    <input
-                      type="text"
-                      value={riskReward}
-                      onChange={(e) => setRiskReward(e.target.value)}
-                      placeholder="e.g. 1:2 or 1:3"
-                      className="w-full bg-white dark:bg-zinc-950/60 border border-zinc-200 dark:border-zinc-900 focus:border-zinc-400 dark:focus:border-zinc-700 rounded-2xl px-4 py-3 text-xs font-semibold text-zinc-800 dark:text-white focus:outline-none shadow-sm transition-colors"
-                    />
-                  </div>
-
-                  {/* Account Type (Personal or Prop Firm) */}
-                  <div className="space-y-2.5">
-                    <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">Account Type</label>
-                    <div className="grid grid-cols-2 gap-3">
-                      <button
-                        onClick={() => setAccountType('personal')}
-                        className={`p-4 rounded-2xl border text-center transition-all cursor-pointer ${
-                          accountType === 'personal'
-                            ? 'bg-zinc-50 dark:bg-zinc-100/5 border-zinc-300 dark:border-zinc-200 text-zinc-950 dark:text-white font-bold shadow-sm'
-                            : 'bg-white dark:bg-zinc-950/40 border-zinc-200 dark:border-zinc-900 text-zinc-500 hover:border-zinc-400 dark:hover:border-zinc-800'
-                        }`}
-                      >
-                        <div className="text-xs font-semibold leading-relaxed">Personal</div>
-                        <div className="text-xs font-semibold leading-relaxed">Account</div>
-                      </button>
-                      <button
-                        onClick={() => setAccountType('prop')}
-                        className={`p-4 rounded-2xl border text-center transition-all cursor-pointer ${
-                          accountType === 'prop'
-                            ? 'bg-zinc-50 dark:bg-zinc-100/5 border-zinc-300 dark:border-zinc-200 text-zinc-950 dark:text-white font-bold shadow-sm'
-                            : 'bg-white dark:bg-zinc-950/40 border-zinc-200 dark:border-zinc-900 text-zinc-500 hover:border-zinc-400 dark:hover:border-zinc-800'
-                        }`}
-                      >
-                        <div className="text-xs font-semibold leading-relaxed">Prop Firm</div>
-                        <div className="text-xs font-semibold leading-relaxed">Account</div>
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Preferred Session */}
-                  <div className="space-y-2.5">
-                    <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">Preferred Session</label>
-                    <div className="flex flex-wrap gap-2">
-                      {['London', 'New York', 'Tokyo', 'Sydney'].map(session => {
-                        const isChecked = preferredSessions.includes(session);
-                        return (
-                          <button
-                            key={session}
-                            onClick={() => toggleSession(session)}
-                            className={`px-4 py-2 rounded-full text-xs font-semibold border flex items-center gap-1.5 transition-all cursor-pointer ${
-                              isChecked
-                                ? 'bg-zinc-950 dark:bg-zinc-100/5 text-white dark:text-white border-zinc-950 dark:border-zinc-300 shadow-sm'
-                                : 'bg-white dark:bg-zinc-950/40 text-zinc-500 border-zinc-200 dark:border-zinc-900 hover:border-zinc-400 dark:hover:border-zinc-800'
-                            }`}
-                          >
-                            {isChecked && <Check className="w-3 h-3 text-white stroke-[3]" />}
-                            <span>{session}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  {/* Preferred Timeframes - Matches Screenshot 10 */}
-                  <div className="space-y-2.5">
-                    <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">Preferred Timeframes</label>
-                    <div className="flex flex-wrap gap-2">
-                      {['M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'Daily'].map(tf => {
-                        const isChecked = preferredTimeframes.includes(tf);
-                        return (
-                          <button
-                            key={tf}
-                            onClick={() => toggleTimeframe(tf)}
-                            className={`w-11 h-11 rounded-full text-xs font-semibold border flex items-center justify-center transition-all cursor-pointer ${
-                              isChecked
-                                ? 'bg-zinc-950 dark:bg-zinc-100/5 text-white dark:text-white border-zinc-950 dark:border-zinc-300 shadow-sm'
-                                : 'bg-white dark:bg-zinc-950/40 text-zinc-500 border-zinc-200 dark:border-zinc-900 hover:border-zinc-400 dark:hover:border-zinc-800'
-                            }`}
-                          >
-                            {tf}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  {/* Save Preferences Trigger */}
-                  <button
-                    disabled={!isPrefsDirty}
-                    onClick={savePreferences}
-                    className={`w-full flex items-center justify-center gap-2 px-5 py-3 rounded-full transition-all shadow-md mt-4 ${
-                      isPrefsDirty
-                        ? 'bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 hover:bg-zinc-800 dark:hover:bg-zinc-200 cursor-pointer'
-                        : 'bg-zinc-200 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500 cursor-not-allowed opacity-70'
-                    }`}
-                  >
-                    <Check className={`w-3.5 h-3.5 stroke-[2.5] ${isPrefsDirty ? 'text-white dark:text-zinc-950' : 'text-zinc-400 dark:text-zinc-500'}`} />
-                    <span>Save Preferences</span>
-                  </button>
-
-                </div>
-              </div>
-
-            </div>
-          ); })()}
+          {activeTab === 'strategy' && (
+            <React.Suspense fallback={<TabLoading />}>
+              <StrategyTab
+                strategies={strategies}
+                selectedStrategyId={selectedStrategyId}
+                activeStrategyId={activeStrategyId}
+                lastSavedStrategyText={lastSavedStrategyText}
+                GAKS_DEFAULT_STRATEGY={GAKS_DEFAULT_STRATEGY}
+                strategyTextareaRef={strategyTextareaRef}
+                handleClearStrategy={handleClearStrategy}
+                handleRestoreStrategy={handleRestoreStrategy}
+                handleSetActiveStrategy={handleSetActiveStrategy}
+                handleStrategyTextChange={handleStrategyTextChange}
+                saveStrategyPlaybook={saveStrategyPlaybook}
+                capital={capital}
+                setCapital={setCapital}
+                customCapital={customCapital}
+                setCustomCapital={setCustomCapital}
+                preferredRisk={preferredRisk}
+                setPreferredRisk={setPreferredRisk}
+                riskReward={riskReward}
+                setRiskReward={setRiskReward}
+                accountType={accountType}
+                setAccountType={setAccountType}
+                preferredSessions={preferredSessions}
+                toggleSession={toggleSession}
+                preferredTimeframes={preferredTimeframes}
+                toggleTimeframe={toggleTimeframe}
+                isPrefsDirty={isPrefsDirty}
+                savePreferences={savePreferences}
+              />
+            </React.Suspense>
+          )}
 
           {/* ==================== TAB 3: MARKET WATCHER ==================== */}
           {activeTab === 'watcher' && (
-            <div className="space-y-8 animate-fade-in">
-              
-              {/* Header Title */}
-              <div className="space-y-2">
-                <h1 className="text-[32px] sm:text-[36px] font-semibold tracking-[-0.035em] text-zinc-950 dark:text-white leading-[1.15] font-sans">Market Watcher</h1>
-                <p className="text-[15px] sm:text-[16px] font-normal tracking-[-0.01em] text-zinc-500 dark:text-zinc-400 leading-[1.45] max-w-sm">
-                  Build a personal watchlist with AI signals and confidence scoring.
-                </p>
-              </div>
-
-              {/* AI Watcher Activation Widget */}
-              <div className="p-5 rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-[#0c0c0e]/60 space-y-4 shadow-sm">
-                {isTelegramLoading ? (
-                  <div className="flex items-center justify-between py-2">
-                    <div className="flex items-center gap-3">
-                      <div className="w-4 h-4 rounded-full border-2 border-zinc-200 dark:border-zinc-700 border-t-zinc-400 dark:border-t-zinc-400 animate-spin"></div>
-                      <div>
-                        <h4 className="text-xs font-bold text-zinc-700 dark:text-zinc-300">Checking Telegram Connection...</h4>
-                        <p className="text-[10px] text-zinc-500">Querying secure alert routing states</p>
-                      </div>
-                    </div>
-                  </div>
-                ) : !telegramConnection?.connected ? (
-                  <div className="space-y-4 w-full">
-                    <div className="p-4 rounded-2xl border border-amber-500/10 bg-amber-500/5 text-amber-600 dark:text-amber-400 text-xs space-y-2">
-                      <div className="flex items-center gap-2 font-semibold">
-                        <Info className="w-4 h-4 shrink-0 text-amber-600 dark:text-amber-400" />
-                        <span>Telegram Connection Required</span>
-                      </div>
-                      <p className="text-[11px] text-zinc-500 dark:text-zinc-400 leading-normal">
-                        Please connect your Telegram account before activating the AI Market Watcher.
-                      </p>
-                    </div>
-
-                    <div className="flex items-center justify-between gap-4 pt-1">
-                      <div className="flex items-center gap-3">
-                        <div className="w-3.5 h-3.5 rounded-full bg-zinc-200 dark:bg-zinc-700"></div>
-                        <div>
-                          <h4 className="text-xs font-bold text-zinc-950 dark:text-white">AI Market Watcher Engine</h4>
-                          <p className="text-[10px] text-zinc-500">Status: <span className="font-bold">STANDBY (LINK REQUIRED)</span></p>
-                        </div>
-                      </div>
-
-                      <button
-                        onClick={handleConnectTelegram}
-                        disabled={isTelegramConnecting}
-                        className="px-5 py-2.5 rounded-full text-xs font-bold bg-zinc-950 dark:bg-white text-white dark:text-black hover:bg-zinc-800 dark:hover:bg-zinc-200 active:scale-95 transition-all flex items-center gap-1.5 cursor-pointer shadow-md disabled:opacity-50"
-                      >
-                        {isTelegramConnecting ? (
-                          <div className="w-3.5 h-3.5 rounded-full border-2 border-white dark:border-black border-t-transparent animate-spin"></div>
-                        ) : (
-                          <>
-                            <Send className="w-3.5 h-3.5" />
-                            <span>Connect Telegram</span>
-                          </>
-                        )}
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="w-full space-y-4">
-                    {/* Connection status bar */}
-                    <div className="p-4 rounded-2xl border border-emerald-500/10 bg-emerald-500/5 text-emerald-600 dark:text-emerald-400 text-xs flex items-center justify-between">
-                      <div className="flex items-center gap-2 font-semibold">
-                        <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
-                        <span>Telegram Connected</span>
-                      </div>
-                      {telegramConnection?.telegram_username && (
-                        <span className="text-[10px] font-mono text-emerald-600 dark:text-emerald-400/80 bg-emerald-500/10 px-2 py-0.5 rounded-full">
-                          @{telegramConnection.telegram_username}
-                        </span>
-                      )}
-                    </div>
-
-                    <div className="flex items-center justify-between gap-4">
-                      <div className="flex items-center gap-3">
-                        <div className="relative">
-                          <div className={`w-3.5 h-3.5 rounded-full ${isWatcherActive ? 'bg-zinc-950 dark:bg-white animate-pulse' : 'bg-zinc-200 dark:bg-zinc-700'}`}></div>
-                          {isWatcherActive && <div className="absolute inset-0 rounded-full bg-zinc-950 dark:bg-white animate-ping opacity-70"></div>}
-                        </div>
-                        <div>
-                          <h4 className="text-xs font-bold text-zinc-950 dark:text-white">AI Market Watcher Engine</h4>
-                          <div className="text-[10px] text-zinc-500 dark:text-zinc-400 space-y-0.5">
-                            <p>
-                              Status: <span className={isWatcherActive ? 'text-zinc-950 dark:text-white font-bold' : 'text-zinc-400 dark:text-zinc-500 font-bold'}>
-                                {isWatcherActive 
-                                  ? `ACTIVE & MONITORED (${watcherTradeStatus})` 
-                                  : 'STANDBY'}
-                              </span>
-                            </p>
-                            {isWatcherActive && watcherSearch && (
-                              <p className="text-[9px] text-zinc-500 font-mono">
-                                Action: Analyzing {watcherSearch} on {watcherTimeframe}
-                              </p>
-                            )}
-                            {isWatcherActive && watcherLastScanAt && (
-                              <p className="text-[9px] text-zinc-500 font-mono">
-                                Last Scan: {new Date(watcherLastScanAt).toLocaleTimeString()}
-                              </p>
-                            )}
-                            {isWatcherActive && watcherLastCandle && (
-                              <p className="text-[9px] text-zinc-500 font-mono">
-                                Last Candle: {watcherLastCandle}
-                              </p>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {watcherErrorMessage && (
-                  <div className="p-3 rounded-2xl bg-red-500/10 border border-red-500/20 text-red-400 text-xs flex items-start gap-2">
-                    <Info className="w-4 h-4 mt-0.5 shrink-0" />
-                    <p className="leading-normal">{watcherErrorMessage}</p>
-                  </div>
-                )}
-              </div>
-
-              {/* Add Custom Forex Ticker Form with Timeframe and Activate Button */}
-              <div className="p-6 rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-[#0c0c0e]/80 space-y-5 shadow-sm">
-                <div className="flex items-center gap-2">
-                  <Sparkles className="w-4 h-4 text-zinc-950 dark:text-white animate-pulse" />
-                  <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-600 dark:text-zinc-300">Configure Market Watcher</h3>
-                </div>
-                
-                <div className="space-y-4">
-                  {/* Pair input */}
-                  <div className="space-y-2">
-                    <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-500 block">Forex Pair / Asset Symbol</label>
-                    <div className="relative rounded-2xl border border-zinc-200 dark:border-zinc-900 bg-white dark:bg-zinc-950/60 overflow-hidden focus-within:border-zinc-400 dark:focus-within:border-zinc-700 shadow-sm">
-                      <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400 dark:text-zinc-500" />
-                      <input
-                        type="text"
-                        value={watcherSearch}
-                        onChange={(e) => setWatcherSearch(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            e.currentTarget.blur();
-                          }
-                        }}
-                        className="w-full bg-transparent border-0 py-3.5 pl-11 pr-4 text-xs font-semibold text-zinc-800 dark:text-white focus:outline-none"
-                      />
-                    </div>
-                  </div>
-
-                   {/* Timeframe selector */}
-                  <div className="space-y-2">
-                    <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-500 block">Analysis Timeframe</label>
-                    <div className="flex flex-wrap gap-1.5 p-1 rounded-2xl border border-zinc-200 dark:border-zinc-900 bg-zinc-50 dark:bg-zinc-950/40 shadow-inner">
-                      {['M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'Daily'].map(tf => {
-                        const isSelected = watcherTimeframe === tf;
-                        return (
-                          <button
-                            key={tf}
-                            type="button"
-                            onClick={() => setWatcherTimeframe(tf)}
-                            className={`flex-1 min-w-[42px] py-2 rounded-xl text-[10px] font-bold transition-all cursor-pointer ${
-                              isSelected
-                                ? 'bg-white dark:bg-zinc-900 text-zinc-950 dark:text-white shadow-sm border border-zinc-200 dark:border-zinc-800'
-                                : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white hover:bg-white/50 dark:hover:bg-zinc-900/40'
-                            }`}
-                          >
-                            {tf}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  {/* Timeframe Mismatch Warning */}
-                  {isTimeframeMismatch && (
-                    <div className="p-4 rounded-2xl border border-rose-500/10 bg-rose-500/5 text-rose-600 dark:text-rose-400 text-xs space-y-2">
-                      <div className="flex items-center gap-2 font-semibold">
-                        <AlertTriangle className="w-4 h-4 shrink-0 text-rose-600 dark:text-rose-400 animate-pulse" />
-                        <span>Strategy Timeframe Mismatch</span>
-                      </div>
-                      <p className="text-[11px] text-zinc-500 dark:text-zinc-400 leading-normal">
-                        Your strategy was written for: <span className="font-bold text-zinc-950 dark:text-white">{compiledStrategyTimeframes.join(', ')}</span>.
-                        You selected: <span className="font-bold text-zinc-950 dark:text-white">{watcherTimeframe}</span>.
-                        <br />
-                        Please select <span className="font-bold text-zinc-950 dark:text-white">{compiledStrategyTimeframes.join(' or ')}</span> or edit your strategy.
-                      </p>
-                    </div>
-                  )}
-
-                  {/* Activation Trigger */}
-                  {(() => {
-                    const isPairInWatchlist = (watchlist || []).some(w => w && w.symbol && normalizeSymbol(w.symbol) === normalizeSymbol(watcherSearch || ''));
-                    
-                    if (isWatcherActive && (isAdmin || isPairInWatchlist)) {
-                      const isUpdateDisabled = !watcherSearch.trim() || !watcherTimeframe || isTimeframeMismatch;
-                      return (
-                        <div className="flex items-center gap-2 mt-2">
-                          <button
-                            onClick={stopAiMarketWatcher}
-                            className="flex-1 flex items-center justify-center gap-2 px-5 py-3.5 rounded-full text-xs font-bold transition-all shadow-sm font-display bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-300 hover:text-zinc-950 dark:hover:text-white hover:border-zinc-400 dark:hover:border-zinc-700 cursor-pointer"
-                          >
-                            <X className="w-3.5 h-3.5" />
-                            <span>Stop Watcher</span>
-                          </button>
-                          <button
-                            disabled={isUpdateDisabled}
-                            onClick={() => {
-                              if (isUpdateDisabled) return;
-                              startAiMarketWatcher(watcherSearch, watcherTimeframe);
-                            }}
-                            className={`flex-1 flex items-center justify-center gap-2 px-5 py-3.5 rounded-full text-xs font-bold transition-all shadow-sm font-display ${
-                              isUpdateDisabled
-                                ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500 cursor-not-allowed'
-                                : 'bg-zinc-950 dark:bg-white text-white dark:text-black hover:bg-zinc-800 dark:hover:bg-zinc-200 active:scale-[0.98] cursor-pointer'
-                            }`}
-                          >
-                            <Play className={`w-3.5 h-3.5 fill-current ${isUpdateDisabled ? 'text-zinc-400 dark:text-zinc-500' : 'text-white dark:text-zinc-950 stroke-white dark:stroke-zinc-950'}`} />
-                            <span>Update Watcher</span>
-                          </button>
-                        </div>
-                      );
-                    } else {
-                      const isDisabled = (isWatcherActive && !isAdmin) || !watcherSearch.trim() || !watcherTimeframe || isTimeframeMismatch;
-                      return (
-                        <div className="space-y-3 mt-2">
-                          <button
-                            disabled={isDisabled}
-                            onClick={() => {
-                              if (isDisabled) return;
-                              startAiMarketWatcher(watcherSearch, watcherTimeframe);
-                            }}
-                            className={`w-full flex items-center justify-center gap-2 px-5 py-3.5 rounded-full text-xs font-bold transition-all shadow-sm font-display ${
-                              isDisabled
-                                ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500 cursor-not-allowed'
-                                : 'bg-zinc-950 dark:bg-white text-white dark:text-black hover:bg-zinc-800 dark:hover:bg-zinc-200 active:scale-[0.98] cursor-pointer'
-                            }`}
-                          >
-                            <Play className={`w-3.5 h-3.5 fill-current ${isDisabled ? 'text-zinc-400 dark:text-zinc-500' : 'text-white dark:text-zinc-950 stroke-white dark:stroke-zinc-950'}`} />
-                            <span>Activate Market Watcher</span>
-                          </button>
-                          
-                          {isWatcherActive && !isAdmin && (
-                            <div className="p-3 rounded-2xl bg-zinc-50 dark:bg-zinc-900/50 border border-zinc-100 dark:border-zinc-800 text-zinc-500 dark:text-zinc-400 text-center text-[11px] leading-relaxed shadow-inner">
-                              Free accounts can monitor one market at a time.
-                            </div>
-                          )}
-                        </div>
-                      );
-                    }
-                  })()}
-                </div>
-              </div>
-
-              {/* Quick Add Pills */}
-              <div className="space-y-2.5">
-                <span className="text-[11px] font-bold text-zinc-500 uppercase tracking-wider">Select Symbol to Configure:</span>
-                <div className="flex flex-wrap gap-2">
-                  {['EURUSD', 'GBPUSD', 'XAUUSD', 'BTCUSD', 'NAS100', 'US30'].map(symbol => {
-                    const isSelected = normalizeSymbol(watcherSearch) === normalizeSymbol(symbol);
-                    return (
-                      <button
-                        key={symbol}
-                        onClick={() => {
-                          setWatcherSearch(symbol);
-                          triggerNotification(`Selected ${symbol}. Choose a timeframe and press Activate.`, 'info');
-                        }}
-                        className={`px-3.5 py-1.5 rounded-full text-xs font-semibold border transition-all cursor-pointer flex items-center gap-1.5 ${
-                          isSelected
-                            ? 'border-zinc-950 dark:border-white bg-zinc-950 dark:bg-white text-white dark:text-black shadow-md'
-                            : 'border-zinc-200 dark:border-zinc-900 bg-white dark:bg-zinc-950/40 text-zinc-500 dark:text-zinc-300 hover:text-zinc-950 dark:hover:text-white hover:border-zinc-400 dark:hover:border-zinc-800'
-                        }`}
-                      >
-                        {isSelected && <Check className="w-3.5 h-3.5" />}
-                        {symbol}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Watchlist Display area */}
-              <div className="space-y-4">
-                {(watchlist || []).length === 0 ? (
-                  /* Empty state - Matches Screenshot 11 exactly */
-                  <div className="p-12 rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-[#0c0c0e]/40 flex flex-col items-center text-center space-y-4 shadow-sm">
-                    <div className="w-12 h-12 rounded-full bg-zinc-50 dark:bg-zinc-950/80 border border-zinc-100 dark:border-zinc-900 flex items-center justify-center text-zinc-400">
-                      <Search className="w-5 h-5 text-zinc-400 dark:text-zinc-500 stroke-[1.8]" />
-                    </div>
-                    <div className="space-y-1.5 max-w-[240px]">
-                      <h3 className="text-sm font-bold text-zinc-950 dark:text-white">No pair selected</h3>
-                      <p className="text-[11px] text-zinc-500 leading-relaxed">
-                        Select a symbol above to configure the Market Watcher.
-                      </p>
-                    </div>
-                  </div>
-                ) : (
-                  /* Watchlisted symbols cards deck */
-                  <div className="space-y-3">
-                    <h4 className="text-xs font-bold uppercase tracking-wider text-zinc-500 mb-1">Monitored Pair</h4>
-                    {(watchlist || []).map(pair => {
-                      if (!pair) return null;
-                      const isBullish = pair.direction === 'Bullish';
-                      const isBearish = pair.direction === 'Bearish';
-                      const { lineD, fillD } = getSparklinePaths(pair.history, 100, 24);
-                      
-                      return (
-                        <div
-                          key={pair.symbol}
-                          className="p-6 rounded-3xl border border-zinc-200 dark:border-zinc-800/80 bg-white dark:bg-[#111113]/90 flex flex-col gap-4 hover:border-zinc-400 dark:hover:border-zinc-700 transition-all relative overflow-hidden shadow-lg"
-                        >
-                          <div className="flex justify-between items-start">
-                            <div className="space-y-1">
-                              <h3 className="text-base font-bold text-zinc-950 dark:text-white font-display tracking-tight flex items-center gap-2">
-                                <span>{pair.symbol}</span>
-                                <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wider uppercase border ${
-                                  isBullish
-                                    ? 'bg-emerald-50 dark:bg-[#0c1c0c] text-emerald-600 dark:text-emerald-500 border-emerald-200 dark:border-emerald-950/80'
-                                    : isBearish
-                                    ? 'bg-rose-50 dark:bg-[#1c0c0c] text-rose-600 dark:text-red-500 border-rose-200 dark:border-red-950/80'
-                                    : 'bg-zinc-50 dark:bg-zinc-900 text-zinc-500 dark:text-zinc-400 border-zinc-200 dark:border-zinc-800'
-                                }`}>
-                                  {pair.direction}
-                                </span>
-                                <span className="px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wider bg-zinc-50 dark:bg-zinc-900 text-zinc-500 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-800/80 uppercase">
-                                  {pair.timeframe || 'H1'}
-                                </span>
-                              </h3>
-                              <p className="text-[10px] text-zinc-500 dark:text-zinc-400 font-medium">{pair.name}</p>
-                            </div>
-
-                            <button
-                              onClick={() => handleRemovePair(pair.symbol)}
-                              className="p-1 text-zinc-400 dark:text-zinc-600 hover:text-rose-600 dark:hover:text-rose-400 transition-colors rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-950/80 cursor-pointer"
-                              title="Remove pair"
-                            >
-                              <X className="w-4 h-4" />
-                            </button>
-                          </div>
-
-                          {/* Bid/Ask Price display & tiny sparkline wave */}
-                          <div className="flex justify-between items-end">
-                            {/* Wave graphics */}
-                            <div className="h-6 w-24 opacity-80 pointer-events-none">
-                              {pair.status !== 'unavailable' && pair.history.length > 0 && (
-                                <svg className="w-full h-full overflow-visible" viewBox="0 0 100 24" preserveAspectRatio="none">
-                                  <defs>
-                                    <linearGradient id={`watcher-grad-${pair.symbol}`} x1="0" y1="0" x2="0" y2="1">
-                                      <stop offset="0%" stopColor={isBearish ? "#ef4444" : "#10b981"} stopOpacity="0.25"/>
-                                      <stop offset="100%" stopColor={isBearish ? "#ef4444" : "#10b981"} stopOpacity="0.0"/>
-                                    </linearGradient>
-                                  </defs>
-                                  <path d={fillD} fill={`url(#watcher-grad-${pair.symbol})`} />
-                                  <path d={lineD} fill="none" stroke={isBearish ? "#ef4444" : "#10b981"} strokeWidth="1.2" />
-                                </svg>
-                              )}
-                            </div>
-
-                            <div className="text-right">
-                              {pair.status === 'unavailable' || pair.price === 0 ? (
-                                <div className="text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider">Data unavailable</div>
-                              ) : (
-                                <>
-                                  <div className="text-lg font-bold text-zinc-950 dark:text-white tracking-tight">{(pair.price || 0).toLocaleString(undefined, { minimumFractionDigits: (pair.price || 0) > 10 ? 2 : 4 })}</div>
-                                  <div className={`text-xs font-semibold flex items-center justify-end gap-0.5 ${pair.change >= 0 ? 'text-emerald-600 dark:text-emerald-500' : 'text-rose-600 dark:text-red-500'}`}>
-                                    {pair.change >= 0 ? '+' : ''}{pair.change}%
-                                  </div>
-                                </>
-                              )}
-                            </div>
-                          </div>
-
-                          {/* Extra info panel: Spread, Volatility, AI Confidence meter */}
-                          <div className="pt-3 border-t border-zinc-100 dark:border-zinc-900/60 grid grid-cols-3 gap-2">
-                            <div className="space-y-0.5">
-                              <div className="text-[9px] uppercase font-bold text-zinc-500">Spread</div>
-                              <div className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">{pair.spread} pips</div>
-                            </div>
-                            <div className="space-y-0.5">
-                              <div className="text-[9px] uppercase font-bold text-zinc-500">Volatility</div>
-                              <div className={`text-xs font-semibold ${pair.volatility === 'High' ? 'text-amber-600 dark:text-amber-400' : 'text-zinc-700 dark:text-zinc-300'}`}>{pair.volatility}</div>
-                            </div>
-                            <div className="space-y-0.5">
-                              <div className="text-[9px] uppercase font-bold text-zinc-500">AI Confidence</div>
-                              <div className="text-xs font-bold text-zinc-950 dark:text-white flex items-center gap-1">
-                                <span>{pair.confidence}%</span>
-                                <div className="w-1.5 h-1.5 rounded-full bg-zinc-950 dark:bg-white animate-pulse"></div>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-
-            </div>
+            <React.Suspense fallback={<TabLoading />}>
+              <WatcherTab
+                isTelegramLoading={isTelegramLoading}
+                telegramConnection={telegramConnection}
+                isTelegramConnecting={isTelegramConnecting}
+                handleConnectTelegram={handleConnectTelegram}
+                isWatcherActive={isWatcherActive}
+                watcherTradeStatus={watcherTradeStatus}
+                watcherSearch={watcherSearch}
+                setWatcherSearch={setWatcherSearch}
+                watcherTimeframe={watcherTimeframe}
+                setWatcherTimeframe={setWatcherTimeframe}
+                watcherLastScanAt={watcherLastScanAt}
+                watcherLastCandle={watcherLastCandle}
+                watcherErrorMessage={watcherErrorMessage}
+                isTimeframeMismatch={isTimeframeMismatch}
+                compiledStrategyTimeframes={compiledStrategyTimeframes}
+                watchlist={watchlist}
+                stopAiMarketWatcher={stopAiMarketWatcher}
+                startAiMarketWatcher={startAiMarketWatcher}
+                isAdmin={isAdmin}
+                triggerNotification={triggerNotification}
+                getSparklinePaths={getSparklinePaths}
+                handleRemovePair={handleRemovePair}
+              />
+            </React.Suspense>
           )}
 
           {/* ==================== TAB 4: SETTINGS & PROFILE ==================== */}
           {activeTab === 'settings' && (
-            <div className="space-y-10 animate-fade-in pb-20">
-              
-              {/* Premium Profile Header Card - Centered Design */}
-              <div className="relative p-10 rounded-[40px] border border-zinc-200 dark:border-zinc-800/50 bg-gradient-to-b from-zinc-50 to-white dark:from-[#121214] dark:to-[#08080a] overflow-hidden shadow-2xl">
-                {/* Subtle light leak effect */}
-                <div className="absolute -top-20 -left-20 w-64 h-64 bg-emerald-500/10 dark:bg-emerald-500/5 blur-[100px] rounded-full"></div>
-                <div className="absolute -bottom-20 -right-20 w-64 h-64 bg-emerald-500/10 dark:bg-emerald-500/5 blur-[100px] rounded-full"></div>
-                
-                <div className="relative flex flex-col items-center text-center space-y-6">
-                  {/* Avatar Container */}
-                  <div className="relative group">
-                    <div className="w-28 h-28 rounded-[32px] bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800/80 flex items-center justify-center text-zinc-900 dark:text-white text-4xl font-bold uppercase overflow-hidden shadow-2xl group-hover:border-zinc-300 dark:group-hover:border-zinc-700 transition-all duration-500">
-                      {profileAvatarUrl ? (
-                        <img src={profileAvatarUrl} alt="" className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110" referrerPolicy="no-referrer" />
-                      ) : (
-                        <span className="bg-gradient-to-br from-zinc-950 to-zinc-600 dark:from-white dark:to-zinc-400 bg-clip-text text-transparent">
-                          {profileFullName ? profileFullName.charAt(0) : 'U'}
-                        </span>
-                      )}
-                    </div>
-                    {/* Status Ring */}
-                    <div className="absolute -bottom-1 -right-1 w-8 h-8 rounded-2xl bg-white dark:bg-[#0c0c0e] border border-zinc-200 dark:border-zinc-800 flex items-center justify-center">
-                      <div className="w-3 h-3 rounded-full bg-emerald-500 shadow-[0_0_12px_rgba(16,185,129,0.5)]"></div>
-                    </div>
-                  </div>
-
-                  <div className="space-y-3">
-                    <div className="flex flex-col items-center gap-2">
-                      <h2 className="text-3xl font-semibold text-zinc-950 dark:text-white tracking-tighter font-display">{profileFullName || 'Gaks User'}</h2>
-                      <div className="flex items-center gap-2">
-                        <span className="inline-flex px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-[10px] font-bold uppercase tracking-widest">
-                          {profilePlan || 'Free'} Plan
-                        </span>
-                        <div className="w-1 h-1 rounded-full bg-zinc-200 dark:bg-zinc-800"></div>
-                        <p className="text-zinc-500 text-xs font-medium tracking-tight">{session?.user?.email}</p>
-                      </div>
-                    </div>
-                    
-                    <div className="pt-2 flex items-center justify-center gap-3">
-                      <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-zinc-100/50 dark:bg-zinc-950/40 border border-zinc-200 dark:border-zinc-900/50">
-                        <Shield className="w-3 h-3 text-emerald-500" />
-                        <span className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-widest">Database Synced</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Settings Grid */}
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                
-                {/* Profile Form */}
-                <div className="space-y-6">
-                  <div className="flex items-center gap-2 px-1">
-                    <UserIcon className="w-4 h-4 text-zinc-400 dark:text-zinc-500" />
-                    <h3 className="text-xs font-bold text-zinc-900 dark:text-white uppercase tracking-widest">Profile Configuration</h3>
-                  </div>
-                  
-                  <form onSubmit={handleUpdateProfile} className="p-8 rounded-[32px] border border-zinc-100 dark:border-zinc-900 bg-zinc-50/50 dark:bg-[#0c0c0e]/60 space-y-6">
-                    <div className="space-y-4">
-                      <div className="space-y-2">
-                        <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-500 block ml-1">Full Name</label>
-                        <div className="relative rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950/40 focus-within:border-zinc-400 dark:focus-within:border-zinc-700 transition-all overflow-hidden">
-                          <input
-                            type="text"
-                            value={profileFullName}
-                            onChange={(e) => setProfileFullName(e.target.value)}
-                            placeholder="Your full name"
-                            required
-                            className="w-full bg-transparent border-0 px-4 py-3.5 text-xs text-zinc-900 dark:text-white focus:outline-none focus:ring-0 font-medium"
-                          />
-                        </div>
-                      </div>
-
-                      <div className="space-y-2">
-                        <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-500 block ml-1">Profile Image URL</label>
-                        <div className="relative rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950/40 focus-within:border-zinc-400 dark:focus-within:border-zinc-700 transition-all overflow-hidden">
-                          <input
-                            type="url"
-                            value={profileAvatarUrl}
-                            onChange={(e) => setProfileAvatarUrl(e.target.value)}
-                            placeholder="https://images.unsplash.com/photo-..."
-                            className="w-full bg-transparent border-0 px-4 py-3.5 text-xs text-zinc-900 dark:text-white focus:outline-none focus:ring-0 font-medium"
-                          />
-                        </div>
-                      </div>
-
-                      <div className="space-y-4">
-                        <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-500 block ml-1">Gaks Subscription Tier</label>
-                        <div className="space-y-3">
-                          {[
-                            { id: 'Free', price: '$0', desc: 'Basic market scanning and limited AI analysis.' },
-                            { id: 'Premium', price: '$29', desc: 'Advanced AI watchers and real-time Telegram alerts.' },
-                            { id: 'Premium Pro', price: '$99', desc: 'Enterprise-grade throughput and custom signal logic.' }
-                          ].map((plan) => {
-                            const isSelected = profilePlan === plan.id;
-                            return (
-                              <button
-                                type="button"
-                                key={plan.id}
-                                onClick={() => setProfilePlan(plan.id)}
-                                className={`w-full text-left p-4 rounded-2xl border transition-all cursor-pointer relative group ${
-                                  isSelected
-                                    ? 'bg-zinc-950 dark:bg-zinc-900/40 border-emerald-500 shadow-[0_0_20px_rgba(16,185,129,0.1)]'
-                                    : 'bg-white dark:bg-zinc-950/20 border-zinc-200 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700'
-                                }`}
-                              >
-                                <div className="flex items-center justify-between">
-                                  <div className="space-y-1">
-                                    <div className="flex items-center gap-2">
-                                      <span className={`text-[13px] font-bold tracking-tight ${isSelected ? 'text-white' : 'text-zinc-900 dark:text-zinc-300'}`}>
-                                        {plan.id}
-                                      </span>
-                                      {isSelected && (
-                                        <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 text-[8px] font-bold uppercase tracking-widest">
-                                          Active
-                                        </span>
-                                      )}
-                                    </div>
-                                    <p className="text-[10px] text-zinc-500 font-medium leading-relaxed max-w-[200px]">
-                                      {plan.desc}
-                                    </p>
-                                  </div>
-                                  <div className="text-right">
-                                    <div className={`text-[15px] font-bold tracking-tight ${isSelected ? 'text-emerald-500' : 'text-zinc-900 dark:text-zinc-100'}`}>
-                                      {plan.price}
-                                    </div>
-                                    <div className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest">Per Month</div>
-                                  </div>
-                                </div>
-                                {isSelected && (
-                                  <div className="absolute top-2 right-2">
-                                    <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,1)]"></div>
-                                  </div>
-                                )}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    </div>
-
-                    <button
-                      type="submit"
-                      disabled={isProfileUpdating}
-                      className="w-full flex items-center justify-center gap-2 px-5 py-4 rounded-full bg-zinc-900 dark:bg-white text-xs font-bold text-white dark:text-black hover:bg-zinc-800 dark:hover:bg-zinc-200 transition-all cursor-pointer disabled:opacity-50"
-                    >
-                      {isProfileUpdating ? (
-                        <div className="w-4 h-4 rounded-full border-2 border-white dark:border-black border-t-transparent animate-spin"></div>
-                      ) : (
-                        <>
-                          <Check className="w-4 h-4 stroke-[2.5]" />
-                          <span>Update Profile</span>
-                        </>
-                      )}
-                    </button>
-                  </form>
-                </div>
-
-                {/* Appearance & AI Configuration */}
-                <div className="space-y-8">
-                  
-                  {/* Theme Selector Section */}
-                  <div className="space-y-6">
-                    <div className="flex items-center gap-2 px-1">
-                      <Palette className="w-4 h-4 text-zinc-400 dark:text-zinc-500" />
-                      <h3 className="text-xs font-bold text-zinc-900 dark:text-white uppercase tracking-widest">Appearance</h3>
-                    </div>
-                    
-                    <div className="p-8 rounded-[32px] border border-zinc-100 dark:border-zinc-900 bg-zinc-50/50 dark:bg-[#0c0c0e]/60 space-y-6">
-                      <div className="grid grid-cols-3 gap-3">
-                        {[
-                          { id: 'light', label: 'Light', icon: Sun },
-                          { id: 'dark', label: 'Dark', icon: Moon },
-                          { id: 'system', label: 'System', icon: Monitor }
-                        ].map((theme) => {
-                          const Icon = theme.icon;
-                          const isSelected = profileTheme === theme.id;
-                          return (
-                            <button
-                              key={theme.id}
-                              onClick={() => setProfileTheme(theme.id as any)}
-                              className={`flex flex-col items-center gap-3 p-4 rounded-[24px] border transition-all cursor-pointer group ${
-                                isSelected
-                                  ? 'bg-zinc-900 dark:bg-white border-zinc-900 dark:border-white'
-                                  : 'bg-white dark:bg-zinc-950/40 border-zinc-200 dark:border-zinc-900 hover:border-zinc-300 dark:hover:border-zinc-800'
-                              }`}
-                            >
-                              <div className={`w-10 h-10 rounded-xl flex items-center justify-center transition-colors ${
-                                isSelected ? 'bg-zinc-800 dark:bg-zinc-100 text-white dark:text-black' : 'bg-zinc-100 dark:bg-zinc-900 text-zinc-400 dark:text-zinc-500 group-hover:text-zinc-600 dark:group-hover:text-zinc-300'
-                              }`}>
-                                <Icon className="w-5 h-5" />
-                              </div>
-                              <span className={`text-[10px] font-bold uppercase tracking-wider ${
-                                isSelected ? 'text-white dark:text-black' : 'text-zinc-400 dark:text-zinc-500 group-hover:text-zinc-600 dark:group-hover:text-zinc-300'
-                              }`}>
-                                {theme.label}
-                              </span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                      <p className="text-[10px] text-zinc-400 dark:text-zinc-600 text-center px-4">
-                        Interface updates instantly across all views. {profileTheme === 'system' ? 'Currently matching your device preferences.' : ''}
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* AI Settings Section */}
-                  <div className="space-y-6">
-                    <div className="flex items-center gap-2 px-1">
-                      <Sparkles className="w-4 h-4 text-zinc-400 dark:text-zinc-500" />
-                      <h3 className="text-xs font-bold text-zinc-900 dark:text-white uppercase tracking-widest">AI Engine</h3>
-                    </div>
-                    
-                    <div className="p-8 rounded-[32px] border border-zinc-100 dark:border-zinc-900 bg-zinc-50/50 dark:bg-[#0c0c0e]/60 space-y-6">
-                      <div className="space-y-4">
-                        <div className="relative rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950/40 focus-within:border-zinc-400 dark:focus-within:border-zinc-700 transition-all overflow-hidden">
-                          <input
-                            type="password"
-                            value={geminiKey}
-                            onChange={(e) => setGeminiKey(e.target.value)}
-                            placeholder={geminiKeyExists ? "••••••••••••••••••••••••••••" : "Enter Gemini API Key"}
-                            className="w-full bg-transparent border-0 px-4 py-3.5 text-xs text-zinc-900 dark:text-white focus:outline-none focus:ring-0 font-mono"
-                          />
-                        </div>
-                        <button
-                          onClick={handleSaveGeminiKey}
-                          disabled={isGeminiKeySaving}
-                          className="w-full flex items-center justify-center gap-2 px-5 py-3.5 rounded-full bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-xs font-bold text-zinc-900 dark:text-white hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-all cursor-pointer disabled:opacity-50"
-                        >
-                          {isGeminiKeySaving ? 'Saving...' : 'Update API Key'}
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Bottom Actions */}
-              <div className="flex flex-col md:flex-row items-center gap-4">
-                <button
-                  onClick={handleLogout}
-                  className="w-full md:w-auto px-8 py-4 rounded-full bg-zinc-900 border border-zinc-800 text-xs font-bold text-zinc-400 hover:text-white hover:border-zinc-700 transition-all flex items-center justify-center gap-2 cursor-pointer"
-                >
-                  <LogOut className="w-4 h-4" />
-                  <span>Sign Out of Session</span>
-                </button>
-                
-                <div className="flex-1 p-5 rounded-3xl border border-zinc-900 bg-zinc-950/20 flex items-center gap-3">
-                  <Shield className="w-4 h-4 text-zinc-600 shrink-0" />
-                  <p className="text-[10px] text-zinc-600 leading-relaxed">
-                    Identity managed by Supabase Auth. Data isolated via RLS policies.
-                  </p>
-                </div>
-              </div>
-            </div>
+            <React.Suspense fallback={<TabLoading />}>
+              <SettingsTab
+                profileAvatarUrl={profileAvatarUrl}
+                setProfileAvatarUrl={setProfileAvatarUrl}
+                profileFullName={profileFullName}
+                setProfileFullName={setProfileFullName}
+                profilePlan={profilePlan}
+                setProfilePlan={setProfilePlan}
+                session={session}
+                handleUpdateProfile={handleUpdateProfile}
+                isProfileUpdating={isProfileUpdating}
+                profileTheme={profileTheme}
+                setProfileTheme={setProfileTheme}
+                geminiKey={geminiKey}
+                setGeminiKey={setGeminiKey}
+                geminiKeyExists={geminiKeyExists}
+                handleSaveGeminiKey={handleSaveGeminiKey}
+                isGeminiKeySaving={isGeminiKeySaving}
+                handleLogout={handleLogout}
+              />
+            </React.Suspense>
           )}
           {activeTab === 'admin' && (
             <React.Suspense fallback={
