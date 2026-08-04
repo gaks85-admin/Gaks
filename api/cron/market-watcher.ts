@@ -76,7 +76,7 @@ export async function runGeminiRequest(
     supabase: any,
     userId: string,
     prompt: string,
-    model: string = 'gemini-1.5-flash',
+    model: string = 'gemini-2.5-flash',
     config?: any
 ) {
     const { data: apiKeyData, error: apiKeyError } = await supabase
@@ -1434,7 +1434,7 @@ Output ONLY valid JSON:
 }
 `;
                 const aiResponse = await ai.models.generateContent({
-                  model: "gemini-1.5-flash",
+                  model: "gemini-2.5-flash",
                   contents: promptText,
                   config: {
                     responseMimeType: "application/json",

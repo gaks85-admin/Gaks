@@ -309,15 +309,12 @@ export default async function handler(req: any, res: any) {
     console.log("[Watcher] apiKeyError:", apiKeyError);
     console.log("[Watcher] apiKeyRecord:", apiKeyRecord);
 
-    const { data: allKeys } = await supabase
-      .from("user_api_keys")
-      .select("*");
-    console.log("[ALL USER API KEYS]", allKeys);
+    const hasGlobalKey = !!process.env.GEMINI_API_KEY;
 
-    if (apiKeyError || !apiKeyRecord || !apiKeyRecord.api_key) {
+    if (!hasGlobalKey && (apiKeyError || !apiKeyRecord || !apiKeyRecord.api_key)) {
       const errReason = apiKeyError 
         ? `Supabase query error: ${apiKeyError.message}` 
-        : `No row exists or api_key is missing in '${tableName}' for user_id='${userId}' and provider='${providerFilter}'.`;
+        : `No global GEMINI_API_KEY and no row exists or api_key is missing in '${tableName}' for user_id='${userId}' and provider='${providerFilter}'.`;
 
       console.log("[Watcher Start] Termination: Gemini API key lookup failed or key missing.");
 

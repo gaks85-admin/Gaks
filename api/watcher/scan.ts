@@ -311,7 +311,11 @@ export default async function handler(req: any, res: any) {
         geminiCalled = true;
         geminiStart = Date.now();
         try {
-          const geminiKey = process.env.GEMINI_API_KEY;
+          let geminiKey = process.env.GEMINI_API_KEY;
+          const { data: userKeyData } = await supabase.from('user_api_keys').select('api_key').eq('user_id', userId).eq('provider', 'gemini').maybeSingle();
+          if (userKeyData?.api_key) {
+             geminiKey = userKeyData.api_key;
+          }
           if (geminiKey) {
             const ai = new GoogleGenAI({ apiKey: geminiKey });
             const promptText = `
@@ -340,7 +344,7 @@ Answer with JSON containing:
 - reasoning (string)
 `;
             const aiResponse = await ai.models.generateContent({
-              model: "gemini-1.5-flash",
+              model: "gemini-2.5-flash",
               contents: promptText,
               config: {
                 responseMimeType: "application/json",

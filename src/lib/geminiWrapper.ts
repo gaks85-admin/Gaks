@@ -36,8 +36,13 @@ export async function runGeminiRequest(
         .eq('status', 'active')
         .maybeSingle();
 
-    if (apiKeyError || !apiKeyData || !apiKeyData.api_key) {
-        throw new Error('Gemini API key not found or inactive for user.');
+    let finalApiKey = process.env.GEMINI_API_KEY;
+    if (apiKeyData && apiKeyData.api_key) {
+        finalApiKey = apiKeyData.api_key;
+    }
+
+    if (!finalApiKey) {
+        throw new Error('Gemini API key not found or inactive for user, and no global GEMINI_API_KEY is configured.');
     }
 
     // 2. Load watcher status
@@ -54,13 +59,15 @@ export async function runGeminiRequest(
     }
 
     // Initialize GoogleGenAI
-    const ai = new GoogleGenAI({ apiKey: apiKeyData.api_key });
+    const ai = new GoogleGenAI({ apiKey: finalApiKey });
 
-    // 3. Increment total_requests.
-    await supabase.from('user_api_keys').update({
-        total_requests: (apiKeyData.total_requests || 0) + 1,
-        last_tested_at: new Date().toISOString()
-    }).eq('id', apiKeyData.id);
+    // 3. Increment total_requests if using personal key.
+    if (apiKeyData && apiKeyData.id) {
+        await supabase.from('user_api_keys').update({
+            total_requests: (apiKeyData.total_requests || 0) + 1,
+            last_tested_at: new Date().toISOString()
+        }).eq('id', apiKeyData.id);
+    }
 
     try {
         // 5. Call Gemini.
@@ -71,12 +78,14 @@ export async function runGeminiRequest(
         });
 
         // On success:
-        await supabase.from('user_api_keys').update({
-            status: 'active',
-            last_success_at: new Date().toISOString(),
-            last_error: null,
-            telegram_notified: false
-        }).eq('id', apiKeyData.id);
+        if (apiKeyData && apiKeyData.id) {
+            await supabase.from('user_api_keys').update({
+                status: 'active',
+                last_success_at: new Date().toISOString(),
+                last_error: null,
+                telegram_notified: false
+            }).eq('id', apiKeyData.id);
+        }
 
         return response.text;
     } catch (error: any) {
@@ -84,11 +93,13 @@ export async function runGeminiRequest(
         const errorType = classifyGeminiError(error);
         
         // Increment total_failures.
-        await supabase.from('user_api_keys').update({
-            total_failures: (apiKeyData.total_failures || 0) + 1,
-            last_error: errorType,
-            last_error_at: new Date().toISOString()
-        }).eq('id', apiKeyData.id);
+        if (apiKeyData && apiKeyData.id) {
+            await supabase.from('user_api_keys').update({
+                total_failures: (apiKeyData.total_failures || 0) + 1,
+                last_error: errorType,
+                last_error_at: new Date().toISOString()
+            }).eq('id', apiKeyData.id);
+        }
 
         throw error;
     }
