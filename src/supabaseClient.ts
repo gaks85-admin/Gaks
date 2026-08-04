@@ -1,13 +1,17 @@
 import { createClient } from '@supabase/supabase-js';
 
 const getSupabaseUrl = (): string => {
-  let url = "https://wkujrqmxivljnuvumfau.supabase.co";
+  let url = "";
   if (typeof process !== 'undefined' && process.env && process.env.VITE_SUPABASE_URL) {
     url = process.env.VITE_SUPABASE_URL;
   } else if (typeof import.meta !== 'undefined' && import.meta.env && (import.meta.env as any).VITE_SUPABASE_URL) {
     url = (import.meta.env as any).VITE_SUPABASE_URL;
   }
   
+  if (!url) {
+    return "";
+  }
+
   if (url.endsWith('/rest/v1/')) {
     url = url.slice(0, -9);
   } else if (url.endsWith('/rest/v1')) {
@@ -34,8 +38,9 @@ const getSupabaseKey = (): string | undefined => {
 const SUPABASE_URL = getSupabaseUrl();
 const SUPABASE_PUBLIC_KEY = getSupabaseKey();
 
-if (!SUPABASE_PUBLIC_KEY) {
-  console.warn('VITE_SUPABASE_ANON_KEY is missing');
-}
+export const isRealSupabaseConfigured = !!(SUPABASE_URL && SUPABASE_PUBLIC_KEY && SUPABASE_PUBLIC_KEY !== 'dummy-key');
 
-export const supabase = createClient(SUPABASE_URL, SUPABASE_PUBLIC_KEY || "dummy-key");
+export const supabase = createClient(
+  SUPABASE_URL || 'https://wkujrqmxivljnuvumfau.supabase.co',
+  SUPABASE_PUBLIC_KEY || 'dummy-key'
+);

@@ -350,10 +350,10 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
         setErrorMessage(error.message);
       } else {
         setSuccessMessage('Password updated successfully! Signing you into your workspace...');
-        setTimeout(() => {
-          const session = localStorage.getItem('gaks_active_user');
-          if (session) {
-            onAuthSuccess(JSON.parse(session));
+        setTimeout(async () => {
+          const { data: sessionData } = await supabase.auth.getSession();
+          if (sessionData?.session) {
+            onAuthSuccess(sessionData.session);
           } else {
             setMode('login');
           }
