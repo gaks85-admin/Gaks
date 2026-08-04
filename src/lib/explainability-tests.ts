@@ -1249,7 +1249,7 @@ const runTests = async () => {
 };
 
 // If file is run directly using tsx, execute tests
-if (import.meta.url.endsWith(process.argv[1] || '')) {
+if (typeof import.meta !== 'undefined' && import.meta?.url && typeof process !== 'undefined' && process?.argv && import.meta.url.endsWith(process.argv[1] || '')) {
   runTests().then((passed) => {
     process.exit(passed ? 0 : 1);
   }).catch((err) => {

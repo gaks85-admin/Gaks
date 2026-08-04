@@ -1,16 +1,18 @@
 import { createClient } from '@supabase/supabase-js';
 
-const getSupabaseUrl = (): string => {
-  let url = "";
-  
-  if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_SUPABASE_URL) {
-    url = import.meta.env.VITE_SUPABASE_URL;
+const getEnvVar = (key: string): string => {
+  try {
+    if (typeof import.meta !== 'undefined' && import.meta && import.meta.env) {
+      return (import.meta.env as Record<string, string>)[key] || '';
+    }
+  } catch {
+    // fallback
   }
-  
-  if (!url) {
-    return "";
-  }
+  return '';
+};
 
+const getSupabaseUrl = (): string => {
+  let url = getEnvVar('VITE_SUPABASE_URL');
   if (url.endsWith('/rest/v1/')) {
     url = url.slice(0, -9);
   } else if (url.endsWith('/rest/v1')) {
@@ -19,32 +21,13 @@ const getSupabaseUrl = (): string => {
   return url;
 };
 
-const getSupabaseKey = (): string | undefined => {
-  if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_SUPABASE_ANON_KEY) {
-    return import.meta.env.VITE_SUPABASE_ANON_KEY;
-  }
-  return undefined;
-};
-
 const SUPABASE_URL = getSupabaseUrl();
-const SUPABASE_PUBLIC_KEY = getSupabaseKey();
+const SUPABASE_PUBLIC_KEY = getEnvVar('VITE_SUPABASE_ANON_KEY');
 
 export const isRealSupabaseConfigured = !!(SUPABASE_URL && SUPABASE_PUBLIC_KEY);
 
-const getClient = () => {
-  if (!isRealSupabaseConfigured) {
-    throw new Error('Supabase configuration missing: VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY must be defined.');
-  }
-  return createClient(SUPABASE_URL, SUPABASE_PUBLIC_KEY!);
-};
+export const supabase = createClient(
+  SUPABASE_URL || 'https://placeholder.supabase.co',
+  SUPABASE_PUBLIC_KEY || 'placeholder'
+);
 
-export const supabase = new Proxy({} as any, {
-  get(target, prop) {
-    const client = getClient();
-    const value = (client as any)[prop];
-    if (typeof value === 'function') {
-      return value.bind(client);
-    }
-    return value;
-  }
-});
