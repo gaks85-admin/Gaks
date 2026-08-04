@@ -33,7 +33,7 @@ const getSupabase = (token?: string) => {
 
 async function sendTelegramMessage(chatId: string | number, text: string): Promise<boolean> {
   const token = process.env.TELEGRAM_BOT_TOKEN;
-  if (false) {
+  if (!token) {
     console.warn("TELEGRAM_BOT_TOKEN is not defined in environment variables.");
     return false;
   }
@@ -710,27 +710,6 @@ export default async function handler(req: any, res: any) {
     }
 
     console.log("[Watcher Activation] Watcher created successfully");
-
-    // Upsert into legacy market_watchers table for interface backwards-compatibility
-    try {
-      console.log("[Watcher Start] Upserting legacy market_watcher...");
-      const { error: legacyError } = await supabase
-        .from("market_watchers")
-        .upsert({
-          user_id: userId,
-          status: "active",
-          activated_at: nowString,
-          updated_at: nowString
-        }, { onConflict: "user_id" });
-      
-      if (legacyError) {
-        console.warn("[Watcher Start] Legacy market_watchers table sync error:", legacyError.message);
-      } else {
-        console.log("[Watcher Start] Legacy market_watcher upsert successful.");
-      }
-    } catch (err: any) {
-      console.warn("[Watcher Start] Legacy market_watchers table sync exception:", err.message);
-    }
 
     console.log(`[Watcher Start] AI Market Watcher activated successfully for user ${userId}.`);
 

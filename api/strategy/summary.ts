@@ -21,8 +21,20 @@ export default async function strategySummaryHandler(req: Request, res: Response
       });
     }
 
+    // Extract active strategy text if it's a JSON string
+    let activeText = strategyText;
+    try {
+      const parsed = JSON.parse(strategyText);
+      if (parsed && typeof parsed === 'object' && Array.isArray(parsed.strategies)) {
+        const active = parsed.strategies.find((s: any) => s.id === parsed.activeId) || parsed.strategies[0];
+        activeText = active ? (active.text || '') : '';
+      }
+    } catch (e) {
+      // Not JSON, use as-is
+    }
+
     // 1. Generate summary label using Gemini (max 4 words)
-    const summary = await generateStrategySummary(strategyText);
+    const summary = await generateStrategySummary(activeText);
 
     // 2. Store summary in DB if userId is provided
     let updatedInDb = false;

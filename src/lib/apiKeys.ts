@@ -71,7 +71,7 @@ export async function saveGeminiKey(key: string): Promise<{ success: boolean; er
     // Test the new key immediately
     try {
         const ai = new GoogleGenAI({ apiKey: trimmedKey });
-        await ai.models.generateContent({ model: "gemini-1.5-flash", contents: "Reply only with OK" });
+        await ai.models.generateContent({ model: "gemini-2.5-flash", contents: "Reply only with OK" });
     } catch (err: any) {
         return { success: false, error: "Validation failed: " + err.message };
     }

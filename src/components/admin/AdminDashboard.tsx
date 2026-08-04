@@ -1821,10 +1821,10 @@ const SettingsPage = ({ fetchWithAuth, showToast }: { fetchWithAuth: any; showTo
             onChange={e => setSettings((prev: any) => ({ ...prev, defaultGeminiModel: e.target.value }))}
             className="w-full bg-zinc-50 dark:bg-[#0c0c0e] border border-zinc-200 dark:border-zinc-900 text-xs font-semibold rounded-xl px-4 py-3 focus:outline-none focus:border-zinc-300 dark:focus:border-zinc-800 text-zinc-950 dark:text-zinc-300 shadow-sm"
           >
-            <option value="gemini-2.5-flash">Gemini 1.5 Flash (Default / High Speed)</option>
-            <option value="gemini-1.5-pro">Gemini 1.5 Pro (Deep Reasoning)</option>
-            <option value="gemini-2.5-flash">Gemini 1.5 Flash (Legacy)</option>
-            <option value="gemini-1.5-pro">Gemini 1.5 Pro (Legacy)</option>
+            <option value="gemini-2.5-flash">Gemini 2.5 Flash (Default / High Speed)</option>
+            <option value="gemini-2.5-pro">Gemini 2.5 Pro (Deep Reasoning)</option>
+            <option value="gemini-2.5-flash">Gemini 2.5 Flash (Legacy)</option>
+            <option value="gemini-2.5-pro">Gemini 2.5 Pro (Legacy)</option>
           </select>
         </div>
 
