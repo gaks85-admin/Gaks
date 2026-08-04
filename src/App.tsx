@@ -8,6 +8,7 @@ import { compileStrategy } from './lib/strategy-compiler';
 
 const Auth = React.lazy(() => import('./components/Auth'));
 import { AuthSkeleton } from './components/Auth';
+const ResetPassword = React.lazy(() => import('./components/ResetPassword'));
 const AdminDashboard = React.lazy(() => import('./components/admin/AdminDashboard'));
 const StrategyTab = React.lazy(() => import('./components/StrategyTab'));
 const WatcherTab = React.lazy(() => import('./components/WatcherTab'));
@@ -177,10 +178,35 @@ export default function App() {
     return () => mediaQuery.removeEventListener('change', handleChange);
   }, [profileTheme]);
 
-  useEffect(() => {
-    if (window.location.pathname === '/admin') {
-      setActiveTab('admin');
+  const [isResetPasswordPage, setIsResetPasswordPage] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return (
+        window.location.pathname === '/reset-password' ||
+        window.location.hash.includes('type=recovery')
+      );
     }
+    return false;
+  });
+
+  useEffect(() => {
+    const checkRoute = () => {
+      if (
+        window.location.pathname === '/reset-password' ||
+        window.location.hash.includes('type=recovery')
+      ) {
+        setIsResetPasswordPage(true);
+      } else if (window.location.pathname === '/admin') {
+        setActiveTab('admin');
+      }
+    };
+
+    checkRoute();
+    window.addEventListener('popstate', checkRoute);
+    window.addEventListener('hashchange', checkRoute);
+    return () => {
+      window.removeEventListener('popstate', checkRoute);
+      window.removeEventListener('hashchange', checkRoute);
+    };
   }, []);
   const [currentTime, setCurrentTime] = useState<Date>(new Date('2026-06-28T15:01:00'));
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -456,6 +482,9 @@ export default function App() {
     initAuth();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event: string, currentSession: any) => {
+      if (event === 'PASSWORD_RECOVERY') {
+        setIsResetPasswordPage(true);
+      }
       if (currentSession) {
         setSession(currentSession);
         // Load user profile and details in parallel in background, completely non-blocking
@@ -1677,6 +1706,19 @@ export default function App() {
     const fillD = `${lineD} L ${width} ${height} L 0 ${height} Z`;
     return { lineD, fillD };
   };
+
+  if (isResetPasswordPage) {
+    return (
+      <React.Suspense fallback={<AuthSkeleton />}>
+        <ResetPassword
+          onComplete={() => {
+            setIsResetPasswordPage(false);
+            window.history.pushState({}, '', '/');
+          }}
+        />
+      </React.Suspense>
+    );
+  }
 
   if (isAuthLoading) {
     return <AuthSkeleton />;

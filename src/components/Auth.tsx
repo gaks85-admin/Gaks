@@ -304,16 +304,13 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
     setIsLoading(true);
     try {
       const { data, error } = await supabase.auth.resetPasswordForEmail(cleanEmail, {
-        redirectTo: `${window.location.origin}/#reset`,
+        redirectTo: `${window.location.origin}/reset-password`,
       });
 
       if (error) {
         setErrorMessage(error.message);
       } else {
         setSuccessMessage('We have sent a secure password reset link to your email address.');
-        setTimeout(() => {
-          setMode('reset');
-        }, 2200);
       }
     } catch (err: any) {
       setErrorMessage(err.message || 'Failed to trigger password reset.');
