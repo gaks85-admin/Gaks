@@ -2,10 +2,9 @@ import { createClient } from '@supabase/supabase-js';
 
 const getSupabaseUrl = (): string => {
   let url = "";
-  if (typeof process !== 'undefined' && process.env && process.env.VITE_SUPABASE_URL) {
-    url = process.env.VITE_SUPABASE_URL;
-  } else if (typeof import.meta !== 'undefined' && import.meta.env && (import.meta.env as any).VITE_SUPABASE_URL) {
-    url = (import.meta.env as any).VITE_SUPABASE_URL;
+  
+  if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_SUPABASE_URL) {
+    url = import.meta.env.VITE_SUPABASE_URL;
   }
   
   if (!url) {
@@ -21,15 +20,7 @@ const getSupabaseUrl = (): string => {
 };
 
 const getSupabaseKey = (): string | undefined => {
-  if (typeof process !== 'undefined' && process.env && process.env.VITE_SUPABASE_ANON_KEY) {
-    return process.env.VITE_SUPABASE_ANON_KEY;
-  }
-  if (typeof process !== 'undefined' && process.env && process.env.SUPABASE_ANON_KEY) {
-    return process.env.SUPABASE_ANON_KEY;
-  }
-  // @ts-ignore
   if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_SUPABASE_ANON_KEY) {
-    // @ts-ignore
     return import.meta.env.VITE_SUPABASE_ANON_KEY;
   }
   return undefined;
@@ -38,9 +29,22 @@ const getSupabaseKey = (): string | undefined => {
 const SUPABASE_URL = getSupabaseUrl();
 const SUPABASE_PUBLIC_KEY = getSupabaseKey();
 
-export const isRealSupabaseConfigured = !!(SUPABASE_URL && SUPABASE_PUBLIC_KEY && SUPABASE_PUBLIC_KEY !== 'dummy-key');
+export const isRealSupabaseConfigured = !!(SUPABASE_URL && SUPABASE_PUBLIC_KEY);
 
-export const supabase = createClient(
-  SUPABASE_URL || 'https://wkujrqmxivljnuvumfau.supabase.co',
-  SUPABASE_PUBLIC_KEY || 'dummy-key'
-);
+const getClient = () => {
+  if (!isRealSupabaseConfigured) {
+    throw new Error('Supabase configuration missing: VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY must be defined.');
+  }
+  return createClient(SUPABASE_URL, SUPABASE_PUBLIC_KEY!);
+};
+
+export const supabase = new Proxy({} as any, {
+  get(target, prop) {
+    const client = getClient();
+    const value = (client as any)[prop];
+    if (typeof value === 'function') {
+      return value.bind(client);
+    }
+    return value;
+  }
+});
