@@ -1,49 +1,38 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 import { determineMarketBias, Candle } from '../src/lib/strategy-engine.js';
+import { toCanonicalSymbol, toDisplaySymbol } from '../lib/market-utils.js';
 
 /**
- * Converts a symbol to Twelve Data format for time series requests.
+ * Converts a canonical symbol to Yahoo Finance symbol format.
  */
-function convertSymbolForTwelveData(sym: string): string {
-  if (!sym) return "";
-  let mapped = sym.trim().toUpperCase().replace(/[-_\s/]/g, '');
+function convertSymbolForYahoo(sym: string): string {
+  if (!sym) return "EURUSD=X";
+  const canonical = toCanonicalSymbol(sym);
   const mappings: Record<string, string> = {
-    'EURUSD': 'EUR/USD', 'GBPUSD': 'GBP/USD', 'XAUUSD': 'XAU/USD', 'BTCUSD': 'BTC/USD',
-    'ETHUSD': 'ETH/USD', 'XAGUSD': 'XAG/USD', 'USDJPY': 'USD/JPY', 'AUDUSD': 'AUD/USD',
-    'USDCAD': 'USD/CAD', 'USDCHF': 'USD/CHF', 'NZDUSD': 'NZD/USD',
-    'NAS100': 'QQQ', 'US30': 'DIA', 'SPX500': 'SPY', 'US500': 'SPY', 'GER30': 'DAX', 'UK100': 'UKX'
-  };
-  if (mappings[mapped]) return mappings[mapped];
-  if (mapped.length === 6 && /^[A-Z]{6}$/.test(mapped)) return `${mapped.slice(0, 3)}/${mapped.slice(3)}`;
-  return mapped;
-}
-
-/**
- * Canonicalizes a symbol to a standard internal format (uppercase, alphanumeric only).
- */
-const toCanonicalSymbol = (symbol: string): string => {
-  if (!symbol) return '';
-  return symbol.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
-};
-
-/**
- * Converts a canonical symbol to a human-friendly display format.
- */
-const toDisplaySymbol = (symbol: string): string => {
-  const canonical = toCanonicalSymbol(symbol);
-  const mappings: Record<string, string> = {
-    'EURUSD': 'EUR/USD', 'GBPUSD': 'GBP/USD', 'USDJPY': 'USD/JPY', 'AUDUSD': 'AUD/USD',
-    'USDCAD': 'USD/CAD', 'USDCHF': 'USD/CHF', 'NZDUSD': 'NZD/USD', 'BTCUSD': 'BTC/USD',
-    'ETHUSD': 'ETH/USD', 'XAUUSD': 'XAU/USD', 'XAGUSD': 'XAG/USD', 'NAS100': 'NAS100',
-    'US30': 'US30', 'SPX500': 'SPX500', 'GER30': 'GER30', 'UK100': 'UK100'
+    'EURUSD': 'EURUSD=X',
+    'GBPUSD': 'GBPUSD=X',
+    'USDJPY': 'USDJPY=X',
+    'AUDUSD': 'AUDUSD=X',
+    'USDCAD': 'USDCAD=X',
+    'USDCHF': 'USDCHF=X',
+    'NZDUSD': 'NZDUSD=X',
+    'BTCUSD': 'BTC-USD',
+    'ETHUSD': 'ETH-USD',
+    'XAUUSD': 'GC=F',
+    'XAGUSD': 'SI=F',
+    'NAS100': 'NQ=F',
+    'US30': 'YM=F',
+    'SPX500': 'ES=F',
+    'GER30': 'DAX=F',
+    'UK100': 'Z=F'
   };
   if (mappings[canonical]) return mappings[canonical];
   if (canonical.length === 6 && /^[A-Z]{6}$/.test(canonical)) {
-    return `${canonical.slice(0, 3)}/${canonical.slice(3)}`;
+    return `${canonical}=X`;
   }
   return canonical;
-};
+}
 
 /**
  * Self-contained Supabase client initialization.
@@ -77,74 +66,99 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    const supabase = getSupabase();
-    const twelveDataKey = process.env.TWELVE_DATA_API_KEY;
-
-    if (!twelveDataKey) {
-       throw new Error("TWELVE_DATA_API_KEY is not defined");
+    let watcherSymbols: string[] = [];
+    try {
+      const supabase = getSupabase();
+      const { data: watchers } = await supabase
+        .from('watchers')
+        .select('selected_pair')
+        .eq('status', 'active');
+      if (watchers) {
+        watcherSymbols = watchers.map(w => toCanonicalSymbol(w.selected_pair));
+      }
+    } catch (dbErr) {
+      console.warn('[Live Rates] Could not fetch active watchers from Supabase:', dbErr);
     }
-    
-    // 1. Fetch active watchers
-    const { data: watchers } = await supabase
-      .from('watchers')
-      .select('selected_pair')
-      .eq('status', 'active');
-      
-    // 2. Canonicalize and merge
-    const watcherSymbols = (watchers || []).map(w => toCanonicalSymbol(w.selected_pair));
+
     const uniqueSymbols = Array.from(new Set([...DEFAULT_SYMBOLS, ...watcherSymbols])).filter(Boolean);
-    
-    // 3. Fetch data from Twelve Data
+
+    // Fetch data from Yahoo Finance public chart endpoint
     const pairsData = await Promise.all(
       uniqueSymbols.map(async (sym) => {
-        try {
-          const canonical = toCanonicalSymbol(sym);
-          const mappedSymbol = convertSymbolForTwelveData(canonical);
-          const displaySymbol = toDisplaySymbol(sym);
-          
-          // Use complex request for quotes and basic time series (needed for sentiment/bias)
-          const url = `https://api.twelvedata.com/quote?symbol=${encodeURIComponent(mappedSymbol)}&apikey=${twelveDataKey}`;
-          const res = await fetch(url);
-          const quote = await res.json();
+        const canonical = toCanonicalSymbol(sym);
+        const yahooSymbol = convertSymbolForYahoo(canonical);
+        const displaySymbol = toDisplaySymbol(sym);
 
-          if (quote.status === "error") {
-            return { symbol: displaySymbol, status: 'unavailable', error: quote.message };
+        try {
+          const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooSymbol)}?interval=1h&range=5d`;
+          const fetchRes = await fetch(url, {
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            }
+          });
+
+          if (!fetchRes.ok) {
+            return { symbol: displaySymbol, status: 'unavailable' };
           }
 
-          // Fetch recent candles for sentiment
-          const tsUrl = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(mappedSymbol)}&interval=1h&outputsize=20&apikey=${twelveDataKey}`;
-          const tsRes = await fetch(tsUrl);
-          const tsData = await tsRes.json();
-          
+          const data = await fetchRes.json();
+          const result = data?.chart?.result?.[0];
+
+          if (!result) {
+            return { symbol: displaySymbol, status: 'unavailable' };
+          }
+
+          const meta = result.meta || {};
+          const currentPrice = meta.regularMarketPrice || meta.chartPreviousClose || 0;
+          const basePrice = meta.chartPreviousClose || meta.previousClose || currentPrice;
+          const change = basePrice ? ((currentPrice - basePrice) / basePrice) * 100 : 0;
+
+          const quote = result.indicators?.quote?.[0] || {};
+          const timestamps: number[] = result.timestamp || [];
+          const opens: (number | null)[] = quote.open || [];
+          const highs: (number | null)[] = quote.high || [];
+          const lows: (number | null)[] = quote.low || [];
+          const closes: (number | null)[] = quote.close || [];
+
+          const validCloses = closes.filter((c): c is number => typeof c === 'number' && !isNaN(c));
+
+          const candles: Candle[] = [];
+          for (let i = 0; i < timestamps.length; i++) {
+            if (
+              typeof closes[i] === 'number' && !isNaN(closes[i]!) &&
+              typeof opens[i] === 'number' && !isNaN(opens[i]!)
+            ) {
+              candles.push({
+                timestamp: new Date(timestamps[i] * 1000).toISOString(),
+                open: opens[i]!,
+                high: typeof highs[i] === 'number' ? highs[i]! : closes[i]!,
+                low: typeof lows[i] === 'number' ? lows[i]! : closes[i]!,
+                close: closes[i]!,
+              });
+            }
+          }
+
           let sentiment: 'Bullish' | 'Bearish' | 'Neutral' = 'Neutral';
-          let history: number[] = [];
-          
-          if (tsData.status === "ok" && Array.isArray(tsData.values)) {
-            const candles: Candle[] = tsData.values.map((v: any) => ({
-              timestamp: v.datetime,
-              open: parseFloat(v.open),
-              high: parseFloat(v.high),
-              low: parseFloat(v.low),
-              close: parseFloat(v.close),
-              volume: v.volume ? parseFloat(v.volume) : undefined
-            })).reverse();
-            
+          if (candles.length > 0) {
             sentiment = determineMarketBias(candles);
-            history = candles.map(c => c.close);
+          } else if (change > 0) {
+            sentiment = 'Bullish';
+          } else if (change < 0) {
+            sentiment = 'Bearish';
           }
 
           return {
             symbol: displaySymbol,
             name: displaySymbol,
-            currentPrice: parseFloat(quote.close || quote.price),
-            basePrice: parseFloat(quote.previous_close || quote.close),
-            change: parseFloat(quote.percent_change || 0),
+            currentPrice,
+            basePrice,
+            change,
             sentiment,
-            history: history.length > 0 ? history : [parseFloat(quote.previous_close || quote.close), parseFloat(quote.close || quote.price)],
+            history: validCloses.length > 0 ? validCloses : [basePrice, currentPrice],
             status: 'active'
           };
         } catch (err) {
-          return { symbol: sym, status: 'unavailable' };
+          return { symbol: displaySymbol, status: 'unavailable' };
         }
       })
     );
@@ -154,7 +168,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       timestamp: Date.now(),
       pairs: pairsData
     });
-    
+
   } catch (error: any) {
     console.error('[Live Rates] Endpoint Error:', error);
     return res.status(500).json({
