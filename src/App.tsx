@@ -1857,7 +1857,7 @@ export default function App() {
                   ) : (
                     liveRates.map(pair => {
                       const isNegativeChange = pair.change < 0;
-                      const chartColor = pair.sentiment === 'Bullish' ? "#ffffff" : pair.sentiment === 'Bearish' ? "#ef4444" : "#71717a";
+                      const chartColor = pair.sentiment === 'Bullish' ? "#10b981" : pair.sentiment === 'Bearish' ? "#ef4444" : "#71717a";
                       const { lineD, fillD } = getSparklinePaths(pair.history, 110, 28);
 
                       return (
@@ -1873,7 +1873,7 @@ export default function App() {
                             </div>
                             <span className={`px-3 py-1 rounded-full text-[12px] font-medium tracking-normal border flex items-center gap-1.5 ${
                               pair.sentiment === 'Bullish'
-                                ? 'bg-zinc-800 text-zinc-100 border-zinc-700'
+                                ? 'bg-emerald-50 dark:bg-[#0c1c0c] text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-950/80'
                                 : pair.sentiment === 'Bearish'
                                 ? 'bg-red-50 dark:bg-[#200c0c] text-red-600 dark:text-[#ef4444] border-red-100 dark:border-[#3f1616]'
                                 : 'bg-zinc-50 dark:bg-[#1a1a1e] text-zinc-500 dark:text-[#a1a1aa] border-zinc-200 dark:border-[#27272a]'
@@ -1908,7 +1908,7 @@ export default function App() {
                               ) : (
                                 <>
                                   <div className="text-[24px] sm:text-[26px] font-semibold text-zinc-950 dark:text-white tracking-[-0.03em] font-sans tabular-nums">{pair.price.toLocaleString(undefined, { minimumFractionDigits: pair.price > 10 ? 2 : 4 })}</div>
-                                  <div className={`text-[13px] sm:text-[14px] font-medium tracking-normal flex items-center justify-end gap-1 ${isNegativeChange ? 'text-red-500' : 'text-zinc-200'}`}>
+                                  <div className={`text-[13px] sm:text-[14px] font-medium tracking-normal flex items-center justify-end gap-1 ${isNegativeChange ? 'text-red-500' : 'text-emerald-600 dark:text-emerald-400'}`}>
                                     {isNegativeChange ? <ArrowDownRight className="w-4 h-4 stroke-[2]" /> : <ArrowUpRight className="w-4 h-4 stroke-[2]" />}
                                     <span>{isNegativeChange ? '' : '+'}{pair.change.toFixed(2)}%</span>
                                   </div>
@@ -1958,7 +1958,7 @@ export default function App() {
                           </div>
                           <div className="text-right">
                             <div className="text-[14px] sm:text-[15px] font-semibold tracking-[-0.02em] text-zinc-950 dark:text-white tabular-nums">{mover.price.toLocaleString(undefined, { minimumFractionDigits: mover.price > 10 ? 2 : 4 })}</div>
-                            <div className={`text-[13px] font-medium tracking-normal ${mover.change >= 0 ? 'text-zinc-200' : 'text-red-600 dark:text-[#ef4444]'}`}>
+                            <div className={`text-[13px] font-medium tracking-normal ${mover.change >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-[#ef4444]'}`}>
                               {mover.change >= 0 ? '+' : ''}{mover.change.toFixed(2)}%
                             </div>
                           </div>
@@ -1998,7 +1998,7 @@ export default function App() {
                         <div key={idx} className="p-4 rounded-2xl border border-zinc-200 dark:border-zinc-800/80 bg-zinc-50 dark:bg-[#161618] relative overflow-hidden flex flex-col justify-between h-24 sm:h-28 hover:border-zinc-300 dark:hover:border-zinc-700 transition-all shadow-sm">
                           <div className="flex justify-between items-center z-10">
                             <span className="text-[14px] sm:text-[15px] font-semibold tracking-[-0.02em] text-zinc-950 dark:text-white">{trend.symbol}</span>
-                            <span className={`text-[13px] font-medium tracking-normal ${isBearish ? 'text-red-600 dark:text-[#ef4444]' : 'text-zinc-200'}`}>
+                            <span className={`text-[13px] font-medium tracking-normal ${isBearish ? 'text-red-600 dark:text-[#ef4444]' : 'text-emerald-600 dark:text-emerald-400'}`}>
                               {trend.change >= 0 ? '+' : ''}{trend.change.toFixed(2)}%
                             </span>
                           </div>
@@ -2008,12 +2008,12 @@ export default function App() {
                               <svg className="w-full h-full overflow-visible" viewBox="0 0 80 18" preserveAspectRatio="none">
                                 <defs>
                                   <linearGradient id={`trend-grad-${idx}`} x1="0" y1="0" x2="0" y2="1">
-                                    <stop offset="0%" stopColor={isBearish ? "#ef4444" : "#ffffff"} stopOpacity="0.25"/>
-                                    <stop offset="100%" stopColor={isBearish ? "#ef4444" : "#ffffff"} stopOpacity="0.0"/>
+                                    <stop offset="0%" stopColor={isBearish ? "#ef4444" : "#10b981"} stopOpacity="0.25"/>
+                                    <stop offset="100%" stopColor={isBearish ? "#ef4444" : "#10b981"} stopOpacity="0.0"/>
                                   </linearGradient>
                                 </defs>
                                 <path d={fillD} fill={`url(#trend-grad-${idx})`} />
-                                <path d={lineD} fill="none" stroke={isBearish ? "#ef4444" : "#ffffff"} strokeWidth="1.2" />
+                                <path d={lineD} fill="none" stroke={isBearish ? "#ef4444" : "#10b981"} strokeWidth="1.2" />
                               </svg>
                             )}
                           </div>
@@ -2051,7 +2051,7 @@ export default function App() {
                       
                       const bgColor = isBearish 
                         ? `bg-rose-600 ${intensity}` 
-                        : `bg-zinc-700 ${intensity}`;
+                        : `bg-emerald-600 ${intensity}`;
 
                       return (
                         <div
