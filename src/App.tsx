@@ -627,9 +627,6 @@ export default function App() {
 
       const savedWatchlist = localStorage.getItem('gaks_watchlist');
       if (savedWatchlist) setWatchlist(JSON.parse(savedWatchlist));
-
-      const savedTheme = localStorage.getItem('gaks_theme') as 'dark' | 'light' | 'system';
-      if (savedTheme) setProfileTheme(savedTheme);
     } catch (e) {
       console.error('Error loading saved state:', e);
     }

@@ -605,31 +605,18 @@ export default async function handler(req: any, res: any) {
     // Protect the endpoint using a CRON_SECRET
     const authHeader = req.headers.authorization || req.headers['authorization'];
     
-    // Robust parsing of Bearer token
-    let token: string | null = null;
-    if (authHeader) {
-      const trimmedHeader = authHeader.trim();
-      if (trimmedHeader.toLowerCase().startsWith("bearer ")) {
-        token = trimmedHeader.substring(7).trim();
-      } else {
-        token = trimmedHeader;
-      }
-    }
-
-    // Clean quotes or whitespace
-    const cleanToken = token ? token.replace(/^['"]|['"]$/g, '').trim() : "";
     const cleanCronSecret = cronSecretRaw ? cronSecretRaw.trim().replace(/^['"]|['"]$/g, '').trim() : "";
 
-    // Strictly enforce CRON_SECRET requirement
+    // 1. Strictly enforce CRON_SECRET requirement (500 if missing on server)
     if (!cleanCronSecret) {
-      console.warn("LOG: Forbidden access attempt - CRON_SECRET environment variable is missing on server.");
-      return res.status(403).json({
+      console.warn("LOG: Missing CRON_SECRET environment variable on server.");
+      return res.status(500).json({
         success: false,
-        error: "Forbidden",
-        reason: "CRON_SECRET environment variable is not configured on the server."
+        error: "CRON_SECRET environment variable is not configured on the server."
       });
     }
 
+    // 2. Require Bearer authentication (401 if missing, invalid format, or token mismatch)
     if (!authHeader) {
       console.warn("LOG: Unauthorized access attempt - missing Authorization header.");
       return res.status(401).json({
@@ -639,16 +626,19 @@ export default async function handler(req: any, res: any) {
       });
     }
 
-    if (!cleanToken) {
-      console.warn("LOG: Unauthorized access attempt - invalid Authorization token format.");
+    const trimmedHeader = authHeader.trim();
+    if (!trimmedHeader.toLowerCase().startsWith("bearer ")) {
+      console.warn("LOG: Unauthorized access attempt - Authorization header does not use Bearer scheme.");
       return res.status(401).json({
         success: false,
         error: "Unauthorized",
-        reason: "No token could be extracted from Authorization header."
+        reason: "Authorization header must use Bearer scheme."
       });
     }
 
-    if (cleanToken !== cleanCronSecret) {
+    const token = trimmedHeader.substring(7).trim().replace(/^['"]|['"]$/g, '').trim();
+
+    if (!token || token !== cleanCronSecret) {
       console.warn("LOG: Unauthorized access attempt - token mismatch.");
       return res.status(401).json({
         success: false,
