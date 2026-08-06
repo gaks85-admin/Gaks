@@ -92,7 +92,7 @@ export function buildTelegramAlertMessage(signal: SignalTelegramPayload): string
   const pairStr = formatDisplayPair(signal.pair);
   const tfStr = formatTimeframe(signal.timeframe);
   const isBuy = signal.direction.toUpperCase() === 'BUY';
-  const dirStr = isBuy ? '🟢 BUY' : '🔴 SELL';
+  const dirStr = isBuy ? '⚪ BUY' : '🔴 SELL';
   const stratSummary = (signal.strategySummary && signal.strategySummary.trim())
     ? signal.strategySummary.trim()
     : 'Custom Strategy';

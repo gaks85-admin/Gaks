@@ -115,14 +115,15 @@ const parseStrategyText = (rawText: string) => {
       };
     }
   } catch (e) {
+    const customStrategyId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2) + '-' + Date.now();
     const existingCustom: Strategy = {
-      id: '11111111-1111-1111-1111-111111111111',
+      id: customStrategyId,
       name: 'My Custom Strategy',
       isDefault: false,
       text: rawText
     };
     return {
-      activeId: '11111111-1111-1111-1111-111111111111',
+      activeId: customStrategyId,
       strategies: [GAKS_DEFAULT_STRATEGY, existingCustom]
     };
   }
@@ -142,41 +143,6 @@ const serializeStrategies = (activeId: string, list: Strategy[]) => {
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<'home' | 'strategy' | 'watcher' | 'settings' | 'admin'>('home');
-  const [profileTheme, setProfileTheme] = useState<'dark' | 'light' | 'system'>('dark');
-  
-  // Theme effect
-  useEffect(() => {
-    const applyTheme = (theme: 'dark' | 'light' | 'system') => {
-      const root = window.document.documentElement;
-      root.classList.remove('light', 'dark');
-      
-      if (theme === 'system') {
-        const systemTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-        root.classList.add(systemTheme);
-      } else {
-        root.classList.add(theme);
-      }
-    };
-
-    applyTheme(profileTheme);
-    localStorage.setItem('gaks_theme', profileTheme);
-  }, [profileTheme]);
-
-  // Listen for system theme changes if 'system' is active
-  useEffect(() => {
-    if (profileTheme !== 'system') return;
-    
-    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-    const handleChange = () => {
-      const root = window.document.documentElement;
-      root.classList.remove('light', 'dark');
-      const systemTheme = mediaQuery.matches ? 'dark' : 'light';
-      root.classList.add(systemTheme);
-    };
-    
-    mediaQuery.addEventListener('change', handleChange);
-    return () => mediaQuery.removeEventListener('change', handleChange);
-  }, [profileTheme]);
 
   const [isResetPasswordPage, setIsResetPasswordPage] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -444,11 +410,9 @@ export default function App() {
         const { data: { session: activeSession } } = await supabase.auth.getSession();
         if (activeSession) {
           setSession(activeSession);
-          // Set loading to false immediately after getting the active session, so UI renders instantly.
-          setIsAuthLoading(false);
 
-          // Retrieve all supplementary user details in parallel without blocking the main render
-          Promise.all([
+          // Wait until session, profile, subscription, watchlist, preferences, and telegram status finish loading before clearing the loading state
+          await Promise.all([
             supabase
               .from('profiles')
               .select('*')
@@ -468,8 +432,10 @@ export default function App() {
             loadTradingPreferences(activeSession.user.id),
             loadWatcherStatus(activeSession.user.id)
           ]).catch(err => {
-            console.error('Error fetching secondary user data in background:', err);
+            console.error('Error fetching supplementary user data during auth init:', err);
           });
+
+          setIsAuthLoading(false);
         } else {
           setIsAuthLoading(false);
         }
@@ -487,7 +453,7 @@ export default function App() {
       }
       if (currentSession) {
         setSession(currentSession);
-        // Load user profile and details in parallel in background, completely non-blocking
+        // Load user profile and details in parallel
         Promise.all([
           supabase
             .from('profiles')
@@ -530,45 +496,71 @@ export default function App() {
   useEffect(() => {
     if (!session?.user) return;
 
-    const checkAndTriggerActivation = async () => {
-      const pendingToken = localStorage.getItem('gaks_pending_telegram_token');
-      const pendingUserId = localStorage.getItem('gaks_pending_telegram_user');
+    const pendingToken = localStorage.getItem('gaks_pending_telegram_token');
+    const pendingUserId = localStorage.getItem('gaks_pending_telegram_user');
 
-      // If there is no pending activation token in local storage, completely skip expensive background API/DB queries
-      if (!pendingToken || pendingUserId !== session.user.id) {
-        return;
-      }
+    // Only set up listeners or polling if a Telegram connection is explicitly pending for this user
+    if (!pendingToken || pendingUserId !== session.user.id) {
+      return;
+    }
 
-      // Reload the state (this updates the UI instantly if the backend updated it)
+    const checkAndTriggerActivation = async (): Promise<boolean> => {
+      // Reload the state
       await loadTelegramConnection(session.user.id, false);
       
-      // We need to check if it's connected now
       const { data } = await getTelegramConnection(session.user.id);
       if (data && data.connected) {
         localStorage.removeItem('gaks_pending_telegram_token');
         localStorage.removeItem('gaks_pending_telegram_user');
         triggerNotification("Telegram linked successfully!", "success");
         setTelegramSuccessMessage("Telegram Connected!");
+        return true;
       }
+      return false;
     };
 
-    // Initial check (only runs if there is a pending token, thanks to the early exit check)
+    // Initial check
     checkAndTriggerActivation();
 
-    // 1. Focus listener: instantly updates when user switches back to this tab
+    // 1. Focus listener: instantly checks when user switches back to this tab
     const handleFocus = () => {
       checkAndTriggerActivation();
     };
     window.addEventListener('focus', handleFocus);
 
-    // 2. Continuous Polling interval: background check every 4 seconds
-    const interval = setInterval(() => {
-      checkAndTriggerActivation();
-    }, 4000);
+    // 2. Realtime channel subscription on telegram_connections table
+    const channel = supabase
+      .channel(`telegram_conn_${session.user.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'telegram_connections',
+          filter: `user_id=eq.${session.user.id}`
+        },
+        async () => {
+          const isConnected = await checkAndTriggerActivation();
+          if (isConnected) {
+            supabase.removeChannel(channel);
+          }
+        }
+      )
+      .subscribe();
+
+    // 3. Fallback polling interval (10s) only while pending
+    const interval = setInterval(async () => {
+      const isConnected = await checkAndTriggerActivation();
+      if (isConnected) {
+        clearInterval(interval);
+        supabase.removeChannel(channel);
+      }
+    }, 10000);
 
     return () => {
       window.removeEventListener('focus', handleFocus);
       clearInterval(interval);
+      supabase.removeChannel(channel);
     };
   }, [session]);
 
@@ -1003,27 +995,13 @@ export default function App() {
           full_name: profileFullName,
           subscription_plan: profilePlan,
           telegram_connected: profileTelegram,
-          avatar_url: profileAvatarUrl,
-          theme: profileTheme
+          avatar_url: profileAvatarUrl
         })
         .eq('id', session.user.id);
 
       if (error) {
-        // If theme column doesn't exist, we fallback to just updating the rest
-        if (error.message.includes('column "theme" of relation "profiles" does not exist')) {
-          await supabase
-            .from('profiles')
-            .update({
-              full_name: profileFullName,
-              subscription_plan: profilePlan,
-              telegram_connected: profileTelegram,
-              avatar_url: profileAvatarUrl,
-            })
-            .eq('id', session.user.id);
-        } else {
-          triggerNotification(error.message, "info");
-          return;
-        }
+        triggerNotification(error.message, "info");
+        return;
       }
       
       setUserProfile({
@@ -1031,8 +1009,7 @@ export default function App() {
         full_name: profileFullName,
         subscription_plan: profilePlan,
         telegram_connected: profileTelegram,
-        avatar_url: profileAvatarUrl,
-        theme: profileTheme
+        avatar_url: profileAvatarUrl
       });
       triggerNotification("Profile details saved successfully!", "success");
     } catch (err: any) {
@@ -1772,7 +1749,7 @@ export default function App() {
         {/* Global Floating Toast Notification */}
         {showNotification && (
           <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 w-[90%] max-w-sm px-4 py-3 rounded-xl bg-zinc-900 border border-zinc-800 flex items-center gap-2.5 shadow-xl animate-bounce">
-            <div className={`p-1 rounded-full ${showNotification.type === 'success' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-blue-500/10 text-blue-400'}`}>
+            <div className={`p-1 rounded-full ${showNotification.type === 'success' ? 'bg-zinc-800 text-zinc-200' : 'bg-blue-500/10 text-blue-400'}`}>
               <Check className="w-4 h-4 stroke-[2.5]" />
             </div>
             <span className="text-xs font-normal text-zinc-200">{showNotification.message}</span>
@@ -1800,7 +1777,7 @@ export default function App() {
               {/* Live markets status & date row */}
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                 <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full border border-zinc-200 dark:border-zinc-800/80 bg-zinc-50 dark:bg-[#121214] w-fit">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                  <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse shadow-[0_0_8px_rgba(255,255,255,0.8)]"></span>
                   <span className="text-[13px] text-zinc-600 dark:text-zinc-300 font-normal tracking-normal">Live · markets open</span>
                 </div>
                 <span className="text-[13px] text-zinc-400 dark:text-zinc-500 font-normal tracking-normal">
@@ -1883,7 +1860,7 @@ export default function App() {
                   ) : (
                     liveRates.map(pair => {
                       const isNegativeChange = pair.change < 0;
-                      const chartColor = pair.sentiment === 'Bullish' ? "#10b981" : pair.sentiment === 'Bearish' ? "#ef4444" : "#71717a";
+                      const chartColor = pair.sentiment === 'Bullish' ? "#ffffff" : pair.sentiment === 'Bearish' ? "#ef4444" : "#71717a";
                       const { lineD, fillD } = getSparklinePaths(pair.history, 110, 28);
 
                       return (
@@ -1899,7 +1876,7 @@ export default function App() {
                             </div>
                             <span className={`px-3 py-1 rounded-full text-[12px] font-medium tracking-normal border flex items-center gap-1.5 ${
                               pair.sentiment === 'Bullish'
-                                ? 'bg-emerald-50 dark:bg-[#081e14] text-emerald-600 dark:text-[#10b981] border-emerald-100 dark:border-[#133c29]'
+                                ? 'bg-zinc-800 text-zinc-100 border-zinc-700'
                                 : pair.sentiment === 'Bearish'
                                 ? 'bg-red-50 dark:bg-[#200c0c] text-red-600 dark:text-[#ef4444] border-red-100 dark:border-[#3f1616]'
                                 : 'bg-zinc-50 dark:bg-[#1a1a1e] text-zinc-500 dark:text-[#a1a1aa] border-zinc-200 dark:border-[#27272a]'
@@ -1934,7 +1911,7 @@ export default function App() {
                               ) : (
                                 <>
                                   <div className="text-[24px] sm:text-[26px] font-semibold text-zinc-950 dark:text-white tracking-[-0.03em] font-sans tabular-nums">{pair.price.toLocaleString(undefined, { minimumFractionDigits: pair.price > 10 ? 2 : 4 })}</div>
-                                  <div className={`text-[13px] sm:text-[14px] font-medium tracking-normal flex items-center justify-end gap-1 ${isNegativeChange ? 'text-red-500' : 'text-emerald-500'}`}>
+                                  <div className={`text-[13px] sm:text-[14px] font-medium tracking-normal flex items-center justify-end gap-1 ${isNegativeChange ? 'text-red-500' : 'text-zinc-200'}`}>
                                     {isNegativeChange ? <ArrowDownRight className="w-4 h-4 stroke-[2]" /> : <ArrowUpRight className="w-4 h-4 stroke-[2]" />}
                                     <span>{isNegativeChange ? '' : '+'}{pair.change.toFixed(2)}%</span>
                                   </div>
@@ -1984,7 +1961,7 @@ export default function App() {
                           </div>
                           <div className="text-right">
                             <div className="text-[14px] sm:text-[15px] font-semibold tracking-[-0.02em] text-zinc-950 dark:text-white tabular-nums">{mover.price.toLocaleString(undefined, { minimumFractionDigits: mover.price > 10 ? 2 : 4 })}</div>
-                            <div className={`text-[13px] font-medium tracking-normal ${mover.change >= 0 ? 'text-emerald-600 dark:text-[#10b981]' : 'text-red-600 dark:text-[#ef4444]'}`}>
+                            <div className={`text-[13px] font-medium tracking-normal ${mover.change >= 0 ? 'text-zinc-200' : 'text-red-600 dark:text-[#ef4444]'}`}>
                               {mover.change >= 0 ? '+' : ''}{mover.change.toFixed(2)}%
                             </div>
                           </div>
@@ -1998,7 +1975,7 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Trending Pairs Grid - Matches Screenshot 2 */}
+              {/* Trending Pairs Grid */}
               <div className="p-6 rounded-3xl border border-zinc-200 dark:border-zinc-800/80 bg-zinc-50/50 dark:bg-[#111113]/80 space-y-4">
                 <div className="flex flex-col">
                   <span className="text-[19px] sm:text-[21px] font-semibold tracking-[-0.025em] text-zinc-950 dark:text-white font-sans">Trending Pairs</span>
@@ -2024,7 +2001,7 @@ export default function App() {
                         <div key={idx} className="p-4 rounded-2xl border border-zinc-200 dark:border-zinc-800/80 bg-zinc-50 dark:bg-[#161618] relative overflow-hidden flex flex-col justify-between h-24 sm:h-28 hover:border-zinc-300 dark:hover:border-zinc-700 transition-all shadow-sm">
                           <div className="flex justify-between items-center z-10">
                             <span className="text-[14px] sm:text-[15px] font-semibold tracking-[-0.02em] text-zinc-950 dark:text-white">{trend.symbol}</span>
-                            <span className={`text-[13px] font-medium tracking-normal ${isBearish ? 'text-red-600 dark:text-[#ef4444]' : 'text-emerald-600 dark:text-[#10b981]'}`}>
+                            <span className={`text-[13px] font-medium tracking-normal ${isBearish ? 'text-red-600 dark:text-[#ef4444]' : 'text-zinc-200'}`}>
                               {trend.change >= 0 ? '+' : ''}{trend.change.toFixed(2)}%
                             </span>
                           </div>
@@ -2034,12 +2011,12 @@ export default function App() {
                               <svg className="w-full h-full overflow-visible" viewBox="0 0 80 18" preserveAspectRatio="none">
                                 <defs>
                                   <linearGradient id={`trend-grad-${idx}`} x1="0" y1="0" x2="0" y2="1">
-                                    <stop offset="0%" stopColor={isBearish ? "#ef4444" : "#10b981"} stopOpacity="0.25"/>
-                                    <stop offset="100%" stopColor={isBearish ? "#ef4444" : "#10b981"} stopOpacity="0.0"/>
+                                    <stop offset="0%" stopColor={isBearish ? "#ef4444" : "#ffffff"} stopOpacity="0.25"/>
+                                    <stop offset="100%" stopColor={isBearish ? "#ef4444" : "#ffffff"} stopOpacity="0.0"/>
                                   </linearGradient>
                                 </defs>
                                 <path d={fillD} fill={`url(#trend-grad-${idx})`} />
-                                <path d={lineD} fill="none" stroke={isBearish ? "#ef4444" : "#10b981"} strokeWidth="1.2" />
+                                <path d={lineD} fill="none" stroke={isBearish ? "#ef4444" : "#ffffff"} strokeWidth="1.2" />
                               </svg>
                             )}
                           </div>
@@ -2052,7 +2029,7 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Market Heatmap Section - Matches Screenshot 2 */}
+              {/* Market Heatmap Section */}
               <div className="p-6 rounded-3xl border border-zinc-200 dark:border-zinc-800/80 bg-white dark:bg-[#111113]/80 space-y-4">
                 <div className="flex flex-col">
                   <span className="text-[19px] sm:text-[21px] font-semibold tracking-[-0.025em] text-zinc-950 dark:text-white font-sans">Market Heatmap</span>
@@ -2077,7 +2054,7 @@ export default function App() {
                       
                       const bgColor = isBearish 
                         ? `bg-rose-600 ${intensity}` 
-                        : `bg-emerald-600 ${intensity}`;
+                        : `bg-zinc-700 ${intensity}`;
 
                       return (
                         <div
@@ -2181,8 +2158,6 @@ export default function App() {
                 session={session}
                 handleUpdateProfile={handleUpdateProfile}
                 isProfileUpdating={isProfileUpdating}
-                profileTheme={profileTheme}
-                setProfileTheme={setProfileTheme}
                 geminiKey={geminiKey}
                 setGeminiKey={setGeminiKey}
                 geminiKeyExists={geminiKeyExists}

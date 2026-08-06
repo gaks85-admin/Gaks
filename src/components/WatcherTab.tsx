@@ -125,13 +125,13 @@ export const WatcherTab: React.FC<WatcherTabProps> = ({
         ) : (
           <div className="w-full space-y-4">
             {/* Connection status bar */}
-            <div className="p-4 rounded-2xl border border-emerald-500/10 bg-emerald-500/5 text-emerald-600 dark:text-emerald-400 text-xs flex items-center justify-between">
+            <div className="p-4 rounded-2xl border border-zinc-800 bg-zinc-900/60 text-zinc-200 text-xs flex items-center justify-between">
               <div className="flex items-center gap-2 font-semibold">
-                <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                <CheckCircle2 className="w-4 h-4 shrink-0 text-zinc-200" />
                 <span>Telegram Connected</span>
               </div>
               {telegramConnection?.telegram_username && (
-                <span className="text-[10px] font-mono text-emerald-600 dark:text-emerald-400/80 bg-emerald-500/10 px-2 py-0.5 rounded-full">
+                <span className="text-[10px] font-mono text-zinc-300 bg-zinc-800 px-2 py-0.5 rounded-full">
                   @{telegramConnection.telegram_username}
                 </span>
               )}
@@ -377,9 +377,9 @@ export const WatcherTab: React.FC<WatcherTabProps> = ({
                         <span>{pair.symbol}</span>
                         <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wider uppercase border ${
                           isBullish
-                            ? 'bg-emerald-50 dark:bg-[#0c1c0c] text-emerald-600 dark:text-emerald-500 border-emerald-200 dark:border-emerald-950/80'
+                            ? 'bg-zinc-800 text-zinc-100 border-zinc-700'
                             : isBearish
-                            ? 'bg-rose-50 dark:bg-[#1c0c0c] text-rose-600 dark:text-red-500 border-rose-200 dark:border-red-950/80'
+                            ? 'bg-rose-950/60 text-rose-300 border-rose-900/80'
                             : 'bg-zinc-50 dark:bg-zinc-900 text-zinc-500 dark:text-zinc-400 border-zinc-200 dark:border-zinc-800'
                         }`}>
                           {pair.direction}
@@ -408,12 +408,12 @@ export const WatcherTab: React.FC<WatcherTabProps> = ({
                         <svg className="w-full h-full overflow-visible" viewBox="0 0 100 24" preserveAspectRatio="none">
                           <defs>
                             <linearGradient id={`watcher-grad-${pair.symbol}`} x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="0%" stopColor={isBearish ? "#ef4444" : "#10b981"} stopOpacity="0.25"/>
-                              <stop offset="100%" stopColor={isBearish ? "#ef4444" : "#10b981"} stopOpacity="0.0"/>
+                              <stop offset="0%" stopColor={isBearish ? "#ef4444" : "#ffffff"} stopOpacity="0.25"/>
+                              <stop offset="100%" stopColor={isBearish ? "#ef4444" : "#ffffff"} stopOpacity="0.0"/>
                             </linearGradient>
                           </defs>
                           <path d={fillD} fill={`url(#watcher-grad-${pair.symbol})`} />
-                          <path d={lineD} fill="none" stroke={isBearish ? "#ef4444" : "#10b981"} strokeWidth="1.2" />
+                          <path d={lineD} fill="none" stroke={isBearish ? "#ef4444" : "#ffffff"} strokeWidth="1.2" />
                         </svg>
                       )}
                     </div>
@@ -424,7 +424,7 @@ export const WatcherTab: React.FC<WatcherTabProps> = ({
                       ) : (
                         <>
                           <div className="text-lg font-bold text-zinc-950 dark:text-white tracking-tight">{(pair.price || 0).toLocaleString(undefined, { minimumFractionDigits: (pair.price || 0) > 10 ? 2 : 4 })}</div>
-                          <div className={`text-xs font-semibold flex items-center justify-end gap-0.5 ${pair.change >= 0 ? 'text-emerald-600 dark:text-emerald-500' : 'text-rose-600 dark:text-red-500'}`}>
+                          <div className={`text-xs font-semibold flex items-center justify-end gap-0.5 ${pair.change >= 0 ? 'text-zinc-200' : 'text-rose-400'}`}>
                             {pair.change >= 0 ? '+' : ''}{pair.change}%
                           </div>
                         </>

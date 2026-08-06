@@ -83,7 +83,7 @@ export const StrategyTab: React.FC<StrategyTabProps> = ({
             </>
           ) : (
             <>
-              <Check className="w-4 h-4 text-emerald-500 stroke-[2.5]" />
+              <Check className="w-4 h-4 text-zinc-300 stroke-[2.5]" />
               <span className="text-xs text-zinc-400 dark:text-zinc-500 font-medium">All changes saved</span>
             </>
           )}
@@ -98,7 +98,7 @@ export const StrategyTab: React.FC<StrategyTabProps> = ({
           <div className="rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-[#0c0c0e]/80 overflow-hidden flex flex-col">
             <div className="px-5 py-4 border-b border-zinc-200 dark:border-zinc-900 flex flex-wrap items-center justify-between gap-3 bg-zinc-100/50 dark:bg-[#08080a]">
               <div className="flex items-center gap-2.5">
-                <span className={`w-2 h-2 rounded-full ${selectedStrat.id === activeStrategyId ? 'bg-emerald-500 animate-pulse' : 'bg-zinc-600'}`}></span>
+                <span className={`w-2 h-2 rounded-full ${selectedStrat.id === activeStrategyId ? 'bg-white animate-pulse' : 'bg-zinc-600'}`}></span>
                 <span className="text-xs font-bold text-zinc-700 dark:text-white uppercase tracking-wider">Strategy Editor</span>
               </div>
 
@@ -124,8 +124,8 @@ export const StrategyTab: React.FC<StrategyTabProps> = ({
                 </button>
 
                 {selectedStrat.id === activeStrategyId ? (
-                  <span className="text-[10px] bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 px-2.5 py-1 rounded-full font-bold uppercase tracking-wider flex items-center gap-1.5">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                  <span className="text-[10px] bg-zinc-800 border border-zinc-700 text-zinc-100 px-2.5 py-1 rounded-full font-bold uppercase tracking-wider flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-white"></span>
                     Active
                   </span>
                 ) : (

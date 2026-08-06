@@ -2,12 +2,8 @@ import React from 'react';
 import { 
   Shield, 
   User as UserIcon, 
-  Palette, 
   Check, 
   LogOut, 
-  Sun, 
-  Moon, 
-  Monitor,
   Sparkles
 } from 'lucide-react';
 
@@ -21,8 +17,6 @@ export interface SettingsTabProps {
   session: any;
   handleUpdateProfile: (e: React.FormEvent) => void;
   isProfileUpdating: boolean;
-  profileTheme: 'light' | 'dark' | 'system';
-  setProfileTheme: (theme: 'light' | 'dark' | 'system') => void;
   geminiKey: string;
   setGeminiKey: (val: string) => void;
   geminiKeyExists: boolean;
@@ -41,8 +35,6 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
   session,
   handleUpdateProfile,
   isProfileUpdating,
-  profileTheme,
-  setProfileTheme,
   geminiKey,
   setGeminiKey,
   geminiKeyExists,
@@ -55,9 +47,9 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
       
       {/* Premium Profile Header Card - Centered Design */}
       <div className="relative p-10 rounded-[40px] border border-zinc-200 dark:border-zinc-800/50 bg-gradient-to-b from-zinc-50 to-white dark:from-[#121214] dark:to-[#08080a] overflow-hidden shadow-2xl">
-        {/* Subtle light leak effect */}
-        <div className="absolute -top-20 -left-20 w-64 h-64 bg-emerald-500/10 dark:bg-emerald-500/5 blur-[100px] rounded-full"></div>
-        <div className="absolute -bottom-20 -right-20 w-64 h-64 bg-emerald-500/10 dark:bg-emerald-500/5 blur-[100px] rounded-full"></div>
+        {/* Subtle glow effect */}
+        <div className="absolute -top-20 -left-20 w-64 h-64 bg-zinc-500/5 blur-[100px] rounded-full"></div>
+        <div className="absolute -bottom-20 -right-20 w-64 h-64 bg-zinc-500/5 blur-[100px] rounded-full"></div>
         
         <div className="relative flex flex-col items-center text-center space-y-6">
           {/* Avatar Container */}
@@ -73,7 +65,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
             </div>
             {/* Status Ring */}
             <div className="absolute -bottom-1 -right-1 w-8 h-8 rounded-2xl bg-white dark:bg-[#0c0c0e] border border-zinc-200 dark:border-zinc-800 flex items-center justify-center">
-              <div className="w-3 h-3 rounded-full bg-emerald-500 shadow-[0_0_12px_rgba(16,185,129,0.5)]"></div>
+              <div className="w-3 h-3 rounded-full bg-white shadow-[0_0_12px_rgba(255,255,255,0.6)]"></div>
             </div>
           </div>
 
@@ -81,7 +73,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
             <div className="flex flex-col items-center gap-2">
               <h2 className="text-3xl font-semibold text-zinc-950 dark:text-white tracking-tighter font-display">{profileFullName || 'Gaks User'}</h2>
               <div className="flex items-center gap-2">
-                <span className="inline-flex px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-[10px] font-bold uppercase tracking-widest">
+                <span className="inline-flex px-3 py-1 rounded-full bg-zinc-800/50 border border-zinc-700/50 text-zinc-200 text-[10px] font-bold uppercase tracking-widest">
                   {profilePlan || 'Free'} Plan
                 </span>
                 <div className="w-1 h-1 rounded-full bg-zinc-200 dark:bg-zinc-800"></div>
@@ -91,7 +83,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
             
             <div className="pt-2 flex items-center justify-center gap-3">
               <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-zinc-100/50 dark:bg-zinc-950/40 border border-zinc-200 dark:border-zinc-900/50">
-                <Shield className="w-3 h-3 text-emerald-500" />
+                <Shield className="w-3 h-3 text-zinc-400" />
                 <span className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-widest">Database Synced</span>
               </div>
             </div>
@@ -154,7 +146,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
                         onClick={() => setProfilePlan(plan.id)}
                         className={`w-full text-left p-4 rounded-2xl border transition-all cursor-pointer relative group ${
                           isSelected
-                            ? 'bg-zinc-950 dark:bg-zinc-900/40 border-emerald-500 shadow-[0_0_20px_rgba(16,185,129,0.1)]'
+                            ? 'bg-zinc-950 dark:bg-zinc-900/60 border-zinc-500 shadow-[0_0_20px_rgba(255,255,255,0.05)]'
                             : 'bg-white dark:bg-zinc-950/20 border-zinc-200 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700'
                         }`}
                       >
@@ -165,7 +157,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
                                 {plan.id}
                               </span>
                               {isSelected && (
-                                <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 text-[8px] font-bold uppercase tracking-widest">
+                                <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-zinc-800 border border-zinc-700 text-zinc-200 text-[8px] font-bold uppercase tracking-widest">
                                   Active
                                 </span>
                               )}
@@ -175,7 +167,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
                             </p>
                           </div>
                           <div className="text-right">
-                            <div className={`text-[15px] font-bold tracking-tight ${isSelected ? 'text-emerald-500' : 'text-zinc-900 dark:text-zinc-100'}`}>
+                            <div className={`text-[15px] font-bold tracking-tight ${isSelected ? 'text-white' : 'text-zinc-900 dark:text-zinc-100'}`}>
                               {plan.price}
                             </div>
                             <div className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest">Per Month</div>
@@ -183,7 +175,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
                         </div>
                         {isSelected && (
                           <div className="absolute top-2 right-2">
-                            <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,1)]"></div>
+                            <div className="w-1.5 h-1.5 rounded-full bg-white shadow-[0_0_8px_rgba(255,255,255,1)]"></div>
                           </div>
                         )}
                       </button>
@@ -210,55 +202,8 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
           </form>
         </div>
 
-        {/* Appearance & AI Configuration */}
+        {/* AI Configuration */}
         <div className="space-y-8">
-          
-          {/* Theme Selector Section */}
-          <div className="space-y-6">
-            <div className="flex items-center gap-2 px-1">
-              <Palette className="w-4 h-4 text-zinc-400 dark:text-zinc-500" />
-              <h3 className="text-xs font-bold text-zinc-900 dark:text-white uppercase tracking-widest">Appearance</h3>
-            </div>
-            
-            <div className="p-8 rounded-[32px] border border-zinc-100 dark:border-zinc-900 bg-zinc-50/50 dark:bg-[#0c0c0e]/60 space-y-6">
-              <div className="grid grid-cols-3 gap-3">
-                {[
-                  { id: 'light', label: 'Light', icon: Sun },
-                  { id: 'dark', label: 'Dark', icon: Moon },
-                  { id: 'system', label: 'System', icon: Monitor }
-                ].map((theme) => {
-                  const Icon = theme.icon;
-                  const isSelected = profileTheme === theme.id;
-                  return (
-                    <button
-                      key={theme.id}
-                      onClick={() => setProfileTheme(theme.id as any)}
-                      className={`flex flex-col items-center gap-3 p-4 rounded-[24px] border transition-all cursor-pointer group ${
-                        isSelected
-                          ? 'bg-zinc-900 dark:bg-white border-zinc-900 dark:border-white'
-                          : 'bg-white dark:bg-zinc-950/40 border-zinc-200 dark:border-zinc-900 hover:border-zinc-300 dark:hover:border-zinc-800'
-                      }`}
-                    >
-                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center transition-colors ${
-                        isSelected ? 'bg-zinc-800 dark:bg-zinc-100 text-white dark:text-black' : 'bg-zinc-100 dark:bg-zinc-900 text-zinc-400 dark:text-zinc-500 group-hover:text-zinc-600 dark:group-hover:text-zinc-300'
-                      }`}>
-                        <Icon className="w-5 h-5" />
-                      </div>
-                      <span className={`text-[10px] font-bold uppercase tracking-wider ${
-                        isSelected ? 'text-white dark:text-black' : 'text-zinc-400 dark:text-zinc-500 group-hover:text-zinc-600 dark:group-hover:text-zinc-300'
-                      }`}>
-                        {theme.label}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-              <p className="text-[10px] text-zinc-400 dark:text-zinc-600 text-center px-4">
-                Interface updates instantly across all views. {profileTheme === 'system' ? 'Currently matching your device preferences.' : ''}
-              </p>
-            </div>
-          </div>
-
           {/* AI Settings Section */}
           <div className="space-y-6">
             <div className="flex items-center gap-2 px-1">

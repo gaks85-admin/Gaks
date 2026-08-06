@@ -124,9 +124,6 @@ export async function runGeminiRequest(
 }
 
 
-// In-memory duplicate cache for signal registration (15-min window per watcher)
-const registeredSignalsCache = new Map<string, { hash: string; timestamp: number }>();
-
 export interface SignalPayload {
   pair: string;
   timeframe?: string;
@@ -158,13 +155,44 @@ export async function registerSignal(
   const signalHash = `${signal.pair}_${signal.direction}_${signal.entryPrice}`;
 
   try {
-    // 1. Duplicate Check
-    const cached = registeredSignalsCache.get(watcher.id);
-    const now = Date.now();
-    const isDuplicate = !!(cached && cached.hash === signalHash && (now - cached.timestamp < 15 * 60 * 1000));
+    // 1. Duplicate Check via Supabase (15-min window per watcher)
+    const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+    
+    // Check signal_fingerprints table in Supabase
+    try {
+      const { data: existingFingerprints } = await supabase
+        .from('signal_fingerprints')
+        .select('id')
+        .eq('watcher_id', watcher.id)
+        .eq('fingerprint', signalHash)
+        .gte('created_at', fifteenMinutesAgo)
+        .limit(1);
 
-    if (isDuplicate) {
-      return false;
+      if (existingFingerprints && existingFingerprints.length > 0) {
+        console.log(`[registerSignal] Duplicate signal fingerprint detected in Supabase for watcher ${watcher.id}. Skipping.`);
+        return false;
+      }
+    } catch (fpQueryErr) {
+      console.warn(`[registerSignal] Error querying signal_fingerprints from Supabase:`, fpQueryErr);
+    }
+
+    // Secondary fallback check against scan_evaluations
+    try {
+      const { data: recentEvaluations } = await supabase
+        .from('scan_evaluations')
+        .select('id')
+        .eq('watcher_id', watcher.id)
+        .eq('pair', signal.pair)
+        .eq('trade_sent', true)
+        .gte('created_at', fifteenMinutesAgo)
+        .limit(1);
+
+      if (recentEvaluations && recentEvaluations.length > 0) {
+        console.log(`[registerSignal] Recent trade alert already recorded in scan_evaluations for watcher ${watcher.id}. Skipping.`);
+        return false;
+      }
+    } catch (evalErr) {
+      // Ignore evaluation table check errors if table doesn't exist
     }
 
     // 2. Insert/Update registration log in database
@@ -184,17 +212,27 @@ export async function registerSignal(
       return false;
     }
 
-    // 3. Save to duplicate cache
-    registeredSignalsCache.set(watcher.id, { hash: signalHash, timestamp: now });
+    // 3. Save signal fingerprint to Supabase
+    try {
+      await supabase
+        .from('signal_fingerprints')
+        .insert({
+          watcher_id: watcher.id,
+          fingerprint: signalHash,
+          pair: signal.pair,
+          direction: signal.direction,
+          entry_price: String(signal.entryPrice),
+          created_at: new Date().toISOString()
+        });
+    } catch (insertFpErr) {
+      console.warn(`[registerSignal] Could not insert signal fingerprint into Supabase:`, insertFpErr);
+    }
 
-    console.log(`[registerSignal] Signal registered successfully for ${signal.pair}.`);
-    console.log("[REGISTER] Returning:", true);
+    console.log(`[registerSignal] Signal registered successfully in Supabase for ${signal.pair}.`);
     return true;
 
   } catch (err: any) {
     console.error(`[registerSignal] Exception caught during signal registration:`, err);
-    console.error(`[REGISTER] Exception stack:`, err?.stack || err);
-    console.log("[REGISTER] Returning:", false);
     return false;
   }
 }
@@ -582,28 +620,40 @@ export default async function handler(req: any, res: any) {
     const cleanToken = token ? token.replace(/^['"]|['"]$/g, '').trim() : "";
     const cleanCronSecret = cronSecretRaw ? cronSecretRaw.trim().replace(/^['"]|['"]$/g, '').trim() : "";
 
-    let authorized = true;
-    let authFailureReason = "";
-
-    if (cleanCronSecret) {
-      if (!authHeader) {
-        authorized = false;
-        authFailureReason = "Authorization header is missing.";
-      } else if (!cleanToken) {
-        authorized = false;
-        authFailureReason = "No token could be extracted from Authorization header.";
-      } else if (cleanToken !== cleanCronSecret) {
-        authorized = false;
-        authFailureReason = "Token mismatch.";
-      }
+    // Strictly enforce CRON_SECRET requirement
+    if (!cleanCronSecret) {
+      console.warn("LOG: Forbidden access attempt - CRON_SECRET environment variable is missing on server.");
+      return res.status(403).json({
+        success: false,
+        error: "Forbidden",
+        reason: "CRON_SECRET environment variable is not configured on the server."
+      });
     }
 
-    if (!authorized) {
-      console.warn(`LOG: Unauthorized access attempt: ${authFailureReason}`);
+    if (!authHeader) {
+      console.warn("LOG: Unauthorized access attempt - missing Authorization header.");
       return res.status(401).json({
         success: false,
         error: "Unauthorized",
-        reason: authFailureReason
+        reason: "Authorization header is missing."
+      });
+    }
+
+    if (!cleanToken) {
+      console.warn("LOG: Unauthorized access attempt - invalid Authorization token format.");
+      return res.status(401).json({
+        success: false,
+        error: "Unauthorized",
+        reason: "No token could be extracted from Authorization header."
+      });
+    }
+
+    if (cleanToken !== cleanCronSecret) {
+      console.warn("LOG: Unauthorized access attempt - token mismatch.");
+      return res.status(401).json({
+        success: false,
+        error: "Unauthorized",
+        reason: "Invalid or mismatched Bearer token."
       });
     }
 

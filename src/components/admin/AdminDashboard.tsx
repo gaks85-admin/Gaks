@@ -18,7 +18,7 @@ const Toast = ({ message, type, onClose }: { message: string; type: 'success' | 
 
   return (
     <div className="fixed bottom-6 right-6 z-50 max-w-sm px-4 py-3 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 flex items-center gap-2.5 shadow-2xl animate-fade-in">
-      <div className={`p-1 rounded-full ${type === 'success' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'bg-red-500/10 text-red-600 dark:text-red-400'}`}>
+      <div className={`p-1 rounded-full ${type === 'success' ? 'bg-zinc-800 text-zinc-200' : 'bg-red-500/10 text-red-600 dark:text-red-400'}`}>
         {type === 'success' ? <Check className="w-4 h-4 stroke-[2.5]" /> : <AlertTriangle className="w-4 h-4" />}
       </div>
       <span className="text-xs font-semibold text-zinc-800 dark:text-zinc-200">{message}</span>
@@ -78,7 +78,7 @@ const DashboardPage = ({ fetchWithAuth }: { fetchWithAuth: any }) => {
   }
 
   const statCards = [
-    { label: "Total Active Watchers", value: stats?.activeWatchers || 0, desc: "Scanners actively running in background", icon: Eye, color: "text-emerald-400 bg-emerald-500/10 border-emerald-500/20" },
+    { label: "Total Active Watchers", value: stats?.activeWatchers || 0, desc: "Scanners actively running in background", icon: Eye, color: "text-zinc-200 bg-zinc-800 border-zinc-700" },
     { label: "Total Pairs Being Monitored", value: stats?.totalPairsMonitored || 0, desc: "Unique currency and crypto trading pairs", icon: Activity, color: "text-blue-400 bg-blue-500/10 border-blue-500/20" },
     { label: "Total Signals Sent", value: stats?.totalSignalsSent || 0, desc: "Total alerts processed historically", icon: Zap, color: "text-purple-400 bg-purple-500/10 border-purple-500/20" },
     { label: "Last Scan Time", value: stats?.lastCronRun ? new Date(stats.lastCronRun).toLocaleTimeString() : "Never", desc: stats?.lastCronRun ? new Date(stats.lastCronRun).toLocaleDateString() : "No scan executed yet", icon: Clock, color: "text-amber-400 bg-amber-500/10 border-amber-500/20" },
@@ -126,7 +126,7 @@ const DashboardPage = ({ fetchWithAuth }: { fetchWithAuth: any }) => {
           <div className="space-y-3.5">
             <div className="flex justify-between items-center py-2 border-b border-zinc-200 dark:border-zinc-900/60">
               <span className="text-xs text-zinc-500 dark:text-zinc-400">System Status</span>
-              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">OPERATIONAL</span>
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-zinc-800 text-zinc-200 border border-zinc-700">OPERATIONAL</span>
             </div>
             <div className="flex justify-between items-center py-2 border-b border-zinc-200 dark:border-zinc-900/60">
               <span className="text-xs text-zinc-500 dark:text-zinc-400">Last Scanner Run</span>
@@ -386,7 +386,7 @@ const SendTestNotificationCard = ({ fetchWithAuth }: { fetchWithAuth: any }) => 
         {status && (
           <div className={`p-3 rounded-xl text-xs flex items-start gap-2.5 border ${
             status.type === 'success' 
-              ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-400' 
+              ? 'bg-zinc-800 border-zinc-700 text-zinc-200' 
               : 'bg-red-500/10 border-red-500/20 text-red-600 dark:text-red-400'
           }`}>
             {status.type === 'success' ? (
@@ -613,7 +613,7 @@ const UsersPage = ({ fetchWithAuth, showToast }: { fetchWithAuth: any; showToast
                     </td>
                     <td className="py-4 px-5 text-center">
                       <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border ${
-                        (!user.gemini_status || user.gemini_status === 'READY') ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20' :
+                        (!user.gemini_status || user.gemini_status === 'READY') ? 'bg-zinc-800 text-zinc-200 border-zinc-700' :
                         user.gemini_status === 'QUOTA_EXHAUSTED' ? 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/20' :
                         user.gemini_status === 'INVALID_KEY' ? 'bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/20' :
                         user.gemini_status === 'BILLING_REQUIRED' ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20' :
@@ -624,7 +624,7 @@ const UsersPage = ({ fetchWithAuth, showToast }: { fetchWithAuth: any; showToast
                     </td>
                     <td className="py-4 px-5 text-center">
                       <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border ${
-                        user.watcher_status === 'active' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20' :
+                        user.watcher_status === 'active' ? 'bg-zinc-800 text-zinc-200 border-zinc-700' :
                         user.watcher_status === 'paused' ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20' :
                         'bg-zinc-100 dark:bg-zinc-900 text-zinc-500 border-zinc-200 dark:border-zinc-900'
                       }`}>
@@ -662,7 +662,7 @@ const UsersPage = ({ fetchWithAuth, showToast }: { fetchWithAuth: any; showToast
                           <button 
                             onClick={() => handleUserAction(user.id, 'resume')}
                             disabled={actionLoading !== null}
-                            className="p-1.5 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 rounded-lg transition-colors cursor-pointer"
+                            className="p-1.5 text-zinc-200 hover:bg-zinc-800 rounded-lg transition-colors cursor-pointer"
                             title="Resume Scanner"
                           >
                             <Play className="w-3.5 h-3.5" />
@@ -778,7 +778,7 @@ const UsersPage = ({ fetchWithAuth, showToast }: { fetchWithAuth: any; showToast
               ) : (
                 <button 
                   onClick={() => handleUserAction(selectedUser.id, 'resume')}
-                  className="flex-1 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-xs font-bold hover:bg-emerald-500/20 transition-all cursor-pointer"
+                  className="flex-1 py-2 rounded-xl bg-zinc-800 border border-zinc-700 text-zinc-200 text-xs font-bold hover:bg-zinc-700 transition-all cursor-pointer"
                 >
                   Activate Scanner
                 </button>
@@ -980,7 +980,7 @@ const WatchersPage = ({ fetchWithAuth, showToast }: { fetchWithAuth: any; showTo
                     gStatus === 'TEMP_ERROR' ? 'TEMP ERROR' : 'READY';
                   
                   const gBadgeColor = 
-                    gStatus === 'READY' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/10' :
+                    gStatus === 'READY' ? 'bg-zinc-800 text-zinc-200 border-zinc-700' :
                     gStatus === 'QUOTA_EXHAUSTED' ? 'bg-amber-500/10 text-amber-400 border-amber-500/10' :
                     gStatus === 'TEMP_ERROR' ? 'bg-amber-500/10 text-amber-400 border-amber-500/10' :
                     'bg-rose-500/10 text-rose-400 border-rose-500/10';
@@ -997,7 +997,7 @@ const WatchersPage = ({ fetchWithAuth, showToast }: { fetchWithAuth: any; showTo
                       <td className="py-4 px-5 text-xs text-zinc-500 dark:text-zinc-400 font-semibold">{watcher.selected_timeframe}</td>
                       <td className="py-4 px-5">
                         <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border ${
-                          watcher.status === 'active' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20' :
+                          watcher.status === 'active' ? 'bg-zinc-800 text-zinc-200 border-zinc-700' :
                           watcher.status === 'paused' ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20' :
                           'bg-zinc-100 dark:bg-zinc-900 text-zinc-400 dark:text-zinc-500 border-zinc-200 dark:border-zinc-900'
                         }`}>
@@ -1036,7 +1036,7 @@ const WatchersPage = ({ fetchWithAuth, showToast }: { fetchWithAuth: any; showTo
                           <button 
                             onClick={() => handleWatcherAction(watcher.id, 'restart')}
                             disabled={actionLoading === watcher.id}
-                            className="p-1.5 text-emerald-400 hover:bg-emerald-500/10 rounded-lg transition-colors cursor-pointer"
+                            className="p-1.5 text-zinc-200 hover:bg-zinc-800 rounded-lg transition-colors cursor-pointer"
                             title="Restart / Start Watcher"
                           >
                             <Play className="w-3.5 h-3.5" />
@@ -1100,7 +1100,7 @@ const WatchersPage = ({ fetchWithAuth, showToast }: { fetchWithAuth: any; showTo
               </div>
             ) : (
               <div className="space-y-4">
-                <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-xl flex items-center gap-2.5 text-xs font-semibold">
+                <div className="p-3 bg-zinc-800 border border-zinc-700 text-zinc-200 rounded-xl flex items-center gap-2.5 text-xs font-semibold">
                   <CheckCircle2 className="w-4 h-4" />
                   <span>Gemini Market Analysis complete! logged {foundSignals.length} signals.</span>
                 </div>
@@ -1115,7 +1115,7 @@ const WatchersPage = ({ fetchWithAuth, showToast }: { fetchWithAuth: any; showTo
                       <div key={idx} className="p-4 bg-zinc-950 rounded-xl border border-zinc-900 space-y-2 text-xs">
                         <div className="flex justify-between items-center">
                           <span className="font-extrabold text-white text-sm">{sig.pair}</span>
-                          <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold ${sig.direction === 'BUY' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'}`}>
+                          <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold ${sig.direction === 'BUY' ? 'bg-zinc-800 text-zinc-100' : 'bg-rose-500/10 text-rose-400'}`}>
                             {sig.direction}
                           </span>
                         </div>
@@ -1337,7 +1337,7 @@ const SignalsPage = ({ fetchWithAuth }: { fetchWithAuth: any }) => {
                     <td className="py-4 px-5 font-bold text-xs text-white">{sig.pair}</td>
                     <td className="py-4 px-5 text-center">
                       <span className={`inline-flex px-2 py-0.5 rounded-full text-[9px] font-bold ${
-                        sig.signal_type === 'BUY' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/10' :
+                        sig.signal_type === 'BUY' ? 'bg-zinc-800 text-zinc-100 border border-zinc-700' :
                         sig.signal_type === 'SELL' ? 'bg-rose-500/10 text-rose-400 border border-rose-500/10' :
                         'bg-zinc-900 text-zinc-400 border border-zinc-800'
                       }`}>
@@ -1349,7 +1349,7 @@ const SignalsPage = ({ fetchWithAuth }: { fetchWithAuth: any }) => {
                         <span className="text-xs font-bold text-sky-400 font-mono">{sig.confidence || 0}%</span>
                         <div className="w-16 bg-zinc-900 h-1.5 rounded-full overflow-hidden mt-1 border border-zinc-800/40">
                           <div 
-                            className={`h-full rounded-full ${sig.confidence >= 80 ? 'bg-emerald-400' : sig.confidence >= 70 ? 'bg-amber-400' : 'bg-zinc-600'}`}
+                            className={`h-full rounded-full ${sig.confidence >= 80 ? 'bg-zinc-200' : sig.confidence >= 70 ? 'bg-amber-400' : 'bg-zinc-600'}`}
                             style={{ width: `${sig.confidence || 0}%` }}
                           />
                         </div>
@@ -1511,7 +1511,7 @@ const SystemHealthPage = ({ fetchWithAuth }: { fetchWithAuth: any }) => {
                 <div>
                   <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Backend API</span>
                   <div className="flex items-center gap-2 mt-2">
-                    <span className="text-emerald-500">🟢</span>
+                    <span className="w-2 h-2 rounded-full bg-white"></span>
                     <span className="text-xs font-bold text-zinc-200">HEALTHY</span>
                   </div>
                 </div>
@@ -1523,7 +1523,7 @@ const SystemHealthPage = ({ fetchWithAuth }: { fetchWithAuth: any }) => {
                 <div>
                   <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Database</span>
                   <div className="flex items-center gap-2 mt-2">
-                    <span>{health?.database === 'healthy' ? '🟢' : health?.database === 'slow' ? '🟡' : '🔴'}</span>
+                    {health?.database === 'healthy' ? <span className="w-2 h-2 rounded-full bg-white"></span> : <span>{health?.database === 'slow' ? '🟡' : '🔴'}</span>}
                     <span className="text-xs font-bold text-zinc-200 uppercase">{health?.database}</span>
                   </div>
                 </div>
@@ -1535,7 +1535,7 @@ const SystemHealthPage = ({ fetchWithAuth }: { fetchWithAuth: any }) => {
                 <div>
                   <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Telegram Bot</span>
                   <div className="flex items-center gap-2 mt-2">
-                    <span>{health?.telegram === 'healthy' ? '🟢' : health?.telegram === 'warning' ? '🟡' : '🔴'}</span>
+                    {health?.telegram === 'healthy' ? <span className="w-2 h-2 rounded-full bg-white"></span> : <span>{health?.telegram === 'warning' ? '🟡' : '🔴'}</span>}
                     <span className="text-xs font-bold text-zinc-200 uppercase">{health?.telegram}</span>
                   </div>
                 </div>
@@ -1547,7 +1547,7 @@ const SystemHealthPage = ({ fetchWithAuth }: { fetchWithAuth: any }) => {
                 <div>
                   <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Gemini AI</span>
                   <div className="flex items-center gap-2 mt-2">
-                    <span>{health?.gemini === 'healthy' ? '🟢' : '🔴'}</span>
+                    {health?.gemini === 'healthy' ? <span className="w-2 h-2 rounded-full bg-white"></span> : <span>🔴</span>}
                     <span className="text-xs font-bold text-zinc-200 uppercase truncate max-w-[80px] block" title={health?.gemini}>{health?.gemini}</span>
                   </div>
                 </div>
@@ -1559,7 +1559,7 @@ const SystemHealthPage = ({ fetchWithAuth }: { fetchWithAuth: any }) => {
                 <div>
                   <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Cron Jobs</span>
                   <div className="flex items-center gap-2 mt-2">
-                    <span>{health?.cron === 'running' ? '🟢' : '🔴'}</span>
+                    {health?.cron === 'running' ? <span className="w-2 h-2 rounded-full bg-white"></span> : <span>🔴</span>}
                     <span className="text-xs font-bold text-zinc-200 uppercase">{health?.cron}</span>
                   </div>
                 </div>
@@ -1571,7 +1571,7 @@ const SystemHealthPage = ({ fetchWithAuth }: { fetchWithAuth: any }) => {
                 <div>
                   <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Learning Core</span>
                   <div className="flex items-center gap-2 mt-2">
-                    <span>{health?.learning_engine === 'healthy' ? '🟢' : '🔴'}</span>
+                    {health?.learning_engine === 'healthy' ? <span className="w-2 h-2 rounded-full bg-white"></span> : <span>🔴</span>}
                     <span className="text-xs font-bold text-zinc-200 uppercase truncate max-w-[80px] block" title={health?.learning_engine}>{health?.learning_engine === 'healthy' ? 'healthy' : 'Database Error'}</span>
                   </div>
                 </div>
@@ -1612,7 +1612,7 @@ const SystemHealthPage = ({ fetchWithAuth }: { fetchWithAuth: any }) => {
                   </div>
                   <div className="flex justify-between items-baseline">
                     <span className="text-zinc-500 text-xs">Signals Sent:</span>
-                    <span className="text-xl font-bold text-emerald-400">{health?.today_signals || 0}</span>
+                    <span className="text-xl font-bold text-white">{health?.today_signals || 0}</span>
                   </div>
                 </div>
                 <span className="text-[9px] text-zinc-500 mt-3 font-semibold">Signals detected and pushed</span>
@@ -1660,7 +1660,7 @@ const SystemHealthPage = ({ fetchWithAuth }: { fetchWithAuth: any }) => {
               <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 text-xs font-mono">
                 <div className="p-3 bg-zinc-900/40 border border-zinc-900 rounded-xl">
                   <span className="text-zinc-500 text-[10px] block mb-1">Average Scan Speed</span>
-                  <span className="text-lg font-bold text-emerald-400">{health?.average_scan_ms || 0} ms</span>
+                  <span className="text-lg font-bold text-white">{health?.average_scan_ms || 0} ms</span>
                 </div>
                 <div className="p-3 bg-zinc-900/40 border border-zinc-900 rounded-xl">
                   <span className="text-zinc-500 text-[10px] block mb-1">Average Gemini Latency</span>
@@ -1715,7 +1715,7 @@ const SystemHealthPage = ({ fetchWithAuth }: { fetchWithAuth: any }) => {
                           <td className="p-4 whitespace-nowrap">
                             <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider border ${
                               isSuccess 
-                                ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/10' 
+                                ? 'bg-zinc-800 text-zinc-200 border-zinc-700' 
                                 : 'bg-red-500/10 text-red-400 border-red-500/10'
                             }`}>
                               {log.status}
@@ -1938,14 +1938,14 @@ const LiveLogsPage = ({ fetchWithAuth }: { fetchWithAuth: any }) => {
             <div key={run.id} className="bg-zinc-950 border border-zinc-900 rounded-2xl overflow-hidden shadow-xl">
               <div className="px-5 py-3 bg-zinc-900/50 border-b border-zinc-900 flex justify-between items-center">
                 <div className="flex items-center gap-3">
-                  <div className={`w-2 h-2 rounded-full ${run.status === 'success' ? 'bg-emerald-500' : 'bg-red-500'}`} />
+                  <div className={`w-2 h-2 rounded-full ${run.status === 'success' ? 'bg-white' : 'bg-red-500'}`} />
                   <span className="text-xs font-bold text-zinc-200">{run.pair}</span>
                   <span className="text-[10px] text-zinc-500 font-mono">{new Date(run.run_time).toLocaleString()}</span>
                 </div>
                 <div className="flex items-center gap-4">
                   <div className="text-[10px]">
                     <span className="text-zinc-500">Signal: </span>
-                    <span className={`font-bold ${run.final_signal === 'BUY' ? 'text-emerald-400' : run.final_signal === 'SELL' ? 'text-red-400' : 'text-zinc-400'}`}>
+                    <span className={`font-bold ${run.final_signal === 'BUY' ? 'text-zinc-200' : run.final_signal === 'SELL' ? 'text-red-400' : 'text-zinc-400'}`}>
                       {run.final_signal || 'N/A'}
                     </span>
                   </div>
@@ -1960,7 +1960,7 @@ const LiveLogsPage = ({ fetchWithAuth }: { fetchWithAuth: any }) => {
                   <div key={idx} className="flex gap-3">
                     <span className="text-zinc-600 shrink-0">[{log.time}]</span>
                     <span className={`${
-                      log.type === 'success' ? 'text-emerald-500' : 
+                      log.type === 'success' ? 'text-zinc-300' : 
                       log.type === 'error' ? 'text-red-500' : 
                       log.type === 'warning' ? 'text-amber-500' : 
                       'text-zinc-400'

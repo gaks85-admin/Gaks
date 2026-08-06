@@ -139,7 +139,7 @@ export default function ResetPassword({ onComplete }: ResetPasswordProps) {
           <div className="w-16 h-16 rounded-[22px] bg-white dark:bg-[#0c0c0e] border border-zinc-200 dark:border-[#262626] flex items-center justify-center shadow-[0_12px_36px_rgba(0,0,0,0.1)] dark:shadow-[0_12px_36px_rgba(0,0,0,0.9)] mb-5 relative group overflow-hidden">
             <div className="absolute inset-0 bg-gradient-to-tr from-zinc-500/[0.03] dark:from-white/[0.06] via-transparent to-transparent pointer-events-none" />
             <span className="text-3xl font-black tracking-tighter text-zinc-950 dark:text-white">G</span>
-            <div className="absolute top-2.5 right-2.5 w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.8)]" />
+            <div className="absolute top-2.5 right-2.5 w-1.5 h-1.5 rounded-full bg-white shadow-[0_0_10px_rgba(255,255,255,0.8)]" />
           </div>
           <div className="flex items-center gap-1.5">
             <span className="text-xl font-bold tracking-tight text-zinc-950 dark:text-white">Gaks</span>
@@ -182,7 +182,7 @@ export default function ResetPassword({ onComplete }: ResetPasswordProps) {
               animate={{ opacity: 1, scale: 1 }}
               className="p-7 sm:p-8 rounded-[24px] border border-zinc-200 dark:border-[#262626] bg-white dark:bg-[#0c0c0e] text-center space-y-6 shadow-2xl relative overflow-hidden"
             >
-              <div className="w-14 h-14 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 dark:text-emerald-400 flex items-center justify-center mx-auto shadow-[0_0_30px_rgba(16,185,129,0.15)]">
+              <div className="w-14 h-14 rounded-full bg-zinc-800 border border-zinc-700 text-zinc-100 flex items-center justify-center mx-auto shadow-[0_0_30px_rgba(255,255,255,0.1)]">
                 <CheckCircle2 className="w-7 h-7 stroke-[2]" />
               </div>
               <div className="space-y-2">

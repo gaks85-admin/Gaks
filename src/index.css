@@ -34,30 +34,17 @@
 }
 
 html, body, #root {
-  background-color: var(--color-background, #080808);
-  color: var(--color-foreground, #f4f4f5);
+  background-color: #080808;
+  color: #f4f4f5;
   font-family: var(--font-sans);
   min-height: 100dvh;
   margin: 0;
   padding: 0;
   letter-spacing: -0.011em;
   line-height: 1.5;
-  transition: background-color 0.3s ease, color 0.3s ease;
 }
 
-/* Light Mode Overrides */
-html.light {
-  --color-background: #ffffff;
-  --color-foreground: #09090b;
-  --color-heading: #09090b;
-  --color-paragraph: #3f3f46;
-  --color-scrollbar-track: #f4f4f5;
-  --color-scrollbar-thumb: #d4d4d8;
-  --color-scrollbar-thumb-hover: #a1a1aa;
-}
-
-/* Dark Mode Defaults */
-html:not(.light) {
+:root {
   --color-background: #080808;
   --color-foreground: #f4f4f5;
   --color-heading: #fafafa;

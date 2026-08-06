@@ -55,14 +55,32 @@ const getSupabase = () => {
 
 const DEFAULT_SYMBOLS = ['EURUSD', 'GBPUSD', 'XAUUSD', 'BTCUSD', 'NAS100', 'US30'];
 
+// In-memory server cache for Yahoo Finance live rates (20-second TTL)
+interface LiveRatesCache {
+  data: any;
+  timestamp: number;
+}
+let liveRatesCache: LiveRatesCache | null = null;
+const CACHE_TTL_MS = 20 * 1000; // 20 seconds
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // CORS Headers
+  // CORS & Cache Headers
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Cache-Control', 'public, max-age=20, s-maxage=20, stale-while-revalidate=10');
 
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
+  }
+
+  const now = Date.now();
+  if (liveRatesCache && (now - liveRatesCache.timestamp) < CACHE_TTL_MS) {
+    return res.status(200).json({
+      ...liveRatesCache.data,
+      cached: true,
+      cacheAgeMs: now - liveRatesCache.timestamp
+    });
   }
 
   try {
@@ -163,11 +181,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       })
     );
 
-    return res.status(200).json({
+    const responsePayload = {
       success: true,
       timestamp: Date.now(),
       pairs: pairsData
-    });
+    };
+
+    liveRatesCache = {
+      data: responsePayload,
+      timestamp: Date.now()
+    };
+
+    return res.status(200).json(responsePayload);
 
   } catch (error: any) {
     console.error('[Live Rates] Endpoint Error:', error);
