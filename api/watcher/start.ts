@@ -314,7 +314,7 @@ export default async function handler(req: any, res: any) {
     if (!hasGlobalKey && (apiKeyError || !apiKeyRecord || !apiKeyRecord.api_key)) {
       const errReason = apiKeyError 
         ? `Supabase query error: ${apiKeyError.message}` 
-        : `No global GEMINI_API_KEY and no row exists or api_key is missing in '${tableName}' for user_id='${userId}' and provider='${providerFilter}'.`;
+        : "Gemini API key is required to activate Market Watcher. Please configure your Gemini API key under Settings.";
 
       console.log("[Watcher Start] Termination: Gemini API key lookup failed or key missing.");
 
@@ -646,7 +646,7 @@ export default async function handler(req: any, res: any) {
       risk_percentage: riskPercentage,
       selected_pair: selectedPair,
       selected_timeframe: finalTimeframe,
-      gemini_model: "gemini-2.5-flash",
+      gemini_model: "gemini-3.6-flash",
       scan_interval_minutes: computedInterval,
       trade_status: "WAITING",
       entry_price: null,

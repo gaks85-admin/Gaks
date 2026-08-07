@@ -9,7 +9,11 @@ export function classifyGeminiError(error: any): GeminiErrorType {
     const message = error.message ? error.message.toLowerCase() : '';
     const status = error.status || 0;
 
-    if (status === 401 || status === 403 || message.includes('invalid') || message.includes('permission denied')) {
+    // Do not classify model deprecation or not found as invalid_key
+    if (status === 404 || message.includes('not_found') || message.includes('no longer available') || message.includes('not found')) {
+        return 'temporary_failure';
+    }
+    if (status === 401 || status === 403 || message.includes('invalid_api_key') || message.includes('api_key_invalid') || message.includes('permission denied')) {
         return 'invalid_key';
     }
     if (status === 429 || message.includes('quota') || message.includes('rate limit')) {
@@ -25,7 +29,7 @@ export async function runGeminiRequest(
     supabase: any,
     userId: string,
     prompt: string,
-    model: string = 'gemini-2.5-flash',
+    model: string = 'gemini-3.6-flash',
     config?: any
 ) {
     const { data: apiKeyData, error: apiKeyError } = await supabase

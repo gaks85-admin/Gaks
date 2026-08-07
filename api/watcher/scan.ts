@@ -344,7 +344,7 @@ Answer with JSON containing:
 - reasoning (string)
 `;
             const aiResponse = await ai.models.generateContent({
-              model: "gemini-2.5-flash",
+              model: "gemini-3.6-flash",
               contents: promptText,
               config: {
                 responseMimeType: "application/json",

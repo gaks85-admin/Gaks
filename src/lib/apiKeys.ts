@@ -71,9 +71,19 @@ export async function saveGeminiKey(key: string): Promise<{ success: boolean; er
     // Test the new key immediately
     try {
         const ai = new GoogleGenAI({ apiKey: trimmedKey });
-        await ai.models.generateContent({ model: "gemini-2.5-flash", contents: "Reply only with OK" });
+        await ai.models.generateContent({ model: "gemini-3.6-flash", contents: "Reply only with OK" });
     } catch (err: any) {
-        return { success: false, error: "Validation failed: " + err.message };
+        const rawMsg = err?.message || String(err);
+        console.error("[Gemini Save] Key validation error:", rawMsg);
+        let userMsg = "Invalid or unverified Gemini API key. Please check your key under Settings.";
+        if (rawMsg.includes("401") || rawMsg.includes("403") || rawMsg.toLowerCase().includes("invalid") || rawMsg.toLowerCase().includes("permission denied")) {
+          userMsg = "Invalid API key or permission denied. Please verify your Gemini API key.";
+        } else if (rawMsg.includes("429") || rawMsg.toLowerCase().includes("quota") || rawMsg.toLowerCase().includes("rate limit")) {
+          userMsg = "API key quota or rate limit exceeded. Please check your Gemini account quota.";
+        } else if (rawMsg.includes("404") || rawMsg.toLowerCase().includes("not_found") || rawMsg.toLowerCase().includes("no longer available")) {
+          userMsg = "Gemini service temporarily unavailable. Please try again in a few moments.";
+        }
+        return { success: false, error: userMsg };
     }
 
     // Check if key already exists

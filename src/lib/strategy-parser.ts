@@ -106,24 +106,16 @@ If a parameter is not mentioned, omit it or set it to null/false depending on th
   };
 
   const response = await ai.models.generateContent({
-    model: 'gemini-2.5-flash',
+    model: 'gemini-3.6-flash',
     contents: strategyText,
     config: {
       systemInstruction: systemInstruction,
       responseMimeType: 'application/json',
       responseSchema: responseSchema,
-      temperature: 0.1,
     },
   });
 
-  let responseText = "";
-  if (typeof response.text === 'function') {
-    responseText = await (response.text as any)();
-  } else if (typeof response.text === 'string') {
-    responseText = response.text;
-  } else {
-    responseText = (response as any).candidates?.[0]?.content?.parts?.[0]?.text ?? "{}";
-  }
+  const responseText = response.text || "{}";
 
   try {
     const parsed = JSON.parse(responseText);

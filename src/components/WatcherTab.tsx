@@ -36,6 +36,8 @@ export interface WatcherTabProps {
   triggerNotification: (msg: string, type?: 'success' | 'error' | 'info') => void;
   getSparklinePaths: (points?: number[], width?: number, height?: number) => { lineD: string; fillD: string };
   handleRemovePair: (symbol: string) => void;
+  geminiKeyExists?: boolean;
+  onGoToSettings?: () => void;
 }
 
 export const WatcherTab: React.FC<WatcherTabProps> = ({
@@ -61,6 +63,8 @@ export const WatcherTab: React.FC<WatcherTabProps> = ({
   triggerNotification,
   getSparklinePaths,
   handleRemovePair,
+  geminiKeyExists = true,
+  onGoToSettings,
 }) => {
   return (
     <div className="space-y-8 animate-fade-in">
@@ -137,6 +141,29 @@ export const WatcherTab: React.FC<WatcherTabProps> = ({
               )}
             </div>
 
+            {!geminiKeyExists && !isWatcherActive && (
+              <div className="p-4 rounded-2xl border border-amber-500/20 bg-amber-500/5 text-amber-600 dark:text-amber-400 text-xs space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 font-semibold">
+                    <Info className="w-4 h-4 shrink-0 text-amber-500" />
+                    <span>Gemini API Key Required</span>
+                  </div>
+                  {onGoToSettings && (
+                    <button
+                      type="button"
+                      onClick={onGoToSettings}
+                      className="px-3 py-1 rounded-full bg-amber-500/10 hover:bg-amber-500/20 text-amber-600 dark:text-amber-400 font-semibold text-[11px] transition-colors cursor-pointer"
+                    >
+                      Configure in Settings &rarr;
+                    </button>
+                  )}
+                </div>
+                <p className="text-[11px] text-zinc-500 dark:text-zinc-400 leading-normal">
+                  Market Watcher requires a valid Gemini API key to perform automated market analysis. Please add your key in Settings before activating.
+                </p>
+              </div>
+            )}
+
             <div className="flex items-center justify-between gap-4">
               <div className="flex items-center gap-3">
                 <div className="relative">
@@ -147,10 +174,10 @@ export const WatcherTab: React.FC<WatcherTabProps> = ({
                   <h4 className="text-xs font-bold text-zinc-950 dark:text-white">AI Market Watcher Engine</h4>
                   <div className="text-[10px] text-zinc-500 dark:text-zinc-400 space-y-0.5">
                     <p>
-                      Status: <span className={isWatcherActive ? 'text-zinc-950 dark:text-white font-bold' : 'text-zinc-400 dark:text-zinc-500 font-bold'}>
+                      Status: <span className={isWatcherActive ? 'text-zinc-950 dark:text-white font-bold' : (!geminiKeyExists ? 'text-amber-500 font-bold' : 'text-zinc-400 dark:text-zinc-500 font-bold')}>
                         {isWatcherActive 
                           ? `ACTIVE & MONITORED (${watcherTradeStatus})` 
-                          : 'STANDBY'}
+                          : (!geminiKeyExists ? 'STANDBY (GEMINI KEY REQUIRED)' : 'STANDBY')}
                       </span>
                     </p>
                     {isWatcherActive && watcherSearch && (
@@ -283,7 +310,7 @@ export const WatcherTab: React.FC<WatcherTabProps> = ({
                 </div>
               );
             } else {
-              const isDisabled = (isWatcherActive && !isAdmin) || !watcherSearch.trim() || !watcherTimeframe || isTimeframeMismatch;
+              const isDisabled = (isWatcherActive && !isAdmin) || !watcherSearch.trim() || !watcherTimeframe || isTimeframeMismatch || !geminiKeyExists;
               return (
                 <div className="space-y-3 mt-2">
                   <button
@@ -301,6 +328,12 @@ export const WatcherTab: React.FC<WatcherTabProps> = ({
                     <Play className={`w-3.5 h-3.5 fill-current ${isDisabled ? 'text-zinc-400 dark:text-zinc-500' : 'text-white dark:text-zinc-950 stroke-white dark:stroke-zinc-950'}`} />
                     <span>Activate Market Watcher</span>
                   </button>
+
+                  {!geminiKeyExists && (
+                    <p className="text-[11px] text-amber-600 dark:text-amber-400 text-center font-medium">
+                      Gemini API key required. Configure your key in Settings to activate.
+                    </p>
+                  )}
                   
                   {isWatcherActive && !isAdmin && (
                     <div className="p-3 rounded-2xl bg-zinc-50 dark:bg-zinc-900/50 border border-zinc-100 dark:border-zinc-800 text-zinc-500 dark:text-zinc-400 text-center text-[11px] leading-relaxed shadow-inner">

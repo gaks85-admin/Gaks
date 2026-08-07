@@ -1248,6 +1248,7 @@ export default function App() {
       const result = await saveGeminiKey(trimmed);
       if (result.success) {
         setGeminiKeyExists(true);
+        setWatcherErrorMessage(null);
         setGeminiKeySuccess(geminiKeyExists ? "Gemini API key updated successfully!" : "Gemini API key saved successfully!");
         triggerNotification(geminiKeyExists ? "Gemini API key updated!" : "Gemini API key saved!", "success");
       } else {
@@ -1306,6 +1307,11 @@ export default function App() {
       return;
     }
 
+    if (!geminiKeyExists) {
+      setWatcherErrorMessage("Gemini API key is required to activate Market Watcher. Please configure your Gemini API key under Settings.");
+      return;
+    }
+
     try {
       // First ensure local changes are synced to Supabase (so backend checks pass)
       triggerNotification("Synchronizing local setup with Gaks AI...", "info");
@@ -1359,7 +1365,6 @@ export default function App() {
       if (!response.ok || !result.success) {
         const errMsg = result.error || "Failed to activate AI Market Watcher.";
         setWatcherErrorMessage(errMsg);
-        triggerNotification(errMsg, "info");
         return;
       }
 
@@ -1401,7 +1406,6 @@ export default function App() {
     } catch (err: any) {
       console.error("Exception in startAiMarketWatcher:", err);
       setWatcherErrorMessage(err.message || "An unexpected error occurred during activation.");
-      triggerNotification("Activation failed", "info");
     }
   };
 
@@ -2138,6 +2142,8 @@ export default function App() {
                 triggerNotification={triggerNotification}
                 getSparklinePaths={getSparklinePaths}
                 handleRemovePair={handleRemovePair}
+                geminiKeyExists={geminiKeyExists}
+                onGoToSettings={() => setActiveTab('settings')}
               />
             </React.Suspense>
           )}
