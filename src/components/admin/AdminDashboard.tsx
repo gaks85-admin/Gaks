@@ -1314,7 +1314,9 @@ const SignalsPage = ({ fetchWithAuth }: { fetchWithAuth: any }) => {
       ) : filteredSignals.length === 0 ? (
         <div className="p-12 text-center text-zinc-500 border border-dashed border-zinc-900 rounded-2xl bg-zinc-950/20">
           <Zap className="w-8 h-8 mx-auto mb-2 text-zinc-700" />
-          <p className="text-xs font-semibold">No signals found matching "{searchQuery}"</p>
+          <p className="text-xs font-semibold">
+            {searchQuery ? `No signals found matching "${searchQuery}"` : "Signal history is not persisted in the current MVP architecture."}
+          </p>
         </div>
       ) : (
         <div className="bg-zinc-950 border border-zinc-900 rounded-2xl overflow-hidden shadow-xl">

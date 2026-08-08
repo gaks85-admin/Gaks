@@ -401,16 +401,21 @@ async function health_handler(req: any, res: any) {
     let failedDeliveriesToday = 0;
     const todayStart = new Date();
     todayStart.setUTCHours(0, 0, 0, 0);
-    const { data: signalsData } = await supabase.from('signals').select('delivery_status').gte('timestamp', todayStart.toISOString());
-    if (signalsData) {
-      signalsDetectedToday = signalsData.length;
-      signalsData.forEach((s: any) => {
-        if (s.delivery_status === 'failed') {
-          failedDeliveriesToday++;
-        } else {
-          signalsSentToday++;
-        }
-      });
+    try {
+      const { data: evalsData } = await supabase
+        .from('watcher_evaluations')
+        .select('trade_sent')
+        .gte('created_at', todayStart.toISOString());
+      if (evalsData) {
+        signalsDetectedToday = evalsData.length;
+        evalsData.forEach((s: any) => {
+          if (s.trade_sent) {
+            signalsSentToday++;
+          }
+        });
+      }
+    } catch {
+      // Safe fallback
     }
 
     // Fetch API usage today from database logs
@@ -882,18 +887,34 @@ async function signals_handler(req: any, res: any) {
       return res.status(403).json({ success: false, error: "Unauthorized: Insufficient privileges." });
     }
 
-    const { data: signals, error: sErr } = await supabase.from('signals').select('*').order('timestamp', { ascending: false });
-    if (sErr) throw sErr;
+    let assembledSignals: any[] = [];
+    try {
+      const { data: evals, error: eErr } = await supabase
+        .from('watcher_evaluations')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(100);
 
-    const { data: profiles } = await supabase.from('profiles').select('id, email');
-
-    const assembledSignals = (signals || []).map(s => {
-      const prof = profiles?.find(p => p.id === s.user_id);
-      return {
-        ...s,
-        email: prof?.email || 'Unknown User'
-      };
-    });
+      if (!eErr && evals && evals.length > 0) {
+        const { data: profiles } = await supabase.from('profiles').select('id, email');
+        assembledSignals = evals.map((e: any) => {
+          const prof = profiles?.find((p: any) => p.id === e.user_id);
+          return {
+            id: e.id,
+            user_id: e.user_id,
+            email: prof?.email || 'Unknown User',
+            pair: e.pair || 'N/A',
+            signal_type: e.trade_sent ? 'PASS' : (e.recommendation || 'EVAL'),
+            confidence: Math.round(e.decision_score || 0),
+            delivery_status: e.trade_sent ? 'delivered' : 'logged',
+            timestamp: e.created_at
+          };
+        });
+      }
+    } catch (e) {
+      console.warn("Could not query watcher_evaluations for signals log:", e);
+      assembledSignals = [];
+    }
 
     return res.status(200).json({ success: true, signals: assembledSignals });
   } catch (err: any) {
@@ -986,8 +1007,16 @@ async function stats_handler(req: any, res: any) {
     const missingKeyCount = (profiles || []).filter(u => !keysSet.has(u.id)).length;
 
     const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-    const { data: sigs, error: sigErr } = await supabase.from('signals').select('id').gte('timestamp', oneDayAgo);
-    const sigsCount = sigErr ? 0 : (sigs?.length || 0);
+    let sigsCount = 0;
+    try {
+      const { count } = await supabase
+        .from('watcher_evaluations')
+        .select('*', { count: 'exact', head: true })
+        .gte('created_at', oneDayAgo);
+      sigsCount = count || 0;
+    } catch {
+      sigsCount = 0;
+    }
 
     const { data: latestScans } = await supabase.from('watchers').select('last_scan_at').order('last_scan_at', { ascending: false }).limit(1);
     const lastCronRun = (latestScans && latestScans[0]?.last_scan_at) || null;
@@ -998,9 +1027,16 @@ async function stats_handler(req: any, res: any) {
     const totalPairsMonitored = uniquePairsSet.size;
 
     // Fetch total signals sent
-    const { count: totalSignalsCount } = await supabase
-      .from('signals')
-      .select('*', { count: 'exact', head: true });
+    let totalSignalsCount = 0;
+    try {
+      const { count } = await supabase
+        .from('watcher_evaluations')
+        .select('*', { count: 'exact', head: true })
+        .eq('trade_sent', true);
+      totalSignalsCount = count || 0;
+    } catch {
+      totalSignalsCount = 0;
+    }
 
     return res.status(200).json({
       success: true,
@@ -1688,13 +1724,7 @@ ${JSON.stringify(collectedData, null, 2)}
           (sig as any).expectedLoss = posSizeResult.expectedLoss;
           (sig as any).lotType = posSizeResult.lotType;
 
-          await supabase.from("signals").insert({
-            user_id: userId,
-            pair: sig.pair,
-            signal_type: sig.direction,
-            confidence: sig.confidenceScore,
-            delivery_status: watcher.telegram_chat_id ? "delivered" : "no_telegram"
-          });
+          // Signals history is tracked via watcher_evaluations
           
           if (watcher.telegram_chat_id && sig.confidenceScore >= 70) {
             const alertMessage = buildTelegramAlertMessage({
@@ -2264,32 +2294,70 @@ async function system_health_handler(req: any, res: any) {
 
     // 5. Cron check
     let cron = "running";
-    const appSettings = loadSettings();
-    const scanInterval = appSettings.scanInterval || 15;
+    let watchers = 0;
+    let last_scan = "";
+    try {
+      const { data: latestWatcherScan } = await supabase
+        .from('watchers')
+        .select('last_scan_at')
+        .not('last_scan_at', 'is', null)
+        .order('last_scan_at', { ascending: false })
+        .limit(1);
 
-    const { data: latestScans } = await supabase
-      .from('watchers')
-      .select('last_scan_at')
-      .order('last_scan_at', { ascending: false })
-      .limit(1);
-    const last_scan = (latestScans && latestScans[0]?.last_scan_at) || '';
+      const { data: latestEval } = await supabase
+        .from('watcher_evaluations')
+        .select('created_at')
+        .order('created_at', { ascending: false })
+        .limit(1);
 
-    const { count: activeWatchersCount } = await supabase
-      .from('watchers')
-      .select('*', { count: 'exact', head: true })
-      .eq('status', 'active');
-    
-    const watchers = activeWatchersCount || 0;
+      const { data: latestCronLog } = await supabase
+        .from('system_health_logs')
+        .select('created_at')
+        .eq('service', 'Cron')
+        .order('created_at', { ascending: false })
+        .limit(1);
 
-    if (watchers > 0) {
-      if (!last_scan) {
-        cron = "stopped";
+      const timestamps: number[] = [];
+      if (latestWatcherScan?.[0]?.last_scan_at) {
+        timestamps.push(new Date(latestWatcherScan[0].last_scan_at).getTime());
+      }
+      if (latestEval?.[0]?.created_at) {
+        timestamps.push(new Date(latestEval[0].created_at).getTime());
+      }
+      if (latestCronLog?.[0]?.created_at) {
+        timestamps.push(new Date(latestCronLog[0].created_at).getTime());
+      }
+
+      const last_scan_time = timestamps.length > 0 ? Math.max(...timestamps) : null;
+      if (last_scan_time) {
+        last_scan = new Date(last_scan_time).toISOString();
+      }
+
+      const { count: activeWatchersCount } = await supabase
+        .from('watchers')
+        .select('*', { count: 'exact', head: true })
+        .eq('status', 'active');
+      watchers = activeWatchersCount || 0;
+
+      const cronSecret = process.env.CRON_SECRET;
+      const isCronSecretConfigured = !!(cronSecret && cronSecret.trim());
+
+      if (watchers > 0) {
+        if (last_scan_time) {
+          const diffMinutes = (Date.now() - last_scan_time) / (1000 * 60);
+          if (diffMinutes > 24 * 60) {
+            cron = "stopped";
+          }
+        } else if (!isCronSecretConfigured) {
+          cron = "stopped";
+        }
       } else {
-        const diffMinutes = (Date.now() - new Date(last_scan).getTime()) / (1000 * 60);
-        if (diffMinutes > 2 * scanInterval) {
+        if (!isCronSecretConfigured && !last_scan_time) {
           cron = "stopped";
         }
       }
+    } catch {
+      cron = "running";
     }
 
     // 6. Learning Engine check
@@ -2320,11 +2388,17 @@ async function system_health_handler(req: any, res: any) {
       .gte('created_at', todayISO);
     const today_scans = todayScans || 0;
 
-    const { count: todaySignals } = await supabase
-      .from('signals')
-      .select('*', { count: 'exact', head: true })
-      .gte('timestamp', todayISO);
-    const today_signals = todaySignals || 0;
+    let today_signals = 0;
+    try {
+      const { count: todaySignals } = await supabase
+        .from('watcher_evaluations')
+        .select('*', { count: 'exact', head: true })
+        .eq('trade_sent', true)
+        .gte('created_at', todayISO);
+      today_signals = todaySignals || 0;
+    } catch {
+      today_signals = 0;
+    }
 
     const { count: todayFailures } = await supabase
       .from('watcher_evaluations')

@@ -1958,6 +1958,17 @@ Output ONLY valid JSON:
 
     console.log(`LOG: Cron completed (Processed: ${watchersProcessedCount}, Sent: ${telegramMessagesSentCount})`);
 
+    try {
+      await supabase.from('system_health_logs').insert({
+        service: 'Cron',
+        status: 'healthy',
+        latency_ms: Date.now() - startTime,
+        message: `Cron execution completed. Processed: ${watchersProcessedCount}`
+      });
+    } catch {
+      // ignore logging failure
+    }
+
     // Cleanup old logs (keep only last 500 runs)
     try {
       const { data: cutoffData } = await supabase
