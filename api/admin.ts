@@ -2241,55 +2241,94 @@ async function system_health_handler(req: any, res: any) {
     // 3. Telegram check
     let telegram = "offline";
     let telegram_latency_ms = 0;
-    if (process.env.TELEGRAM_BOT_TOKEN) {
+    const telegramToken = (process.env.TELEGRAM_BOT_TOKEN || "").trim();
+
+    if (!telegramToken) {
+      telegram = "missing_token";
+    } else {
       const startTg = Date.now();
       try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 120);
-        const resTg = await fetch("https://api.telegram.org", { signal: controller.signal });
+        const timeoutId = setTimeout(() => controller.abort(), 3000);
+        const resTg = await fetch(`https://api.telegram.org/bot${telegramToken}/getMe`, { signal: controller.signal });
         clearTimeout(timeoutId);
         telegram_latency_ms = Date.now() - startTg;
-        if (resTg.status < 500) {
-          telegram = "healthy";
+
+        if (resTg.status === 401 || resTg.status === 403) {
+          telegram = "invalid_token";
+        } else if (resTg.ok) {
+          const tgJson = await resTg.json().catch(() => null);
+          if (tgJson && tgJson.ok === true) {
+            telegram = "healthy";
+          } else {
+            telegram = "error";
+          }
         } else {
           telegram = "error";
         }
-      } catch {
-        telegram = "offline";
+      } catch (err: any) {
         telegram_latency_ms = Date.now() - startTg;
+        if (err.name === 'AbortError') {
+          telegram = "timeout";
+        } else {
+          telegram = "offline";
+        }
       }
     }
 
     // 4. Gemini check
     let gemini = "healthy";
     let gemini_latency_ms = 0;
-    const startGemini = Date.now();
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 120);
-      await fetch("https://generativelanguage.googleapis.com", { signal: controller.signal });
-      clearTimeout(timeoutId);
-      gemini_latency_ms = Date.now() - startGemini;
-    } catch {
-      gemini_latency_ms = Date.now() - startGemini;
-    }
 
-    const geminiKey = process.env.GEMINI_API_KEY;
+    const envGeminiKey = (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "").trim();
     const { data: keyRecord } = await supabase
       .from('user_api_keys')
       .select('api_key, status, last_error')
       .eq('provider', 'gemini')
+      .eq('status', 'active')
       .limit(1)
       .maybeSingle();
 
-    if (!geminiKey && (!keyRecord || !keyRecord.api_key)) {
-      gemini = "Invalid Key";
-    } else if (keyRecord && keyRecord.status === 'disabled') {
-      gemini = "Disabled";
-    } else if (keyRecord && keyRecord.last_error === 'quota_exceeded') {
-      gemini = "Quota Exhausted";
-    } else if (keyRecord && keyRecord.last_error === 'invalid_key') {
-      gemini = "Invalid Key";
+    const activeGeminiKey = envGeminiKey || (keyRecord?.api_key ? keyRecord.api_key.trim() : "");
+
+    if (!activeGeminiKey) {
+      gemini = "missing_key";
+    } else {
+      const startGemini = Date.now();
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 3000);
+        const resGemini = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(activeGeminiKey)}`, {
+          signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+        gemini_latency_ms = Date.now() - startGemini;
+
+        if (resGemini.ok) {
+          gemini = "healthy";
+        } else if (resGemini.status === 401 || resGemini.status === 400 || resGemini.status === 403) {
+          gemini = "invalid_key";
+        } else if (resGemini.status === 429) {
+          gemini = "quota_exceeded";
+        } else {
+          const errBody = await resGemini.json().catch(() => null);
+          const errStr = JSON.stringify(errBody || {}).toLowerCase();
+          if (errStr.includes("quota") || errStr.includes("resource_exhausted")) {
+            gemini = "quota_exceeded";
+          } else if (errStr.includes("invalid") || errStr.includes("key") || errStr.includes("permission")) {
+            gemini = "invalid_key";
+          } else {
+            gemini = "network_error";
+          }
+        }
+      } catch (err: any) {
+        gemini_latency_ms = Date.now() - startGemini;
+        if (err.name === 'AbortError') {
+          gemini = "timeout";
+        } else {
+          gemini = "network_error";
+        }
+      }
     }
 
     // 5. Cron check

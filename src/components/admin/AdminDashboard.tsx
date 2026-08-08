@@ -1432,8 +1432,8 @@ const SystemHealthPage = ({ fetchWithAuth }: { fetchWithAuth: any }) => {
 
   const isDbAlert = health?.database === 'offline';
   const isCronAlert = health?.cron === 'stopped';
-  const isGeminiAlert = health && ['Quota Exhausted', 'Invalid Key', 'Disabled'].includes(health.gemini);
-  const isTelegramAlert = health && ['offline', 'error'].includes(health.telegram);
+  const isGeminiAlert = health && health.gemini !== 'healthy';
+  const isTelegramAlert = health && health.telegram !== 'healthy';
   const isLearningAlert = health?.learning_engine === 'Database Error';
 
   const hasCriticalAlerts = isDbAlert || isCronAlert || isGeminiAlert || isTelegramAlert || isLearningAlert;
