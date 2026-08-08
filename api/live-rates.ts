@@ -181,6 +181,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       })
     );
 
+    // If all or most pairs failed due to Yahoo rate limit (429/403) and we have cache, serve stale cache
+    const availablePairs = pairsData.filter(p => p && p.status !== 'unavailable');
+    if (availablePairs.length === 0 && liveRatesCache) {
+      console.warn('[Live Rates] Yahoo rate limited or unavailable for all symbols. Serving stale cached rates.');
+      return res.status(200).json({
+        ...liveRatesCache.data,
+        cached: true,
+        stale: true,
+        cacheAgeMs: now - liveRatesCache.timestamp
+      });
+    }
+
     const responsePayload = {
       success: true,
       timestamp: Date.now(),
@@ -196,6 +208,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   } catch (error: any) {
     console.error('[Live Rates] Endpoint Error:', error);
+    if (liveRatesCache) {
+      console.warn('[Live Rates] Returning stale cached rates after endpoint exception.');
+      return res.status(200).json({
+        ...liveRatesCache.data,
+        cached: true,
+        stale: true
+      });
+    }
     return res.status(500).json({
       success: false,
       error: error.message || 'Internal server error'

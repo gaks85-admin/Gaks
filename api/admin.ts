@@ -2516,6 +2516,9 @@ export default async function handler(req: any, res: any) {
     if (pathname.endsWith('/send-test-alert')) {
       return send_test_alert_handler(req, res);
     }
+    if (pathname.endsWith('/admin') || pathname.endsWith('/admin/') || pathname === '' || pathname === '/') {
+      return stats_handler(req, res);
+    }
 
     return res.status(404).json({ 
        success: false, 

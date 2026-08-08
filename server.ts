@@ -45,7 +45,7 @@ async function startServer() {
 
 
   app.use("/api/admin", adminGuard);
-  app.all("/api/admin/*", adminHandler as any);
+  app.all(["/api/admin", "/api/admin/*"], adminHandler as any);
 
   async function adminGuard(req: express.Request, res: express.Response, next: express.NextFunction) {
     const authHeader = req.headers.authorization || '';

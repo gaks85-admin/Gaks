@@ -13,7 +13,7 @@ export interface SettingsTabProps {
   profileFullName: string;
   setProfileFullName: (val: string) => void;
   profilePlan: string;
-  setProfilePlan: (val: string) => void;
+  setProfilePlan?: (val: string) => void;
   session: any;
   handleUpdateProfile: (e: React.FormEvent) => void;
   isProfileUpdating: boolean;
@@ -131,23 +131,25 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
               </div>
 
               <div className="space-y-4">
-                <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-500 block ml-1">Gaks Subscription Tier</label>
+                <div className="flex items-center justify-between">
+                  <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-500 block ml-1">Gaks Subscription Tier</label>
+                  <span className="text-[10px] text-zinc-400 font-medium">Stripe Payment Gateway Pending</span>
+                </div>
                 <div className="space-y-3">
                   {[
-                    { id: 'Free', price: '$0', desc: 'Basic market scanning and limited AI analysis.' },
-                    { id: 'Premium', price: '$29', desc: 'Advanced AI watchers and real-time Telegram alerts.' },
-                    { id: 'Premium Pro', price: '$99', desc: 'Enterprise-grade throughput and custom signal logic.' }
+                    { id: 'Free', price: '$0', desc: 'Basic market scanning, decision engine analysis, and single-pair active watcher.' },
+                    { id: 'Premium', price: '$29', desc: 'Advanced AI watchers, higher throughput, and real-time Telegram alerts.' },
+                    { id: 'Premium Pro', price: '$99', desc: 'Enterprise-grade execution engine, custom signal logic, and priority feeds.' }
                   ].map((plan) => {
-                    const isSelected = profilePlan === plan.id;
+                    const isSelected = (profilePlan || 'Free') === plan.id;
+                    const isPaid = plan.id !== 'Free';
                     return (
-                      <button
-                        type="button"
+                      <div
                         key={plan.id}
-                        onClick={() => setProfilePlan(plan.id)}
-                        className={`w-full text-left p-4 rounded-2xl border transition-all cursor-pointer relative group ${
+                        className={`w-full text-left p-4 rounded-2xl border transition-all relative ${
                           isSelected
                             ? 'bg-zinc-950 dark:bg-zinc-900/60 border-zinc-500 shadow-[0_0_20px_rgba(255,255,255,0.05)]'
-                            : 'bg-white dark:bg-zinc-950/20 border-zinc-200 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700'
+                            : 'bg-white dark:bg-zinc-950/20 border-zinc-200 dark:border-zinc-800/80 opacity-80'
                         }`}
                       >
                         <div className="flex items-center justify-between">
@@ -156,32 +158,49 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
                               <span className={`text-[13px] font-bold tracking-tight ${isSelected ? 'text-white' : 'text-zinc-900 dark:text-zinc-300'}`}>
                                 {plan.id}
                               </span>
-                              {isSelected && (
-                                <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-zinc-800 border border-zinc-700 text-zinc-200 text-[8px] font-bold uppercase tracking-widest">
-                                  Active
+                              {isSelected ? (
+                                <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-[8px] font-bold uppercase tracking-widest">
+                                  Current Plan
                                 </span>
-                              )}
+                              ) : isPaid ? (
+                                <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-zinc-800/80 border border-zinc-700/60 text-zinc-400 text-[8px] font-bold uppercase tracking-widest">
+                                  Stripe Required
+                                </span>
+                              ) : null}
                             </div>
-                            <p className="text-[10px] text-zinc-500 font-medium leading-relaxed max-w-[200px]">
+                            <p className="text-[10px] text-zinc-500 font-medium leading-relaxed max-w-[210px]">
                               {plan.desc}
                             </p>
                           </div>
-                          <div className="text-right">
+                          <div className="text-right flex flex-col items-end">
                             <div className={`text-[15px] font-bold tracking-tight ${isSelected ? 'text-white' : 'text-zinc-900 dark:text-zinc-100'}`}>
                               {plan.price}
                             </div>
                             <div className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest">Per Month</div>
+                            {!isSelected && isPaid && (
+                              <button
+                                type="button"
+                                disabled
+                                title="Paid subscription via Stripe integration coming soon"
+                                className="mt-2 px-2.5 py-1 rounded-lg bg-zinc-800/50 border border-zinc-700/50 text-zinc-400 text-[9px] font-bold uppercase tracking-wider cursor-not-allowed opacity-60"
+                              >
+                                Upgrade Soon
+                              </button>
+                            )}
                           </div>
                         </div>
                         {isSelected && (
                           <div className="absolute top-2 right-2">
-                            <div className="w-1.5 h-1.5 rounded-full bg-white shadow-[0_0_8px_rgba(255,255,255,1)]"></div>
+                            <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,1)]"></div>
                           </div>
                         )}
-                      </button>
+                      </div>
                     );
                   })}
                 </div>
+                <p className="text-[10px] text-zinc-500 font-medium italic text-center pt-1">
+                  All accounts default to the Free plan until verified Stripe payments are connected. Manual plan switching is disabled.
+                </p>
               </div>
             </div>
 

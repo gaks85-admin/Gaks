@@ -155,7 +155,7 @@ export async function registerSignal(
     return false;
   }
 
-  const signalHash = `${signal.pair}_${signal.direction}_${signal.entryPrice}`;
+  const signalHash = `${watcher.id}_${signal.pair}_${signal.direction}_${signal.entryPrice}`;
 
   try {
     // 1. Duplicate Check via Supabase (15-min window per watcher)
@@ -198,7 +198,31 @@ export async function registerSignal(
       // Ignore evaluation table check errors if table doesn't exist
     }
 
-    // 2. Insert/Update registration log in database
+    // 2. Atomic fingerprint insertion FIRST to prevent concurrent duplicate signals across serverless cold starts
+    try {
+      const { error: insertFpErr } = await supabase
+        .from('signal_fingerprints')
+        .insert({
+          watcher_id: watcher.id,
+          fingerprint: signalHash,
+          pair: signal.pair,
+          direction: signal.direction,
+          entry_price: String(signal.entryPrice),
+          created_at: new Date().toISOString()
+        });
+
+      if (insertFpErr) {
+        if (insertFpErr.code === '23505' || insertFpErr.message?.includes('unique') || insertFpErr.message?.includes('duplicate')) {
+          console.log(`[registerSignal] Duplicate signal fingerprint blocked by database constraint for watcher ${watcher.id}. Skipping.`);
+          return false;
+        }
+        console.warn(`[registerSignal] Could not insert signal fingerprint into Supabase:`, insertFpErr.message);
+      }
+    } catch (fpInsertEx) {
+      console.warn(`[registerSignal] Exception inserting signal fingerprint:`, fpInsertEx);
+    }
+
+    // 3. Update watcher registration log in database
     const payload = {
       last_scan_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
@@ -213,22 +237,6 @@ export async function registerSignal(
 
     if (updateError || !updatedRows || updatedRows.length === 0) {
       return false;
-    }
-
-    // 3. Save signal fingerprint to Supabase
-    try {
-      await supabase
-        .from('signal_fingerprints')
-        .insert({
-          watcher_id: watcher.id,
-          fingerprint: signalHash,
-          pair: signal.pair,
-          direction: signal.direction,
-          entry_price: String(signal.entryPrice),
-          created_at: new Date().toISOString()
-        });
-    } catch (insertFpErr) {
-      console.warn(`[registerSignal] Could not insert signal fingerprint into Supabase:`, insertFpErr);
     }
 
     console.log(`[registerSignal] Signal registered successfully in Supabase for ${signal.pair}.`);
@@ -610,18 +618,19 @@ export default async function handler(req: any, res: any) {
     
     const cleanCronSecret = cronSecretRaw ? cronSecretRaw.trim().replace(/^['"]|['"]$/g, '').trim() : "";
 
-    // 1. Strictly enforce CRON_SECRET requirement (500 if missing on server)
+    // 1. Strictly enforce CRON_SECRET requirement (401 Unauthorized if missing on server)
     if (!cleanCronSecret) {
-      console.warn("LOG: Missing CRON_SECRET environment variable on server.");
-      return res.status(500).json({
+      console.warn("[CRON SECURITY REJECTED] CRON_SECRET environment variable is missing or empty on server.");
+      return res.status(401).json({
         success: false,
-        error: "CRON_SECRET environment variable is not configured on the server."
+        error: "Unauthorized",
+        reason: "CRON_SECRET environment variable is not configured or is empty on the server."
       });
     }
 
     // 2. Require Bearer authentication (401 if missing, invalid format, or token mismatch)
     if (!authHeader) {
-      console.warn("LOG: Unauthorized access attempt - missing Authorization header.");
+      console.warn("[CRON SECURITY REJECTED] Missing Authorization header.");
       return res.status(401).json({
         success: false,
         error: "Unauthorized",
@@ -629,9 +638,9 @@ export default async function handler(req: any, res: any) {
       });
     }
 
-    const trimmedHeader = authHeader.trim();
+    const trimmedHeader = String(authHeader).trim();
     if (!trimmedHeader.toLowerCase().startsWith("bearer ")) {
-      console.warn("LOG: Unauthorized access attempt - Authorization header does not use Bearer scheme.");
+      console.warn("[CRON SECURITY REJECTED] Authorization header does not use Bearer scheme.");
       return res.status(401).json({
         success: false,
         error: "Unauthorized",
@@ -642,7 +651,7 @@ export default async function handler(req: any, res: any) {
     const token = trimmedHeader.substring(7).trim().replace(/^['"]|['"]$/g, '').trim();
 
     if (!token || token !== cleanCronSecret) {
-      console.warn("LOG: Unauthorized access attempt - token mismatch.");
+      console.warn("[CRON SECURITY REJECTED] Invalid or mismatched Bearer token provided.");
       return res.status(401).json({
         success: false,
         error: "Unauthorized",

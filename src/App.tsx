@@ -403,44 +403,76 @@ export default function App() {
     }
   };
 
-  // Auth Restoration & Change Subscription logic
+  // Auth Restoration & Profile Initialization logic
   useEffect(() => {
+    const fetchOrCreateUserProfile = async (user: any) => {
+      if (!user) return null;
+      try {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', user.id)
+          .maybeSingle();
+
+        if (profile) {
+          setUserProfile(profile);
+          setProfileFullName(profile.full_name || '');
+          setProfilePlan(profile.subscription_plan || 'Free');
+          setProfileTelegram(profile.telegram_connected || false);
+          setProfileAvatarUrl(profile.avatar_url || '');
+          return profile;
+        } else {
+          // Auto-provision profile with 'Free' plan state for new signups (Email, Google, OAuth)
+          const newProfile = {
+            id: user.id,
+            email: user.email,
+            full_name: user.user_metadata?.full_name || user.email?.split('@')[0] || 'Gaks User',
+            subscription_plan: 'Free',
+            telegram_connected: false,
+            avatar_url: user.user_metadata?.avatar_url || '',
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          };
+          await supabase.from('profiles').upsert(newProfile, { onConflict: 'id' });
+          setUserProfile(newProfile);
+          setProfileFullName(newProfile.full_name);
+          setProfilePlan('Free');
+          setProfileTelegram(false);
+          setProfileAvatarUrl(newProfile.avatar_url);
+          return newProfile;
+        }
+      } catch (err) {
+        console.error('Error fetching or creating profile:', err);
+        setProfilePlan('Free');
+        return null;
+      }
+    };
+
+    const loadUserData = async (user: any) => {
+      if (!user) return;
+      try {
+        await Promise.all([
+          fetchOrCreateUserProfile(user),
+          loadWatchlistFromSupabase(user.id),
+          loadTelegramConnection(user.id),
+          loadTradingPreferences(user.id),
+          loadWatcherStatus(user.id)
+        ]);
+      } catch (err) {
+        console.error('Error fetching user data:', err);
+      }
+    };
+
     const initAuth = async () => {
       try {
         const { data: { session: activeSession } } = await supabase.auth.getSession();
         if (activeSession) {
           setSession(activeSession);
-
-          // Wait until session, profile, subscription, watchlist, preferences, and telegram status finish loading before clearing the loading state
-          await Promise.all([
-            supabase
-              .from('profiles')
-              .select('*')
-              .eq('id', activeSession.user.id)
-              .single()
-              .then(({ data: profile }) => {
-                if (profile) {
-                  setUserProfile(profile);
-                  setProfileFullName(profile.full_name);
-                  setProfilePlan(profile.subscription_plan || 'Free');
-                  setProfileTelegram(profile.telegram_connected || false);
-                  setProfileAvatarUrl(profile.avatar_url || '');
-                }
-              }),
-            loadWatchlistFromSupabase(activeSession.user.id),
-            loadTelegramConnection(activeSession.user.id),
-            loadTradingPreferences(activeSession.user.id),
-            loadWatcherStatus(activeSession.user.id)
-          ]).catch(err => {
-            console.error('Error fetching supplementary user data during auth init:', err);
-          });
-
-          setIsAuthLoading(false);
-        } else {
-          setIsAuthLoading(false);
+          await loadUserData(activeSession.user);
         }
       } catch (err) {
         console.error('Error restoring session:', err);
+      } finally {
         setIsAuthLoading(false);
       }
     };
@@ -453,29 +485,8 @@ export default function App() {
       }
       if (currentSession) {
         setSession(currentSession);
-        // Load user profile and details in parallel
-        Promise.all([
-          supabase
-            .from('profiles')
-            .select('*')
-            .eq('id', currentSession.user.id)
-            .single()
-            .then(({ data: profile }) => {
-              if (profile) {
-                setUserProfile(profile);
-                setProfileFullName(profile.full_name);
-                setProfilePlan(profile.subscription_plan || 'Free');
-                setProfileTelegram(profile.telegram_connected || false);
-                setProfileAvatarUrl(profile.avatar_url || '');
-              }
-            }),
-          loadWatchlistFromSupabase(currentSession.user.id),
-          loadTelegramConnection(currentSession.user.id),
-          loadTradingPreferences(currentSession.user.id),
-          loadWatcherStatus(currentSession.user.id)
-        ]).catch(err => {
-          console.error('Error on auth change fetching data:', err);
-        });
+        // Trigger external async function rather than performing async work directly inside listener
+        loadUserData(currentSession.user);
       } else {
         setSession(null);
         setUserProfile(null);
@@ -986,11 +997,12 @@ export default function App() {
     
     setIsProfileUpdating(true);
     try {
+      // NOTE: subscription_plan is intentionally EXCLUDED from client updates.
+      // Subscription plans must be updated authoritatively via trusted backend/Stripe webhooks.
       const { data, error } = await supabase
         .from('profiles')
         .update({
           full_name: profileFullName,
-          subscription_plan: profilePlan,
           telegram_connected: profileTelegram,
           avatar_url: profileAvatarUrl
         })
@@ -1004,7 +1016,6 @@ export default function App() {
       setUserProfile({
         ...userProfile,
         full_name: profileFullName,
-        subscription_plan: profilePlan,
         telegram_connected: profileTelegram,
         avatar_url: profileAvatarUrl
       });
