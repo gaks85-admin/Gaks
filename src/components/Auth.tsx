@@ -12,27 +12,27 @@ export interface AuthProps {
 
 export function AuthSkeleton() {
   return (
-    <div className="min-h-[100dvh] w-full bg-[#030305] text-white flex flex-col justify-between items-center px-4 py-6 font-sans select-none overflow-hidden">
-      <div className="w-full max-w-[380px] my-auto flex flex-col items-center animate-pulse space-y-4">
+    <div className="h-[100dvh] w-full max-w-[100vw] bg-[#030305] text-white flex flex-col justify-between items-center px-3.5 py-2.5 sm:px-4 sm:py-4 font-sans select-none overflow-hidden box-border">
+      <div className="w-full max-w-[360px] sm:max-w-[380px] my-auto flex flex-col items-center animate-pulse space-y-3 sm:space-y-4">
         {/* Brand title skeleton */}
-        <div className="h-9 w-36 bg-[#12121a] rounded-xl" />
+        <div className="h-8 w-32 bg-[#12121a] rounded-xl" />
         {/* Title & subtitle */}
-        <div className="h-6 w-48 bg-[#12121a] rounded-lg" />
-        <div className="h-4 w-64 bg-[#0c0c12] rounded-md" />
+        <div className="h-5 w-44 bg-[#12121a] rounded-lg" />
+        <div className="h-3.5 w-56 bg-[#0c0c12] rounded-md" />
         {/* Social buttons */}
-        <div className="w-full space-y-2.5 pt-2">
-          <div className="h-[48px] w-full bg-[#0c0c12] rounded-2xl border border-[#1e1e2b]" />
-          <div className="h-[48px] w-full bg-[#0c0c12] rounded-2xl border border-[#1e1e2b]" />
+        <div className="w-full space-y-2 pt-1">
+          <div className="h-[40px] w-full bg-[#0c0c12] rounded-xl border border-[#1e1e2b]" />
+          <div className="h-[40px] w-full bg-[#0c0c12] rounded-xl border border-[#1e1e2b]" />
         </div>
         {/* OR divider */}
-        <div className="w-full h-3 bg-[#0a0a0d] rounded my-1" />
+        <div className="w-full h-2.5 bg-[#0a0a0d] rounded my-0.5" />
         {/* Input skeletons */}
-        <div className="w-full space-y-3">
-          <div className="h-[50px] w-full bg-[#0c0c12] rounded-2xl border border-[#1e1e2b]" />
-          <div className="h-[50px] w-full bg-[#0c0c12] rounded-2xl border border-[#1e1e2b]" />
+        <div className="w-full space-y-2">
+          <div className="h-[40px] w-full bg-[#0c0c12] rounded-xl border border-[#1e1e2b]" />
+          <div className="h-[40px] w-full bg-[#0c0c12] rounded-xl border border-[#1e1e2b]" />
         </div>
         {/* Primary button skeleton */}
-        <div className="h-[50px] w-full bg-zinc-200/20 rounded-2xl mt-1" />
+        <div className="h-[40px] w-full bg-zinc-200/20 rounded-xl mt-1" />
       </div>
     </div>
   );
@@ -298,46 +298,46 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
   };
 
   return (
-    <div className="min-h-[100dvh] w-full bg-[#030305] text-white flex flex-col justify-between items-center px-4 py-5 font-sans antialiased select-none relative overflow-y-auto">
+    <div className="min-h-[100dvh] h-[100dvh] w-full max-w-[100vw] bg-[#030305] text-white flex flex-col justify-between items-center px-4 py-3 sm:py-5 short:py-2 font-sans antialiased select-none relative overflow-hidden box-border">
       
       {/* Top ambient aura */}
-      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[600px] h-[300px] bg-[radial-gradient(ellipse_80%_80%_at_50%_-20%,rgba(255,255,255,0.06),rgba(0,0,0,0))] pointer-events-none" />
+      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-[500px] h-[250px] bg-[radial-gradient(ellipse_80%_80%_at_50%_-20%,rgba(255,255,255,0.06),rgba(0,0,0,0))] pointer-events-none overflow-hidden" />
 
       {/* Main content container */}
-      <div className="w-full max-w-[380px] sm:max-w-[400px] my-auto flex flex-col justify-center relative z-10 space-y-4 sm:space-y-5 py-2">
+      <div className="w-full max-w-[360px] sm:max-w-[380px] my-auto flex flex-col justify-center relative z-10 space-y-3 sm:space-y-4 short:space-y-2 box-border py-1">
         
         {/* Brand heading */}
         <motion.div 
           initial={{ scale: 0.95, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
           transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-          className="text-center space-y-1"
+          className="text-center space-y-1 mb-0.5 sm:mb-1 short:mb-0"
         >
           <div className="flex items-center justify-center gap-2">
-            <span className="text-4xl sm:text-5xl font-black tracking-tight text-white">Gaks</span>
-            <span className="text-4xl sm:text-5xl font-black tracking-tight text-zinc-400">AI</span>
+            <span className="text-3xl sm:text-4xl font-black tracking-tight text-white">Gaks</span>
+            <span className="text-3xl sm:text-4xl font-black tracking-tight text-zinc-400">AI</span>
           </div>
-          <div className="w-24 h-[1px] bg-gradient-to-r from-transparent via-zinc-700/60 to-transparent mx-auto my-1.5" />
+          <div className="w-20 h-[1px] bg-gradient-to-r from-transparent via-zinc-700/80 to-transparent mx-auto mt-1" />
         </motion.div>
 
         <AnimatePresence mode="wait">
           <motion.div
             key={mode}
-            initial={{ opacity: 0, y: 10 }}
+            initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-            transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
-            className="w-full space-y-4"
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+            className="w-full space-y-2.5 sm:space-y-3.5 short:space-y-2"
           >
             {/* Title & Subtitle */}
-            <div className="text-center space-y-1.5">
-              <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-white leading-tight">
+            <div className="text-center space-y-1.5 sm:space-y-2">
+              <h1 className="text-xl sm:text-2xl font-extrabold tracking-tight text-white leading-snug">
                 {mode === 'signup' && 'Create account'}
                 {mode === 'login' && 'Welcome back'}
                 {mode === 'forgot' && 'Reset password'}
                 {mode === 'reset' && 'Create new password'}
               </h1>
-              <p className="text-xs sm:text-sm text-zinc-400 font-normal leading-relaxed max-w-[340px] mx-auto">
+              <p className="text-xs sm:text-sm text-zinc-400 font-normal leading-relaxed max-w-[320px] mx-auto">
                 {mode === 'signup' && 'Start using AI-powered market monitoring in minutes.'}
                 {mode === 'login' && 'Log in to your account and continue monitoring the markets with AI.'}
                 {mode === 'forgot' && "Enter your email address and we'll send a recovery link."}
@@ -350,7 +350,7 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
               <motion.div
                 initial={{ opacity: 0, scale: 0.98 }}
                 animate={{ opacity: 1, scale: 1 }}
-                className="p-3.5 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-rose-400 flex items-start gap-2.5 text-xs leading-relaxed shadow-sm"
+                className="p-2.5 sm:p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 flex items-start gap-2.5 text-xs leading-relaxed shadow-sm"
               >
                 <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
                 <span>{errorMessage}</span>
@@ -359,9 +359,9 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
 
             {infoToast && (
               <motion.div
-                initial={{ opacity: 0, y: -6 }}
+                initial={{ opacity: 0, y: -4 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="p-3.5 rounded-2xl bg-[#0c0c12] border border-[#1e1e2b] text-zinc-300 flex items-start gap-2.5 text-xs leading-relaxed shadow-sm"
+                className="p-2.5 sm:p-3 rounded-xl bg-[#0c0c12] border border-[#1e1e2b] text-zinc-300 flex items-start gap-2.5 text-xs leading-relaxed shadow-sm"
               >
                 <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-zinc-400" />
                 <span className="flex-1">{infoToast}</span>
@@ -373,13 +373,13 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
               <motion.div
                 initial={{ opacity: 0, scale: 0.96 }}
                 animate={{ opacity: 1, scale: 1 }}
-                className="p-6 rounded-3xl border border-[#1e1e2b] bg-[#0c0c12] text-center space-y-4 shadow-2xl relative overflow-hidden"
+                className="p-4 sm:p-5 rounded-2xl border border-[#1e1e2b] bg-[#0c0c12] text-center space-y-3 shadow-2xl relative overflow-hidden"
               >
-                <div className="w-12 h-12 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 flex items-center justify-center mx-auto shadow-[0_0_20px_rgba(16,185,129,0.15)]">
-                  <CheckCircle2 className="w-6 h-6 stroke-[2]" />
+                <div className="w-10 h-10 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 flex items-center justify-center mx-auto shadow-[0_0_15px_rgba(16,185,129,0.15)]">
+                  <CheckCircle2 className="w-5 h-5 stroke-[2]" />
                 </div>
                 <div className="space-y-1">
-                  <h3 className="text-base font-bold text-white tracking-tight">
+                  <h3 className="text-sm sm:text-base font-bold text-white tracking-tight">
                     {mode === 'signup' ? 'Check your email' : 'Success!'}
                   </h3>
                   <p className="text-xs text-zinc-400 leading-relaxed max-w-[260px] mx-auto">
@@ -390,7 +390,7 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
                   <button
                     type="button"
                     onClick={() => switchMode('login')}
-                    className="w-full py-3 px-4 rounded-2xl bg-white text-black font-semibold text-xs sm:text-sm hover:bg-zinc-200 active:scale-[0.99] transition-all cursor-pointer shadow-md"
+                    className="w-full py-2.5 sm:py-3 px-4 rounded-xl bg-white text-black font-semibold text-xs sm:text-sm hover:bg-zinc-200 active:scale-[0.99] transition-all cursor-pointer shadow-md"
                   >
                     Return to Sign In
                   </button>
@@ -400,12 +400,12 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
               <>
                 {/* SOCIAL BUTTONS (Login & Signup modes) */}
                 {(mode === 'login' || mode === 'signup') && (
-                  <div className="space-y-2.5">
+                  <div className="space-y-2 sm:space-y-2.5 my-1 sm:my-1.5 short:my-0.5">
                     <button
                       type="button"
                       onClick={handleGoogleSignIn}
                       disabled={isLoading}
-                      className="w-full py-3 sm:py-3.5 px-4 rounded-2xl bg-[#0c0c12] hover:bg-[#14141d] active:scale-[0.99] border border-[#1e1e2b] text-white font-medium text-xs sm:text-sm flex items-center justify-center gap-3 transition-all duration-200 cursor-pointer shadow-sm disabled:opacity-50"
+                      className="w-full py-2.5 sm:py-3 px-4 rounded-xl bg-[#0c0c12] hover:bg-[#14141d] active:scale-[0.99] border border-[#1e1e2b] text-white font-medium text-xs sm:text-sm flex items-center justify-center gap-3 transition-all duration-200 cursor-pointer shadow-sm disabled:opacity-50"
                     >
                       <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
                         <path fill="#EA4335" d="M12 5.04c1.64 0 3.12.56 4.28 1.67l3.2-3.2C17.52 1.58 14.95 1 12 1 7.35 1 3.4 3.65 1.57 7.5l3.82 2.96C6.32 7.37 8.94 5.04 12 5.04z" />
@@ -420,7 +420,7 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
                       type="button"
                       onClick={handleTelegramSignIn}
                       disabled={isLoading}
-                      className="w-full py-3 sm:py-3.5 px-4 rounded-2xl bg-[#0c0c12] hover:bg-[#14141d] active:scale-[0.99] border border-[#1e1e2b] text-white font-medium text-xs sm:text-sm flex items-center justify-center gap-3 transition-all duration-200 cursor-pointer shadow-sm disabled:opacity-50"
+                      className="w-full py-2.5 sm:py-3 px-4 rounded-xl bg-[#0c0c12] hover:bg-[#14141d] active:scale-[0.99] border border-[#1e1e2b] text-white font-medium text-xs sm:text-sm flex items-center justify-center gap-3 transition-all duration-200 cursor-pointer shadow-sm disabled:opacity-50"
                     >
                       <div className="w-4 h-4 rounded-full bg-[#2AA1DD] flex items-center justify-center shrink-0">
                         <svg className="w-3 h-3 text-white transform -translate-x-[0.5px] translate-y-[0.5px]" viewBox="0 0 24 24" fill="currentColor">
@@ -431,9 +431,9 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
                     </button>
 
                     {/* OR Divider */}
-                    <div className="flex items-center gap-4 my-2">
+                    <div className="flex items-center gap-3 py-1.5 sm:py-2 short:py-1">
                       <div className="h-[1px] flex-1 bg-[#1e1e2b]" />
-                      <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">OR</span>
+                      <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest px-1">OR</span>
                       <div className="h-[1px] flex-1 bg-[#1e1e2b]" />
                     </div>
                   </div>
@@ -450,12 +450,12 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
                       ? handleForgotPassword
                       : handleResetPassword
                   }
-                  className="space-y-3"
+                  className="space-y-2 sm:space-y-2.5 short:space-y-1.5"
                   noValidate
                 >
                   {/* Name field (Signup mode) */}
                   {mode === 'signup' && (
-                    <div className="relative flex items-center bg-[#0c0c12] border border-[#1e1e2b] focus-within:border-zinc-400 focus-within:ring-1 focus-within:ring-white/10 rounded-2xl px-4 py-3 sm:py-3.5 transition-all">
+                    <div className="relative flex items-center bg-[#0c0c12] border border-[#1e1e2b] focus-within:border-zinc-400 focus-within:ring-1 focus-within:ring-white/10 rounded-xl px-3.5 py-2.5 sm:py-3 transition-all">
                       <User className="w-4 h-4 text-zinc-500 shrink-0 mr-3" />
                       <input
                         type="text"
@@ -471,7 +471,7 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
 
                   {/* Email Field (All modes except reset) */}
                   {mode !== 'reset' && (
-                    <div className="relative flex items-center bg-[#0c0c12] border border-[#1e1e2b] focus-within:border-zinc-400 focus-within:ring-1 focus-within:ring-white/10 rounded-2xl px-4 py-3 sm:py-3.5 transition-all">
+                    <div className="relative flex items-center bg-[#0c0c12] border border-[#1e1e2b] focus-within:border-zinc-400 focus-within:ring-1 focus-within:ring-white/10 rounded-xl px-3.5 py-2.5 sm:py-3 transition-all">
                       <Mail className="w-4 h-4 text-zinc-500 shrink-0 mr-3" />
                       <input
                         type="email"
@@ -490,8 +490,8 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
 
                   {/* Password Field (Login & Signup modes) */}
                   {(mode === 'login' || mode === 'signup') && (
-                    <div className="space-y-1.5">
-                      <div className="relative flex items-center bg-[#0c0c12] border border-[#1e1e2b] focus-within:border-zinc-400 focus-within:ring-1 focus-within:ring-white/10 rounded-2xl px-4 py-3 sm:py-3.5 transition-all">
+                    <div className="space-y-1">
+                      <div className="relative flex items-center bg-[#0c0c12] border border-[#1e1e2b] focus-within:border-zinc-400 focus-within:ring-1 focus-within:ring-white/10 rounded-xl px-3.5 py-2.5 sm:py-3 transition-all">
                         <Lock className="w-4 h-4 text-zinc-500 shrink-0 mr-3" />
                         <input
                           type={showPassword ? 'text' : 'password'}
@@ -517,7 +517,7 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
                       
                       {/* Forgot password link on login mode */}
                       {mode === 'login' && (
-                        <div className="flex justify-end pt-0.5">
+                        <div className="flex justify-end pt-1">
                           <button
                             type="button"
                             onClick={() => switchMode('forgot')}
@@ -533,7 +533,7 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
                   {/* Confirm Password Field (Signup mode only) */}
                   {mode === 'signup' && (
                     <div className="space-y-1">
-                      <div className="relative flex items-center bg-[#0c0c12] border border-[#1e1e2b] focus-within:border-zinc-400 focus-within:ring-1 focus-within:ring-white/10 rounded-2xl px-4 py-3 sm:py-3.5 transition-all">
+                      <div className="relative flex items-center bg-[#0c0c12] border border-[#1e1e2b] focus-within:border-zinc-400 focus-within:ring-1 focus-within:ring-white/10 rounded-xl px-3.5 py-2.5 sm:py-3 transition-all">
                         <Lock className="w-4 h-4 text-zinc-500 shrink-0 mr-3" />
                         <input
                           type={showConfirmPassword ? 'text' : 'password'}
@@ -567,7 +567,7 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
                   {/* New Password Fields (Reset mode) */}
                   {mode === 'reset' && (
                     <>
-                      <div className="relative flex items-center bg-[#0c0c12] border border-[#1e1e2b] focus-within:border-zinc-400 focus-within:ring-1 focus-within:ring-white/10 rounded-2xl px-4 py-3 sm:py-3.5 transition-all">
+                      <div className="relative flex items-center bg-[#0c0c12] border border-[#1e1e2b] focus-within:border-zinc-400 focus-within:ring-1 focus-within:ring-white/10 rounded-xl px-3.5 py-2.5 sm:py-3 transition-all">
                         <Lock className="w-4 h-4 text-zinc-500 shrink-0 mr-3" />
                         <input
                           type={showPassword ? 'text' : 'password'}
@@ -586,7 +586,7 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
                         </button>
                       </div>
                       <div className="space-y-1">
-                        <div className="relative flex items-center bg-[#0c0c12] border border-[#1e1e2b] focus-within:border-zinc-400 focus-within:ring-1 focus-within:ring-white/10 rounded-2xl px-4 py-3 sm:py-3.5 transition-all">
+                        <div className="relative flex items-center bg-[#0c0c12] border border-[#1e1e2b] focus-within:border-zinc-400 focus-within:ring-1 focus-within:ring-white/10 rounded-xl px-3.5 py-2.5 sm:py-3 transition-all">
                           <Lock className="w-4 h-4 text-zinc-500 shrink-0 mr-3" />
                           <input
                             type={showConfirmPassword ? 'text' : 'password'}
@@ -614,11 +614,11 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
                   )}
 
                   {/* PRIMARY SUBMIT BUTTON */}
-                  <div className="pt-2">
+                  <div className="pt-1.5 sm:pt-2 short:pt-1">
                     <button
                       type="submit"
                       disabled={!isFormValid() || isLoading}
-                      className="w-full py-3.5 px-5 rounded-2xl bg-white hover:bg-zinc-200 text-black font-bold text-sm sm:text-base active:scale-[0.99] transition-all duration-200 cursor-pointer flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(255,255,255,0.1)] disabled:opacity-35 disabled:cursor-not-allowed disabled:hover:bg-white"
+                      className="w-full py-3 sm:py-3.5 px-5 rounded-xl bg-white hover:bg-zinc-200 text-black font-bold text-xs sm:text-sm active:scale-[0.99] transition-all duration-200 cursor-pointer flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(255,255,255,0.1)] disabled:opacity-35 disabled:cursor-not-allowed disabled:hover:bg-white"
                     >
                       {isLoading ? (
                         <div className="flex items-center gap-2">
@@ -644,14 +644,14 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
                 </form>
 
                 {/* BOTTOM NAVIGATION LINKS */}
-                <div className="text-center pt-1">
+                <div className="text-center pt-2 sm:pt-2.5 short:pt-1.5">
                   {mode === 'signup' && (
                     <p className="text-xs sm:text-sm text-zinc-400 font-normal">
                       Already have an account?{' '}
                       <button
                         type="button"
                         onClick={() => switchMode('login')}
-                        className="text-white font-bold hover:underline cursor-pointer transition-colors"
+                        className="text-white font-bold hover:underline cursor-pointer transition-colors ml-1"
                       >
                         Sign in
                       </button>
@@ -664,7 +664,7 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
                       <button
                         type="button"
                         onClick={() => switchMode('signup')}
-                        className="text-white font-bold hover:underline cursor-pointer transition-colors"
+                        className="text-white font-bold hover:underline cursor-pointer transition-colors ml-1"
                       >
                         Create account
                       </button>
@@ -683,28 +683,30 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
                   )}
                 </div>
 
-                {/* Trust Badges */}
-                <div className="grid grid-cols-3 gap-2 py-4 border-t border-[#181820] mt-3">
-                  <div className="flex flex-col items-center text-center space-y-1">
-                    <div className="w-9 h-9 rounded-xl bg-[#0c0c12] border border-[#1e1e2b] flex items-center justify-center text-zinc-300">
-                      <ShieldCheck className="w-4 h-4" />
+                {/* Trust Badges - 3 feature items */}
+                <div className="grid grid-cols-3 gap-2 sm:gap-2.5 pt-3 sm:pt-4 border-t border-[#181824] mt-3 sm:mt-4 short:mt-2 short:pt-2">
+                  <div className="flex flex-col items-center text-center p-2 sm:p-2.5 rounded-xl bg-[#09090f]/70 border border-[#181826] hover:border-[#262638] transition-colors shadow-sm short:p-1.5">
+                    <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-[#11111b] border border-[#222232] flex items-center justify-center text-zinc-300 mb-1 shrink-0">
+                      <ShieldCheck className="w-3.5 h-3.5" />
                     </div>
-                    <span className="text-xs font-bold text-white">Secure</span>
-                    <span className="text-[10px] text-zinc-500">Bank-level security</span>
+                    <span className="text-[10px] sm:text-[11px] font-bold text-white tracking-tight">Secure</span>
+                    <span className="text-[8.5px] sm:text-[9.5px] text-zinc-400 leading-tight mt-0.5">Bank-level security</span>
                   </div>
-                  <div className="flex flex-col items-center text-center space-y-1 border-x border-[#181820] px-1">
-                    <div className="w-9 h-9 rounded-xl bg-[#0c0c12] border border-[#1e1e2b] flex items-center justify-center text-zinc-300">
-                      <Zap className="w-4 h-4" />
+
+                  <div className="flex flex-col items-center text-center p-2 sm:p-2.5 rounded-xl bg-[#09090f]/70 border border-[#181826] hover:border-[#262638] transition-colors shadow-sm short:p-1.5">
+                    <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-[#11111b] border border-[#222232] flex items-center justify-center text-zinc-300 mb-1 shrink-0">
+                      <Zap className="w-3.5 h-3.5" />
                     </div>
-                    <span className="text-xs font-bold text-white">AI-Powered</span>
-                    <span className="text-[10px] text-zinc-500">Smarter market insights</span>
+                    <span className="text-[10px] sm:text-[11px] font-bold text-white tracking-tight">AI-Powered</span>
+                    <span className="text-[8.5px] sm:text-[9.5px] text-zinc-400 leading-tight mt-0.5">Smarter insights</span>
                   </div>
-                  <div className="flex flex-col items-center text-center space-y-1">
-                    <div className="w-9 h-9 rounded-xl bg-[#0c0c12] border border-[#1e1e2b] flex items-center justify-center text-zinc-300">
-                      <TrendingUp className="w-4 h-4" />
+
+                  <div className="flex flex-col items-center text-center p-2 sm:p-2.5 rounded-xl bg-[#09090f]/70 border border-[#181826] hover:border-[#262638] transition-colors shadow-sm short:p-1.5">
+                    <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-[#11111b] border border-[#222232] flex items-center justify-center text-zinc-300 mb-1 shrink-0">
+                      <TrendingUp className="w-3.5 h-3.5" />
                     </div>
-                    <span className="text-xs font-bold text-white">Real-Time</span>
-                    <span className="text-[10px] text-zinc-500">24/7 market monitoring</span>
+                    <span className="text-[10px] sm:text-[11px] font-bold text-white tracking-tight">Real-Time</span>
+                    <span className="text-[8.5px] sm:text-[9.5px] text-zinc-400 leading-tight mt-0.5">24/7 monitoring</span>
                   </div>
                 </div>
               </>
@@ -714,7 +716,7 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
       </div>
 
       {/* Minimal Footer */}
-      <p className="text-[11px] text-zinc-500 text-center tracking-normal relative z-10 max-w-xs pt-2 pb-2">
+      <p className="text-[10px] sm:text-[11px] text-zinc-500 text-center tracking-normal relative z-10 max-w-xs py-1 sm:py-2 shrink-0">
         By continuing, you agree to our{' '}
         <span className="underline text-zinc-400 hover:text-white cursor-pointer transition-colors">Terms of Service</span>
         {' '}and{' '}

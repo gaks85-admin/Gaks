@@ -122,10 +122,10 @@ export default function ResetPassword({ onComplete }: ResetPasswordProps) {
   const isFormValid = newPassword.length >= 6 && confirmNewPassword.length >= 6 && newPassword === confirmNewPassword;
 
   return (
-    <div className="min-h-screen w-full bg-white dark:bg-black text-zinc-950 dark:text-white flex flex-col justify-center items-center px-5 py-12 font-sans antialiased select-none relative overflow-x-hidden transition-colors duration-300">
+    <div className="h-[100dvh] w-full max-w-[100vw] bg-[#030305] text-white flex flex-col justify-between items-center px-3.5 py-3.5 font-sans antialiased select-none relative overflow-hidden box-border">
       
       {/* Top ambient glow */}
-      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[600px] h-[300px] bg-gradient-to-b from-zinc-100/50 dark:from-zinc-900/40 via-transparent to-transparent blur-[120px] pointer-events-none" />
+      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-[500px] h-[250px] bg-gradient-to-b from-zinc-800/20 via-transparent to-transparent blur-[100px] pointer-events-none overflow-hidden" />
 
       <div className="w-full max-w-[400px] flex flex-col items-center relative z-10">
         

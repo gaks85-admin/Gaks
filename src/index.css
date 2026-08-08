@@ -104,3 +104,21 @@ button, input, select, textarea, label {
 ::-webkit-scrollbar-thumb:hover {
   background: var(--color-scrollbar-thumb-hover);
 }
+
+/* Responsive Viewport Height Rules for Single-Screen Auth Pages */
+@media (max-height: 680px) {
+  .short\:space-y-1\.5 > * + * { margin-top: 0.375rem !important; }
+  .short\:space-y-2 > * + * { margin-top: 0.5rem !important; }
+  .short\:space-y-2\.5 > * + * { margin-top: 0.625rem !important; }
+  .short\:my-1 { margin-top: 0.25rem !important; margin-bottom: 0.25rem !important; }
+  .short\:mb-0\.5 { margin-bottom: 0.125rem !important; }
+  .short\:mb-1 { margin-bottom: 0.25rem !important; }
+  .short\:mt-1 { margin-top: 0.25rem !important; }
+  .short\:mt-2 { margin-top: 0.5rem !important; }
+  .short\:pt-1 { padding-top: 0.25rem !important; }
+  .short\:pt-1\.5 { padding-top: 0.375rem !important; }
+  .short\:pt-2 { padding-top: 0.5rem !important; }
+  .short\:py-1\.5 { padding-top: 0.375rem !important; padding-bottom: 0.375rem !important; }
+  .short\:py-2 { padding-top: 0.5rem !important; }
+  .short\:p-1\.5 { padding: 0.375rem !important; }
+}
