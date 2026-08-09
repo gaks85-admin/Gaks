@@ -9,10 +9,10 @@ import { compileStrategy } from './lib/strategy-compiler';
 const Auth = React.lazy(() => import('./components/Auth'));
 import { AuthSkeleton } from './components/Auth';
 const ResetPassword = React.lazy(() => import('./components/ResetPassword'));
-const AdminDashboard = React.lazy(() => import('./components/admin/AdminDashboard'));
-const StrategyTab = React.lazy(() => import('./components/StrategyTab'));
-const WatcherTab = React.lazy(() => import('./components/WatcherTab'));
-const SettingsTab = React.lazy(() => import('./components/SettingsTab'));
+import AdminDashboard from './components/admin/AdminDashboard';
+import { StrategyTab } from './components/StrategyTab';
+import { WatcherTab } from './components/WatcherTab';
+import { SettingsTab } from './components/SettingsTab';
 
 const TabLoading = () => (
   <div className="space-y-8 animate-pulse p-4">
@@ -2094,102 +2094,91 @@ export default function App() {
 
           {/* ==================== TAB 2: STRATEGY ==================== */}
           {activeTab === 'strategy' && (
-            <React.Suspense fallback={<TabLoading />}>
-              <StrategyTab
-                strategies={strategies}
-                selectedStrategyId={selectedStrategyId}
-                activeStrategyId={activeStrategyId}
-                lastSavedStrategyText={lastSavedStrategyText}
-                GAKS_DEFAULT_STRATEGY={GAKS_DEFAULT_STRATEGY}
-                strategyTextareaRef={strategyTextareaRef}
-                handleClearStrategy={handleClearStrategy}
-                handleRestoreStrategy={handleRestoreStrategy}
-                handleSetActiveStrategy={handleSetActiveStrategy}
-                handleStrategyTextChange={handleStrategyTextChange}
-                saveStrategyPlaybook={saveStrategyPlaybook}
-                capital={capital}
-                setCapital={setCapital}
-                customCapital={customCapital}
-                setCustomCapital={setCustomCapital}
-                preferredRisk={preferredRisk}
-                setPreferredRisk={setPreferredRisk}
-                riskReward={riskReward}
-                setRiskReward={setRiskReward}
-                accountType={accountType}
-                setAccountType={setAccountType}
-                preferredSessions={preferredSessions}
-                toggleSession={toggleSession}
-                preferredTimeframes={preferredTimeframes}
-                toggleTimeframe={toggleTimeframe}
-                isPrefsDirty={isPrefsDirty}
-                savePreferences={savePreferences}
-              />
-            </React.Suspense>
+            <StrategyTab
+              strategies={strategies}
+              selectedStrategyId={selectedStrategyId}
+              activeStrategyId={activeStrategyId}
+              lastSavedStrategyText={lastSavedStrategyText}
+              GAKS_DEFAULT_STRATEGY={GAKS_DEFAULT_STRATEGY}
+              strategyTextareaRef={strategyTextareaRef}
+              handleClearStrategy={handleClearStrategy}
+              handleRestoreStrategy={handleRestoreStrategy}
+              handleSetActiveStrategy={handleSetActiveStrategy}
+              handleStrategyTextChange={handleStrategyTextChange}
+              saveStrategyPlaybook={saveStrategyPlaybook}
+              capital={capital}
+              setCapital={setCapital}
+              customCapital={customCapital}
+              setCustomCapital={setCustomCapital}
+              preferredRisk={preferredRisk}
+              setPreferredRisk={setPreferredRisk}
+              riskReward={riskReward}
+              setRiskReward={setRiskReward}
+              accountType={accountType}
+              setAccountType={setAccountType}
+              preferredSessions={preferredSessions}
+              toggleSession={toggleSession}
+              preferredTimeframes={preferredTimeframes}
+              toggleTimeframe={toggleTimeframe}
+              isPrefsDirty={isPrefsDirty}
+              savePreferences={savePreferences}
+            />
           )}
 
           {/* ==================== TAB 3: MARKET WATCHER ==================== */}
           {activeTab === 'watcher' && (
-            <React.Suspense fallback={<TabLoading />}>
-              <WatcherTab
-                isTelegramLoading={isTelegramLoading}
-                telegramConnection={telegramConnection}
-                isTelegramConnecting={isTelegramConnecting}
-                handleConnectTelegram={handleConnectTelegram}
-                isWatcherActive={isWatcherActive}
-                watcherTradeStatus={watcherTradeStatus}
-                watcherSearch={watcherSearch}
-                setWatcherSearch={setWatcherSearch}
-                watcherTimeframe={watcherTimeframe}
-                setWatcherTimeframe={setWatcherTimeframe}
-                watcherLastScanAt={watcherLastScanAt}
-                watcherLastCandle={watcherLastCandle}
-                watcherErrorMessage={watcherErrorMessage}
-                isTimeframeMismatch={isTimeframeMismatch}
-                compiledStrategyTimeframes={compiledStrategyTimeframes}
-                watchlist={watchlist}
-                stopAiMarketWatcher={stopAiMarketWatcher}
-                startAiMarketWatcher={startAiMarketWatcher}
-                isAdmin={isAdmin}
-                triggerNotification={triggerNotification}
-                getSparklinePaths={getSparklinePaths}
-                handleRemovePair={handleRemovePair}
-                geminiKeyExists={geminiKeyExists}
-                onGoToSettings={() => setActiveTab('settings')}
-              />
-            </React.Suspense>
+            <WatcherTab
+              isTelegramLoading={isTelegramLoading}
+              telegramConnection={telegramConnection}
+              isTelegramConnecting={isTelegramConnecting}
+              handleConnectTelegram={handleConnectTelegram}
+              isWatcherActive={isWatcherActive}
+              watcherTradeStatus={watcherTradeStatus}
+              watcherSearch={watcherSearch}
+              setWatcherSearch={setWatcherSearch}
+              watcherTimeframe={watcherTimeframe}
+              setWatcherTimeframe={setWatcherTimeframe}
+              watcherLastScanAt={watcherLastScanAt}
+              watcherLastCandle={watcherLastCandle}
+              watcherErrorMessage={watcherErrorMessage}
+              isTimeframeMismatch={isTimeframeMismatch}
+              compiledStrategyTimeframes={compiledStrategyTimeframes}
+              watchlist={watchlist}
+              stopAiMarketWatcher={stopAiMarketWatcher}
+              startAiMarketWatcher={startAiMarketWatcher}
+              isAdmin={isAdmin}
+              triggerNotification={triggerNotification}
+              getSparklinePaths={getSparklinePaths}
+              handleRemovePair={handleRemovePair}
+              geminiKeyExists={geminiKeyExists}
+              onGoToSettings={() => setActiveTab('settings')}
+            />
           )}
 
           {/* ==================== TAB 4: SETTINGS & PROFILE ==================== */}
           {activeTab === 'settings' && (
-            <React.Suspense fallback={<TabLoading />}>
-              <SettingsTab
-                profileAvatarUrl={profileAvatarUrl}
-                setProfileAvatarUrl={setProfileAvatarUrl}
-                profileFullName={profileFullName}
-                setProfileFullName={setProfileFullName}
-                profilePlan={profilePlan}
-                setProfilePlan={setProfilePlan}
-                session={session}
-                handleUpdateProfile={handleUpdateProfile}
-                isProfileUpdating={isProfileUpdating}
-                geminiKey={geminiKey}
-                setGeminiKey={setGeminiKey}
-                geminiKeyExists={geminiKeyExists}
-                handleSaveGeminiKey={handleSaveGeminiKey}
-                isGeminiKeySaving={isGeminiKeySaving}
-                handleLogout={handleLogout}
-              />
-            </React.Suspense>
+            <SettingsTab
+              profileAvatarUrl={profileAvatarUrl}
+              setProfileAvatarUrl={setProfileAvatarUrl}
+              profileFullName={profileFullName}
+              setProfileFullName={setProfileFullName}
+              profilePlan={profilePlan}
+              setProfilePlan={setProfilePlan}
+              session={session}
+              handleUpdateProfile={handleUpdateProfile}
+              isProfileUpdating={isProfileUpdating}
+              geminiKey={geminiKey}
+              setGeminiKey={setGeminiKey}
+              geminiKeyExists={geminiKeyExists}
+              handleSaveGeminiKey={handleSaveGeminiKey}
+              isGeminiKeySaving={isGeminiKeySaving}
+              handleLogout={handleLogout}
+            />
           )}
+
+          {/* ==================== TAB 5: ADMIN ==================== */}
           {activeTab === 'admin' && (
-            <React.Suspense fallback={
-              <div className="py-20 flex flex-col items-center justify-center gap-3">
-                <div className="w-8 h-8 rounded-full border-2 border-zinc-900 border-t-zinc-500 animate-spin"></div>
-                <p className="text-xs text-zinc-500">Loading admin panel analytics...</p>
-              </div>
-            }>
-              <AdminDashboard userProfile={userProfile} session={session} authLoading={isAuthLoading} />
-            </React.Suspense>
+            <AdminDashboard userProfile={userProfile} session={session} authLoading={isAuthLoading} />
           )}
 
         </main>

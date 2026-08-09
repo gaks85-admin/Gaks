@@ -59,24 +59,6 @@ const DashboardPage = ({ fetchWithAuth }: { fetchWithAuth: any }) => {
     fetchStats();
   }, []);
 
-  if (loading) {
-    return (
-      <div className="flex flex-col items-center justify-center py-20 text-zinc-400">
-        <RefreshCw className="w-8 h-8 animate-spin text-sky-500 mb-3" />
-        <span className="text-xs font-semibold">Loading live statistics from Supabase...</span>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="p-6 m-6 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 flex items-center gap-3">
-        <AlertTriangle className="w-5 h-5" />
-        <span className="text-sm font-semibold">{error}</span>
-      </div>
-    );
-  }
-
   const statCards = [
     { label: "Total Active Watchers", value: stats?.activeWatchers || 0, desc: "Scanners actively running in background", icon: Eye, color: "text-zinc-200 bg-zinc-800 border-zinc-700" },
     { label: "Total Pairs Being Monitored", value: stats?.totalPairsMonitored || 0, desc: "Unique currency and crypto trading pairs", icon: Activity, color: "text-blue-400 bg-blue-500/10 border-blue-500/20" },
@@ -95,26 +77,48 @@ const DashboardPage = ({ fetchWithAuth }: { fetchWithAuth: any }) => {
           <p className="text-xs text-zinc-500">Real-time statistics fetched from Supabase using Service Role privilege</p>
         </div>
         <button onClick={fetchStats} className="p-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300 transition-colors cursor-pointer" title="Refresh Stats">
-          <RefreshCw className="w-4 h-4" />
+          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
         </button>
       </div>
 
+      {error && (
+        <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 flex items-center gap-3">
+          <AlertTriangle className="w-5 h-5" />
+          <span className="text-sm font-semibold">{error}</span>
+        </div>
+      )}
+
       {/* Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {statCards.map((card, i) => (
-          <div key={i} className={`bg-zinc-50 dark:bg-zinc-950 p-5 rounded-2xl border flex flex-col justify-between shadow-sm dark:shadow-lg relative overflow-hidden transition-all hover:scale-[1.01] ${card.color.split(' ')[2]}`}>
-            <div className="flex justify-between items-start">
-              <div>
-                <span className="text-xs font-bold uppercase tracking-wider text-zinc-500">{card.label}</span>
-                <p className="text-3xl font-extrabold text-zinc-950 dark:text-white mt-1.5 font-display">{card.value}</p>
+        {loading ? (
+          [1, 2, 3, 4, 5, 6].map((i) => (
+            <div key={i} className="bg-zinc-50 dark:bg-zinc-950 p-5 rounded-2xl border border-zinc-200 dark:border-zinc-900 animate-pulse space-y-3">
+              <div className="flex justify-between items-start">
+                <div className="space-y-2">
+                  <div className="h-3 w-28 bg-zinc-200 dark:bg-zinc-800 rounded"></div>
+                  <div className="h-8 w-20 bg-zinc-200 dark:bg-zinc-800 rounded"></div>
+                </div>
+                <div className="w-10 h-10 bg-zinc-200 dark:bg-zinc-800 rounded-xl"></div>
               </div>
-              <div className={`p-2.5 rounded-xl ${card.color.split(' ')[1]} ${card.color.split(' ')[0]}`}>
-                <card.icon className="w-5 h-5 stroke-[1.8]" />
-              </div>
+              <div className="h-2.5 w-36 bg-zinc-100 dark:bg-zinc-900 rounded"></div>
             </div>
-            <span className="text-[10px] text-zinc-500 mt-4">{card.desc}</span>
-          </div>
-        ))}
+          ))
+        ) : (
+          statCards.map((card, i) => (
+            <div key={i} className={`bg-zinc-50 dark:bg-zinc-950 p-5 rounded-2xl border flex flex-col justify-between shadow-sm dark:shadow-lg relative overflow-hidden transition-all hover:scale-[1.01] ${card.color.split(' ')[2]}`}>
+              <div className="flex justify-between items-start">
+                <div>
+                  <span className="text-xs font-bold uppercase tracking-wider text-zinc-500">{card.label}</span>
+                  <p className="text-3xl font-extrabold text-zinc-950 dark:text-white mt-1.5 font-display">{card.value}</p>
+                </div>
+                <div className={`p-2.5 rounded-xl ${card.color.split(' ')[1]} ${card.color.split(' ')[0]}`}>
+                  <card.icon className="w-5 h-5 stroke-[1.8]" />
+                </div>
+              </div>
+              <span className="text-[10px] text-zinc-500 mt-4">{card.desc}</span>
+            </div>
+          ))
+        )}
       </div>
 
       {/* Auxiliary Info */}
