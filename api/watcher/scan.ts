@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import { GoogleGenAI, Type } from "@google/genai";
 import { analyzeMarket, Candle } from "../../src/lib/strategy-engine.js";
 import { extractRiskPreferences, calculatePositionSize, parseRiskRewardRatio } from "../../src/lib/risk-engine.js";
+import { calculateStructuralStopLoss, validateAndResolveStopLoss } from "../../src/lib/structural-stop-loss.js";
 import { evaluateRules } from "../../src/lib/rule-engine.js";
 import { compileStrategy } from "../../src/lib/strategy-compiler.js";
 import { evaluateDecision } from "../../src/lib/decision-engine.js";
@@ -318,30 +319,33 @@ export default async function handler(req: any, res: any) {
           }
           if (geminiKey) {
             const ai = new GoogleGenAI({ apiKey: geminiKey });
+            const currentPrice = candleData[candleData.length - 1].close;
             const promptText = `
 You are an expert AI trading assistant.
-Evaluate whether the following market conditions and indicators satisfy the user's trading strategy.
+Evaluate whether the market conditions satisfy the user's strategy and derive structural trade levels.
 
-Rule Engine Indicators:
+Current Price: ${currentPrice}
+
+Detailed Numeric Market Structure & Key Levels:
 - Trend: ${marketStructure.trend}
-- EMA Trend Aligned: YES
-- ATR Volatility: ${marketStructure.volatilityInformation.atr.toFixed(5)}
-- Market Session: London/New York Active
-- Support Proximity: Near Support
-- Resistance Proximity: Neutral
-- Trendline Breakout: ${marketStructure.breakouts.length > 0 ? 'Breakout Detected' : 'No breakout'}
+- Support Zones (Min-Max): ${marketStructure.supportZones?.map(s => `[${s.priceMin.toFixed(5)} - ${s.priceMax.toFixed(5)}]`).join(', ') || 'None'}
+- Resistance Zones (Min-Max): ${marketStructure.resistanceZones?.map(r => `[${r.priceMin.toFixed(5)} - ${r.priceMax.toFixed(5)}]`).join(', ') || 'None'}
+- Swing Highs: ${marketStructure.swingHighs?.slice(-3).map(s => s.price.toFixed(5)).join(', ') || 'None'}
+- Swing Lows: ${marketStructure.swingLows?.slice(-3).map(s => s.price.toFixed(5)).join(', ') || 'None'}
+- Fair Value Gaps: ${marketStructure.fairValueGaps?.slice(-3).map(f => `${f.type} (${f.bottom.toFixed(5)} - ${f.top.toFixed(5)})`).join(', ') || 'None'}
 - Volume Confirmation: ${marketStructure.volumeInformation.volumeSpike ? 'Confirmed' : 'Normal'}
-- Recent Candles: ${JSON.stringify(candleData.slice(-5), null, 2)}
+- ATR: ${marketStructure.volatilityInformation.atr.toFixed(5)}
 
 User's Trading Strategy:
 ${strategyText}
 
-Does this satisfy the user's strategy?
-Answer with JSON containing:
-- satisfies (boolean)
-- direction ('BUY' | 'SELL' | 'NO_TRADE')
-- confidenceScore (number 0-100)
-- reasoning (string)
+AI Instructions:
+1. Determine if conditions satisfy the strategy ('BUY', 'SELL', 'NO_TRADE').
+2. For BUY: Stop Loss MUST be placed BELOW entry, below relevant support zone, swing low, or demand structure.
+3. For SELL: Stop Loss MUST be placed ABOVE entry, above relevant resistance zone, swing high, or supply structure.
+4. Identify stopLossBasis (SUPPORT_ZONE, RESISTANCE_ZONE, SWING_LOW, SWING_HIGH, DEMAND_ZONE, SUPPLY_ZONE, STRUCTURAL_CANDLE, ATR_FALLBACK).
+
+Answer with JSON matching schema.
 `;
             const aiResponse = await ai.models.generateContent({
               model: "gemini-3.6-flash",
@@ -354,6 +358,10 @@ Answer with JSON containing:
                     satisfies: { type: Type.BOOLEAN },
                     direction: { type: Type.STRING },
                     confidenceScore: { type: Type.NUMBER },
+                    entryPrice: { type: Type.NUMBER },
+                    stopLoss: { type: Type.NUMBER },
+                    takeProfit: { type: Type.NUMBER },
+                    stopLossBasis: { type: Type.STRING },
                     reasoning: { type: Type.STRING }
                   },
                   required: ["satisfies", "direction", "confidenceScore", "reasoning"]
@@ -365,15 +373,35 @@ Answer with JSON containing:
             const parsedResult = JSON.parse(geminiTextResult);
 
             if (parsedResult.satisfies && parsedResult.direction && parsedResult.direction !== 'NO_TRADE') {
-              const entry = candleData[candleData.length - 1].close;
-              const atrVal = marketStructure.volatilityInformation.atr && marketStructure.volatilityInformation.atr > 0 ? marketStructure.volatilityInformation.atr : entry * 0.005;
-              const sl = parsedResult.direction === 'BUY' ? entry - (atrVal * 1.5) : entry + (atrVal * 1.5);
+              const signalDir = parsedResult.direction as 'BUY' | 'SELL';
+              const entry = Number(parsedResult.entryPrice) || candleData[candleData.length - 1].close;
+
+              const slResult = validateAndResolveStopLoss(
+                signalDir,
+                entry,
+                parsedResult.stopLoss,
+                parsedResult.stopLossBasis,
+                marketStructure
+              );
+
+              let finalTP = Number(parsedResult.takeProfit);
+              const isTpValid = !isNaN(finalTP) && finalTP > 0 &&
+                (signalDir === 'BUY' ? finalTP > entry : finalTP < entry);
+
+              if (!isTpValid) {
+                const riskDist = Math.abs(entry - slResult.stopLoss);
+                const rrRatio = parseRiskRewardRatio(riskRewardStr);
+                finalTP = signalDir === 'BUY' ? entry + (riskDist * rrRatio) : entry - (riskDist * rrRatio);
+              }
+
               analysis = {
-                signal: parsedResult.direction,
+                signal: signalDir,
                 confidence: parsedResult.confidenceScore || 85,
                 entryPrice: entry,
-                stopLoss: sl,
-                takeProfit: null,
+                stopLoss: slResult.stopLoss,
+                stopLossBasis: slResult.stopLossBasis,
+                structuralLevel: slResult.structuralLevel,
+                takeProfit: finalTP,
                 riskReward: riskRewardStr,
                 reasoning: [parsedResult.reasoning || "Satisfies strategy rules and Gemini validation."]
               };
@@ -383,6 +411,22 @@ Answer with JSON containing:
           console.warn(`[Gemini Validation Warning]: Falling back to local strategy engine:`, gemErr.message);
 
           const localAnalysis = analyzeMarket(candleData, compiledStrategy);
+          if (localAnalysis && localAnalysis.signal !== 'NO_TRADE' && localAnalysis.entryPrice) {
+            const slResult = calculateStructuralStopLoss(
+              localAnalysis.signal as 'BUY' | 'SELL',
+              localAnalysis.entryPrice,
+              marketStructure
+            );
+            localAnalysis.stopLoss = slResult.stopLoss;
+            (localAnalysis as any).stopLossBasis = slResult.stopLossBasis;
+            (localAnalysis as any).structuralLevel = slResult.structuralLevel;
+
+            const riskDist = Math.abs(localAnalysis.entryPrice - slResult.stopLoss);
+            const rrRatio = parseRiskRewardRatio(riskRewardStr);
+            localAnalysis.takeProfit = localAnalysis.signal === 'BUY'
+              ? localAnalysis.entryPrice + (riskDist * rrRatio)
+              : localAnalysis.entryPrice - (riskDist * rrRatio);
+          }
           analysis = localAnalysis;
           if (geminiStart > 0) {
             geminiDuration = Date.now() - geminiStart;
@@ -393,6 +437,22 @@ Answer with JSON containing:
         console.log(`[Decision Engine] Recommendation is PASS. Skipping Gemini as requires_gemini is false.`);
 
         const localAnalysis = analyzeMarket(candleData, compiledStrategy);
+        if (localAnalysis && localAnalysis.signal !== 'NO_TRADE' && localAnalysis.entryPrice) {
+          const slResult = calculateStructuralStopLoss(
+            localAnalysis.signal as 'BUY' | 'SELL',
+            localAnalysis.entryPrice,
+            marketStructure
+          );
+          localAnalysis.stopLoss = slResult.stopLoss;
+          (localAnalysis as any).stopLossBasis = slResult.stopLossBasis;
+          (localAnalysis as any).structuralLevel = slResult.structuralLevel;
+
+          const riskDist = Math.abs(localAnalysis.entryPrice - slResult.stopLoss);
+          const rrRatio = parseRiskRewardRatio(riskRewardStr);
+          localAnalysis.takeProfit = localAnalysis.signal === 'BUY'
+            ? localAnalysis.entryPrice + (riskDist * rrRatio)
+            : localAnalysis.entryPrice - (riskDist * rrRatio);
+        }
         analysis = localAnalysis;
       }
     }
@@ -414,6 +474,21 @@ Answer with JSON containing:
         direction: analysis.signal,
         riskRewardStr: riskRewardStr
       });
+
+      console.log(`
+[Trade Risk]
+Direction: ${analysis.signal}
+Entry: ${posSizeResult.entryPrice}
+SL: ${posSizeResult.stopLoss}
+TP: ${posSizeResult.takeProfit}
+Stop Distance: ${posSizeResult.stopDistance.toFixed(5)}
+SL Basis: ${analysis.stopLossBasis || 'STRUCTURAL'}
+Structural Level: ${analysis.structuralLevel !== null && analysis.structuralLevel !== undefined ? analysis.structuralLevel : 'N/A'}
+Risk Amount: $${posSizeResult.riskAmount.toFixed(2)}
+Calculated Lot Size: ${posSizeResult.calculatedLotSize}
+Expected Loss: $${posSizeResult.expectedLoss.toFixed(2)}
+${analysis.stopLossBasis === 'ATR_FALLBACK' ? `ATR: ${marketStructure.volatilityInformation.atr.toFixed(5)}\nATR Multiplier: 1.5` : ''}
+`.trim());
       riskResult = {
         accepted: posSizeResult.accepted,
         skipReason: posSizeResult.skipReason

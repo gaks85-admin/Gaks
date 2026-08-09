@@ -3,12 +3,13 @@ import { GoogleGenAI, Type } from '@google/genai';
 import { analyzeMarket, Candle } from '../../src/lib/strategy-engine.js';
 import { ParsedStrategy } from '../../src/lib/strategy-parser.js';
 import { buildTelegramAlertMessage } from '../../src/lib/telegram-formatter.js';
-import { extractRiskPreferences, calculatePositionSize } from '../../src/lib/risk-engine.js';
+import { extractRiskPreferences, calculatePositionSize, parseRiskRewardRatio } from '../../src/lib/risk-engine.js';
 import { evaluateRules } from '../../src/lib/rule-engine.js';
 import { compileStrategy } from '../../src/lib/strategy-compiler.js';
 import { validateDetectors } from '../../src/lib/detector-capability-validator.js';
 import { evaluateDecision } from '../../src/lib/decision-engine.js';
 import { extractMarketStructure } from '../../src/lib/market-structure-engine.js';
+import { calculateStructuralStopLoss, validateAndResolveStopLoss } from '../../src/lib/structural-stop-loss.js';
 import { recordEvaluation } from '../../src/lib/explainability-engine.js';
 import { calculateHistoricalProbability, recordCompletedTrade } from '../../src/lib/learning-engine.js';
 import { RULE_WEIGHTS } from '../../src/lib/rule-weight-engine.js';
@@ -1444,6 +1445,7 @@ export default async function handler(req: any, res: any) {
                 console.log("Sending prompt to Gemini...");
 
                 const ai = new GoogleGenAI({ apiKey: geminiKey });
+                const currentPrice = candleData[candleData.length - 1].close;
                 const promptText = `
 You are an expert AI trading analyst.
 
@@ -1451,39 +1453,28 @@ Strategy Summary:
 - Style: ${compiledStrategy.strategy_mode || 'HYBRID'}
 - Timeframe: ${selectedTimeframe}
 
-Available Market Evidence:
+Current Price: ${currentPrice}
+
+Detailed Numeric Market Structure & Key Levels:
 - Trend: ${marketStructure.trend}
-- BOS: ${marketStructure.BOS?.length > 0 ? 'Detected' : 'None'}
-- CHOCH: ${marketStructure.CHOCH?.length > 0 ? 'Detected' : 'None'}
-- Support: ${marketStructure.supportZones?.length > 0 ? 'Detected' : 'None'}
-- Resistance: ${marketStructure.resistanceZones?.length > 0 ? 'Detected' : 'None'}
-- Fair Value Gap: ${marketStructure.fairValueGaps?.length > 0 ? 'Detected' : 'None'}
-- Liquidity Sweep: ${marketStructure.liquiditySweeps?.length > 0 ? 'Detected' : 'None'}
+- Support Zones (Min-Max): ${marketStructure.supportZones?.map(s => `[${s.priceMin.toFixed(5)} - ${s.priceMax.toFixed(5)}]`).join(', ') || 'None'}
+- Resistance Zones (Min-Max): ${marketStructure.resistanceZones?.map(r => `[${r.priceMin.toFixed(5)} - ${r.priceMax.toFixed(5)}]`).join(', ') || 'None'}
+- Swing Highs: ${marketStructure.swingHighs?.slice(-3).map(s => s.price.toFixed(5)).join(', ') || 'None'}
+- Swing Lows: ${marketStructure.swingLows?.slice(-3).map(s => s.price.toFixed(5)).join(', ') || 'None'}
+- Fair Value Gaps: ${marketStructure.fairValueGaps?.slice(-3).map(f => `${f.type} (${f.bottom.toFixed(5)} - ${f.top.toFixed(5)})`).join(', ') || 'None'}
 - Volume Confirmation: ${marketStructure.volumeInformation.volumeSpike ? 'Confirmed' : 'None'}
 - ATR: ${marketStructure.volatilityInformation.atr.toFixed(5)}
-- EMA Alignment: YES
-
-Missing Evidence:
-${!marketStructure.breakouts?.length ? '- Trendline Breakout' : ''}
-- Trendline Touches
-- Spread
-- High Impact News
 
 AI Instructions:
 1. Evaluate ONLY the supplied market evidence.
-2. Never assume missing data.
-3. Missing evidence is UNKNOWN, not FALSE.
-4. Estimate whether the available confluence is enough to produce a BUY, SELL, or NO_TRADE.
-5. Use probabilistic reasoning instead of strict rule matching.
-6. Only return NO_TRADE when the supplied evidence clearly argues against taking a trade.
+2. Determine whether the available confluence is enough to produce a BUY, SELL, or NO_TRADE.
+3. If BUY or SELL, provide the exact Entry Price, Stop Loss, and Take Profit based on actual NUMERIC market structure.
+4. For BUY: Stop Loss MUST be placed BELOW entry, below relevant support zone, swing low, or demand structure.
+5. For SELL: Stop Loss MUST be placed ABOVE entry, above relevant resistance zone, swing high, or supply structure.
+6. Identify the basis used for the Stop Loss in "stopLossBasis" (SUPPORT_ZONE, RESISTANCE_ZONE, SWING_LOW, SWING_HIGH, DEMAND_ZONE, SUPPLY_ZONE, STRUCTURAL_CANDLE, ATR_FALLBACK).
+7. Only return NO_TRADE when the supplied evidence clearly argues against taking a trade.
 
-Output ONLY valid JSON:
-{
-"satisfies": boolean,
-"direction": "BUY" | "SELL" | "NO_TRADE",
-"confidenceScore": number,
-"reasoning": "short explanation"
-}
+Output ONLY valid JSON.
 `;
                 const aiResponse = await ai.models.generateContent({
                   model: "gemini-3.6-flash",
@@ -1496,6 +1487,10 @@ Output ONLY valid JSON:
                         satisfies: { type: Type.BOOLEAN },
                         direction: { type: Type.STRING },
                         confidenceScore: { type: Type.NUMBER },
+                        entryPrice: { type: Type.NUMBER },
+                        stopLoss: { type: Type.NUMBER },
+                        takeProfit: { type: Type.NUMBER },
+                        stopLossBasis: { type: Type.STRING },
                         reasoning: { type: Type.STRING }
                       },
                       required: ["satisfies", "direction", "confidenceScore", "reasoning"]
@@ -1544,16 +1539,35 @@ Output ONLY valid JSON:
 
                 if (parsedResult.satisfies && parsedResult.direction && parsedResult.direction !== 'NO_TRADE') {
                   geminiDirection = parsedResult.direction;
-                  const entry = candleData[candleData.length - 1].close;
-                  const atrVal = marketStructure.volatilityInformation.atr && marketStructure.volatilityInformation.atr > 0 ? marketStructure.volatilityInformation.atr : entry * 0.005;
-                  const sl = geminiDirection === 'BUY' ? entry - (atrVal * 1.5) : entry + (atrVal * 1.5);
+                  const entry = Number(parsedResult.entryPrice) || candleData[candleData.length - 1].close;
+
+                  // Resolve structural stop loss using market structure
+                  const slResult = validateAndResolveStopLoss(
+                    geminiDirection as 'BUY' | 'SELL',
+                    entry,
+                    parsedResult.stopLoss,
+                    parsedResult.stopLossBasis,
+                    marketStructure
+                  );
+
+                  let finalTP = Number(parsedResult.takeProfit);
+                  const isTpValid = !isNaN(finalTP) && finalTP > 0 &&
+                    (geminiDirection === 'BUY' ? finalTP > entry : finalTP < entry);
+
+                  if (!isTpValid) {
+                    const riskDist = Math.abs(entry - slResult.stopLoss);
+                    const rrRatio = parseRiskRewardRatio(riskRewardStr);
+                    finalTP = geminiDirection === 'BUY' ? entry + (riskDist * rrRatio) : entry - (riskDist * rrRatio);
+                  }
 
                   analysis = {
                     signal: geminiDirection,
                     confidence: parsedResult.confidenceScore || 85,
                     entryPrice: entry,
-                    stopLoss: sl,
-                    takeProfit: null,
+                    stopLoss: slResult.stopLoss,
+                    takeProfit: finalTP,
+                    stopLossBasis: slResult.stopLossBasis,
+                    structuralLevel: slResult.structuralLevel,
                     riskReward: riskRewardStr,
                     reasoning: [parsedResult.reasoning || "Satisfies strategy rules and Gemini validation."]
                   };
@@ -1651,6 +1665,22 @@ Output ONLY valid JSON:
                 minimumRiskReward: compiledStrategy.compiled_rules.risk_reward?.min_ratio
               };
               const localAnalysis = analyzeMarket(candleData, mappedParsedStrategy);
+              if (localAnalysis && localAnalysis.signal !== 'NO_TRADE' && localAnalysis.entryPrice) {
+                const slResult = calculateStructuralStopLoss(
+                  localAnalysis.signal as 'BUY' | 'SELL',
+                  localAnalysis.entryPrice,
+                  marketStructure
+                );
+                localAnalysis.stopLoss = slResult.stopLoss;
+                (localAnalysis as any).stopLossBasis = slResult.stopLossBasis;
+                (localAnalysis as any).structuralLevel = slResult.structuralLevel;
+
+                const riskDist = Math.abs(localAnalysis.entryPrice - slResult.stopLoss);
+                const rrRatio = parseRiskRewardRatio(riskRewardStr);
+                localAnalysis.takeProfit = localAnalysis.signal === 'BUY'
+                  ? localAnalysis.entryPrice + (riskDist * rrRatio)
+                  : localAnalysis.entryPrice - (riskDist * rrRatio);
+              }
               analysis = localAnalysis;
             }
           }
@@ -1733,6 +1763,21 @@ Output ONLY valid JSON:
           direction: analysis.signal,
           riskRewardStr: riskRewardStr
         });
+
+        console.log(`
+[Trade Risk]
+Direction: ${analysis.signal}
+Entry: ${posSizeResult.entryPrice}
+SL: ${posSizeResult.stopLoss}
+TP: ${posSizeResult.takeProfit}
+Stop Distance: ${posSizeResult.stopDistance.toFixed(5)}
+SL Basis: ${analysis.stopLossBasis || 'STRUCTURAL'}
+Structural Level: ${analysis.structuralLevel !== null && analysis.structuralLevel !== undefined ? analysis.structuralLevel : 'N/A'}
+Risk Amount: $${posSizeResult.riskAmount.toFixed(2)}
+Calculated Lot Size: ${posSizeResult.calculatedLotSize}
+Expected Loss: $${posSizeResult.expectedLoss.toFixed(2)}
+${analysis.stopLossBasis === 'ATR_FALLBACK' ? `ATR: ${marketStructure.volatilityInformation.atr.toFixed(5)}\nATR Multiplier: 1.5` : ''}
+`.trim());
 
         if (!posSizeResult.accepted) {
           console.log(`[Risk/Validation Failed - Trade Skipped] ${posSizeResult.skipReason}`);
