@@ -1369,6 +1369,7 @@ export default async function handler(req: any, res: any) {
         let geminiTextResult = "";
         let geminiStart = 0;
         let geminiDuration = 0;
+        let requiresGemini = false;
 
         const recommendation = decisionResult.recommendation; // PASS, LIKELY_PASS, AMBIGUOUS, FAIL
         const executionMode = compiledStrategy.detector_validation?.execution_mode || 'HYBRID';
@@ -1415,9 +1416,9 @@ export default async function handler(req: any, res: any) {
           watchersProcessedCount++;
           continue;
         } else {
-          // Check if we force Gemini for FAIL in HYBRID/AI_ONLY or if AMBIGUOUS in non-RULE_ONLY
+          // Check if we force Gemini for FAIL in HYBRID/AI_ONLY or if AMBIGUOUS/requires_gemini is true
           const forceGemini = (recommendation === 'FAIL' && (executionMode === 'HYBRID' || executionMode === 'AI_ONLY'));
-          const requiresGemini = (compiledStrategy.strategy_mode !== 'RULE_ONLY') && (decisionResult.requires_gemini || forceGemini || recommendation === 'AMBIGUOUS');
+          requiresGemini = Boolean(decisionResult.requires_gemini || forceGemini || recommendation === 'AMBIGUOUS');
           
           console.log(`
 [Decision Routing]
@@ -1694,6 +1695,21 @@ Output ONLY valid JSON.
               }
               analysis = localAnalysis;
             }
+          }
+        }
+
+        if (requiresGemini) {
+          if (!geminiSucceeded || (analysis.signal !== 'BUY' && analysis.signal !== 'SELL')) {
+            console.log(`[Safety Invariant] Gemini required. Executed: ${geminiCalled ? 'YES' : 'NO'}, Result: ${parsedResult?.direction || (geminiSucceeded ? 'NO_TRADE' : 'ERROR/UNAVAILABLE')}`);
+            analysis = {
+              signal: 'NO_TRADE',
+              confidence: 0,
+              entryPrice: null,
+              stopLoss: null,
+              takeProfit: null,
+              riskReward: null,
+              reasoning: analysis.reasoning?.length ? analysis.reasoning : ['Gemini required but did not produce valid BUY or SELL decision.']
+            };
           }
         }
 

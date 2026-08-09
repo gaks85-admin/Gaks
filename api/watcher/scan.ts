@@ -302,7 +302,7 @@ export default async function handler(req: any, res: any) {
     const recommendation = decisionResult.recommendation; // PASS, LIKELY_PASS, AMBIGUOUS, FAIL
     const executionMode = compiledStrategy.strategy_mode || 'HYBRID';
     const forceGemini = (recommendation === 'FAIL' && (executionMode === 'HYBRID' || executionMode === 'AI_ONLY'));
-    const requiresGemini = (compiledStrategy.strategy_mode !== 'RULE_ONLY') && (decisionResult.requires_gemini || forceGemini || recommendation === 'AMBIGUOUS');
+    const requiresGemini = Boolean(decisionResult.requires_gemini || forceGemini || recommendation === 'AMBIGUOUS');
 
     console.log(`
 [Decision Routing]
@@ -472,6 +472,21 @@ Answer with JSON matching schema.
             : localAnalysis.entryPrice - (riskDist * rrRatio);
         }
         analysis = localAnalysis;
+      }
+    }
+
+    if (requiresGemini) {
+      if (analysis.signal !== 'BUY' && analysis.signal !== 'SELL') {
+        console.log(`[Safety Invariant] Gemini required. Executed: ${geminiCalled ? 'YES' : 'NO'}, Final Signal reset to NO_TRADE.`);
+        analysis = {
+          signal: 'NO_TRADE',
+          confidence: 0,
+          entryPrice: null,
+          stopLoss: null,
+          takeProfit: null,
+          riskReward: null,
+          reasoning: analysis.reasoning?.length ? analysis.reasoning : ['Gemini required but did not produce valid BUY or SELL decision.']
+        };
       }
     }
 
