@@ -300,27 +300,33 @@ export default async function handler(req: any, res: any) {
     let geminiDuration = 0;
 
     const recommendation = decisionResult.recommendation; // PASS, LIKELY_PASS, AMBIGUOUS, FAIL
+    const executionMode = compiledStrategy.strategy_mode || 'HYBRID';
+    const forceGemini = (recommendation === 'FAIL' && (executionMode === 'HYBRID' || executionMode === 'AI_ONLY'));
+    const requiresGemini = (compiledStrategy.strategy_mode !== 'RULE_ONLY') && (decisionResult.requires_gemini || forceGemini || recommendation === 'AMBIGUOUS');
 
-    if (recommendation === 'FAIL') {
-      console.log(`[Decision Engine Failed] Watcher ID: ${watcher.id} (${symbol}) recommendation is FAIL. Stopping execution. Gemini NOT called.`);
-      analysis.reasoning = [decisionResult.explanation];
-    } else {
-      // Check if Gemini is required based on Decision Engine requires_gemini
-      const requiresGemini = decisionResult.requires_gemini;
-      
-      if (requiresGemini) {
-        geminiCalled = true;
-        geminiStart = Date.now();
-        try {
-          let geminiKey = process.env.GEMINI_API_KEY;
-          const { data: userKeyData } = await supabase.from('user_api_keys').select('api_key').eq('user_id', userId).eq('provider', 'gemini').maybeSingle();
-          if (userKeyData?.api_key) {
-             geminiKey = userKeyData.api_key;
-          }
-          if (geminiKey) {
-            const ai = new GoogleGenAI({ apiKey: geminiKey });
-            const currentPrice = candleData[candleData.length - 1].close;
-            const promptText = `
+    console.log(`
+[Decision Routing]
+Strategy Mode: ${compiledStrategy.strategy_mode || 'HYBRID'}
+Execution Mode: ${executionMode}
+Rule Score: ${decisionResult.decision_score}
+Rule Recommendation: ${recommendation}
+Requires Gemini: ${requiresGemini ? 'YES' : 'NO'}
+Reason: ${decisionResult.explanation || (requiresGemini ? 'Strategy configuration or score requires AI evaluation' : 'Rule evaluation sufficient')}
+`.trim());
+
+    if (requiresGemini) {
+      geminiCalled = true;
+      geminiStart = Date.now();
+      try {
+        let geminiKey = process.env.GEMINI_API_KEY;
+        const { data: userKeyData } = await supabase.from('user_api_keys').select('api_key').eq('user_id', userId).eq('provider', 'gemini').maybeSingle();
+        if (userKeyData?.api_key) {
+           geminiKey = userKeyData.api_key;
+        }
+        if (geminiKey) {
+          const ai = new GoogleGenAI({ apiKey: geminiKey });
+          const currentPrice = candleData[candleData.length - 1].close;
+          const promptText = `
 You are an expert AI trading assistant.
 Evaluate whether the market conditions satisfy the user's strategy and derive structural trade levels.
 
@@ -347,95 +353,107 @@ AI Instructions:
 
 Answer with JSON matching schema.
 `;
-            const aiResponse = await ai.models.generateContent({
-              model: "gemini-3.6-flash",
-              contents: promptText,
-              config: {
-                responseMimeType: "application/json",
-                responseSchema: {
-                  type: Type.OBJECT,
-                  properties: {
-                    satisfies: { type: Type.BOOLEAN },
-                    direction: { type: Type.STRING },
-                    confidenceScore: { type: Type.NUMBER },
-                    entryPrice: { type: Type.NUMBER },
-                    stopLoss: { type: Type.NUMBER },
-                    takeProfit: { type: Type.NUMBER },
-                    stopLossBasis: { type: Type.STRING },
-                    reasoning: { type: Type.STRING }
-                  },
-                  required: ["satisfies", "direction", "confidenceScore", "reasoning"]
-                }
+          const aiResponse = await ai.models.generateContent({
+            model: "gemini-3.6-flash",
+            contents: promptText,
+            config: {
+              responseMimeType: "application/json",
+              responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                  satisfies: { type: Type.BOOLEAN },
+                  direction: { type: Type.STRING },
+                  confidenceScore: { type: Type.NUMBER },
+                  entryPrice: { type: Type.NUMBER },
+                  stopLoss: { type: Type.NUMBER },
+                  takeProfit: { type: Type.NUMBER },
+                  stopLossBasis: { type: Type.STRING },
+                  reasoning: { type: Type.STRING }
+                },
+                required: ["satisfies", "direction", "confidenceScore", "reasoning"]
               }
-            });
-            geminiDuration = Date.now() - geminiStart;
-            geminiTextResult = aiResponse.text || "";
-            const parsedResult = JSON.parse(geminiTextResult);
-
-            if (parsedResult.satisfies && parsedResult.direction && parsedResult.direction !== 'NO_TRADE') {
-              const signalDir = parsedResult.direction as 'BUY' | 'SELL';
-              const entry = Number(parsedResult.entryPrice) || candleData[candleData.length - 1].close;
-
-              const slResult = validateAndResolveStopLoss(
-                signalDir,
-                entry,
-                parsedResult.stopLoss,
-                parsedResult.stopLossBasis,
-                marketStructure
-              );
-
-              let finalTP = Number(parsedResult.takeProfit);
-              const isTpValid = !isNaN(finalTP) && finalTP > 0 &&
-                (signalDir === 'BUY' ? finalTP > entry : finalTP < entry);
-
-              if (!isTpValid) {
-                const riskDist = Math.abs(entry - slResult.stopLoss);
-                const rrRatio = parseRiskRewardRatio(riskRewardStr);
-                finalTP = signalDir === 'BUY' ? entry + (riskDist * rrRatio) : entry - (riskDist * rrRatio);
-              }
-
-              analysis = {
-                signal: signalDir,
-                confidence: parsedResult.confidenceScore || 85,
-                entryPrice: entry,
-                stopLoss: slResult.stopLoss,
-                stopLossBasis: slResult.stopLossBasis,
-                structuralLevel: slResult.structuralLevel,
-                takeProfit: finalTP,
-                riskReward: riskRewardStr,
-                reasoning: [parsedResult.reasoning || "Satisfies strategy rules and Gemini validation."]
-              };
             }
-          }
-        } catch (gemErr: any) {
-          console.warn(`[Gemini Validation Warning]: Falling back to local strategy engine:`, gemErr.message);
+          });
+          geminiDuration = Date.now() - geminiStart;
+          geminiTextResult = aiResponse.text || "";
+          const parsedResult = JSON.parse(geminiTextResult);
 
-          const localAnalysis = analyzeMarket(candleData, compiledStrategy);
-          if (localAnalysis && localAnalysis.signal !== 'NO_TRADE' && localAnalysis.entryPrice) {
-            const slResult = calculateStructuralStopLoss(
-              localAnalysis.signal as 'BUY' | 'SELL',
-              localAnalysis.entryPrice,
+          if (parsedResult.satisfies && parsedResult.direction && parsedResult.direction !== 'NO_TRADE') {
+            const signalDir = parsedResult.direction as 'BUY' | 'SELL';
+            const entry = Number(parsedResult.entryPrice) || candleData[candleData.length - 1].close;
+
+            const slResult = validateAndResolveStopLoss(
+              signalDir,
+              entry,
+              parsedResult.stopLoss,
+              parsedResult.stopLossBasis,
               marketStructure
             );
-            localAnalysis.stopLoss = slResult.stopLoss;
-            (localAnalysis as any).stopLossBasis = slResult.stopLossBasis;
-            (localAnalysis as any).structuralLevel = slResult.structuralLevel;
 
-            const riskDist = Math.abs(localAnalysis.entryPrice - slResult.stopLoss);
-            const rrRatio = parseRiskRewardRatio(riskRewardStr);
-            localAnalysis.takeProfit = localAnalysis.signal === 'BUY'
-              ? localAnalysis.entryPrice + (riskDist * rrRatio)
-              : localAnalysis.entryPrice - (riskDist * rrRatio);
-          }
-          analysis = localAnalysis;
-          if (geminiStart > 0) {
-            geminiDuration = Date.now() - geminiStart;
+            let finalTP = Number(parsedResult.takeProfit);
+            const isTpValid = !isNaN(finalTP) && finalTP > 0 &&
+              (signalDir === 'BUY' ? finalTP > entry : finalTP < entry);
+
+            if (!isTpValid) {
+              const riskDist = Math.abs(entry - slResult.stopLoss);
+              const rrRatio = parseRiskRewardRatio(riskRewardStr);
+              finalTP = signalDir === 'BUY' ? entry + (riskDist * rrRatio) : entry - (riskDist * rrRatio);
+            }
+
+            analysis = {
+              signal: signalDir,
+              confidence: parsedResult.confidenceScore || 85,
+              entryPrice: entry,
+              stopLoss: slResult.stopLoss,
+              stopLossBasis: slResult.stopLossBasis,
+              structuralLevel: slResult.structuralLevel,
+              takeProfit: finalTP,
+              riskReward: riskRewardStr,
+              reasoning: [parsedResult.reasoning || "Satisfies strategy rules and Gemini validation."]
+            };
+          } else {
+            console.log(`[Gemini Engine] Gemini did not satisfy or returned NO_TRADE. Setting signal to NO_TRADE.`);
+            analysis = {
+              signal: 'NO_TRADE',
+              confidence: 0,
+              entryPrice: null,
+              stopLoss: null,
+              takeProfit: null,
+              riskReward: null,
+              reasoning: [parsedResult?.reasoning || "Gemini evaluated setup as NO_TRADE or unsatisfied."]
+            };
           }
         }
+      } catch (gemErr: any) {
+        console.warn(`[Gemini Validation Error]: Rejecting trade due to Gemini failure:`, gemErr.message);
+        analysis = {
+          signal: 'NO_TRADE',
+          confidence: 0,
+          entryPrice: null,
+          stopLoss: null,
+          takeProfit: null,
+          riskReward: null,
+          reasoning: [`Gemini API call failed: ${gemErr.message}`]
+        };
+        if (geminiStart > 0) {
+          geminiDuration = Date.now() - geminiStart;
+        }
+      }
+    } else {
+      // Gemini NOT required! Check recommendation
+      if (recommendation === 'FAIL' || recommendation === 'AMBIGUOUS') {
+        console.log(`[Decision Engine] Recommendation is ${recommendation}. Forcing NO_TRADE without Gemini approval.`);
+        analysis = {
+          signal: 'NO_TRADE',
+          confidence: 0,
+          entryPrice: null,
+          stopLoss: null,
+          takeProfit: null,
+          riskReward: null,
+          reasoning: [`Rejected by Decision Engine (${recommendation} without Gemini approval)`]
+        };
       } else {
-        // Gemini NOT required! Fallback to local strategy engine (since recommendation is PASS)
-        console.log(`[Decision Engine] Recommendation is PASS. Skipping Gemini as requires_gemini is false.`);
-
+        console.log(`[Decision Engine] Recommendation is ${recommendation}. Evaluating local strategy engine.`);
         const localAnalysis = analyzeMarket(candleData, compiledStrategy);
         if (localAnalysis && localAnalysis.signal !== 'NO_TRADE' && localAnalysis.entryPrice) {
           const slResult = calculateStructuralStopLoss(
@@ -481,12 +499,17 @@ Direction: ${analysis.signal}
 Entry: ${posSizeResult.entryPrice}
 SL: ${posSizeResult.stopLoss}
 TP: ${posSizeResult.takeProfit}
-Stop Distance: ${posSizeResult.stopDistance.toFixed(5)}
 SL Basis: ${analysis.stopLossBasis || 'STRUCTURAL'}
 Structural Level: ${analysis.structuralLevel !== null && analysis.structuralLevel !== undefined ? analysis.structuralLevel : 'N/A'}
+Stop Distance: ${posSizeResult.stopDistance.toFixed(5)}
 Risk Amount: $${posSizeResult.riskAmount.toFixed(2)}
-Calculated Lot Size: ${posSizeResult.calculatedLotSize}
-Expected Loss: $${posSizeResult.expectedLoss.toFixed(2)}
+Required Lot: ${posSizeResult.exactLotSize}
+Minimum Lot: ${posSizeResult.minLot}
+Executable Lot: ${posSizeResult.accepted ? posSizeResult.calculatedLotSize : 'NONE'}
+Theoretical Expected Loss: $${posSizeResult.expectedLossAtRequiredLot.toFixed(2)}
+Minimum Lot Expected Loss: $${posSizeResult.expectedLossAtMinLot.toFixed(2)}
+Expected Loss: $${posSizeResult.accepted ? posSizeResult.expectedLoss.toFixed(2) : posSizeResult.expectedLossAtRequiredLot.toFixed(2)}
+Accepted: ${posSizeResult.accepted ? 'YES' : 'NO'}
 ${analysis.stopLossBasis === 'ATR_FALLBACK' ? `ATR: ${marketStructure.volatilityInformation.atr.toFixed(5)}\nATR Multiplier: 1.5` : ''}
 `.trim());
       riskResult = {

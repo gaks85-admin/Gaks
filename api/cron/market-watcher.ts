@@ -1415,15 +1415,19 @@ export default async function handler(req: any, res: any) {
           watchersProcessedCount++;
           continue;
         } else {
-          // Check if we force Gemini for FAIL in HYBRID/AI_ONLY
+          // Check if we force Gemini for FAIL in HYBRID/AI_ONLY or if AMBIGUOUS in non-RULE_ONLY
           const forceGemini = (recommendation === 'FAIL' && (executionMode === 'HYBRID' || executionMode === 'AI_ONLY'));
-          const requiresGemini = (compiledStrategy.strategy_mode !== 'RULE_ONLY') && (decisionResult.requires_gemini || forceGemini);
+          const requiresGemini = (compiledStrategy.strategy_mode !== 'RULE_ONLY') && (decisionResult.requires_gemini || forceGemini || recommendation === 'AMBIGUOUS');
           
-          if (forceGemini) {
-            console.log(`Execution Mode: ${executionMode}`);
-            console.log(`Decision: ${recommendation}`);
-            console.log(`Routing to Gemini...`);
-          }
+          console.log(`
+[Decision Routing]
+Strategy Mode: ${compiledStrategy.strategy_mode || 'HYBRID'}
+Execution Mode: ${executionMode}
+Rule Score: ${decisionResult.decision_score}
+Rule Recommendation: ${recommendation}
+Requires Gemini: ${requiresGemini ? 'YES' : 'NO'}
+Reason: ${decisionResult.explanation || (requiresGemini ? 'Strategy configuration or score requires AI evaluation' : 'Rule evaluation sufficient')}
+`.trim());
 
           if (requiresGemini) {
             addLog("Gemini Required", "success");
@@ -1571,6 +1575,13 @@ Output ONLY valid JSON.
                     riskReward: riskRewardStr,
                     reasoning: [parsedResult.reasoning || "Satisfies strategy rules and Gemini validation."]
                   };
+                } else {
+                  console.log(`[Gemini Engine] Gemini did not satisfy or returned NO_TRADE. Resetting signal to NO_TRADE.`);
+                  analysis = {
+                    signal: 'NO_TRADE',
+                    confidence: 0,
+                    reasoning: [parsedResult?.reasoning || "Gemini evaluated setup as NO_TRADE or unsatisfied."]
+                  };
                 }
               }
             } catch (gemErr: any) {
@@ -1641,12 +1652,12 @@ Output ONLY valid JSON.
             // Gemini NOT required! Fallback to local strategy engine (since recommendation is PASS)
             console.log(`[Decision Engine] Recommendation is ${recommendation}. Skipping Gemini as requires_gemini is false.`);
 
-            if (recommendation === 'FAIL') {
-              console.log(`[Decision Engine] Recommendation is FAIL. Forcing NO_TRADE in local fallback.`);
+            if (recommendation === 'FAIL' || recommendation === 'AMBIGUOUS') {
+              console.log(`[Decision Engine] Recommendation is ${recommendation}. Forcing NO_TRADE without Gemini approval.`);
               analysis = {
                 signal: 'NO_TRADE',
                 confidence: 0,
-                reasoning: ['Rejected by Decision Engine']
+                reasoning: [`Rejected by Decision Engine (${recommendation} without Gemini approval)`]
               };
             } else {
               const mappedParsedStrategy: ParsedStrategy = {
@@ -1770,12 +1781,17 @@ Direction: ${analysis.signal}
 Entry: ${posSizeResult.entryPrice}
 SL: ${posSizeResult.stopLoss}
 TP: ${posSizeResult.takeProfit}
-Stop Distance: ${posSizeResult.stopDistance.toFixed(5)}
 SL Basis: ${analysis.stopLossBasis || 'STRUCTURAL'}
 Structural Level: ${analysis.structuralLevel !== null && analysis.structuralLevel !== undefined ? analysis.structuralLevel : 'N/A'}
+Stop Distance: ${posSizeResult.stopDistance.toFixed(5)}
 Risk Amount: $${posSizeResult.riskAmount.toFixed(2)}
-Calculated Lot Size: ${posSizeResult.calculatedLotSize}
-Expected Loss: $${posSizeResult.expectedLoss.toFixed(2)}
+Required Lot: ${posSizeResult.exactLotSize}
+Minimum Lot: ${posSizeResult.minLot}
+Executable Lot: ${posSizeResult.accepted ? posSizeResult.calculatedLotSize : 'NONE'}
+Theoretical Expected Loss: $${posSizeResult.expectedLossAtRequiredLot.toFixed(2)}
+Minimum Lot Expected Loss: $${posSizeResult.expectedLossAtMinLot.toFixed(2)}
+Expected Loss: $${posSizeResult.accepted ? posSizeResult.expectedLoss.toFixed(2) : posSizeResult.expectedLossAtRequiredLot.toFixed(2)}
+Accepted: ${posSizeResult.accepted ? 'YES' : 'NO'}
 ${analysis.stopLossBasis === 'ATR_FALLBACK' ? `ATR: ${marketStructure.volatilityInformation.atr.toFixed(5)}\nATR Multiplier: 1.5` : ''}
 `.trim());
 

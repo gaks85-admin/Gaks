@@ -37,14 +37,107 @@ export interface PositionSizeResult {
   actualReward: number;
   actualRr: number;
   rrValidationPassed: boolean;
+  executableLotDisplay?: string;
+  theoreticalExpectedLoss?: number;
+}
+
+export interface InstrumentSpec {
+  symbol: string;
+  assetClass: 'Forex' | 'Gold' | 'Indices' | 'Crypto';
+  minLot: number;
+  lotStep: number;
+  contractSize: number;
+  tickSize: number;
+  source: string;
+}
+
+export function resolveInstrumentSpec(symbol: string): InstrumentSpec {
+  const cleanSym = (symbol || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+  let assetClass: 'Forex' | 'Gold' | 'Indices' | 'Crypto' = 'Forex';
+  let contractSize = 100000;
+  let minLot = 0.01;
+  let lotStep = 0.01;
+  let tickSize = 0.0001;
+  let source = 'Forex Specification Resolver';
+
+  if (
+    cleanSym.includes('BTC') ||
+    cleanSym.includes('ETH') ||
+    cleanSym.includes('SOL') ||
+    cleanSym.includes('XRP') ||
+    cleanSym.includes('CRYPTO')
+  ) {
+    assetClass = 'Crypto';
+    contractSize = 1;
+    minLot = 0.01;
+    lotStep = 0.01;
+    tickSize = 0.01;
+    source = 'Crypto Specification Resolver';
+  } else if (
+    cleanSym.includes('XAU') ||
+    cleanSym.includes('GOLD') ||
+    cleanSym.includes('XAG') ||
+    cleanSym.includes('SILVER')
+  ) {
+    assetClass = 'Gold';
+    contractSize = (cleanSym.includes('XAG') || cleanSym.includes('SILVER')) ? 5000 : 100;
+    minLot = 0.01;
+    lotStep = 0.01;
+    tickSize = 0.01;
+    source = 'Metals Specification Resolver';
+  } else if (
+    cleanSym.includes('NAS') ||
+    cleanSym.includes('US30') ||
+    cleanSym.includes('SPX') ||
+    cleanSym.includes('US500') ||
+    cleanSym.includes('GER30') ||
+    cleanSym.includes('UK100') ||
+    cleanSym.includes('QQQ') ||
+    cleanSym.includes('DIA') ||
+    cleanSym.includes('SPY') ||
+    cleanSym.includes('DAX') ||
+    cleanSym.includes('UKX') ||
+    cleanSym.includes('INDEX')
+  ) {
+    assetClass = 'Indices';
+    contractSize = 1;
+    minLot = 0.01;
+    lotStep = 0.01;
+    tickSize = 0.1;
+    source = 'Indices Specification Resolver';
+  } else {
+    assetClass = 'Forex';
+    contractSize = 100000;
+    minLot = 0.01;
+    lotStep = 0.01;
+    tickSize = cleanSym.includes('JPY') ? 0.01 : 0.0001;
+    source = 'Forex Specification Resolver';
+  }
+
+  console.log(`
+[Instrument Spec]
+Symbol: ${symbol}
+Asset Class: ${assetClass.toUpperCase()}
+Min Lot: ${minLot}
+Lot Step: ${lotStep}
+Contract Size: ${contractSize}
+Source: ${source}
+`.trim());
+
+  return {
+    symbol,
+    assetClass,
+    minLot,
+    lotStep,
+    contractSize,
+    tickSize,
+    source
+  };
 }
 
 export function getTickSize(symbol: string): number {
-  const clean = (symbol || '').toUpperCase();
-  if (clean.includes('JPY') || clean.includes('XAU') || clean.includes('GOLD') || clean.includes('XAG') || clean.includes('SILVER') || clean.includes('US30') || clean.includes('NAS') || clean.includes('SPX') || clean.includes('BTC') || clean.includes('ETH')) {
-    return 0.01;
-  }
-  return 0.0001;
+  return resolveInstrumentSpec(symbol).tickSize;
 }
 
 export function logExecutionValidationAudit(
@@ -180,23 +273,25 @@ export function logRiskValidationAudit(
   expectedLossAtRequiredLot: number,
   expectedLossAtMinLot: number,
   accepted: boolean,
-  reason: string
+  reason: string,
+  executableLotDisplay: string = accepted ? requiredLot.toString() : 'NONE'
 ): void {
   console.log(`\n========== RISK VALIDATION ==========`);
   console.log(`Capital: $${accountSize.toFixed(2)}`);
   console.log(`Risk %: ${riskPercentage}%`);
   console.log(`Risk Amount: $${riskAmount.toFixed(2)}`);
   console.log(`Required Lot: ${requiredLot.toFixed(4)}`);
-  console.log(`Broker Minimum Lot: ${minLot}`);
-  console.log(`Expected Loss at Required Lot: $${expectedLossAtRequiredLot.toFixed(2)}`);
-  console.log(`Expected Loss at Minimum Lot: $${expectedLossAtMinLot.toFixed(2)}`);
+  console.log(`Minimum Lot: ${minLot}`);
+  console.log(`Executable Lot: ${executableLotDisplay}`);
+  console.log(`Theoretical Expected Loss: $${expectedLossAtRequiredLot.toFixed(2)}`);
+  console.log(`Minimum Lot Expected Loss: $${expectedLossAtMinLot.toFixed(2)}`);
   console.log(`Trade Accepted: ${accepted ? 'YES' : 'NO'}`);
   console.log(`Reason: ${reason}`);
   console.log(`====================================\n`);
 }
 
 /**
- * Calculates position size, strictly enforcing broker minimum lot (0.01 fixed, no rounding up),
+ * Calculates position size, strictly enforcing instrument-specific broker minimum lot,
  * backend TP calculation, and RR validation (within 1% tolerance).
  */
 export function calculatePositionSize(config: {
@@ -216,6 +311,10 @@ export function calculatePositionSize(config: {
   const userRr = config.riskRewardStr || '1:2';
   const targetRrRatio = parseRiskRewardRatio(userRr);
 
+  // Resolve instrument specification
+  const spec = resolveInstrumentSpec(config.symbol);
+  const { assetClass, contractSize, minLot, lotStep, tickSize } = spec;
+
   // 1. Determine Intended Entry Price
   const intendedEntry = config.entryPrice;
   // 4. Retrieve Actual Executed Entry Price
@@ -230,7 +329,6 @@ export function calculatePositionSize(config: {
 
   // Check tick difference
   const diff = Math.abs(executedEntry - intendedEntry);
-  const tickSize = getTickSize(config.symbol);
   if (diff > tickSize) {
     console.log(`[Execution Validation] Executed entry (${executedEntry}) differs from intended entry (${intendedEntry}) by ${diff.toFixed(5)} (> 1 tick ${tickSize}). Automatically recomputing TP and SL.`);
   }
@@ -278,78 +376,40 @@ export function calculatePositionSize(config: {
 
   const cleanSym = (config.symbol || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 
-  let assetClass: 'Forex' | 'Gold' | 'Indices' | 'Crypto' = 'Forex';
-  let contractSize = 100000;
   let pipValue = 10.00;
   let lossPerOneLot = 0;
   let profitPerOneLot = 0;
 
-  if (
-    cleanSym.includes('BTC') ||
-    cleanSym.includes('ETH') ||
-    cleanSym.includes('SOL') ||
-    cleanSym.includes('XRP') ||
-    cleanSym.includes('CRYPTO')
-  ) {
-    assetClass = 'Crypto';
-    contractSize = 1;
+  if (assetClass === 'Crypto') {
     pipValue = 0.01;
     lossPerOneLot = stopDistance * contractSize;
     profitPerOneLot = tpDistance * contractSize;
-  } else if (
-    cleanSym.includes('XAU') ||
-    cleanSym.includes('GOLD') ||
-    cleanSym.includes('XAG') ||
-    cleanSym.includes('SILVER')
-  ) {
-    assetClass = 'Gold';
-    contractSize = cleanSym.includes('XAG') || cleanSym.includes('SILVER') ? 5000 : 100;
+  } else if (assetClass === 'Gold') {
     pipValue = contractSize * 0.01;
     lossPerOneLot = stopDistance * contractSize;
     profitPerOneLot = tpDistance * contractSize;
-  } else if (
-    cleanSym.includes('NAS') ||
-    cleanSym.includes('US30') ||
-    cleanSym.includes('SPX') ||
-    cleanSym.includes('US500') ||
-    cleanSym.includes('GER30') ||
-    cleanSym.includes('UK100') ||
-    cleanSym.includes('QQQ') ||
-    cleanSym.includes('DIA') ||
-    cleanSym.includes('SPY') ||
-    cleanSym.includes('DAX') ||
-    cleanSym.includes('UKX') ||
-    cleanSym.includes('INDEX')
-  ) {
-    assetClass = 'Indices';
-    contractSize = 1;
+  } else if (assetClass === 'Indices') {
     pipValue = 0.01;
     lossPerOneLot = stopDistance * contractSize;
     profitPerOneLot = tpDistance * contractSize;
   } else {
-    assetClass = 'Forex';
-    contractSize = 100000;
     if (cleanSym.endsWith('USD')) {
       pipValue = 10.00;
       lossPerOneLot = stopDistance * contractSize;
       profitPerOneLot = tpDistance * contractSize;
     } else if (cleanSym.startsWith('USD')) {
-      const pipSize = cleanSym.includes('JPY') ? 0.01 : 0.0001;
+      const pipSize = tickSize;
       pipValue = config.entryPrice > 0 ? (pipSize * contractSize) / config.entryPrice : 10.00;
       lossPerOneLot = config.entryPrice > 0 ? (stopDistance * contractSize) / config.entryPrice : stopDistance * contractSize;
       profitPerOneLot = config.entryPrice > 0 ? (tpDistance * contractSize) / config.entryPrice : 0;
     } else {
-      const pipSize = cleanSym.includes('JPY') ? 0.01 : 0.0001;
+      const pipSize = tickSize;
       const estRate = cleanSym.includes('JPY') ? 155.00 : 1.00;
       pipValue = (pipSize * contractSize) / estRate;
       lossPerOneLot = (stopDistance * contractSize) / estRate;
       profitPerOneLot = (tpDistance * contractSize) / estRate;
     }
   }
-
-  // Fixed broker minimum lot = 0.01, lot step = 0.01 (No nano lots, no rounding up)
-  const minLot = 0.01;
-  const lotStep = 0.01;
 
   let exactLotSize = 0;
   let expectedLossAtRequiredLot = 0;
@@ -361,7 +421,7 @@ export function calculatePositionSize(config: {
     exactLotSize = riskAmount / lossPerOneLot;
     expectedLossAtRequiredLot = exactLotSize * lossPerOneLot;
 
-    // Strict validation: RequiredLot < 0.01 (Broker minimum) -> Reject trade. Do NOT round up to 0.01.
+    // Strict validation: RequiredLot < minLot -> Reject trade. Do NOT round up to minLot.
     if (exactLotSize < minLot) {
       accepted = false;
       skipReason = `Trade skipped. Required lot size is below broker minimum. Required lot: ${exactLotSize.toFixed(4)}, Broker minimum: ${minLot}, Expected loss at minimum lot: $${expectedLossAtMinLot.toFixed(2)}, User maximum risk: $${riskAmount.toFixed(2)}.`;
@@ -374,7 +434,8 @@ export function calculatePositionSize(config: {
         expectedLossAtRequiredLot,
         expectedLossAtMinLot,
         accepted,
-        skipReason
+        skipReason,
+        'NONE'
       );
 
       logExecutionValidationAudit(
@@ -385,7 +446,7 @@ export function calculatePositionSize(config: {
         tpDistance,
         userRr,
         actualRr,
-        0,
+        expectedLossAtRequiredLot,
         0,
         false
       );
@@ -402,11 +463,11 @@ export function calculatePositionSize(config: {
         contractSize,
         calculatedLotSize: 0,
         exactLotSize: Number(exactLotSize.toFixed(4)),
-        expectedLoss: 0,
+        expectedLoss: expectedLossAtRequiredLot,
         expectedProfit: 0,
         assetClass,
         normalizedLotSize: 0,
-        lotType: 'Nano Lot',
+        lotType: 'Below Minimum',
         lotStep,
         minLot,
         symbol: config.symbol,
@@ -419,7 +480,9 @@ export function calculatePositionSize(config: {
         actualRisk,
         actualReward,
         actualRr,
-        rrValidationPassed
+        rrValidationPassed,
+        executableLotDisplay: 'NONE',
+        theoreticalExpectedLoss: expectedLossAtRequiredLot
       };
     }
 
@@ -435,7 +498,8 @@ export function calculatePositionSize(config: {
         expectedLossAtRequiredLot,
         expectedLossAtMinLot,
         accepted,
-        skipReason
+        skipReason,
+        'NONE'
       );
 
       logExecutionValidationAudit(
@@ -446,7 +510,7 @@ export function calculatePositionSize(config: {
         tpDistance,
         userRr,
         actualRr,
-        0,
+        expectedLossAtRequiredLot,
         0,
         false
       );
@@ -463,11 +527,11 @@ export function calculatePositionSize(config: {
         contractSize,
         calculatedLotSize: 0,
         exactLotSize: Number(exactLotSize.toFixed(4)),
-        expectedLoss: 0,
+        expectedLoss: expectedLossAtRequiredLot,
         expectedProfit: 0,
         assetClass,
         normalizedLotSize: 0,
-        lotType: 'Micro Lot',
+        lotType: classifyLotType(minLot),
         lotStep,
         minLot,
         symbol: config.symbol,
@@ -480,7 +544,9 @@ export function calculatePositionSize(config: {
         actualRisk,
         actualReward,
         actualRr,
-        rrValidationPassed: rrValidationPassed && slValidationPassed
+        rrValidationPassed: rrValidationPassed && slValidationPassed,
+        executableLotDisplay: 'NONE',
+        theoreticalExpectedLoss: expectedLossAtRequiredLot
       };
     }
 
@@ -496,7 +562,8 @@ export function calculatePositionSize(config: {
         expectedLossAtRequiredLot,
         expectedLossAtMinLot,
         accepted,
-        skipReason
+        skipReason,
+        'NONE'
       );
 
       logExecutionValidationAudit(
@@ -507,7 +574,7 @@ export function calculatePositionSize(config: {
         tpDistance,
         userRr,
         actualRr,
-        0,
+        expectedLossAtRequiredLot,
         0,
         false
       );
@@ -524,11 +591,11 @@ export function calculatePositionSize(config: {
         contractSize,
         calculatedLotSize: 0,
         exactLotSize: Number(exactLotSize.toFixed(4)),
-        expectedLoss: 0,
+        expectedLoss: expectedLossAtRequiredLot,
         expectedProfit: 0,
         assetClass,
         normalizedLotSize: 0,
-        lotType: 'Micro Lot',
+        lotType: classifyLotType(minLot),
         lotStep,
         minLot,
         symbol: config.symbol,
@@ -541,7 +608,9 @@ export function calculatePositionSize(config: {
         actualRisk,
         actualReward,
         actualRr,
-        rrValidationPassed
+        rrValidationPassed,
+        executableLotDisplay: 'NONE',
+        theoreticalExpectedLoss: expectedLossAtRequiredLot
       };
     }
   }
@@ -576,7 +645,8 @@ export function calculatePositionSize(config: {
     expectedLossAtRequiredLot,
     expectedLossAtMinLot,
     accepted,
-    skipReason
+    skipReason,
+    calculatedLotSize.toString()
   );
 
   logExecutionValidationAudit(
@@ -621,7 +691,9 @@ export function calculatePositionSize(config: {
     actualRisk,
     actualReward,
     actualRr,
-    rrValidationPassed
+    rrValidationPassed,
+    executableLotDisplay: calculatedLotSize.toString(),
+    theoreticalExpectedLoss: expectedLossAtRequiredLot
   };
 }
 
