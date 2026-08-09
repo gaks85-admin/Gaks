@@ -4,7 +4,9 @@ import {
   User as UserIcon, 
   Check, 
   LogOut, 
-  Sparkles
+  Sparkles,
+  Sun,
+  Moon
 } from 'lucide-react';
 
 export interface SettingsTabProps {
@@ -23,6 +25,8 @@ export interface SettingsTabProps {
   handleSaveGeminiKey: () => void;
   isGeminiKeySaving: boolean;
   handleLogout: () => void;
+  theme?: 'light' | 'dark';
+  toggleTheme?: () => void;
 }
 
 export const SettingsTab: React.FC<SettingsTabProps> = ({
@@ -41,6 +45,8 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
   handleSaveGeminiKey,
   isGeminiKeySaving,
   handleLogout,
+  theme = 'dark',
+  toggleTheme,
 }) => {
   return (
     <div className="space-y-10 animate-fade-in pb-20">
@@ -250,6 +256,41 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
                 </button>
               </div>
             </div>
+            
+            {/* Appearance Section */}
+            {toggleTheme && (
+              <div className="space-y-4 pt-2">
+                <div className="flex items-center gap-2 px-1">
+                  <Sun className="w-4 h-4 text-zinc-400 dark:text-zinc-500" />
+                  <h3 className="text-xs font-bold text-zinc-900 dark:text-white uppercase tracking-widest">Appearance</h3>
+                </div>
+                
+                <div className="p-6 rounded-[28px] border border-zinc-100 dark:border-zinc-900 bg-zinc-50/50 dark:bg-[#0c0c0e]/60 flex items-center justify-between">
+                  <div className="space-y-1">
+                    <div className="text-xs font-semibold text-zinc-900 dark:text-white">Interface Theme</div>
+                    <div className="text-[11px] text-zinc-500">Currently set to {theme === 'dark' ? 'Dark Mode' : 'Light Mode'}</div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={toggleTheme}
+                    className="px-4 py-2 rounded-xl bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-xs font-bold text-zinc-900 dark:text-white hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-all cursor-pointer flex items-center gap-2"
+                  >
+                    {theme === 'dark' ? (
+                      <>
+                        <Sun className="w-4 h-4 text-amber-500" />
+                        <span>Light Mode</span>
+                      </>
+                    ) : (
+                      <>
+                        <Moon className="w-4 h-4 text-blue-500" />
+                        <span>Dark Mode</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>

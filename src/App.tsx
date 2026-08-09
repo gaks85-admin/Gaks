@@ -178,6 +178,29 @@ export default function App() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<string | null>(null);
+
+  // Theme State
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('gaks_theme');
+      if (saved === 'light' || saved === 'dark') return saved;
+    }
+    return 'dark';
+  });
+
+  useEffect(() => {
+    const root = document.documentElement;
+    if (theme === 'dark') {
+      root.classList.add('dark');
+    } else {
+      root.classList.remove('dark');
+    }
+    localStorage.setItem('gaks_theme', theme);
+  }, [theme]);
+
+  const toggleTheme = () => {
+    setTheme(prev => prev === 'dark' ? 'light' : 'dark');
+  };
   
   // Auth & Profile states
   const [session, setSession] = useState<any>(null);
@@ -1745,12 +1768,19 @@ export default function App() {
                     profileFullName ? profileFullName.charAt(0) : 'U'
                   )}
                 </div>
-                <span className="text-[11px] font-normal text-zinc-300 max-w-[80px] truncate">{profileFullName}</span>
+                <span className="text-[11px] font-normal text-zinc-700 dark:text-zinc-300 max-w-[80px] truncate">{profileFullName}</span>
               </div>
             )}
             <button 
+              onClick={toggleTheme}
+              className="p-2 text-zinc-500 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white transition-all rounded-xl hover:bg-zinc-100 dark:hover:bg-zinc-900 cursor-pointer" 
+              title={theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+            >
+              {theme === 'dark' ? <Sun className="w-4.5 h-4.5 stroke-[1.8]" /> : <Moon className="w-4.5 h-4.5 stroke-[1.8]" />}
+            </button>
+            <button 
               onClick={handleLogout}
-              className="p-2 text-zinc-400 hover:text-white transition-all rounded-xl hover:bg-zinc-900 cursor-pointer" 
+              className="p-2 text-zinc-500 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white transition-all rounded-xl hover:bg-zinc-100 dark:hover:bg-zinc-900 cursor-pointer" 
               title="Logout"
             >
               <LogOut className="w-4.5 h-4.5 stroke-[1.8]" />
@@ -2173,6 +2203,8 @@ export default function App() {
               handleSaveGeminiKey={handleSaveGeminiKey}
               isGeminiKeySaving={isGeminiKeySaving}
               handleLogout={handleLogout}
+              theme={theme}
+              toggleTheme={toggleTheme}
             />
           )}
 
@@ -2254,12 +2286,12 @@ export default function App() {
               onClick={() => setActiveTab('admin')}
               className={`flex-1 flex flex-col items-center gap-1 cursor-pointer transition-all ${
                 activeTab === 'admin'
-                  ? 'text-white'
-                  : 'text-zinc-500 hover:text-zinc-300'
+                  ? 'text-zinc-950 dark:text-white'
+                  : 'text-zinc-400 hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300'
               }`}
             >
               <div className={`py-1.5 px-3 rounded-2xl flex flex-col items-center gap-1 transition-all ${
-                activeTab === 'admin' ? 'bg-[#1a1a1e] text-white shadow-sm font-medium' : ''
+                activeTab === 'admin' ? 'bg-zinc-100 dark:bg-[#1a1a1e] text-zinc-950 dark:text-white shadow-sm font-medium' : ''
               }`}>
                 <Shield className="w-4 h-4 stroke-[1.8]" />
                 <span className="text-[10px] font-medium tracking-normal">Admin</span>
