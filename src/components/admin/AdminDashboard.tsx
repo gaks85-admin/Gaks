@@ -60,7 +60,7 @@ const DashboardPage = ({ fetchWithAuth }: { fetchWithAuth: any }) => {
   }, []);
 
   const statCards = [
-    { label: "Total Active Watchers", value: stats?.activeWatchers || 0, desc: "Scanners actively running in background", icon: Eye, color: "text-zinc-200 bg-zinc-800 border-zinc-700" },
+    { label: "Total Active Watchers", value: stats?.activeWatchers || 0, desc: "Scanners actively running in background", icon: Eye, color: "text-zinc-900 dark:text-zinc-200 bg-zinc-100 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700" },
     { label: "Total Pairs Being Monitored", value: stats?.totalPairsMonitored || 0, desc: "Unique currency and crypto trading pairs", icon: Activity, color: "text-blue-400 bg-blue-500/10 border-blue-500/20" },
     { label: "Total Signals Sent", value: stats?.totalSignalsSent || 0, desc: "Total alerts processed historically", icon: Zap, color: "text-purple-400 bg-purple-500/10 border-purple-500/20" },
     { label: "Last Scan Time", value: stats?.lastCronRun ? new Date(stats.lastCronRun).toLocaleTimeString() : "Never", desc: stats?.lastCronRun ? new Date(stats.lastCronRun).toLocaleDateString() : "No scan executed yet", icon: Clock, color: "text-amber-400 bg-amber-500/10 border-amber-500/20" },
@@ -130,7 +130,7 @@ const DashboardPage = ({ fetchWithAuth }: { fetchWithAuth: any }) => {
           <div className="space-y-3.5">
             <div className="flex justify-between items-center py-2 border-b border-zinc-200 dark:border-zinc-900/60">
               <span className="text-xs text-zinc-500 dark:text-zinc-400">System Status</span>
-              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-zinc-800 text-zinc-200 border border-zinc-700">OPERATIONAL</span>
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-zinc-200 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200 border border-zinc-300 dark:border-zinc-700">OPERATIONAL</span>
             </div>
             <div className="flex justify-between items-center py-2 border-b border-zinc-200 dark:border-zinc-900/60">
               <span className="text-xs text-zinc-500 dark:text-zinc-400">Last Scanner Run</span>

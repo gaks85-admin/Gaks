@@ -96,17 +96,17 @@ export const StrategyTab: React.FC<StrategyTabProps> = ({
         {/* Full Width Strategy Editor */}
         <div className="space-y-4">
           <div className="rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-[#0c0c0e]/80 overflow-hidden flex flex-col">
-            <div className="px-5 py-4 border-b border-zinc-200 dark:border-zinc-900 flex flex-wrap items-center justify-between gap-3 bg-zinc-100/50 dark:bg-[#08080a]">
+            <div className="px-5 py-4 border-b border-zinc-200 dark:border-zinc-900 flex flex-wrap items-center justify-between gap-3 bg-zinc-100/70 dark:bg-[#08080a]">
               <div className="flex items-center gap-2.5">
-                <span className={`w-2 h-2 rounded-full ${selectedStrat.id === activeStrategyId ? 'bg-white animate-pulse' : 'bg-zinc-600'}`}></span>
-                <span className="text-xs font-bold text-zinc-700 dark:text-white uppercase tracking-wider">Strategy Editor</span>
+                <span className={`w-2 h-2 rounded-full ${selectedStrat.id === activeStrategyId ? 'bg-zinc-950 dark:bg-white animate-pulse' : 'bg-zinc-400 dark:bg-zinc-600'}`}></span>
+                <span className="text-xs font-bold text-zinc-800 dark:text-white uppercase tracking-wider">Strategy Editor</span>
               </div>
 
               <div className="flex items-center gap-2">
                 {/* Delete Button */}
                 <button
                   onClick={handleClearStrategy}
-                  className="px-3 py-1.5 rounded-xl border border-red-950/20 dark:border-red-950/20 hover:border-red-500/40 bg-red-50 dark:bg-zinc-950/60 text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 transition-all cursor-pointer flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider"
+                  className="px-3 py-1.5 rounded-xl border border-red-200 dark:border-red-950/20 hover:border-red-300 dark:hover:border-red-500/40 bg-red-50 dark:bg-zinc-950/60 text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 transition-all cursor-pointer flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider"
                   title="Clear current strategy"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
@@ -116,7 +116,7 @@ export const StrategyTab: React.FC<StrategyTabProps> = ({
                 {/* Restore Button */}
                 <button
                   onClick={handleRestoreStrategy}
-                  className="px-3 py-1.5 rounded-xl border border-zinc-800 hover:border-zinc-700 bg-zinc-950/40 text-zinc-400 hover:text-white transition-all cursor-pointer flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider"
+                  className="px-3 py-1.5 rounded-xl border border-zinc-200 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700 bg-white dark:bg-zinc-950/40 text-zinc-600 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white transition-all cursor-pointer flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider shadow-xs"
                   title="Restore last saved or default version"
                 >
                   <RefreshCw className="w-3.5 h-3.5" />
@@ -124,14 +124,14 @@ export const StrategyTab: React.FC<StrategyTabProps> = ({
                 </button>
 
                 {selectedStrat.id === activeStrategyId ? (
-                  <span className="text-[10px] bg-zinc-800 border border-zinc-700 text-zinc-100 px-2.5 py-1 rounded-full font-bold uppercase tracking-wider flex items-center gap-1.5">
-                    <span className="w-1.5 h-1.5 rounded-full bg-white"></span>
+                  <span className="text-[10px] bg-zinc-200 dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-700 text-zinc-900 dark:text-zinc-100 px-2.5 py-1 rounded-full font-bold uppercase tracking-wider flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-zinc-950 dark:bg-white"></span>
                     Active
                   </span>
                 ) : (
                   <button
                     onClick={() => handleSetActiveStrategy(selectedStrat.id)}
-                    className="px-3 py-1 text-[10px] bg-white text-black hover:bg-zinc-200 transition-all rounded-full font-bold uppercase tracking-wider cursor-pointer shadow-md"
+                    className="px-3 py-1 text-[10px] bg-zinc-950 dark:bg-white text-white dark:text-black hover:bg-zinc-800 dark:hover:bg-zinc-200 transition-all rounded-full font-bold uppercase tracking-wider cursor-pointer shadow-md"
                   >
                     Activate
                   </button>

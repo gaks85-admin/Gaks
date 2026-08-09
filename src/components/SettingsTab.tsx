@@ -73,10 +73,10 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
             <div className="flex flex-col items-center gap-2">
               <h2 className="text-3xl font-semibold text-zinc-950 dark:text-white tracking-tighter font-display">{profileFullName || 'Gaks User'}</h2>
               <div className="flex items-center gap-2">
-                <span className="inline-flex px-3 py-1 rounded-full bg-zinc-800/50 border border-zinc-700/50 text-zinc-200 text-[10px] font-bold uppercase tracking-widest">
+                <span className="inline-flex px-3 py-1 rounded-full bg-zinc-200 dark:bg-zinc-800/50 border border-zinc-300 dark:border-zinc-700/50 text-zinc-800 dark:text-zinc-200 text-[10px] font-bold uppercase tracking-widest">
                   {profilePlan || 'Free'} Plan
                 </span>
-                <div className="w-1 h-1 rounded-full bg-zinc-200 dark:bg-zinc-800"></div>
+                <div className="w-1 h-1 rounded-full bg-zinc-300 dark:bg-zinc-800"></div>
                 <p className="text-zinc-500 text-xs font-medium tracking-tight">{session?.user?.email}</p>
               </div>
             </div>
@@ -148,8 +148,8 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
                         key={plan.id}
                         className={`w-full text-left p-4 rounded-2xl border transition-all relative ${
                           isSelected
-                            ? 'bg-zinc-950 dark:bg-zinc-900/60 border-zinc-500 shadow-[0_0_20px_rgba(255,255,255,0.05)]'
-                            : 'bg-white dark:bg-zinc-950/20 border-zinc-200 dark:border-zinc-800/80 opacity-80'
+                            ? 'bg-zinc-950 dark:bg-zinc-900/60 text-white border-zinc-950 dark:border-zinc-500 shadow-md'
+                            : 'bg-white dark:bg-zinc-950/20 border-zinc-200 dark:border-zinc-800/80 text-zinc-900 dark:text-zinc-300 opacity-90'
                         }`}
                       >
                         <div className="flex items-center justify-between">
@@ -159,16 +159,16 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
                                 {plan.id}
                               </span>
                               {isSelected ? (
-                                <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-[8px] font-bold uppercase tracking-widest">
+                                <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 text-[8px] font-bold uppercase tracking-widest">
                                   Current Plan
                                 </span>
                               ) : isPaid ? (
-                                <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-zinc-800/80 border border-zinc-700/60 text-zinc-400 text-[8px] font-bold uppercase tracking-widest">
+                                <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-zinc-100 dark:bg-zinc-800/80 border border-zinc-200 dark:border-zinc-700/60 text-zinc-600 dark:text-zinc-400 text-[8px] font-bold uppercase tracking-widest">
                                   Stripe Required
                                 </span>
                               ) : null}
                             </div>
-                            <p className="text-[10px] text-zinc-500 font-medium leading-relaxed max-w-[210px]">
+                            <p className={`text-[10px] font-medium leading-relaxed max-w-[210px] ${isSelected ? 'text-zinc-400' : 'text-zinc-500'}`}>
                               {plan.desc}
                             </p>
                           </div>
@@ -176,13 +176,13 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
                             <div className={`text-[15px] font-bold tracking-tight ${isSelected ? 'text-white' : 'text-zinc-900 dark:text-zinc-100'}`}>
                               {plan.price}
                             </div>
-                            <div className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest">Per Month</div>
+                            <div className="text-[9px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-widest">Per Month</div>
                             {!isSelected && isPaid && (
                               <button
                                 type="button"
                                 disabled
                                 title="Paid subscription via Stripe integration coming soon"
-                                className="mt-2 px-2.5 py-1 rounded-lg bg-zinc-800/50 border border-zinc-700/50 text-zinc-400 text-[9px] font-bold uppercase tracking-wider cursor-not-allowed opacity-60"
+                                className="mt-2 px-2.5 py-1 rounded-lg bg-zinc-100 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700/50 text-zinc-400 text-[9px] font-bold uppercase tracking-wider cursor-not-allowed opacity-60"
                               >
                                 Upgrade Soon
                               </button>
@@ -258,15 +258,15 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
       <div className="flex flex-col md:flex-row items-center gap-4">
         <button
           onClick={handleLogout}
-          className="w-full md:w-auto px-8 py-4 rounded-full bg-zinc-900 border border-zinc-800 text-xs font-bold text-zinc-400 hover:text-white hover:border-zinc-700 transition-all flex items-center justify-center gap-2 cursor-pointer"
+          className="w-full md:w-auto px-8 py-4 rounded-full bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-xs font-bold text-zinc-700 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white hover:border-zinc-300 dark:hover:border-zinc-700 transition-all flex items-center justify-center gap-2 cursor-pointer shadow-xs"
         >
           <LogOut className="w-4 h-4" />
           <span>Sign Out of Session</span>
         </button>
         
-        <div className="flex-1 p-5 rounded-3xl border border-zinc-900 bg-zinc-950/20 flex items-center gap-3">
-          <Shield className="w-4 h-4 text-zinc-600 shrink-0" />
-          <p className="text-[10px] text-zinc-600 leading-relaxed">
+        <div className="flex-1 p-5 rounded-3xl border border-zinc-200 dark:border-zinc-900 bg-zinc-50 dark:bg-zinc-950/20 flex items-center gap-3">
+          <Shield className="w-4 h-4 text-zinc-400 dark:text-zinc-600 shrink-0" />
+          <p className="text-[10px] text-zinc-500 dark:text-zinc-600 leading-relaxed">
             Identity managed by Supabase Auth. Data isolated via RLS policies.
           </p>
         </div>

@@ -12,27 +12,27 @@ export interface AuthProps {
 
 export function AuthSkeleton() {
   return (
-    <div className="h-[100dvh] w-full max-w-[100vw] bg-[#030305] text-white flex flex-col justify-between items-center px-3.5 py-2.5 sm:px-4 sm:py-4 font-sans select-none overflow-hidden box-border">
+    <div className="h-[100dvh] w-full max-w-[100vw] bg-white dark:bg-[#030305] text-zinc-950 dark:text-white flex flex-col justify-between items-center px-3.5 py-2.5 sm:px-4 sm:py-4 font-sans select-none overflow-hidden box-border">
       <div className="w-full max-w-[360px] sm:max-w-[380px] my-auto flex flex-col items-center animate-pulse space-y-3 sm:space-y-4">
         {/* Brand title skeleton */}
-        <div className="h-8 w-32 bg-[#12121a] rounded-xl" />
+        <div className="h-8 w-32 bg-zinc-200 dark:bg-[#12121a] rounded-xl" />
         {/* Title & subtitle */}
-        <div className="h-5 w-44 bg-[#12121a] rounded-lg" />
-        <div className="h-3.5 w-56 bg-[#0c0c12] rounded-md" />
+        <div className="h-5 w-44 bg-zinc-200 dark:bg-[#12121a] rounded-lg" />
+        <div className="h-3.5 w-56 bg-zinc-100 dark:bg-[#0c0c12] rounded-md" />
         {/* Social buttons */}
         <div className="w-full space-y-2 pt-1">
-          <div className="h-[40px] w-full bg-[#0c0c12] rounded-xl border border-[#1e1e2b]" />
-          <div className="h-[40px] w-full bg-[#0c0c12] rounded-xl border border-[#1e1e2b]" />
+          <div className="h-[40px] w-full bg-zinc-50 dark:bg-[#0c0c12] rounded-xl border border-zinc-200 dark:border-[#1e1e2b]" />
+          <div className="h-[40px] w-full bg-zinc-50 dark:bg-[#0c0c12] rounded-xl border border-zinc-200 dark:border-[#1e1e2b]" />
         </div>
         {/* OR divider */}
-        <div className="w-full h-2.5 bg-[#0a0a0d] rounded my-0.5" />
+        <div className="w-full h-2.5 bg-zinc-100 dark:bg-[#0a0a0d] rounded my-0.5" />
         {/* Input skeletons */}
         <div className="w-full space-y-2">
-          <div className="h-[40px] w-full bg-[#0c0c12] rounded-xl border border-[#1e1e2b]" />
-          <div className="h-[40px] w-full bg-[#0c0c12] rounded-xl border border-[#1e1e2b]" />
+          <div className="h-[40px] w-full bg-zinc-50 dark:bg-[#0c0c12] rounded-xl border border-zinc-200 dark:border-[#1e1e2b]" />
+          <div className="h-[40px] w-full bg-zinc-50 dark:bg-[#0c0c12] rounded-xl border border-zinc-200 dark:border-[#1e1e2b]" />
         </div>
         {/* Primary button skeleton */}
-        <div className="h-[40px] w-full bg-zinc-200/20 rounded-xl mt-1" />
+        <div className="h-[40px] w-full bg-zinc-900/10 dark:bg-zinc-200/20 rounded-xl mt-1" />
       </div>
     </div>
   );
@@ -298,10 +298,10 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
   };
 
   return (
-    <div className="min-h-[100dvh] h-[100dvh] w-full max-w-[100vw] bg-[#030305] text-white flex flex-col justify-between items-center px-4 py-3 sm:py-5 short:py-2 font-sans antialiased select-none relative overflow-hidden box-border">
+    <div className="min-h-[100dvh] h-[100dvh] w-full max-w-[100vw] bg-white dark:bg-[#030305] text-zinc-950 dark:text-white flex flex-col justify-between items-center px-4 py-3 sm:py-5 short:py-2 font-sans antialiased select-none relative overflow-hidden box-border">
       
       {/* Top ambient aura */}
-      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-[500px] h-[250px] bg-[radial-gradient(ellipse_80%_80%_at_50%_-20%,rgba(255,255,255,0.06),rgba(0,0,0,0))] pointer-events-none overflow-hidden" />
+      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-[500px] h-[250px] bg-[radial-gradient(ellipse_80%_80%_at_50%_-20%,rgba(0,0,0,0.03),rgba(255,255,255,0))] dark:bg-[radial-gradient(ellipse_80%_80%_at_50%_-20%,rgba(255,255,255,0.06),rgba(0,0,0,0))] pointer-events-none overflow-hidden" />
 
       {/* Main content container */}
       <div className="w-full max-w-[360px] sm:max-w-[380px] my-auto flex flex-col justify-center relative z-10 space-y-3 sm:space-y-4 short:space-y-2 box-border py-1">
@@ -314,10 +314,10 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
           className="text-center space-y-1 mb-0.5 sm:mb-1 short:mb-0"
         >
           <div className="flex items-center justify-center gap-2">
-            <span className="text-3xl sm:text-4xl font-black tracking-tight text-white">Gaks</span>
+            <span className="text-3xl sm:text-4xl font-black tracking-tight text-zinc-950 dark:text-white">Gaks</span>
             <span className="text-3xl sm:text-4xl font-black tracking-tight text-zinc-400">AI</span>
           </div>
-          <div className="w-20 h-[1px] bg-gradient-to-r from-transparent via-zinc-700/80 to-transparent mx-auto mt-1" />
+          <div className="w-20 h-[1px] bg-gradient-to-r from-transparent via-zinc-300 dark:via-zinc-700/80 to-transparent mx-auto mt-1" />
         </motion.div>
 
         <AnimatePresence mode="wait">
@@ -331,13 +331,13 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
           >
             {/* Title & Subtitle */}
             <div className="text-center space-y-1.5 sm:space-y-2">
-              <h1 className="text-xl sm:text-2xl font-extrabold tracking-tight text-white leading-snug">
+              <h1 className="text-xl sm:text-2xl font-extrabold tracking-tight text-zinc-950 dark:text-white leading-snug">
                 {mode === 'signup' && 'Create account'}
                 {mode === 'login' && 'Welcome back'}
                 {mode === 'forgot' && 'Reset password'}
                 {mode === 'reset' && 'Create new password'}
               </h1>
-              <p className="text-xs sm:text-sm text-zinc-400 font-normal leading-relaxed max-w-[320px] mx-auto">
+              <p className="text-xs sm:text-sm text-zinc-600 dark:text-zinc-400 font-normal leading-relaxed max-w-[320px] mx-auto">
                 {mode === 'signup' && 'Start using AI-powered market monitoring in minutes.'}
                 {mode === 'login' && 'Log in to your account and continue monitoring the markets with AI.'}
                 {mode === 'forgot' && "Enter your email address and we'll send a recovery link."}
@@ -350,7 +350,7 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
               <motion.div
                 initial={{ opacity: 0, scale: 0.98 }}
                 animate={{ opacity: 1, scale: 1 }}
-                className="p-2.5 sm:p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 flex items-start gap-2.5 text-xs leading-relaxed shadow-sm"
+                className="p-2.5 sm:p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-400 flex items-start gap-2.5 text-xs leading-relaxed shadow-sm"
               >
                 <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
                 <span>{errorMessage}</span>
@@ -361,7 +361,7 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
               <motion.div
                 initial={{ opacity: 0, y: -4 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="p-2.5 sm:p-3 rounded-xl bg-[#0c0c12] border border-[#1e1e2b] text-zinc-300 flex items-start gap-2.5 text-xs leading-relaxed shadow-sm"
+                className="p-2.5 sm:p-3 rounded-xl bg-zinc-50 dark:bg-[#0c0c12] border border-zinc-200 dark:border-[#1e1e2b] text-zinc-700 dark:text-zinc-300 flex items-start gap-2.5 text-xs leading-relaxed shadow-sm"
               >
                 <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-zinc-400" />
                 <span className="flex-1">{infoToast}</span>
@@ -373,16 +373,16 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
               <motion.div
                 initial={{ opacity: 0, scale: 0.96 }}
                 animate={{ opacity: 1, scale: 1 }}
-                className="p-4 sm:p-5 rounded-2xl border border-[#1e1e2b] bg-[#0c0c12] text-center space-y-3 shadow-2xl relative overflow-hidden"
+                className="p-4 sm:p-5 rounded-2xl border border-zinc-200 dark:border-[#1e1e2b] bg-zinc-50 dark:bg-[#0c0c12] text-center space-y-3 shadow-2xl relative overflow-hidden"
               >
-                <div className="w-10 h-10 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 flex items-center justify-center mx-auto shadow-[0_0_15px_rgba(16,185,129,0.15)]">
+                <div className="w-10 h-10 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mx-auto shadow-[0_0_15px_rgba(16,185,129,0.15)]">
                   <CheckCircle2 className="w-5 h-5 stroke-[2]" />
                 </div>
                 <div className="space-y-1">
-                  <h3 className="text-sm sm:text-base font-bold text-white tracking-tight">
+                  <h3 className="text-sm sm:text-base font-bold text-zinc-950 dark:text-white tracking-tight">
                     {mode === 'signup' ? 'Check your email' : 'Success!'}
                   </h3>
-                  <p className="text-xs text-zinc-400 leading-relaxed max-w-[260px] mx-auto">
+                  <p className="text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed max-w-[260px] mx-auto">
                     {successMessage}
                   </p>
                 </div>
@@ -390,7 +390,7 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
                   <button
                     type="button"
                     onClick={() => switchMode('login')}
-                    className="w-full py-2.5 sm:py-3 px-4 rounded-xl bg-white text-black font-semibold text-xs sm:text-sm hover:bg-zinc-200 active:scale-[0.99] transition-all cursor-pointer shadow-md"
+                    className="w-full py-2.5 sm:py-3 px-4 rounded-xl bg-zinc-950 dark:bg-white text-white dark:text-black font-semibold text-xs sm:text-sm hover:bg-zinc-800 dark:hover:bg-zinc-200 active:scale-[0.99] transition-all cursor-pointer shadow-md"
                   >
                     Return to Sign In
                   </button>
@@ -405,7 +405,7 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
                       type="button"
                       onClick={handleGoogleSignIn}
                       disabled={isLoading}
-                      className="w-full py-2.5 sm:py-3 px-4 rounded-xl bg-[#0c0c12] hover:bg-[#14141d] active:scale-[0.99] border border-[#1e1e2b] text-white font-medium text-xs sm:text-sm flex items-center justify-center gap-3 transition-all duration-200 cursor-pointer shadow-sm disabled:opacity-50"
+                      className="w-full py-2.5 sm:py-3 px-4 rounded-xl bg-zinc-50 dark:bg-[#0c0c12] hover:bg-zinc-100 dark:hover:bg-[#14141d] active:scale-[0.99] border border-zinc-200 dark:border-[#1e1e2b] text-zinc-900 dark:text-white font-medium text-xs sm:text-sm flex items-center justify-center gap-3 transition-all duration-200 cursor-pointer shadow-sm disabled:opacity-50"
                     >
                       <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
                         <path fill="#EA4335" d="M12 5.04c1.64 0 3.12.56 4.28 1.67l3.2-3.2C17.52 1.58 14.95 1 12 1 7.35 1 3.4 3.65 1.57 7.5l3.82 2.96C6.32 7.37 8.94 5.04 12 5.04z" />
@@ -420,7 +420,7 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
                       type="button"
                       onClick={handleTelegramSignIn}
                       disabled={isLoading}
-                      className="w-full py-2.5 sm:py-3 px-4 rounded-xl bg-[#0c0c12] hover:bg-[#14141d] active:scale-[0.99] border border-[#1e1e2b] text-white font-medium text-xs sm:text-sm flex items-center justify-center gap-3 transition-all duration-200 cursor-pointer shadow-sm disabled:opacity-50"
+                      className="w-full py-2.5 sm:py-3 px-4 rounded-xl bg-zinc-50 dark:bg-[#0c0c12] hover:bg-zinc-100 dark:hover:bg-[#14141d] active:scale-[0.99] border border-zinc-200 dark:border-[#1e1e2b] text-zinc-900 dark:text-white font-medium text-xs sm:text-sm flex items-center justify-center gap-3 transition-all duration-200 cursor-pointer shadow-sm disabled:opacity-50"
                     >
                       <div className="w-4 h-4 rounded-full bg-[#2AA1DD] flex items-center justify-center shrink-0">
                         <svg className="w-3 h-3 text-white transform -translate-x-[0.5px] translate-y-[0.5px]" viewBox="0 0 24 24" fill="currentColor">
@@ -432,9 +432,9 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
 
                     {/* OR Divider */}
                     <div className="flex items-center gap-3 py-1.5 sm:py-2 short:py-1">
-                      <div className="h-[1px] flex-1 bg-[#1e1e2b]" />
-                      <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest px-1">OR</span>
-                      <div className="h-[1px] flex-1 bg-[#1e1e2b]" />
+                      <div className="h-[1px] flex-1 bg-zinc-200 dark:bg-[#1e1e2b]" />
+                      <span className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-widest px-1">OR</span>
+                      <div className="h-[1px] flex-1 bg-zinc-200 dark:bg-[#1e1e2b]" />
                     </div>
                   </div>
                 )}
@@ -455,8 +455,8 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
                 >
                   {/* Name field (Signup mode) */}
                   {mode === 'signup' && (
-                    <div className="relative flex items-center bg-[#0c0c12] border border-[#1e1e2b] focus-within:border-zinc-400 focus-within:ring-1 focus-within:ring-white/10 rounded-xl px-3.5 py-2.5 sm:py-3 transition-all">
-                      <User className="w-4 h-4 text-zinc-500 shrink-0 mr-3" />
+                    <div className="relative flex items-center bg-zinc-50 dark:bg-[#0c0c12] border border-zinc-200 dark:border-[#1e1e2b] focus-within:border-zinc-400 focus-within:ring-1 focus-within:ring-zinc-400/20 rounded-xl px-3.5 py-2.5 sm:py-3 transition-all">
+                      <User className="w-4 h-4 text-zinc-400 dark:text-zinc-500 shrink-0 mr-3" />
                       <input
                         type="text"
                         value={fullName}
@@ -464,15 +464,15 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
                         placeholder="Full Name (optional)"
                         disabled={isLoading}
                         autoComplete="name"
-                        className="w-full bg-transparent text-xs sm:text-sm text-white placeholder-zinc-500 focus:outline-none font-medium"
+                        className="w-full bg-transparent text-xs sm:text-sm text-zinc-900 dark:text-white placeholder-zinc-400 dark:placeholder-zinc-500 focus:outline-none font-medium"
                       />
                     </div>
                   )}
 
                   {/* Email Field (All modes except reset) */}
                   {mode !== 'reset' && (
-                    <div className="relative flex items-center bg-[#0c0c12] border border-[#1e1e2b] focus-within:border-zinc-400 focus-within:ring-1 focus-within:ring-white/10 rounded-xl px-3.5 py-2.5 sm:py-3 transition-all">
-                      <Mail className="w-4 h-4 text-zinc-500 shrink-0 mr-3" />
+                    <div className="relative flex items-center bg-zinc-50 dark:bg-[#0c0c12] border border-zinc-200 dark:border-[#1e1e2b] focus-within:border-zinc-400 focus-within:ring-1 focus-within:ring-zinc-400/20 rounded-xl px-3.5 py-2.5 sm:py-3 transition-all">
+                      <Mail className="w-4 h-4 text-zinc-400 dark:text-zinc-500 shrink-0 mr-3" />
                       <input
                         type="email"
                         value={email}
@@ -483,7 +483,7 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
                         placeholder="Email"
                         disabled={isLoading}
                         autoComplete="email"
-                        className="w-full bg-transparent text-xs sm:text-sm text-white placeholder-zinc-500 focus:outline-none font-medium"
+                        className="w-full bg-transparent text-xs sm:text-sm text-zinc-900 dark:text-white placeholder-zinc-400 dark:placeholder-zinc-500 focus:outline-none font-medium"
                       />
                     </div>
                   )}
@@ -491,8 +491,8 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
                   {/* Password Field (Login & Signup modes) */}
                   {(mode === 'login' || mode === 'signup') && (
                     <div className="space-y-1">
-                      <div className="relative flex items-center bg-[#0c0c12] border border-[#1e1e2b] focus-within:border-zinc-400 focus-within:ring-1 focus-within:ring-white/10 rounded-xl px-3.5 py-2.5 sm:py-3 transition-all">
-                        <Lock className="w-4 h-4 text-zinc-500 shrink-0 mr-3" />
+                      <div className="relative flex items-center bg-zinc-50 dark:bg-[#0c0c12] border border-zinc-200 dark:border-[#1e1e2b] focus-within:border-zinc-400 focus-within:ring-1 focus-within:ring-zinc-400/20 rounded-xl px-3.5 py-2.5 sm:py-3 transition-all">
+                        <Lock className="w-4 h-4 text-zinc-400 dark:text-zinc-500 shrink-0 mr-3" />
                         <input
                           type={showPassword ? 'text' : 'password'}
                           value={password}
@@ -503,12 +503,12 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
                           placeholder="Password"
                           disabled={isLoading}
                           autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
-                          className="w-full bg-transparent text-xs sm:text-sm text-white placeholder-zinc-500 focus:outline-none font-medium pr-2"
+                          className="w-full bg-transparent text-xs sm:text-sm text-zinc-900 dark:text-white placeholder-zinc-400 dark:placeholder-zinc-500 focus:outline-none font-medium pr-2"
                         />
                         <button
                           type="button"
                           onClick={() => setShowPassword(!showPassword)}
-                          className="p-1 text-zinc-500 hover:text-white transition-colors cursor-pointer shrink-0"
+                          className="p-1 text-zinc-400 dark:text-zinc-500 hover:text-zinc-950 dark:hover:text-white transition-colors cursor-pointer shrink-0"
                           title={showPassword ? 'Hide password' : 'Show password'}
                         >
                           {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -521,7 +521,7 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
                           <button
                             type="button"
                             onClick={() => switchMode('forgot')}
-                            className="text-xs font-medium text-zinc-400 hover:text-white transition-colors cursor-pointer"
+                            className="text-xs font-medium text-zinc-500 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white transition-colors cursor-pointer"
                           >
                             Forgot password?
                           </button>
@@ -533,8 +533,8 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
                   {/* Confirm Password Field (Signup mode only) */}
                   {mode === 'signup' && (
                     <div className="space-y-1">
-                      <div className="relative flex items-center bg-[#0c0c12] border border-[#1e1e2b] focus-within:border-zinc-400 focus-within:ring-1 focus-within:ring-white/10 rounded-xl px-3.5 py-2.5 sm:py-3 transition-all">
-                        <Lock className="w-4 h-4 text-zinc-500 shrink-0 mr-3" />
+                      <div className="relative flex items-center bg-zinc-50 dark:bg-[#0c0c12] border border-zinc-200 dark:border-[#1e1e2b] focus-within:border-zinc-400 focus-within:ring-1 focus-within:ring-zinc-400/20 rounded-xl px-3.5 py-2.5 sm:py-3 transition-all">
+                        <Lock className="w-4 h-4 text-zinc-400 dark:text-zinc-500 shrink-0 mr-3" />
                         <input
                           type={showConfirmPassword ? 'text' : 'password'}
                           value={confirmPassword}
@@ -545,19 +545,19 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
                           placeholder="Confirm Password"
                           disabled={isLoading}
                           autoComplete="new-password"
-                          className="w-full bg-transparent text-xs sm:text-sm text-white placeholder-zinc-500 focus:outline-none font-medium pr-2"
+                          className="w-full bg-transparent text-xs sm:text-sm text-zinc-900 dark:text-white placeholder-zinc-400 dark:placeholder-zinc-500 focus:outline-none font-medium pr-2"
                         />
                         <button
                           type="button"
                           onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                          className="p-1 text-zinc-500 hover:text-white transition-colors cursor-pointer shrink-0"
+                          className="p-1 text-zinc-400 dark:text-zinc-500 hover:text-zinc-950 dark:hover:text-white transition-colors cursor-pointer shrink-0"
                           title={showConfirmPassword ? 'Hide password' : 'Show password'}
                         >
                           {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                         </button>
                       </div>
                       {confirmPassword.length > 0 && password !== confirmPassword && (
-                        <p className="text-[11px] text-rose-400 font-medium pl-1">
+                        <p className="text-[11px] text-rose-500 dark:text-rose-400 font-medium pl-1">
                           Passwords do not match
                         </p>
                       )}
@@ -567,45 +567,45 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
                   {/* New Password Fields (Reset mode) */}
                   {mode === 'reset' && (
                     <>
-                      <div className="relative flex items-center bg-[#0c0c12] border border-[#1e1e2b] focus-within:border-zinc-400 focus-within:ring-1 focus-within:ring-white/10 rounded-xl px-3.5 py-2.5 sm:py-3 transition-all">
-                        <Lock className="w-4 h-4 text-zinc-500 shrink-0 mr-3" />
+                      <div className="relative flex items-center bg-zinc-50 dark:bg-[#0c0c12] border border-zinc-200 dark:border-[#1e1e2b] focus-within:border-zinc-400 focus-within:ring-1 focus-within:ring-zinc-400/20 rounded-xl px-3.5 py-2.5 sm:py-3 transition-all">
+                        <Lock className="w-4 h-4 text-zinc-400 dark:text-zinc-500 shrink-0 mr-3" />
                         <input
                           type={showPassword ? 'text' : 'password'}
                           value={newPassword}
                           onChange={(e) => setNewPassword(e.target.value)}
                           placeholder="New Password"
                           disabled={isLoading}
-                          className="w-full bg-transparent text-xs sm:text-sm text-white placeholder-zinc-500 focus:outline-none font-medium pr-2"
+                          className="w-full bg-transparent text-xs sm:text-sm text-zinc-900 dark:text-white placeholder-zinc-400 dark:placeholder-zinc-500 focus:outline-none font-medium pr-2"
                         />
                         <button
                           type="button"
                           onClick={() => setShowPassword(!showPassword)}
-                          className="p-1 text-zinc-500 hover:text-white transition-colors cursor-pointer shrink-0"
+                          className="p-1 text-zinc-400 dark:text-zinc-500 hover:text-zinc-950 dark:hover:text-white transition-colors cursor-pointer shrink-0"
                         >
                           {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                         </button>
                       </div>
                       <div className="space-y-1">
-                        <div className="relative flex items-center bg-[#0c0c12] border border-[#1e1e2b] focus-within:border-zinc-400 focus-within:ring-1 focus-within:ring-white/10 rounded-xl px-3.5 py-2.5 sm:py-3 transition-all">
-                          <Lock className="w-4 h-4 text-zinc-500 shrink-0 mr-3" />
+                        <div className="relative flex items-center bg-zinc-50 dark:bg-[#0c0c12] border border-zinc-200 dark:border-[#1e1e2b] focus-within:border-zinc-400 focus-within:ring-1 focus-within:ring-zinc-400/20 rounded-xl px-3.5 py-2.5 sm:py-3 transition-all">
+                          <Lock className="w-4 h-4 text-zinc-400 dark:text-zinc-500 shrink-0 mr-3" />
                           <input
                             type={showConfirmPassword ? 'text' : 'password'}
                             value={confirmNewPassword}
                             onChange={(e) => setConfirmNewPassword(e.target.value)}
                             placeholder="Confirm New Password"
                             disabled={isLoading}
-                            className="w-full bg-transparent text-xs sm:text-sm text-white placeholder-zinc-500 focus:outline-none font-medium pr-2"
+                            className="w-full bg-transparent text-xs sm:text-sm text-zinc-900 dark:text-white placeholder-zinc-400 dark:placeholder-zinc-500 focus:outline-none font-medium pr-2"
                           />
                           <button
                             type="button"
                             onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                            className="p-1 text-zinc-500 hover:text-white transition-colors cursor-pointer shrink-0"
+                            className="p-1 text-zinc-400 dark:text-zinc-500 hover:text-zinc-950 dark:hover:text-white transition-colors cursor-pointer shrink-0"
                           >
                             {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                           </button>
                         </div>
                         {confirmNewPassword.length > 0 && newPassword !== confirmNewPassword && (
-                          <p className="text-[11px] text-rose-400 font-medium pl-1">
+                          <p className="text-[11px] text-rose-500 dark:text-rose-400 font-medium pl-1">
                             New passwords do not match
                           </p>
                         )}
@@ -618,11 +618,11 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
                     <button
                       type="submit"
                       disabled={!isFormValid() || isLoading}
-                      className="w-full py-3 sm:py-3.5 px-5 rounded-xl bg-white hover:bg-zinc-200 text-black font-bold text-xs sm:text-sm active:scale-[0.99] transition-all duration-200 cursor-pointer flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(255,255,255,0.1)] disabled:opacity-35 disabled:cursor-not-allowed disabled:hover:bg-white"
+                      className="w-full py-3 sm:py-3.5 px-5 rounded-xl bg-zinc-950 dark:bg-white hover:bg-zinc-800 dark:hover:bg-zinc-200 text-white dark:text-black font-bold text-xs sm:text-sm active:scale-[0.99] transition-all duration-200 cursor-pointer flex items-center justify-center gap-2 shadow-sm disabled:opacity-35 disabled:cursor-not-allowed"
                     >
                       {isLoading ? (
                         <div className="flex items-center gap-2">
-                          <div className="w-4 h-4 rounded-full border-2 border-black border-t-transparent animate-spin shrink-0" />
+                          <div className="w-4 h-4 rounded-full border-2 border-white dark:border-black border-t-transparent animate-spin shrink-0" />
                           <span>
                             {mode === 'signup'
                               ? 'Creating account...'
@@ -646,12 +646,12 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
                 {/* BOTTOM NAVIGATION LINKS */}
                 <div className="text-center pt-2 sm:pt-2.5 short:pt-1.5">
                   {mode === 'signup' && (
-                    <p className="text-xs sm:text-sm text-zinc-400 font-normal">
+                    <p className="text-xs sm:text-sm text-zinc-500 dark:text-zinc-400 font-normal">
                       Already have an account?{' '}
                       <button
                         type="button"
                         onClick={() => switchMode('login')}
-                        className="text-white font-bold hover:underline cursor-pointer transition-colors ml-1"
+                        className="text-zinc-950 dark:text-white font-bold hover:underline cursor-pointer transition-colors ml-1"
                       >
                         Sign in
                       </button>
@@ -659,12 +659,12 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
                   )}
 
                   {mode === 'login' && (
-                    <p className="text-xs sm:text-sm text-zinc-400 font-normal">
+                    <p className="text-xs sm:text-sm text-zinc-500 dark:text-zinc-400 font-normal">
                       Don't have an account?{' '}
                       <button
                         type="button"
                         onClick={() => switchMode('signup')}
-                        className="text-white font-bold hover:underline cursor-pointer transition-colors ml-1"
+                        className="text-zinc-950 dark:text-white font-bold hover:underline cursor-pointer transition-colors ml-1"
                       >
                         Create account
                       </button>
@@ -675,7 +675,7 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
                     <button
                       type="button"
                       onClick={() => switchMode('login')}
-                      className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-400 hover:text-white transition-colors cursor-pointer"
+                      className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-500 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white transition-colors cursor-pointer"
                     >
                       <ArrowLeft className="w-3.5 h-3.5" />
                       <span>Back to Sign In</span>
@@ -684,29 +684,29 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
                 </div>
 
                 {/* Trust Badges - 3 feature items */}
-                <div className="grid grid-cols-3 gap-2 sm:gap-2.5 pt-3 sm:pt-4 border-t border-[#181824] mt-3 sm:mt-4 short:mt-2 short:pt-2">
-                  <div className="flex flex-col items-center text-center p-2 sm:p-2.5 rounded-xl bg-[#09090f]/70 border border-[#181826] hover:border-[#262638] transition-colors shadow-sm short:p-1.5">
-                    <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-[#11111b] border border-[#222232] flex items-center justify-center text-zinc-300 mb-1 shrink-0">
+                <div className="grid grid-cols-3 gap-2 sm:gap-2.5 pt-3 sm:pt-4 border-t border-zinc-200 dark:border-[#181824] mt-3 sm:mt-4 short:mt-2 short:pt-2">
+                  <div className="flex flex-col items-center text-center p-2 sm:p-2.5 rounded-xl bg-zinc-50 dark:bg-[#09090f]/70 border border-zinc-200 dark:border-[#181826] hover:border-zinc-300 dark:hover:border-[#262638] transition-colors shadow-sm short:p-1.5">
+                    <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-zinc-100 dark:bg-[#11111b] border border-zinc-200 dark:border-[#222232] flex items-center justify-center text-zinc-700 dark:text-zinc-300 mb-1 shrink-0">
                       <ShieldCheck className="w-3.5 h-3.5" />
                     </div>
-                    <span className="text-[10px] sm:text-[11px] font-bold text-white tracking-tight">Secure</span>
-                    <span className="text-[8.5px] sm:text-[9.5px] text-zinc-400 leading-tight mt-0.5">Bank-level security</span>
+                    <span className="text-[10px] sm:text-[11px] font-bold text-zinc-950 dark:text-white tracking-tight">Secure</span>
+                    <span className="text-[8.5px] sm:text-[9.5px] text-zinc-500 dark:text-zinc-400 leading-tight mt-0.5">Bank-level security</span>
                   </div>
 
-                  <div className="flex flex-col items-center text-center p-2 sm:p-2.5 rounded-xl bg-[#09090f]/70 border border-[#181826] hover:border-[#262638] transition-colors shadow-sm short:p-1.5">
-                    <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-[#11111b] border border-[#222232] flex items-center justify-center text-zinc-300 mb-1 shrink-0">
+                  <div className="flex flex-col items-center text-center p-2 sm:p-2.5 rounded-xl bg-zinc-50 dark:bg-[#09090f]/70 border border-zinc-200 dark:border-[#181826] hover:border-zinc-300 dark:hover:border-[#262638] transition-colors shadow-sm short:p-1.5">
+                    <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-zinc-100 dark:bg-[#11111b] border border-zinc-200 dark:border-[#222232] flex items-center justify-center text-zinc-700 dark:text-zinc-300 mb-1 shrink-0">
                       <Zap className="w-3.5 h-3.5" />
                     </div>
-                    <span className="text-[10px] sm:text-[11px] font-bold text-white tracking-tight">AI-Powered</span>
-                    <span className="text-[8.5px] sm:text-[9.5px] text-zinc-400 leading-tight mt-0.5">Smarter insights</span>
+                    <span className="text-[10px] sm:text-[11px] font-bold text-zinc-950 dark:text-white tracking-tight">AI-Powered</span>
+                    <span className="text-[8.5px] sm:text-[9.5px] text-zinc-500 dark:text-zinc-400 leading-tight mt-0.5">Smarter insights</span>
                   </div>
 
-                  <div className="flex flex-col items-center text-center p-2 sm:p-2.5 rounded-xl bg-[#09090f]/70 border border-[#181826] hover:border-[#262638] transition-colors shadow-sm short:p-1.5">
-                    <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-[#11111b] border border-[#222232] flex items-center justify-center text-zinc-300 mb-1 shrink-0">
+                  <div className="flex flex-col items-center text-center p-2 sm:p-2.5 rounded-xl bg-zinc-50 dark:bg-[#09090f]/70 border border-zinc-200 dark:border-[#181826] hover:border-zinc-300 dark:hover:border-[#262638] transition-colors shadow-sm short:p-1.5">
+                    <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-zinc-100 dark:bg-[#11111b] border border-zinc-200 dark:border-[#222232] flex items-center justify-center text-zinc-700 dark:text-zinc-300 mb-1 shrink-0">
                       <TrendingUp className="w-3.5 h-3.5" />
                     </div>
-                    <span className="text-[10px] sm:text-[11px] font-bold text-white tracking-tight">Real-Time</span>
-                    <span className="text-[8.5px] sm:text-[9.5px] text-zinc-400 leading-tight mt-0.5">24/7 monitoring</span>
+                    <span className="text-[10px] sm:text-[11px] font-bold text-zinc-950 dark:text-white tracking-tight">Real-Time</span>
+                    <span className="text-[8.5px] sm:text-[9.5px] text-zinc-500 dark:text-zinc-400 leading-tight mt-0.5">24/7 monitoring</span>
                   </div>
                 </div>
               </>
@@ -718,9 +718,9 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
       {/* Minimal Footer */}
       <p className="text-[10px] sm:text-[11px] text-zinc-500 text-center tracking-normal relative z-10 max-w-xs py-1 sm:py-2 shrink-0">
         By continuing, you agree to our{' '}
-        <span className="underline text-zinc-400 hover:text-white cursor-pointer transition-colors">Terms of Service</span>
+        <span className="underline text-zinc-600 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white cursor-pointer transition-colors">Terms of Service</span>
         {' '}and{' '}
-        <span className="underline text-zinc-400 hover:text-white cursor-pointer transition-colors">Privacy Policy</span>.
+        <span className="underline text-zinc-600 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white cursor-pointer transition-colors">Privacy Policy</span>.
       </p>
 
     </div>
