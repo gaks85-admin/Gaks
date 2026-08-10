@@ -8,6 +8,8 @@ import { compileStrategy } from "../../src/lib/strategy-compiler.js";
 import { evaluateDecision } from "../../src/lib/decision-engine.js";
 import { extractMarketStructure } from "../../src/lib/market-structure-engine.js";
 import { recordEvaluation } from "../../src/lib/explainability-engine.js";
+import { validateMarketDataIntegrity } from "../../src/lib/market-integrity.js";
+import { normalizeConfidence } from "../../src/lib/confidence-engine.js";
 
 
 /**
@@ -268,11 +270,34 @@ export default async function handler(req: any, res: any) {
 
     if (candleData.length < 2) throw new Error("Insufficient candle data.");
 
+    // Fix 1: Validate Market Data Temporal Integrity
+    const integrity = validateMarketDataIntegrity(symbol, candleData);
+    if (!integrity.valid) {
+      console.log(`[Market Data Integrity] Watcher ${watcher.id} (${symbol}) failed integrity check: ${integrity.reason}`);
+      return res.json({
+        success: true,
+        data: {
+          watcher_id: watcher.id,
+          pair: symbol,
+          signal: 'NO_TRADE',
+          confidence: 0,
+          reasoning: [`Market Data Integrity Check Failed: ${integrity.reason}`],
+          integrity
+        }
+      });
+    }
+
     const scanStart = Date.now();
 
     // 7. Extract Market Structure & Compile Strategy
     const marketStructure = extractMarketStructure(candleData);
     const compiledStrategy = parsed_strategy || compileStrategy(strategyText);
+    const strategyCompilationConfidenceRecord = normalizeConfidence(
+      compiledStrategy.overall_confidence ?? compiledStrategy.confidence,
+      'strategy_compilation',
+      'Strategy Compiler'
+    );
+    const strategyCompilationConfidence = strategyCompilationConfidenceRecord.normalized;
 
     // Stage 2
     const cleanSymUpper = (symbol || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
@@ -283,6 +308,13 @@ export default async function handler(req: any, res: any) {
     (marketStructure as any).timeframe = selectedTimeframe;
     (marketStructure as any).lastClosedCandleTimestamp = candleData[candleData.length - 2]?.timestamp || '';
     const decisionResult = evaluateDecision(compiledStrategy, marketStructure);
+
+    const ruleDecisionScoreRecord = normalizeConfidence(
+      decisionResult.decision_score,
+      'rule_score',
+      'Weighted Decision Engine'
+    );
+    const ruleDecisionScore = ruleDecisionScoreRecord.normalized;
 
     let analysis: any = {
       signal: 'NO_TRADE',
@@ -400,15 +432,15 @@ Answer with JSON matching schema.
               finalTP = signalDir === 'BUY' ? entry + (riskDist * rrRatio) : entry - (riskDist * rrRatio);
             }
 
-            const rawConf = parsedResult.confidenceScore;
-            const normalizedConf = (typeof rawConf === 'number' && rawConf > 0 && rawConf <= 1.0)
-              ? Math.round(rawConf * 100)
-              : Math.round(Number(rawConf) || 85);
+            const geminiConfRecord = normalizeConfidence(parsedResult.confidenceScore, 'gemini', 'Gemini AI Model');
+            const finalConfRecord = normalizeConfidence(geminiConfRecord.normalized, 'final_trade', 'Executable Signal');
 
-            console.log(`[Confidence]
-Raw Value: ${rawConf}
-Semantic: ${typeof rawConf === 'number' && rawConf > 0 && rawConf <= 1.0 ? 'Probability (0-1)' : 'Percentage (0-100)'}
-Displayed: ${normalizedConf}%`);
+            console.log(`[Gemini Decision]
+Required: YES
+Status: APPROVED
+Direction: ${signalDir}
+Confidence: ${geminiConfRecord.normalized}%
+Fallback: NO_TRADE`.trim());
 
             console.log(`[TP Analysis]
 Direction: ${signalDir}
@@ -421,7 +453,7 @@ TP Basis: ${parsedResult.stopLossBasis || 'Market Structure Target'}`);
 
             analysis = {
               signal: signalDir,
-              confidence: normalizedConf,
+              confidence: finalConfRecord.normalized,
               entryPrice: entry,
               stopLoss: slResult.stopLoss,
               stopLossBasis: slResult.stopLossBasis,
@@ -434,7 +466,13 @@ TP Basis: ${parsedResult.stopLossBasis || 'Market Structure Target'}`);
               reasoning: [parsedResult.reasoning || "Satisfies strategy rules and Gemini validation."]
             };
           } else {
-            console.log(`[Gemini Engine] Gemini did not satisfy or returned NO_TRADE. Setting signal to NO_TRADE.`);
+            console.log(`[Gemini Decision]
+Required: YES
+Status: REJECTED
+Direction: NO_TRADE
+Confidence: 0%
+Fallback: NO_TRADE`.trim());
+
             analysis = {
               signal: 'NO_TRADE',
               confidence: 0,
@@ -448,6 +486,25 @@ TP Basis: ${parsedResult.stopLossBasis || 'Market Structure Target'}`);
         }
       } catch (gemErr: any) {
         console.warn(`[Gemini Validation Error]: Rejecting trade due to Gemini failure:`, gemErr.message);
+
+        const errMsg = gemErr.message || String(gemErr);
+        const errStatus = gemErr.status || 0;
+        const lowerMsg = errMsg.toLowerCase();
+
+        let explicitStatus = 'API_ERROR';
+        if (errStatus === 429 || lowerMsg.includes('resource_exhausted') || lowerMsg.includes('quota exceeded') || lowerMsg.includes('rate limit')) {
+          explicitStatus = 'QUOTA_EXHAUSTED';
+        } else if (errStatus >= 500 || lowerMsg.includes('timeout') || lowerMsg.includes('gateway')) {
+          explicitStatus = 'TIMEOUT';
+        }
+
+        console.log(`[Gemini Decision]
+Required: YES
+Status: ${explicitStatus}
+Direction: NO_TRADE
+Confidence: 0%
+Fallback: NO_TRADE`.trim());
+
         analysis = {
           signal: 'NO_TRADE',
           confidence: 0,

@@ -13,6 +13,8 @@ import { calculateStructuralStopLoss, validateAndResolveStopLoss } from '../../s
 import { recordEvaluation } from '../../src/lib/explainability-engine.js';
 import { calculateHistoricalProbability, recordCompletedTrade } from '../../src/lib/learning-engine.js';
 import { RULE_WEIGHTS } from '../../src/lib/rule-weight-engine.js';
+import { validateMarketDataIntegrity } from '../../src/lib/market-integrity.js';
+import { normalizeConfidence } from '../../src/lib/confidence-engine.js';
 
 // --- Inlined Gemini Wrapper ---
 
@@ -1313,9 +1315,55 @@ export default async function handler(req: any, res: any) {
 
         scanStart = Date.now();
 
+        // Fix 1: Validate Market Data Temporal Integrity
+        const integrity = validateMarketDataIntegrity(selectedPair, candleData);
+        if (!integrity.valid) {
+          console.log(`[Market Data Integrity] Watcher ${watcher.id} (${selectedPair}) skipped - ${integrity.reason}`);
+          skipped.push({ userId, reason: `Market data integrity check failed: ${integrity.reason}` });
+          watchersSkippedCount++;
+
+          const scanDurationMs = Date.now() - scanStart;
+          await recordEvaluation(supabase, {
+            user_id: userId,
+            watcher_id: watcher.id,
+            pair: selectedPair,
+            timeframe: selectedTimeframe,
+            strategy_mode: 'HYBRID',
+            decision_score: 0,
+            matched_weight: 0,
+            possible_weight: 0,
+            recommendation: 'FAIL',
+            mandatory_rules_passed: false,
+            matched_rules: [],
+            failed_rules: [`Market Data Integrity Failed: ${integrity.reason}`],
+            gemini_used: false,
+            trade_sent: false,
+            trade_reason: `Market data invalid (${integrity.status}): ${integrity.reason}`,
+            scan_duration_ms: scanDurationMs,
+            decision_snapshot: null
+          });
+
+          await supabase
+            .from("watchers")
+            .update({
+               last_scan_at: new Date().toISOString(),
+               updated_at: new Date().toISOString()
+            })
+            .eq("id", watcher.id);
+
+          continue;
+        }
+
         // Extract market structure & compile strategy
         addLog("Strategy Compiled", "success");
         const compiledStrategy = compileStrategy(strategyText);
+        const strategyCompilationConfidenceRecord = normalizeConfidence(
+          compiledStrategy.overall_confidence ?? compiledStrategy.confidence,
+          'strategy_compilation',
+          'Strategy Compiler'
+        );
+        const strategyCompilationConfidence = strategyCompilationConfidenceRecord.normalized;
+
         const marketStructure = extractMarketStructure(candleData, compiledStrategy.detector_validation?.supported_detectors);
 
         // Stage 2
@@ -1346,6 +1394,13 @@ export default async function handler(req: any, res: any) {
           histResult.historical_probability,
           histResult.sample_size
         );
+
+        const ruleDecisionScoreRecord = normalizeConfidence(
+          decisionResult.decision_score,
+          'rule_score',
+          'Weighted Decision Engine'
+        );
+        const ruleDecisionScore = ruleDecisionScoreRecord.normalized;
 
         const decisionSnapshot = buildDecisionSnapshot(decisionResult, histResult, compiledStrategy);
 
@@ -1537,10 +1592,8 @@ Output ONLY valid JSON.
                 console.log("========== PARSED GEMINI OUTPUT ==========");
                 console.log(parsedResult);
 
-                console.log("Gemini JSON Parsed");
                 geminiSucceeded = true;
                 geminiDecision = parsedResult.direction as 'BUY' | 'SELL' | 'NO_TRADE';
-                console.log(`Gemini Decision = ${geminiDecision}`);
 
                 if (parsedResult.satisfies && parsedResult.direction && parsedResult.direction !== 'NO_TRADE') {
                   geminiDirection = parsedResult.direction;
@@ -1565,15 +1618,15 @@ Output ONLY valid JSON.
                     finalTP = geminiDirection === 'BUY' ? entry + (riskDist * rrRatio) : entry - (riskDist * rrRatio);
                   }
 
-                  const rawConf = parsedResult.confidenceScore;
-                  const normalizedConf = (typeof rawConf === 'number' && rawConf > 0 && rawConf <= 1.0)
-                    ? Math.round(rawConf * 100)
-                    : Math.round(Number(rawConf) || 85);
+                  const geminiConfRecord = normalizeConfidence(parsedResult.confidenceScore, 'gemini', 'Gemini AI Model');
+                  const finalConfRecord = normalizeConfidence(geminiConfRecord.normalized, 'final_trade', 'Executable Signal');
 
-                  console.log(`[Confidence]
-Raw Value: ${rawConf}
-Semantic: ${typeof rawConf === 'number' && rawConf > 0 && rawConf <= 1.0 ? 'Probability (0-1)' : 'Percentage (0-100)'}
-Displayed: ${normalizedConf}%`);
+                  console.log(`[Gemini Decision]
+Required: YES
+Status: APPROVED
+Direction: ${geminiDirection}
+Confidence: ${geminiConfRecord.normalized}%
+Fallback: NO_TRADE`.trim());
 
                   console.log(`[TP Analysis]
 Direction: ${geminiDirection}
@@ -1586,7 +1639,7 @@ TP Basis: ${parsedResult.stopLossBasis || 'Market Structure Target'}`);
 
                   analysis = {
                     signal: geminiDirection,
-                    confidence: normalizedConf,
+                    confidence: finalConfRecord.normalized,
                     entryPrice: entry,
                     stopLoss: slResult.stopLoss,
                     takeProfit: finalTP,
@@ -1599,7 +1652,13 @@ TP Basis: ${parsedResult.stopLossBasis || 'Market Structure Target'}`);
                     reasoning: [parsedResult.reasoning || "Satisfies strategy rules and Gemini validation."]
                   };
                 } else {
-                  console.log(`[Gemini Engine] Gemini did not satisfy or returned NO_TRADE. Resetting signal to NO_TRADE.`);
+                  console.log(`[Gemini Decision]
+Required: YES
+Status: REJECTED
+Direction: NO_TRADE
+Confidence: 0%
+Fallback: NO_TRADE`.trim());
+
                   analysis = {
                     signal: 'NO_TRADE',
                     confidence: 0,
@@ -1616,17 +1675,30 @@ TP Basis: ${parsedResult.stopLossBasis || 'Market Structure Target'}`);
               const lowerMsg = errMsg.toLowerCase();
 
               let newStatus = 'NEEDS_ATTENTION';
+              let explicitStatus = 'API_ERROR';
               if (errStatus === 429 || lowerMsg.includes('resource_exhausted') || lowerMsg.includes('quota exceeded') || lowerMsg.includes('rate limit') || lowerMsg.includes('retryinfo') || lowerMsg.includes('retrydelay')) {
                 newStatus = 'QUOTA_EXHAUSTED';
+                explicitStatus = 'QUOTA_EXHAUSTED';
               } else if (errStatus === 401 || errStatus === 403 || lowerMsg.includes('invalid api key') || lowerMsg.includes('permission denied') || lowerMsg.includes('invalid')) {
                 newStatus = 'INVALID_KEY';
+                explicitStatus = 'API_ERROR';
               } else if (errStatus === 402 || lowerMsg.includes('billing') || lowerMsg.includes('payment required')) {
                 newStatus = 'BILLING_REQUIRED';
+                explicitStatus = 'API_ERROR';
               } else if (errStatus >= 500 || errStatus === 503 || lowerMsg.includes('timeout') || lowerMsg.includes('network') || lowerMsg.includes('gateway')) {
                 newStatus = 'TEMP_ERROR';
+                explicitStatus = 'TIMEOUT';
               } else {
                 newStatus = 'NEEDS_ATTENTION';
+                explicitStatus = 'API_ERROR';
               }
+
+              console.log(`[Gemini Decision]
+Required: YES
+Status: ${explicitStatus}
+Direction: NO_TRADE
+Confidence: 0%
+Fallback: NO_TRADE`.trim());
 
               await supabase.from("profiles").update({
                 gemini_status: newStatus,

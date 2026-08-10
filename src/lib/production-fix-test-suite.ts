@@ -1,5 +1,7 @@
 import { buildTelegramAlertMessage } from './telegram-formatter.js';
 import { calculatePositionSize, resolveInstrumentSpec } from './risk-engine.js';
+import { validateMarketDataIntegrity } from './market-integrity.js';
+import { normalizeConfidence } from './confidence-engine.js';
 
 export function runProductionFixTestSuite() {
   console.log("==========================================");
@@ -20,9 +22,45 @@ export function runProductionFixTestSuite() {
   }
 
   // ==========================================
-  // TEST A: CONFIDENCE CONVERSION
+  // TEST A: MARKET DATA INTEGRITY CHECKS
   // ==========================================
-  console.log("\n--- TEST A: Confidence Conversion ---");
+  console.log("\n--- TEST A: Market Data Temporal Integrity ---");
+  const now = Date.now();
+  const validCandles = [
+    { timestamp: new Date(now - 7200000).toISOString(), open: 1.1000, high: 1.1050, low: 1.0990, close: 1.1020 },
+    { timestamp: new Date(now - 3600000).toISOString(), open: 1.1020, high: 1.1080, low: 1.1010, close: 1.1070 }
+  ];
+  const validResult = validateMarketDataIntegrity('EURUSD', validCandles);
+  assert(validResult.valid === true, 'Test A1 - Valid candles pass integrity check');
+
+  const futureCandles = [
+    { timestamp: new Date(now - 3600000).toISOString(), open: 1.1000, high: 1.1050, low: 1.0990, close: 1.1020 },
+    { timestamp: new Date(now + 86400000).toISOString(), open: 1.1020, high: 1.1080, low: 1.1010, close: 1.1070 } // 24h in future
+  ];
+  const futureResult = validateMarketDataIntegrity('EURUSD', futureCandles);
+  assert(futureResult.valid === false, 'Test A2 - Future candle is rejected');
+  assert(futureResult.status === 'INVALID_FUTURE_CANDLE', 'Test A3 - Future candle status is INVALID_FUTURE_CANDLE');
+
+  const outOfOrderCandles = [
+    { timestamp: new Date(now - 1800000).toISOString(), open: 1.1000, high: 1.1050, low: 1.0990, close: 1.1020 },
+    { timestamp: new Date(now - 3600000).toISOString(), open: 1.1020, high: 1.1080, low: 1.1010, close: 1.1070 }
+  ];
+  const outOfOrderResult = validateMarketDataIntegrity('EURUSD', outOfOrderCandles);
+  assert(outOfOrderResult.valid === false, 'Test A4 - Out-of-order candles rejected');
+
+  // ==========================================
+  // TEST B: CONFIDENCE NORMALIZATION
+  // ==========================================
+  console.log("\n--- TEST B: Confidence Normalization ---");
+  assert(normalizeConfidence(0.01, 'gemini').formatted === '1%', 'Test B1 - 0.01 converts to 1%');
+  assert(normalizeConfidence(0.82, 'gemini').formatted === '82%', 'Test B2 - 0.82 converts to 82%');
+  assert(normalizeConfidence(82, 'gemini').formatted === '82%', 'Test B3 - 82 converts to 82%');
+  assert(normalizeConfidence(1.0, 'gemini').formatted === '100%', 'Test B4 - 1.0 converts to 100%');
+
+  const stratConf = normalizeConfidence(0.97, 'strategy_compilation').normalized;
+  const tradeConf = normalizeConfidence(0, 'final_trade').normalized;
+  assert(stratConf === 97, 'Test B5 - Strategy compilation confidence is 97%');
+  assert(tradeConf === 0, 'Test B6 - Final trade confidence remains 0% until trade decision');
   const testAValues = [
     { input: 0.01, expectedDisplay: '1%' },
     { input: 0.50, expectedDisplay: '50%' },
