@@ -325,7 +325,13 @@ export function calculatePositionSize(config: {
   riskDistance = Math.abs(riskDistance);
 
   // 3. Calculate TP
-  let calculatedTP = direction === 'SELL' ? intendedEntry - (riskDistance * targetRrRatio) : intendedEntry + (riskDistance * targetRrRatio);
+  const rawProvidedTp = config.takeProfit !== undefined && config.takeProfit !== null ? Number(config.takeProfit) : (config.geminiTp !== undefined && config.geminiTp !== null ? Number(config.geminiTp) : null);
+  const isProvidedTpValid = rawProvidedTp !== null && !isNaN(rawProvidedTp) && rawProvidedTp > 0 &&
+    (direction === 'BUY' ? rawProvidedTp > executedEntry : rawProvidedTp < executedEntry);
+
+  const calculatedTP = isProvidedTpValid
+    ? rawProvidedTp!
+    : (direction === 'SELL' ? intendedEntry - (riskDistance * targetRrRatio) : intendedEntry + (riskDistance * targetRrRatio));
 
   // Check tick difference
   const diff = Math.abs(executedEntry - intendedEntry);
@@ -335,7 +341,9 @@ export function calculatePositionSize(config: {
 
   // 5. Recalculate Stop Loss, Take Profit using ONLY the executed entry
   const executedSL = direction === 'SELL' ? executedEntry + riskDistance : executedEntry - riskDistance;
-  const executedTP = direction === 'SELL' ? executedEntry - (riskDistance * targetRrRatio) : executedEntry + (riskDistance * targetRrRatio);
+  const executedTP = isProvidedTpValid
+    ? rawProvidedTp!
+    : (direction === 'SELL' ? executedEntry - (riskDistance * targetRrRatio) : executedEntry + (riskDistance * targetRrRatio));
 
   const stopDistance = Math.abs(executedEntry - executedSL);
   const tpDistance = Math.abs(executedTP - executedEntry);
@@ -358,10 +366,9 @@ export function calculatePositionSize(config: {
     }
   }
 
-  // Validate RR within 1% tolerance
+  // Validate RR: actual R:R must satisfy target/minimum RR (within 1% or 0.01 tolerance)
   const expectedRrNumeric = targetRrRatio;
-  const rrDiff = Math.abs(actualRr - expectedRrNumeric);
-  const rrValidationPassed = expectedRrNumeric === 0 ? false : (rrDiff / expectedRrNumeric) <= 0.01;
+  const rrValidationPassed = expectedRrNumeric === 0 ? false : (actualRr >= expectedRrNumeric - 0.01);
 
   logRrValidationAudit(
     executedEntry,
@@ -421,8 +428,8 @@ export function calculatePositionSize(config: {
     exactLotSize = riskAmount / lossPerOneLot;
     expectedLossAtRequiredLot = exactLotSize * lossPerOneLot;
 
-    // Strict validation: RequiredLot < minLot -> Reject trade. Do NOT round up to minLot.
-    if (exactLotSize < minLot) {
+    // Strict validation: RequiredLot < minLot -> Reject trade. Do NOT round up to minLot. Use epsilon tolerance for float precision.
+    if (exactLotSize < minLot - 1e-7) {
       accepted = false;
       skipReason = `Trade skipped. Required lot size is below broker minimum. Required lot: ${exactLotSize.toFixed(4)}, Broker minimum: ${minLot}, Expected loss at minimum lot: $${expectedLossAtMinLot.toFixed(2)}, User maximum risk: $${riskAmount.toFixed(2)}.`;
       logRiskValidationAudit(
@@ -661,6 +668,23 @@ export function calculatePositionSize(config: {
     expectedProfit,
     accepted && rrValidationPassed
   );
+
+  console.log(`
+[Trade Risk]
+Direction: ${direction}
+Entry: ${executedEntry}
+SL: ${executedSL}
+TP: ${executedTP}
+Stop Distance: ${stopDistance.toFixed(5)}
+Risk Amount: $${riskAmount.toFixed(2)}
+Required Lot: ${rawLotSizeFormatted}
+Minimum Lot: ${minLot}
+Executable Lot: ${accepted ? calculatedLotSize.toFixed(2) : 'NONE'}
+Expected Loss: $${(accepted ? expectedLoss : expectedLossAtRequiredLot).toFixed(2)}
+Minimum Lot Expected Loss: $${expectedLossAtMinLot.toFixed(2)}
+R:R: 1:${actualRr.toFixed(2)}
+Accepted: ${accepted ? 'YES' : 'NO'}
+`.trim());
 
   return {
     accountSize: config.accountSize,

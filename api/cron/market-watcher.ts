@@ -1565,12 +1565,34 @@ Output ONLY valid JSON.
                     finalTP = geminiDirection === 'BUY' ? entry + (riskDist * rrRatio) : entry - (riskDist * rrRatio);
                   }
 
+                  const rawConf = parsedResult.confidenceScore;
+                  const normalizedConf = (typeof rawConf === 'number' && rawConf > 0 && rawConf <= 1.0)
+                    ? Math.round(rawConf * 100)
+                    : Math.round(Number(rawConf) || 85);
+
+                  console.log(`[Confidence]
+Raw Value: ${rawConf}
+Semantic: ${typeof rawConf === 'number' && rawConf > 0 && rawConf <= 1.0 ? 'Probability (0-1)' : 'Percentage (0-100)'}
+Displayed: ${normalizedConf}%`);
+
+                  console.log(`[TP Analysis]
+Direction: ${geminiDirection}
+Entry: ${entry}
+SL: ${slResult.stopLoss}
+TP1: ${finalTP}
+TP2: ${parsedResult.tp2 ?? 'N/A'}
+TP3: ${parsedResult.tp3 ?? 'N/A'}
+TP Basis: ${parsedResult.stopLossBasis || 'Market Structure Target'}`);
+
                   analysis = {
                     signal: geminiDirection,
-                    confidence: parsedResult.confidenceScore || 85,
+                    confidence: normalizedConf,
                     entryPrice: entry,
                     stopLoss: slResult.stopLoss,
                     takeProfit: finalTP,
+                    tp1: parsedResult.tp1 || finalTP,
+                    tp2: parsedResult.tp2 || null,
+                    tp3: parsedResult.tp3 || null,
                     stopLossBasis: slResult.stopLossBasis,
                     structuralLevel: slResult.structuralLevel,
                     riskReward: riskRewardStr,
@@ -1862,6 +1884,11 @@ ${analysis.stopLossBasis === 'ATR_FALLBACK' ? `ATR: ${marketStructure.volatility
           console.log(`[SIGNAL GENERATED] Watcher ID: ${watcher.id}`);
           console.log(`Exact reason new signal was generated: Strategy evaluation returned signal '${analysis.signal}' with confidence ${analysis.confidence}% (>= 70 threshold) on pair ${selectedPair}. Executed Entry: ${analysis.entryPrice}, Stop Loss: ${analysis.stopLoss}, Take Profit: ${analysis.takeProfit}. Reasoning: ${signalReasoning}`);
 
+          const actualRrVal = posSizeResult.actualRr;
+          const formattedRr = actualRrVal > 0
+            ? `1:${actualRrVal % 1 === 0 ? actualRrVal.toFixed(0) : actualRrVal.toFixed(2)}`
+            : riskRewardStr;
+
           signal = {
               pair: mappedSymbol,
               timeframe: selectedTimeframe,
@@ -1870,7 +1897,10 @@ ${analysis.stopLossBasis === 'ATR_FALLBACK' ? `ATR: ${marketStructure.volatility
               entryPrice: analysis.entryPrice,
               stopLoss: analysis.stopLoss,
               takeProfit: analysis.takeProfit,
-              riskRewardRatio: riskRewardStr,
+              tp1: analysis.tp1 || analysis.takeProfit,
+              tp2: analysis.tp2 || null,
+              tp3: analysis.tp3 || null,
+              riskRewardRatio: formattedRr,
               confidenceScore: analysis.confidence,
               aiReasoning: analysis.reasoning,
               lotSize: posSizeResult.calculatedLotSize,

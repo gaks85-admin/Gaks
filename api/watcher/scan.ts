@@ -400,14 +400,36 @@ Answer with JSON matching schema.
               finalTP = signalDir === 'BUY' ? entry + (riskDist * rrRatio) : entry - (riskDist * rrRatio);
             }
 
+            const rawConf = parsedResult.confidenceScore;
+            const normalizedConf = (typeof rawConf === 'number' && rawConf > 0 && rawConf <= 1.0)
+              ? Math.round(rawConf * 100)
+              : Math.round(Number(rawConf) || 85);
+
+            console.log(`[Confidence]
+Raw Value: ${rawConf}
+Semantic: ${typeof rawConf === 'number' && rawConf > 0 && rawConf <= 1.0 ? 'Probability (0-1)' : 'Percentage (0-100)'}
+Displayed: ${normalizedConf}%`);
+
+            console.log(`[TP Analysis]
+Direction: ${signalDir}
+Entry: ${entry}
+SL: ${slResult.stopLoss}
+TP1: ${finalTP}
+TP2: ${parsedResult.tp2 ?? 'N/A'}
+TP3: ${parsedResult.tp3 ?? 'N/A'}
+TP Basis: ${parsedResult.stopLossBasis || 'Market Structure Target'}`);
+
             analysis = {
               signal: signalDir,
-              confidence: parsedResult.confidenceScore || 85,
+              confidence: normalizedConf,
               entryPrice: entry,
               stopLoss: slResult.stopLoss,
               stopLossBasis: slResult.stopLossBasis,
               structuralLevel: slResult.structuralLevel,
               takeProfit: finalTP,
+              tp1: parsedResult.tp1 || finalTP,
+              tp2: parsedResult.tp2 || null,
+              tp3: parsedResult.tp3 || null,
               riskReward: riskRewardStr,
               reasoning: [parsedResult.reasoning || "Satisfies strategy rules and Gemini validation."]
             };
@@ -502,6 +524,7 @@ Answer with JSON matching schema.
         entryPrice: Number(analysis.entryPrice) || 0,
         executedEntry: executedPrice,
         stopLoss: Number(analysis.stopLoss) || 0,
+        takeProfit: analysis.takeProfit ? Number(analysis.takeProfit) : null,
         geminiTp: analysis.takeProfit ? Number(analysis.takeProfit) : null,
         symbol: symbol,
         direction: analysis.signal,
