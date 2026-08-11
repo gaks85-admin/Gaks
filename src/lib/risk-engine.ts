@@ -1,3 +1,5 @@
+import { validateTradeGeometry } from './trade-geometry-validator.js';
+
 export interface RiskPreferences {
   accountSize: number;
   riskPercentage: number;
@@ -370,11 +372,60 @@ export function calculatePositionSize(config: {
     ? rawProvidedTp!
     : (direction === 'SELL' ? executedEntry - (riskDistance * targetRrRatio) : executedEntry + (riskDistance * targetRrRatio));
 
-  const stopDistance = Math.abs(executedEntry - executedSL);
-  const tpDistance = Math.abs(executedTP - executedEntry);
+  const stopDistance = direction === 'SELL' ? executedSL - executedEntry : executedEntry - executedSL;
+  const tpDistance = direction === 'SELL' ? executedEntry - executedTP : executedTP - executedEntry;
   const actualRisk = stopDistance;
   const actualReward = tpDistance;
   const actualRr = actualRisk > 0 ? Number((actualReward / actualRisk).toFixed(4)) : 0;
+
+  const geoResult = validateTradeGeometry({
+    symbol: config.symbol,
+    direction: direction,
+    entryPrice: executedEntry,
+    stopLoss: executedSL,
+    takeProfit: executedTP,
+    minRr: targetRrRatio,
+    positionMode: config.positionMode,
+    lotSize: config.preferredLotSize,
+    maxAllowedRisk: riskAmount,
+    actualRisk: stopDistance
+  });
+
+  if (!geoResult.valid) {
+    return {
+      accountSize: config.accountSize,
+      riskPercentage: config.riskPercentage,
+      riskAmount,
+      entryPrice: executedEntry,
+      stopLoss: executedSL,
+      takeProfit: executedTP,
+      stopDistance,
+      pipValue: 10,
+      contractSize,
+      calculatedLotSize: 0,
+      exactLotSize: 0,
+      expectedLoss: 0,
+      expectedProfit: 0,
+      assetClass,
+      normalizedLotSize: 0,
+      lotType: 'INVALID',
+      lotStep,
+      minLot,
+      symbol: config.symbol,
+      accepted: false,
+      skipReason: geoResult.reason,
+      expectedLossAtRequiredLot: 0,
+      expectedLossAtMinLot: 0,
+      userRr,
+      geminiTp: config.geminiTp ?? config.takeProfit,
+      actualRisk,
+      actualReward,
+      actualRr,
+      rrValidationPassed: false,
+      executableLotDisplay: '0',
+      theoreticalExpectedLoss: 0
+    };
+  }
 
   // Phase 5: Stop Loss & Take Profit Structural Validation
   let slValidationPassed = true;

@@ -1,3 +1,5 @@
+import { validateTradeGeometry } from './trade-geometry-validator.js';
+
 export interface ActiveTradeValidationResult {
   valid: boolean;
   reason?: string;
@@ -20,31 +22,22 @@ export function validateActiveTradeState(watcher: {
     return { valid: false, reason: `Invalid or missing direction ('${watcher.direction}'). Must be BUY or SELL (NO_TRADE is not valid for ACTIVE state).` };
   }
 
-  const isBuy = dir === 'BUY' || dir === 'LONG';
+  const normalizedDir = dir === 'LONG' ? 'BUY' : (dir === 'SHORT' ? 'SELL' : dir);
   const entry = watcher.entry_price !== null && watcher.entry_price !== undefined ? parseFloat(String(watcher.entry_price)) : NaN;
   const sl = watcher.stop_loss !== null && watcher.stop_loss !== undefined ? parseFloat(String(watcher.stop_loss)) : NaN;
   const tp = watcher.take_profit !== null && watcher.take_profit !== undefined ? parseFloat(String(watcher.take_profit)) : NaN;
 
-  if (isNaN(entry) || !Number.isFinite(entry) || entry <= 0) {
-    return { valid: false, reason: `Invalid entry price (${watcher.entry_price}). Must be finite and positive.` };
-  }
-  if (isNaN(sl) || !Number.isFinite(sl) || sl <= 0) {
-    return { valid: false, reason: `Invalid stop loss (${watcher.stop_loss}). Must be finite and positive.` };
-  }
-  if (isNaN(tp) || !Number.isFinite(tp) || tp <= 0) {
-    return { valid: false, reason: `Invalid take profit (${watcher.take_profit}). Must be finite and positive.` };
-  }
+  const geoResult = validateTradeGeometry({
+    symbol: 'ACTIVE_TRADE',
+    direction: normalizedDir,
+    entryPrice: entry,
+    stopLoss: sl,
+    takeProfit: tp,
+    minRr: 0.1 // lenient min R:R for active state check, focus on geometry
+  });
 
-  // BUY: SL < Entry < TP
-  // SELL: TP < Entry < SL
-  if (isBuy) {
-    if (!(sl < entry && entry < tp)) {
-      return { valid: false, reason: `Invalid BUY geometry: SL (${sl}) must be < Entry (${entry}) must be < TP (${tp}).` };
-    }
-  } else {
-    if (!(tp < entry && entry < sl)) {
-      return { valid: false, reason: `Invalid SELL geometry: TP (${tp}) must be < Entry (${entry}) must be < SL (${sl}).` };
-    }
+  if (!geoResult.valid) {
+    return { valid: false, reason: geoResult.reason };
   }
 
   return { valid: true };

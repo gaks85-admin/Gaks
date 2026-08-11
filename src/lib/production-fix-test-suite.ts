@@ -4,6 +4,8 @@ import { validateMarketDataIntegrity } from './market-integrity.js';
 import { normalizeConfidence } from './confidence-engine.js';
 import { evaluateQualityGate } from './quality-gate.js';
 import { checkSignalDeduplication } from './signal-deduplication.js';
+import { validateTradeGeometry } from './trade-geometry-validator.js';
+import { validateActiveTradeState } from './trade-validator.js';
 import { runGeminiAuditTestSuite } from './gemini-audit-test-suite.js';
 import { runTradeValidatorTestSuite } from './trade-validator-test-suite.js';
 
@@ -653,6 +655,112 @@ export function runProductionFixTestSuite() {
   const isBuyLoss = (1.0950 - 1.1000) < 0;
   assert(isBuyWin === true, 'Test L24 - Accepted trade reaching TP is recorded as WIN');
   assert(isBuyLoss === true, 'Test L25 - Accepted trade reaching SL is recorded as LOSS');
+
+  // ==========================================
+  // TEST M: TRADE GEOMETRY & CONSISTENCY REGRESSION TESTS (1-15)
+  // ==========================================
+  console.log("\n--- TEST M: Trade Geometry & Consistency Regression Tests ---");
+
+  // 1. Valid BUY
+  const testM1 = validateTradeGeometry({ symbol: 'GBPUSD', direction: 'BUY', entryPrice: 1.3500, stopLoss: 1.3490, takeProfit: 1.3520 });
+  assert(testM1.valid === true && testM1.geometry === 'ACCEPTABLE_GEOMETRY', 'Test M1 - Valid BUY produces ACCEPTABLE_GEOMETRY');
+
+  // 2. Valid SELL
+  const testM2 = validateTradeGeometry({ symbol: 'GBPUSD', direction: 'SELL', entryPrice: 1.3500, stopLoss: 1.3510, takeProfit: 1.3480 });
+  assert(testM2.valid === true && testM2.geometry === 'ACCEPTABLE_GEOMETRY', 'Test M2 - Valid SELL produces ACCEPTABLE_GEOMETRY');
+
+  // 3. SELL with SL below Entry
+  const testM3 = validateTradeGeometry({ symbol: 'GBPUSD', direction: 'SELL', entryPrice: 1.35095, stopLoss: 1.35045, takeProfit: 1.35195 });
+  assert(testM3.valid === false && testM3.geometry.includes('SELL'), 'Test M3 - SELL with SL below Entry is rejected');
+
+  // 4. SELL with TP above Entry
+  const testM4 = validateTradeGeometry({ symbol: 'GBPUSD', direction: 'SELL', entryPrice: 1.3500, stopLoss: 1.3510, takeProfit: 1.3520 });
+  assert(testM4.valid === false, 'Test M4 - SELL with TP above Entry is rejected');
+
+  // 5. BUY with SL above Entry
+  const testM5 = validateTradeGeometry({ symbol: 'GBPUSD', direction: 'BUY', entryPrice: 1.3500, stopLoss: 1.3510, takeProfit: 1.3520 });
+  assert(testM5.valid === false, 'Test M5 - BUY with SL above Entry is rejected');
+
+  // 6. BUY with TP below Entry
+  const testM6 = validateTradeGeometry({ symbol: 'GBPUSD', direction: 'BUY', entryPrice: 1.3500, stopLoss: 1.3490, takeProfit: 1.3480 });
+  assert(testM6.valid === false, 'Test M6 - BUY with TP below Entry is rejected');
+
+  // 7. Negative risk distance
+  const testM7 = validateTradeGeometry({ symbol: 'GBPUSD', direction: 'BUY', entryPrice: 1.3500, stopLoss: 1.3510, takeProfit: 1.3520 });
+  assert(testM7.valid === false, 'Test M7 - Negative risk distance is rejected');
+
+  // 8. Negative reward distance
+  const testM8 = validateTradeGeometry({ symbol: 'GBPUSD', direction: 'BUY', entryPrice: 1.3500, stopLoss: 1.3490, takeProfit: 1.3480 });
+  assert(testM8.valid === false, 'Test M8 - Negative reward distance is rejected');
+
+  // 9. R:R calculation for BUY
+  const testM9 = validateTradeGeometry({ symbol: 'EURUSD', direction: 'BUY', entryPrice: 1.1000, stopLoss: 1.0950, takeProfit: 1.1150 });
+  assert(testM9.calculatedRr === 3.0, 'Test M9 - R:R calculation for BUY is exactly 3.0');
+
+  // 10. R:R calculation for SELL
+  const testM10 = validateTradeGeometry({ symbol: 'EURUSD', direction: 'SELL', entryPrice: 1.1000, stopLoss: 1.1050, takeProfit: 1.0850 });
+  assert(testM10.calculatedRr === 3.0, 'Test M10 - R:R calculation for SELL is exactly 3.0');
+
+  // 11. Fixed-lot risk validation
+  const testM11 = calculatePositionSize({
+    accountSize: 10000,
+    riskPercentage: 2,
+    entryPrice: 1.1000,
+    stopLoss: 1.0950,
+    takeProfit: 1.1100,
+    symbol: 'EURUSD',
+    direction: 'BUY',
+    positionMode: 'FIXED_LOT',
+    preferredLotSize: 0.10
+  });
+  assert(testM11.accepted === true && testM11.calculatedLotSize === 0.10, 'Test M11 - Fixed-lot risk validation calculates correct actual risk and lot size');
+
+  // 12. Gemini explanation says LONG but structured direction says SELL
+  const testM12 = validateTradeGeometry({
+    symbol: 'GBPUSD',
+    direction: 'SELL',
+    entryPrice: 1.3500,
+    stopLoss: 1.3510,
+    takeProfit: 1.3480,
+    explanation: 'Market trend is bullish on M5, long position targeting higher levels.'
+  });
+  assert(testM12.valid === false && testM12.geometry === 'EXPLANATION_CONTRADICTS_DIRECTION', 'Test M12 - Explanation says LONG but direction is SELL -> NO_TRADE');
+
+  // 13. Gemini explanation says SHORT but structured direction says BUY
+  const testM13 = validateTradeGeometry({
+    symbol: 'EURUSD',
+    direction: 'BUY',
+    entryPrice: 1.1000,
+    stopLoss: 1.0950,
+    takeProfit: 1.1150,
+    explanation: 'Bearish entry and short setup targeting lower levels.'
+  });
+  assert(testM13.valid === false && testM13.geometry === 'EXPLANATION_CONTRADICTS_DIRECTION', 'Test M13 - Explanation says SHORT but direction is BUY -> NO_TRADE');
+
+  // 14. Telegram payload safety check for invalid geometry
+  let telegramPayloadFailed = false;
+  try {
+    const invalidRiskResult = calculatePositionSize({
+      accountSize: 10000,
+      riskPercentage: 2,
+      entryPrice: 1.35095,
+      stopLoss: 1.35045, // invalid SELL SL
+      takeProfit: 1.35195, // invalid SELL TP
+      symbol: 'GBPUSD',
+      direction: 'SELL'
+    });
+    if (!invalidRiskResult.accepted) {
+      telegramPayloadFailed = true; // successfully blocked from reaching telegram
+    }
+  } catch {
+    telegramPayloadFailed = true;
+  }
+  assert(telegramPayloadFailed === true, 'Test M14 - Telegram payload cannot be generated for invalid geometry');
+
+  // 15. Active trade state cannot be created with direction = NO_TRADE or invalid SL/Entry/TP geometry
+  const testM15_a = validateActiveTradeState({ trade_status: 'ACTIVE', direction: 'NO_TRADE', entry_price: 1.1000, stop_loss: 1.0950, take_profit: 1.1150 });
+  const testM15_b = validateActiveTradeState({ trade_status: 'ACTIVE', direction: 'SELL', entry_price: 1.35095, stop_loss: 1.35045, take_profit: 1.35195 });
+  assert(testM15_a.valid === false && testM15_b.valid === false, 'Test M15 - Active trade state rejects NO_TRADE or invalid geometry');
 
   // 26. Run Trade Validator & Scheduler Test Suite
   runTradeValidatorTestSuite();
