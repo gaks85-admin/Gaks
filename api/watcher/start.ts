@@ -309,9 +309,7 @@ export default async function handler(req: any, res: any) {
     console.log("[Watcher] apiKeyError:", apiKeyError);
     console.log("[Watcher] apiKeyRecord:", apiKeyRecord);
 
-    const hasGlobalKey = !!process.env.GEMINI_API_KEY;
-
-    if (!hasGlobalKey && (apiKeyError || !apiKeyRecord || !apiKeyRecord.api_key)) {
+    if (apiKeyError || !apiKeyRecord || !apiKeyRecord.api_key) {
       const errReason = apiKeyError 
         ? `Supabase query error: ${apiKeyError.message}` 
         : "Gemini API key is required to activate Market Watcher. Please configure your Gemini API key under Settings.";

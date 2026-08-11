@@ -4,6 +4,7 @@ import { GoogleGenAI, Type } from '@google/genai';
 import { buildTelegramAlertMessage } from '../src/lib/telegram-formatter.js';
 import { timeframeToMinutes } from '../src/lib/timeframe.js';
 import { extractRiskPreferences, calculatePositionSize } from '../src/lib/risk-engine.js';
+import { resolveUserGeminiKey } from '../src/lib/gemini-key-resolver.js';
 
 // --- Inlined Gemini & Telegram Wrappers ---
 
@@ -1559,11 +1560,11 @@ async function watchers_action_handler(req: any, res: any) {
       
       const userId = watcher.user_id;
       
-      const { data: keyRec } = await supabase.from('user_api_keys').select('*').eq('user_id', userId).eq('provider', 'gemini').maybeSingle();
-      const geminiKey = keyRec?.api_key || process.env.GEMINI_API_KEY;
+      const keyRes = await resolveUserGeminiKey(supabase, userId, watcherId);
+      const geminiKey = keyRes.apiKey;
       
       if (!geminiKey) {
-        return res.status(400).json({ success: false, error: "Gemini API key is not configured for this user or server." });
+        return res.status(400).json({ success: false, error: "Gemini API key is not configured for this user." });
       }
       
       const { data: prefsRecord } = await supabase.from('trading_preferences').select('*').eq('user_id', userId).maybeSingle();

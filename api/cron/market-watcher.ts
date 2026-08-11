@@ -17,6 +17,7 @@ import { validateMarketDataIntegrity } from '../../src/lib/market-integrity.js';
 import { normalizeConfidence } from '../../src/lib/confidence-engine.js';
 import { evaluateQualityGate } from '../../src/lib/quality-gate.js';
 import { checkSignalDeduplication } from '../../src/lib/signal-deduplication.js';
+import { resolveUserGeminiKey, classifyAndRedactGeminiError } from '../../src/lib/gemini-key-resolver.js';
 
 // --- Inlined Gemini Wrapper ---
 
@@ -1498,8 +1499,49 @@ Reason: ${decisionResult.explanation || (requiresGemini ? 'Strategy configuratio
             console.log("Gemini Invoked");
             geminiCalled = true;
             geminiStart = Date.now();
+
+            const keyRes = await resolveUserGeminiKey(supabase, userId, watcher.id);
+
+            if (!keyRes.keyPresent || !keyRes.apiKey) {
+              console.log(`[Decision Engine] User ${userId} has no Gemini API key in user_api_keys. Forcing NO_TRADE.`);
+
+              await supabase.from("profiles").update({
+                gemini_status: 'NOT_CONNECTED',
+                gemini_last_error: 'Missing Gemini API key',
+                gemini_last_checked: new Date().toISOString(),
+                updated_at: new Date().toISOString()
+              }).eq("id", userId);
+
+              const scanDurationMs = Date.now() - scanStart;
+              await recordEvaluation(supabase, {
+                user_id: userId,
+                watcher_id: watcher.id,
+                pair: selectedPair,
+                timeframe: selectedTimeframe,
+                strategy_mode: compiledStrategy.strategy_mode,
+                decision_score: decisionResult.decision_score,
+                matched_weight: decisionResult.matched_weight,
+                possible_weight: decisionResult.possible_weight,
+                recommendation: decisionResult.recommendation,
+                mandatory_rules_passed: decisionResult.mandatory_rules_passed,
+                matched_rules: decisionResult.matched_rules,
+                failed_rules: decisionResult.failed_rules,
+                gemini_used: true,
+                gemini_result: "Missing Gemini API key",
+                trade_sent: false,
+                trade_reason: "User has no Gemini API key configured",
+                scan_duration_ms: scanDurationMs,
+                gemini_duration_ms: Date.now() - geminiStart,
+                decision_snapshot: decisionSnapshot
+              });
+
+              skipped.push({ userId, reason: "Missing Gemini API key" });
+              watchersSkippedCount++;
+              continue;
+            }
+
             try {
-              const geminiKey = apiKeyRecord?.api_key || process.env.GEMINI_API_KEY;
+              const geminiKey = keyRes.apiKey;
               if (geminiKey) {
                 console.log("========== CALLING GEMINI ==========");
                 console.log("Watcher ID:", watcher.id);
@@ -1676,39 +1718,26 @@ Fallback: NO_TRADE`.trim());
               console.error("========== GEMINI ERROR ==========");
               console.error(gemErr);
 
-              const errMsg = gemErr.message || String(gemErr);
-              const errStatus = gemErr.status || 0;
-              const lowerMsg = errMsg.toLowerCase();
+              const { profileStatus, diagnosticStatus, cleanErrorMessage } = classifyAndRedactGeminiError(gemErr);
 
-              let newStatus = 'NEEDS_ATTENTION';
-              let explicitStatus = 'API_ERROR';
-              if (errStatus === 429 || lowerMsg.includes('resource_exhausted') || lowerMsg.includes('quota exceeded') || lowerMsg.includes('rate limit') || lowerMsg.includes('retryinfo') || lowerMsg.includes('retrydelay')) {
-                newStatus = 'QUOTA_EXHAUSTED';
-                explicitStatus = 'QUOTA_EXHAUSTED';
-              } else if (errStatus === 401 || errStatus === 403 || lowerMsg.includes('invalid api key') || lowerMsg.includes('permission denied') || lowerMsg.includes('invalid')) {
-                newStatus = 'INVALID_KEY';
-                explicitStatus = 'API_ERROR';
-              } else if (errStatus === 402 || lowerMsg.includes('billing') || lowerMsg.includes('payment required')) {
-                newStatus = 'BILLING_REQUIRED';
-                explicitStatus = 'API_ERROR';
-              } else if (errStatus >= 500 || errStatus === 503 || lowerMsg.includes('timeout') || lowerMsg.includes('network') || lowerMsg.includes('gateway')) {
-                newStatus = 'TEMP_ERROR';
-                explicitStatus = 'TIMEOUT';
-              } else {
-                newStatus = 'NEEDS_ATTENTION';
-                explicitStatus = 'API_ERROR';
-              }
+              console.log(`[Gemini Key Resolution]
+User ID: ${userId}
+Watcher ID: ${watcher.id}
+Key Source: user_api_keys
+Key Present: YES
+Key Redacted: ${keyRes.keyRedacted}
+Status: ${diagnosticStatus}`);
 
               console.log(`[Gemini Decision]
 Required: YES
-Status: ${explicitStatus}
+Status: ${diagnosticStatus}
 Direction: NO_TRADE
 Confidence: 0%
 Fallback: NO_TRADE`.trim());
 
               await supabase.from("profiles").update({
-                gemini_status: newStatus,
-                gemini_last_error: errMsg,
+                gemini_status: profileStatus,
+                gemini_last_error: cleanErrorMessage,
                 gemini_last_checked: new Date().toISOString(),
                 updated_at: new Date().toISOString()
               }).eq("id", userId);
@@ -1716,8 +1745,8 @@ Fallback: NO_TRADE`.trim());
               console.log(`========== AI STATUS ==========`);
               console.log(`User: ${userProfile?.email || userId}`);
               console.log(`Watcher: ${watcher.id} (${watcher.selected_pair})`);
-              console.log(`Gemini Status: ${newStatus}`);
-              console.log(`Reason: ${errMsg}`);
+              console.log(`Gemini Status: ${profileStatus}`);
+              console.log(`Reason: ${cleanErrorMessage}`);
               console.log(`Action: Skipped`);
               console.log(`===============================`);
 
@@ -1737,15 +1766,15 @@ Fallback: NO_TRADE`.trim());
                 matched_rules: decisionResult.matched_rules,
                 failed_rules: decisionResult.failed_rules,
                 gemini_used: true,
-                gemini_result: "Gemini execution failed: " + errMsg,
+                gemini_result: "Gemini execution failed: " + cleanErrorMessage,
                 trade_sent: false,
-                trade_reason: "Gemini API call failed: " + errMsg,
+                trade_reason: "Gemini API call failed: " + cleanErrorMessage,
                 scan_duration_ms: scanDurationMs,
                 gemini_duration_ms: Date.now() - geminiStart,
                 decision_snapshot: decisionSnapshot
               });
 
-              skipped.push({ userId, reason: errMsg });
+              skipped.push({ userId, reason: cleanErrorMessage });
               watchersSkippedCount++;
               continue;
             }

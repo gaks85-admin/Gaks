@@ -10,6 +10,7 @@ import { extractMarketStructure } from "../../src/lib/market-structure-engine.js
 import { recordEvaluation } from "../../src/lib/explainability-engine.js";
 import { validateMarketDataIntegrity } from "../../src/lib/market-integrity.js";
 import { normalizeConfidence } from "../../src/lib/confidence-engine.js";
+import { resolveUserGeminiKey, classifyAndRedactGeminiError } from "../../src/lib/gemini-key-resolver.js";
 
 
 /**
@@ -351,13 +352,31 @@ Reason: ${decisionResult.explanation || (requiresGemini ? 'Strategy configuratio
     if (requiresGemini) {
       geminiCalled = true;
       geminiStart = Date.now();
-      try {
-        let geminiKey = process.env.GEMINI_API_KEY;
-        const { data: userKeyData } = await supabase.from('user_api_keys').select('api_key').eq('user_id', userId).eq('provider', 'gemini').maybeSingle();
-        if (userKeyData?.api_key) {
-           geminiKey = userKeyData.api_key;
-        }
-        if (geminiKey) {
+
+      const keyRes = await resolveUserGeminiKey(supabase, userId, watcher?.id || 'manual-scan');
+
+      if (!keyRes.keyPresent || !keyRes.apiKey) {
+        console.log(`[Decision Engine] User ${userId} has no Gemini API key in user_api_keys. Forcing NO_TRADE.`);
+
+        await supabase.from("profiles").update({
+          gemini_status: 'NOT_CONNECTED',
+          gemini_last_error: 'Missing Gemini API key',
+          gemini_last_checked: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        }).eq("id", userId);
+
+        analysis = {
+          signal: 'NO_TRADE',
+          confidence: 0,
+          entryPrice: null,
+          stopLoss: null,
+          takeProfit: null,
+          riskReward: null,
+          reasoning: ['User has no Gemini API key configured. Gemini required for execution.']
+        };
+      } else {
+        const geminiKey = keyRes.apiKey;
+        try {
           const ai = new GoogleGenAI({ apiKey: geminiKey });
           const currentPrice = candleData[candleData.length - 1].close;
           const promptText = `
@@ -485,39 +504,45 @@ Fallback: NO_TRADE`.trim());
               reasoning: [parsedResult?.reasoning || "Gemini evaluated setup as NO_TRADE or unsatisfied."]
             };
           }
-        }
-      } catch (gemErr: any) {
-        console.warn(`[Gemini Validation Error]: Rejecting trade due to Gemini failure:`, gemErr.message);
+        } catch (gemErr: any) {
+          console.warn(`[Gemini Validation Error]: Rejecting trade due to Gemini failure:`, gemErr.message);
 
-        const errMsg = gemErr.message || String(gemErr);
-        const errStatus = gemErr.status || 0;
-        const lowerMsg = errMsg.toLowerCase();
+          const { profileStatus, diagnosticStatus, cleanErrorMessage } = classifyAndRedactGeminiError(gemErr);
 
-        let explicitStatus = 'API_ERROR';
-        if (errStatus === 429 || lowerMsg.includes('resource_exhausted') || lowerMsg.includes('quota exceeded') || lowerMsg.includes('rate limit')) {
-          explicitStatus = 'QUOTA_EXHAUSTED';
-        } else if (errStatus >= 500 || lowerMsg.includes('timeout') || lowerMsg.includes('gateway')) {
-          explicitStatus = 'TIMEOUT';
-        }
+          console.log(`[Gemini Key Resolution]
+User ID: ${userId}
+Watcher ID: ${watcher?.id || 'manual-scan'}
+Key Source: user_api_keys
+Key Present: YES
+Key Redacted: ${keyRes.keyRedacted}
+Status: ${diagnosticStatus}`);
 
-        console.log(`[Gemini Decision]
+          console.log(`[Gemini Decision]
 Required: YES
-Status: ${explicitStatus}
+Status: ${diagnosticStatus}
 Direction: NO_TRADE
 Confidence: 0%
 Fallback: NO_TRADE`.trim());
 
-        analysis = {
-          signal: 'NO_TRADE',
-          confidence: 0,
-          entryPrice: null,
-          stopLoss: null,
-          takeProfit: null,
-          riskReward: null,
-          reasoning: [`Gemini API call failed: ${gemErr.message}`]
-        };
-        if (geminiStart > 0) {
-          geminiDuration = Date.now() - geminiStart;
+          await supabase.from("profiles").update({
+            gemini_status: profileStatus,
+            gemini_last_error: cleanErrorMessage,
+            gemini_last_checked: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          }).eq("id", userId);
+
+          analysis = {
+            signal: 'NO_TRADE',
+            confidence: 0,
+            entryPrice: null,
+            stopLoss: null,
+            takeProfit: null,
+            riskReward: null,
+            reasoning: [`Gemini API call failed (${diagnosticStatus}): ${cleanErrorMessage}`]
+          };
+          if (geminiStart > 0) {
+            geminiDuration = Date.now() - geminiStart;
+          }
         }
       }
     } else {

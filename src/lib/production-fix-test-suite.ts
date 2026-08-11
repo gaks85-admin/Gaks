@@ -4,6 +4,7 @@ import { validateMarketDataIntegrity } from './market-integrity.js';
 import { normalizeConfidence } from './confidence-engine.js';
 import { evaluateQualityGate } from './quality-gate.js';
 import { checkSignalDeduplication } from './signal-deduplication.js';
+import { runGeminiAuditTestSuite } from './gemini-audit-test-suite.js';
 
 export function runProductionFixTestSuite() {
   console.log("==========================================");
@@ -597,7 +598,10 @@ export function runProductionFixTestSuite() {
   assert(isBuyWin === true, 'Test L24 - Accepted trade reaching TP is recorded as WIN');
   assert(isBuyLoss === true, 'Test L25 - Accepted trade reaching SL is recorded as LOSS');
 
-  // 26. Final confirmation
+  // 26. Run Gemini Audit Test Suite
+  runGeminiAuditTestSuite();
+
+  // 27. Final confirmation
   assert(passedCount > 50, 'Test L26 - All existing 55+ production tests pass successfully');
   console.log("==========================================");
 
