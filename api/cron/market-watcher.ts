@@ -15,6 +15,8 @@ import { calculateHistoricalProbability, recordCompletedTrade } from '../../src/
 import { RULE_WEIGHTS } from '../../src/lib/rule-weight-engine.js';
 import { validateMarketDataIntegrity } from '../../src/lib/market-integrity.js';
 import { normalizeConfidence } from '../../src/lib/confidence-engine.js';
+import { evaluateQualityGate } from '../../src/lib/quality-gate.js';
+import { checkSignalDeduplication } from '../../src/lib/signal-deduplication.js';
 
 // --- Inlined Gemini Wrapper ---
 
@@ -1177,12 +1179,16 @@ export default async function handler(req: any, res: any) {
         let riskPercentage: number;
         let riskRewardStr: string;
         let maxDailyRiskStr: string;
+        let positionMode: 'AUTO_RISK' | 'FIXED_LOT';
+        let preferredLotSize: number | undefined;
         try {
           const riskPrefs = extractRiskPreferences(prefsRecord, userId);
           accountSize = riskPrefs.accountSize;
           riskPercentage = riskPrefs.riskPercentage;
           riskRewardStr = riskPrefs.riskRewardStr;
           maxDailyRiskStr = riskPrefs.maxDailyRiskStr;
+          positionMode = riskPrefs.positionMode;
+          preferredLotSize = riskPrefs.preferredLotSize;
         } catch (prefsErr: any) {
           console.log(`LOG: Watcher ${watcher.id} skipped - ${prefsErr.message}`);
           skipped.push({ userId, reason: prefsErr.message });
@@ -1828,6 +1834,27 @@ Fallback: NO_TRADE`.trim());
 
         console.log(`LOG: Signal result for ${selectedPair}: ${analysis.signal} (Confidence: ${analysis.confidence}%)`);
 
+        // Quality Gate Check (QUALITY OVER QUANTITY)
+        if (analysis.signal === 'BUY' || analysis.signal === 'SELL') {
+          const qualityResult = evaluateQualityGate({
+            ruleScore: ruleDecisionScore,
+            marketStructure: marketStructure,
+            mandatoryRulesPassed: decisionResult.mandatory_rules_passed ?? true,
+            geminiApproved: geminiCalled ? geminiSucceeded : undefined,
+            geminiRequired: requiresGemini,
+            direction: analysis.signal,
+            slValid: Boolean(analysis.stopLoss),
+            tpValid: Boolean(analysis.takeProfit),
+            rrValid: true,
+            historicalProbability: histResult.historical_probability
+          });
+
+          if (!qualityResult.passed) {
+            console.log(`[Signal Quality] Signal rejected by Quality Gate for ${selectedPair}: ${qualityResult.reason} (Score: ${qualityResult.qualityScore})`);
+            analysis.signal = 'NO_TRADE';
+          }
+        }
+
         // If there is NO setup: Update last_scan_at, last_analyzed_closed_candle_time, save evaluation and Exit.
         const isWaiting = geminiInvoked 
           ? (geminiSucceeded && geminiDecision === 'NO_TRADE')
@@ -1882,7 +1909,9 @@ Fallback: NO_TRADE`.trim());
           geminiTp: analysis.takeProfit ? Number(analysis.takeProfit) : null,
           symbol: selectedPair,
           direction: analysis.signal,
-          riskRewardStr: riskRewardStr
+          riskRewardStr: riskRewardStr,
+          positionMode: positionMode,
+          preferredLotSize: preferredLotSize
         });
 
         console.log(`
@@ -2024,15 +2053,36 @@ ${analysis.stopLossBasis === 'ATR_FALLBACK' ? `ATR: ${marketStructure.volatility
           continue;
         }
 
-        // Send ONE Telegram signal
-        const alertMessage = buildTelegramAlertMessage(signal);
-        const alertSent = await sendTelegramMessage(telegramChatId, alertMessage);
-        if (alertSent) {
-          addLog("Telegram Sent", "success");
-          telegramMessagesSentCount++;
-          console.log(`LOG: Telegram message sent successfully for Watcher ID: ${watcher.id} (${selectedPair})`);
+        // Send ONE Telegram signal with Signal Deduplication Check
+        let alertSent = false;
+        let alertReason = "";
+
+        const dedupCheck = checkSignalDeduplication({
+          symbol: selectedPair,
+          direction: analysis.signal,
+          timeframe: selectedTimeframe,
+          entryPrice: posSizeResult.entryPrice,
+          stopLoss: posSizeResult.stopLoss,
+          takeProfit: posSizeResult.takeProfit,
+          setupCandleTimestamp: latestClosedCandleTime,
+          previousSignal: watcher.last_signal_data || null
+        });
+
+        if (dedupCheck.suppressed) {
+          alertReason = dedupCheck.reason || "Suppressed by Signal Deduplication";
+          console.log(`[Signal Deduplication] Suppressed Telegram alert for Watcher ID: ${watcher.id} (${selectedPair}): ${dedupCheck.reason}`);
         } else {
-          console.error(`LOG ERROR: Telegram message failed for Watcher ID: ${watcher.id} (${selectedPair})`);
+          const alertMessage = buildTelegramAlertMessage(signal);
+          alertSent = await sendTelegramMessage(telegramChatId, alertMessage);
+          if (alertSent) {
+            alertReason = "Trade alert sent successfully on Telegram";
+            addLog("Telegram Sent", "success");
+            telegramMessagesSentCount++;
+            console.log(`LOG: Telegram message sent successfully for Watcher ID: ${watcher.id} (${selectedPair})`);
+          } else {
+            alertReason = "Telegram message failed to send";
+            console.error(`LOG ERROR: Telegram message failed for Watcher ID: ${watcher.id} (${selectedPair})`);
+          }
         }
 
         // Store PASS/ALERT Sent evaluation record
@@ -2053,7 +2103,7 @@ ${analysis.stopLossBasis === 'ATR_FALLBACK' ? `ATR: ${marketStructure.volatility
           gemini_used: geminiCalled,
           gemini_result: geminiTextResult || null,
           trade_sent: alertSent,
-          trade_reason: alertSent ? "Trade alert sent successfully on Telegram" : "Telegram message failed to send",
+          trade_reason: alertReason || (alertSent ? "Trade alert sent successfully on Telegram" : "Telegram message failed to send"),
           scan_duration_ms: scanDurationMs,
           gemini_duration_ms: geminiDuration,
           decision_snapshot: decisionSnapshot

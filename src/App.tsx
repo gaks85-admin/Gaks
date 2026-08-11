@@ -244,6 +244,8 @@ export default function App() {
   const [preferredRisk, setPreferredRisk] = useState<string>('1%');
   const [riskReward, setRiskReward] = useState<string>('1:2');
   const [accountType, setAccountType] = useState<'personal' | 'prop'>('personal');
+  const [positionMode, setPositionMode] = useState<'AUTO_RISK' | 'FIXED_LOT'>('AUTO_RISK');
+  const [fixedLotSize, setFixedLotSize] = useState<string>('0.01');
   const [preferredSessions, setPreferredSessions] = useState<string[]>(['London', 'New York', 'Tokyo']);
   const [preferredTimeframes, setPreferredTimeframes] = useState<string[]>(['M15', 'H1']);
   const [lastSavedStrategyText, setLastSavedStrategyText] = useState<string>('');
@@ -265,6 +267,8 @@ export default function App() {
     preferredRisk: string;
     riskReward: string;
     accountType: 'personal' | 'prop';
+    positionMode: 'AUTO_RISK' | 'FIXED_LOT';
+    fixedLotSize: string;
     preferredSessions: string[];
     preferredTimeframes: string[];
   }>({
@@ -273,6 +277,8 @@ export default function App() {
     preferredRisk: '1%',
     riskReward: '1:2',
     accountType: 'personal',
+    positionMode: 'AUTO_RISK',
+    fixedLotSize: '0.01',
     preferredSessions: ['London', 'New York', 'Tokyo'],
     preferredTimeframes: ['M15', 'H1']
   });
@@ -283,6 +289,8 @@ export default function App() {
     if (preferredRisk !== initialPrefs.preferredRisk) return true;
     if (riskReward !== initialPrefs.riskReward) return true;
     if (accountType !== initialPrefs.accountType) return true;
+    if (positionMode !== initialPrefs.positionMode) return true;
+    if (fixedLotSize !== initialPrefs.fixedLotSize) return true;
     
     if (preferredSessions.length !== initialPrefs.preferredSessions.length) return true;
     const sortedSessions = [...preferredSessions].sort();
@@ -295,7 +303,7 @@ export default function App() {
     if (sortedTimeframes.some((t, idx) => t !== sortedInitialTimeframes[idx])) return true;
 
     return false;
-  }, [capital, customCapital, preferredRisk, riskReward, accountType, preferredSessions, preferredTimeframes, initialPrefs]);
+  }, [capital, customCapital, preferredRisk, riskReward, accountType, positionMode, fixedLotSize, preferredSessions, preferredTimeframes, initialPrefs]);
 
   const ADMIN_EMAIL = "gaks6535@gmail.com";
   const isAdmin = useMemo(() => {
@@ -1105,6 +1113,8 @@ export default function App() {
         const riskVal = data.preferred_risk || '1%';
         const rrVal = data.risk_reward || '1:2';
         const accountVal = (data.account_type === 'personal' || data.account_type === 'prop') ? data.account_type : 'personal';
+        const modeVal = (data.position_mode === 'FIXED_LOT' || data.position_size_mode === 'FIXED_LOT') ? 'FIXED_LOT' : 'AUTO_RISK';
+        const lotVal = data.preferred_lot_size || data.fixed_lot_size || '0.01';
         const sessionsVal = data.preferred_sessions || ['London', 'New York', 'Tokyo'];
         const timeframesVal = data.preferred_timeframes || ['M15', 'H1'];
 
@@ -1115,6 +1125,8 @@ export default function App() {
         if (data.account_type === 'personal' || data.account_type === 'prop') {
           setAccountType(data.account_type);
         }
+        setPositionMode(modeVal);
+        setFixedLotSize(String(lotVal));
         if (data.preferred_sessions) setPreferredSessions(data.preferred_sessions);
         if (data.preferred_timeframes) setPreferredTimeframes(data.preferred_timeframes);
 
@@ -1124,6 +1136,8 @@ export default function App() {
           preferredRisk: riskVal,
           riskReward: rrVal,
           accountType: accountVal as 'personal' | 'prop',
+          positionMode: modeVal,
+          fixedLotSize: String(lotVal),
           preferredSessions: sessionsVal,
           preferredTimeframes: timeframesVal
         });
@@ -1497,6 +1511,8 @@ export default function App() {
     localStorage.setItem('gaks_preferred_risk', preferredRisk);
     localStorage.setItem('gaks_risk_reward', riskReward);
     localStorage.setItem('gaks_account_type', accountType);
+    localStorage.setItem('gaks_position_mode', positionMode);
+    localStorage.setItem('gaks_fixed_lot_size', fixedLotSize);
     localStorage.setItem('gaks_sessions', JSON.stringify(preferredSessions));
     localStorage.setItem('gaks_timeframes', JSON.stringify(preferredTimeframes));
     
@@ -1511,6 +1527,8 @@ export default function App() {
             preferred_risk: preferredRisk,
             risk_reward: riskReward,
             account_type: accountType,
+            position_mode: positionMode,
+            preferred_lot_size: fixedLotSize,
             preferred_sessions: preferredSessions,
             preferred_timeframes: preferredTimeframes,
             updated_at: new Date().toISOString()
@@ -1526,6 +1544,8 @@ export default function App() {
             preferredRisk,
             riskReward,
             accountType,
+            positionMode,
+            fixedLotSize,
             preferredSessions,
             preferredTimeframes
           });
@@ -2144,6 +2164,10 @@ export default function App() {
               setPreferredRisk={setPreferredRisk}
               riskReward={riskReward}
               setRiskReward={setRiskReward}
+              positionMode={positionMode}
+              setPositionMode={setPositionMode}
+              fixedLotSize={fixedLotSize}
+              setFixedLotSize={setFixedLotSize}
               accountType={accountType}
               setAccountType={setAccountType}
               preferredSessions={preferredSessions}

@@ -2,6 +2,8 @@ import { buildTelegramAlertMessage } from './telegram-formatter.js';
 import { calculatePositionSize, resolveInstrumentSpec } from './risk-engine.js';
 import { validateMarketDataIntegrity } from './market-integrity.js';
 import { normalizeConfidence } from './confidence-engine.js';
+import { evaluateQualityGate } from './quality-gate.js';
+import { checkSignalDeduplication } from './signal-deduplication.js';
 
 export function runProductionFixTestSuite() {
   console.log("==========================================");
@@ -20,6 +22,117 @@ export function runProductionFixTestSuite() {
       console.error(`❌ [FAIL] ${testName}${detail ? ` - ${detail}` : ''}`);
     }
   }
+
+  // ==========================================
+  // TEST I: FIXED LOT SIZE & USER POSITION MODE
+  // ==========================================
+  console.log("\n--- TEST I: Fixed Lot Size & User Position Mode ---");
+  const fixedLotValid = calculatePositionSize({
+    accountSize: 10000,
+    riskPercentage: 2, // $200 max risk
+    entryPrice: 1.1000,
+    stopLoss: 1.0950, // 50 pips SL = $500 loss per 1.0 lot -> 0.10 lot = $50 loss
+    takeProfit: 1.1100,
+    symbol: 'EURUSD',
+    direction: 'BUY',
+    riskRewardStr: '1:2',
+    positionMode: 'FIXED_LOT',
+    preferredLotSize: 0.10
+  });
+
+  assert(fixedLotValid.accepted === true, 'Test I1 - Valid Fixed Lot within max risk is accepted');
+  assert(fixedLotValid.calculatedLotSize === 0.10, 'Test I2 - Fixed Lot uses exact preferred lot size (0.10)');
+  assert(fixedLotValid.positionMode === 'FIXED_LOT', 'Test I3 - Position mode identified as FIXED_LOT');
+
+  const fixedLotExceeds = calculatePositionSize({
+    accountSize: 1000,
+    riskPercentage: 1, // $10 max risk
+    entryPrice: 1.1000,
+    stopLoss: 1.0900, // 100 pips SL = $1000 loss per 1.0 lot -> 0.20 lot = $200 loss (exceeds $10 risk)
+    takeProfit: 1.1200,
+    symbol: 'EURUSD',
+    direction: 'BUY',
+    riskRewardStr: '1:2',
+    positionMode: 'FIXED_LOT',
+    preferredLotSize: 0.20
+  });
+
+  assert(fixedLotExceeds.accepted === false, 'Test I4 - Fixed lot exceeding max risk is REJECTED');
+  assert(fixedLotExceeds.calculatedLotSize === 0, 'Test I5 - Rejected fixed lot is NOT scaled down to 0.01/0.08');
+
+  // ==========================================
+  // TEST J: QUALITY OVER QUANTITY FILTERING
+  // ==========================================
+  console.log("\n--- TEST J: Quality Over Quantity Filtering ---");
+  const highQualityResult = evaluateQualityGate({
+    ruleScore: 85,
+    marketStructure: {
+      trend: 'Bullish',
+      htfBiasAligned: true,
+      bos: true,
+      fairValueGaps: [{ top: 1.1050, bottom: 1.1020 }],
+      activeSession: true,
+      volumeConfirmed: true
+    },
+    mandatoryRulesPassed: true,
+    direction: 'BUY',
+    slValid: true,
+    tpValid: true,
+    rrValid: true
+  });
+
+  assert(highQualityResult.passed === true, 'Test J1 - High confluence setup passes Quality Gate');
+  assert(highQualityResult.qualityScore >= 75, 'Test J2 - Quality Score is >= 75%');
+
+  const lowQualityResult = evaluateQualityGate({
+    ruleScore: 50,
+    marketStructure: {},
+    mandatoryRulesPassed: true,
+    direction: 'BUY',
+    slValid: true,
+    tpValid: true,
+    rrValid: true
+  });
+
+  assert(lowQualityResult.passed === false, 'Test J3 - Low quality setup fails Quality Gate');
+
+  // ==========================================
+  // TEST K: SIGNAL DEDUPLICATION
+  // ==========================================
+  console.log("\n--- TEST K: Signal Deduplication ---");
+  const prevSig = {
+    symbol: 'EURUSD',
+    direction: 'BUY' as const,
+    timeframe: 'M15',
+    entryPrice: 1.1000,
+    stopLoss: 1.0950,
+    takeProfit: 1.1100,
+    alertedAt: new Date(Date.now() - 5 * 60 * 1000).toISOString() // 5 min ago
+  };
+
+  const dupResult = checkSignalDeduplication({
+    symbol: 'EURUSD',
+    direction: 'BUY',
+    timeframe: 'M15',
+    entryPrice: 1.1000,
+    stopLoss: 1.0950,
+    takeProfit: 1.1100,
+    previousSignal: prevSig
+  });
+
+  assert(dupResult.suppressed === true, 'Test K1 - Equivalent signal within cooldown is suppressed');
+
+  const diffResult = checkSignalDeduplication({
+    symbol: 'GBPUSD',
+    direction: 'BUY',
+    timeframe: 'M15',
+    entryPrice: 1.2500,
+    stopLoss: 1.2450,
+    takeProfit: 1.2600,
+    previousSignal: prevSig
+  });
+
+  assert(diffResult.suppressed === false, 'Test K2 - Different pair signal is NOT suppressed');
 
   // ==========================================
   // TEST A: MARKET DATA INTEGRITY CHECKS

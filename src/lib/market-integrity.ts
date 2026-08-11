@@ -114,14 +114,17 @@ Reason: ${res.reason}`.trim());
   const lastClosedCandle = candleData[candleData.length - 2];
   const lastClosedMs = parseUtcTimestamp(lastClosedCandle.timestamp);
   const lastClosedUtc = new Date(lastClosedMs).toISOString();
+
+  const latestCandle = candleData[candleData.length - 1];
+  const latestCandleMs = parseUtcTimestamp(latestCandle.timestamp);
   const nowMs = now.getTime();
 
-  // Strict check: if lastClosedCandleTimestamp > currentTimeUTC
-  if (lastClosedMs > nowMs) {
+  // Strict check: if any candle timestamp (last closed or latest) > currentTimeUTC
+  if (latestCandleMs > nowMs || lastClosedMs > nowMs) {
     const res: MarketDataIntegrityResult = {
       valid: false,
       status: 'INVALID_FUTURE_CANDLE',
-      reason: 'Last closed candle timestamp is later than current server time.',
+      reason: 'Candle timestamp is later than current server time.',
       lastClosedCandleUtc: lastClosedUtc,
       currentUtc
     };

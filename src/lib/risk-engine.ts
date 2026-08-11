@@ -5,6 +5,8 @@ export interface RiskPreferences {
   maxDailyRiskStr: string;
   strategySummary: string;
   dbTimestamp: string;
+  positionMode: 'AUTO_RISK' | 'FIXED_LOT';
+  preferredLotSize: number;
 }
 
 export interface PositionSizeResult {
@@ -39,6 +41,8 @@ export interface PositionSizeResult {
   rrValidationPassed: boolean;
   executableLotDisplay?: string;
   theoreticalExpectedLoss?: number;
+  positionMode?: 'AUTO_RISK' | 'FIXED_LOT';
+  requestedFixedLot?: number;
 }
 
 export interface InstrumentSpec {
@@ -202,13 +206,22 @@ export function extractRiskPreferences(prefsRecord: any, userId: string): RiskPr
   const strategySummary = prefsRecord?.strategy_summary || 'Custom Strategy';
   const dbTimestamp = prefsRecord?.updated_at || prefsRecord?.created_at || 'N/A';
 
+  const rawMode = prefsRecord?.position_mode || prefsRecord?.position_size_mode || 'AUTO_RISK';
+  const positionMode: 'AUTO_RISK' | 'FIXED_LOT' = rawMode === 'FIXED_LOT' ? 'FIXED_LOT' : 'AUTO_RISK';
+
+  const rawLot = prefsRecord?.preferred_lot_size || prefsRecord?.fixed_lot_size || prefsRecord?.custom_lot_size || '0.01';
+  const parsedLot = parseFloat(String(rawLot).replace(/[^0-9.]/g, ""));
+  const preferredLotSize = isNaN(parsedLot) || parsedLot <= 0 ? 0.01 : parsedLot;
+
   return {
     accountSize,
     riskPercentage,
     riskRewardStr,
     maxDailyRiskStr,
     strategySummary,
-    dbTimestamp
+    dbTimestamp,
+    positionMode,
+    preferredLotSize
   };
 }
 
@@ -305,6 +318,8 @@ export function calculatePositionSize(config: {
   symbol: string;
   direction?: string;
   riskRewardStr?: string;
+  positionMode?: 'AUTO_RISK' | 'FIXED_LOT';
+  preferredLotSize?: number;
 }): PositionSizeResult {
   const riskAmount = config.accountSize * (config.riskPercentage / 100);
   const direction = (config.direction || 'BUY').toUpperCase();
@@ -423,6 +438,89 @@ export function calculatePositionSize(config: {
   let expectedLossAtMinLot = minLot * lossPerOneLot;
   let accepted = true;
   let skipReason = '';
+
+  const positionMode = config.positionMode || 'AUTO_RISK';
+  const preferredLotSize = config.preferredLotSize ?? 0.01;
+
+  if (positionMode === 'FIXED_LOT') {
+    const requestedLot = preferredLotSize;
+    const expectedLossAtFixedLot = requestedLot * lossPerOneLot;
+    const expectedProfitAtFixedLot = requestedLot * profitPerOneLot;
+    const maxAllowedRisk = riskAmount;
+
+    console.log(`
+[Position Sizing]
+Mode: FIXED_LOT
+Requested Lot: ${requestedLot}
+`.trim());
+
+    if (requestedLot < minLot - 1e-7) {
+      accepted = false;
+      skipReason = `Fixed lot size (${requestedLot}) is below broker minimum lot (${minLot}).`;
+    } else {
+      const remainder = Math.abs((requestedLot * 1000) % (lotStep * 1000));
+      if (remainder > 1e-4 && Math.abs(remainder - lotStep * 1000) > 1e-4) {
+        accepted = false;
+        skipReason = `Fixed lot size (${requestedLot}) is not aligned to broker lot step (${lotStep}).`;
+      } else if (expectedLossAtFixedLot > maxAllowedRisk + 1e-4) {
+        accepted = false;
+        skipReason = `Fixed lot exceeds maximum allowed risk (Expected loss: $${expectedLossAtFixedLot.toFixed(2)} > Maximum allowed risk: $${maxAllowedRisk.toFixed(2)}).`;
+      } else if (!slValidationPassed || !rrValidationPassed) {
+        accepted = false;
+        skipReason = !slValidationPassed
+          ? `Stop loss validation failed: ${slValidationError}`
+          : `RR validation failed. Expected RR: ${targetRrRatio}, Actual RR: ${actualRr.toFixed(4)}.`;
+      }
+    }
+
+    const execDisplay = accepted ? requestedLot.toString() : 'NONE';
+    console.log(`
+[Trade Risk]
+Position Mode: FIXED_LOT
+Requested Lot: ${requestedLot}
+Maximum Allowed Risk: $${maxAllowedRisk.toFixed(2)}
+Expected Loss: $${expectedLossAtFixedLot.toFixed(2)}
+Executable Lot: ${execDisplay}
+Trade Accepted: ${accepted ? 'YES' : 'NO'}
+${accepted ? '' : `Reason: ${skipReason}`}
+`.trim());
+
+    return {
+      accountSize: config.accountSize,
+      riskPercentage: config.riskPercentage,
+      riskAmount,
+      entryPrice: executedEntry,
+      stopLoss: executedSL,
+      takeProfit: executedTP,
+      stopDistance,
+      pipValue,
+      contractSize,
+      calculatedLotSize: accepted ? requestedLot : 0,
+      exactLotSize: requestedLot,
+      expectedLoss: expectedLossAtFixedLot,
+      expectedProfit: accepted ? expectedProfitAtFixedLot : 0,
+      assetClass,
+      normalizedLotSize: accepted ? requestedLot : 0,
+      lotType: classifyLotType(requestedLot),
+      lotStep,
+      minLot,
+      symbol: config.symbol,
+      accepted,
+      skipReason: accepted ? `Fixed lot (${requestedLot}) accepted within maximum risk.` : skipReason,
+      expectedLossAtRequiredLot: expectedLossAtFixedLot,
+      expectedLossAtMinLot,
+      userRr,
+      geminiTp: config.geminiTp ?? config.takeProfit,
+      actualRisk,
+      actualReward,
+      actualRr,
+      rrValidationPassed: rrValidationPassed && slValidationPassed,
+      executableLotDisplay: execDisplay,
+      theoreticalExpectedLoss: expectedLossAtFixedLot,
+      positionMode: 'FIXED_LOT',
+      requestedFixedLot: requestedLot
+    };
+  }
 
   if (lossPerOneLot > 0 && config.accountSize > 0 && config.riskPercentage > 0) {
     exactLotSize = riskAmount / lossPerOneLot;

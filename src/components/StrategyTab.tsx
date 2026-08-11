@@ -22,6 +22,10 @@ export interface StrategyTabProps {
   setPreferredRisk: (val: string) => void;
   riskReward: string;
   setRiskReward: (val: string) => void;
+  positionMode: 'AUTO_RISK' | 'FIXED_LOT';
+  setPositionMode: (val: 'AUTO_RISK' | 'FIXED_LOT') => void;
+  fixedLotSize: string;
+  setFixedLotSize: (val: string) => void;
   accountType: 'personal' | 'prop';
   setAccountType: (val: 'personal' | 'prop') => void;
   preferredSessions: string[];
@@ -52,6 +56,10 @@ export const StrategyTab: React.FC<StrategyTabProps> = ({
   setPreferredRisk,
   riskReward,
   setRiskReward,
+  positionMode,
+  setPositionMode,
+  fixedLotSize,
+  setFixedLotSize,
   accountType,
   setAccountType,
   preferredSessions,
@@ -224,7 +232,7 @@ export const StrategyTab: React.FC<StrategyTabProps> = ({
 
           {/* Preferred Risk Input */}
           <div className="space-y-2">
-            <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">Preferred Risk</label>
+            <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">Preferred Risk (Maximum Risk Cap)</label>
             <input
               type="text"
               value={preferredRisk}
@@ -232,6 +240,48 @@ export const StrategyTab: React.FC<StrategyTabProps> = ({
               placeholder="e.g. 1% or 2.5%"
               className="w-full bg-white dark:bg-zinc-950/60 border border-zinc-200 dark:border-zinc-900 focus:border-zinc-400 dark:focus:border-zinc-700 rounded-2xl px-4 py-3 text-xs font-semibold text-zinc-800 dark:text-white focus:outline-none shadow-sm transition-colors"
             />
+          </div>
+
+          {/* Position Sizing Mode Selection */}
+          <div className="space-y-2.5">
+            <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">Position Size Mode</label>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => setPositionMode('AUTO_RISK')}
+                className={`p-3 rounded-2xl border text-center transition-all cursor-pointer text-xs font-bold ${
+                  positionMode === 'AUTO_RISK'
+                    ? 'bg-zinc-950 dark:bg-zinc-100 text-white dark:text-zinc-900 border-zinc-950 dark:border-zinc-100 shadow-sm'
+                    : 'bg-white dark:bg-zinc-950/40 border-zinc-200 dark:border-zinc-900 text-zinc-500 hover:border-zinc-400 dark:hover:border-zinc-800'
+                }`}
+              >
+                Auto Risk (%)
+              </button>
+              <button
+                type="button"
+                onClick={() => setPositionMode('FIXED_LOT')}
+                className={`p-3 rounded-2xl border text-center transition-all cursor-pointer text-xs font-bold ${
+                  positionMode === 'FIXED_LOT'
+                    ? 'bg-zinc-950 dark:bg-zinc-100 text-white dark:text-zinc-900 border-zinc-950 dark:border-zinc-100 shadow-sm'
+                    : 'bg-white dark:bg-zinc-950/40 border-zinc-200 dark:border-zinc-900 text-zinc-500 hover:border-zinc-400 dark:hover:border-zinc-800'
+                }`}
+              >
+                Fixed Lot
+              </button>
+            </div>
+            
+            {positionMode === 'FIXED_LOT' && (
+              <div className="space-y-1.5 mt-2 animate-fade-in">
+                <label className="text-[11px] font-semibold text-zinc-600 dark:text-zinc-400">Fixed Lot Size</label>
+                <input
+                  type="text"
+                  value={fixedLotSize}
+                  onChange={(e) => setFixedLotSize(e.target.value)}
+                  placeholder="e.g. 0.05 or 0.20"
+                  className="w-full bg-white dark:bg-zinc-950/60 border border-zinc-200 dark:border-zinc-900 focus:border-zinc-400 dark:focus:border-zinc-700 rounded-2xl px-4 py-2.5 text-xs font-semibold text-zinc-800 dark:text-white focus:outline-none shadow-sm transition-colors"
+                />
+              </div>
+            )}
           </div>
 
           {/* Risk : Reward Ratio Input */}
