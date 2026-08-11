@@ -3,6 +3,8 @@ import { runGeminiRequest } from './geminiWrapper.js';
 import { GoogleGenAI } from '@google/genai';
 import { sendTelegramMessage } from './telegramWrapper.js';
 
+export const GEMINI_API_KEY_URL = 'https://aistudio.google.com/app/apikey';
+
 export interface UserApiKey {
   id?: string;
   user_id: string;
@@ -10,6 +12,91 @@ export interface UserApiKey {
   api_key: string;
   created_at?: string;
   updated_at?: string;
+}
+
+export type GeminiTestStatus = 'connected' | 'invalid' | 'quota_exhausted' | 'connection_failed';
+
+export interface GeminiTestResult {
+  status: GeminiTestStatus;
+  message: string;
+  errorType?: string;
+}
+
+/**
+  Redacts API keys for safe logging and UI display.
+  Never logs full key content.
+ */
+export function redactApiKey(key: string | null | undefined): string {
+  if (!key) return '[NO_KEY]';
+  const trimmed = key.trim();
+  if (trimmed.length <= 8) return '[REDACTED]';
+  return `${trimmed.slice(0, 4)}...${trimmed.slice(-4)}`;
+}
+
+/**
+ * Sends a minimal authenticated Gemini request to test key validity.
+ * Does not perform market analysis or consume unnecessary tokens.
+ */
+export async function testGeminiKey(key: string): Promise<GeminiTestResult> {
+  const trimmedKey = key ? key.trim() : '';
+  if (!trimmedKey) {
+    return {
+      status: 'invalid',
+      message: '✕ Invalid Gemini API key',
+      errorType: 'invalid_key'
+    };
+  }
+
+  const redacted = redactApiKey(trimmedKey);
+  console.log(`[Gemini Test] Testing API Key: ${redacted}`);
+
+  try {
+    const ai = new GoogleGenAI({ apiKey: trimmedKey });
+    await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: 'ping'
+    });
+    return {
+      status: 'connected',
+      message: '✓ Gemini API connected'
+    };
+  } catch (err: any) {
+    const rawMsg = (err?.message || String(err)).toLowerCase();
+    const status = err?.status || 0;
+    console.error(`[Gemini Test] Failure for key (${redacted}):`, status, rawMsg.slice(0, 100));
+
+    if (
+      status === 401 ||
+      status === 403 ||
+      rawMsg.includes('invalid') ||
+      rawMsg.includes('permission denied') ||
+      rawMsg.includes('api_key_invalid') ||
+      rawMsg.includes('unauthorized')
+    ) {
+      return {
+        status: 'invalid',
+        message: '✕ Invalid Gemini API key',
+        errorType: 'invalid_key'
+      };
+    } else if (
+      status === 429 ||
+      rawMsg.includes('quota') ||
+      rawMsg.includes('rate limit') ||
+      rawMsg.includes('resource_exhausted')
+    ) {
+      return {
+        status: 'quota_exhausted',
+        message: '⚠ Gemini quota exhausted',
+        errorType: 'quota_exceeded'
+      };
+    } else {
+      return {
+        status: 'connection_failed',
+        message: '⚠ Gemini connection failed',
+        errorType: 'temporary_failure'
+      };
+    }
+  }
 }
 
 /**
@@ -48,10 +135,11 @@ export async function getGeminiKey(): Promise<string | null> {
 }
 
 /**
- * Saves a new Gemini API key. If a key already exists, updates it.
- * Validates the value to prevent duplicates or empty entries.
+ * Saves a new Gemini API key to Supabase.
+ * Validates the value before saving. If Supabase persistence fails,
+ * returns error and does NOT update state.
  */
-export async function saveGeminiKey(key: string): Promise<{ success: boolean; error?: string }> {
+export async function saveGeminiKey(key: string): Promise<{ success: boolean; error?: string; status?: GeminiTestStatus }> {
   console.log("[Gemini Save] Function called");
   const trimmedKey = key.trim();
   if (!trimmedKey) {
@@ -66,24 +154,17 @@ export async function saveGeminiKey(key: string): Promise<{ success: boolean; er
     }
 
     const userId = session.user.id;
-    console.log("[Gemini Save] userId =", userId);
+    const redactedKey = redactApiKey(trimmedKey);
+    console.log(`[Gemini Save] userId = ${userId}, key = ${redactedKey}`);
 
-    // Test the new key immediately
-    try {
-        const ai = new GoogleGenAI({ apiKey: trimmedKey });
-        await ai.models.generateContent({ model: "gemini-3.6-flash", contents: "Reply only with OK" });
-    } catch (err: any) {
-        const rawMsg = err?.message || String(err);
-        console.error("[Gemini Save] Key validation error:", rawMsg);
-        let userMsg = "Invalid or unverified Gemini API key. Please check your key under Settings.";
-        if (rawMsg.includes("401") || rawMsg.includes("403") || rawMsg.toLowerCase().includes("invalid") || rawMsg.toLowerCase().includes("permission denied")) {
-          userMsg = "Invalid API key or permission denied. Please verify your Gemini API key.";
-        } else if (rawMsg.includes("429") || rawMsg.toLowerCase().includes("quota") || rawMsg.toLowerCase().includes("rate limit")) {
-          userMsg = "API key quota or rate limit exceeded. Please check your Gemini account quota.";
-        } else if (rawMsg.includes("404") || rawMsg.toLowerCase().includes("not_found") || rawMsg.toLowerCase().includes("no longer available")) {
-          userMsg = "Gemini service temporarily unavailable. Please try again in a few moments.";
-        }
-        return { success: false, error: userMsg };
+    // Validate key before saving
+    const testRes = await testGeminiKey(trimmedKey);
+    if (testRes.status !== 'connected' && testRes.status !== 'quota_exhausted') {
+      return {
+        success: false,
+        error: testRes.message,
+        status: testRes.status
+      };
     }
 
     // Check if key already exists
@@ -100,61 +181,35 @@ export async function saveGeminiKey(key: string): Promise<{ success: boolean; er
 
     let result;
     const commonFields = {
-        api_key: trimmedKey,
-        updated_at: new Date().toISOString()
+      api_key: trimmedKey,
+      updated_at: new Date().toISOString()
     };
 
-    console.log("[Gemini Save] Saving key", {
-      userId,
-      provider: "gemini"
-    });
-
     if (existingKey?.id) {
-      // Update existing
-      const payload = {
-        ...commonFields
-      };
-      console.log("[Gemini Save] Update payload =", payload);
-      console.log("[Gemini Save] About to insert");
       result = await supabase
         .from('user_api_keys')
-        .update(payload)
+        .update(commonFields)
         .eq('id', existingKey.id);
-      console.log("[Gemini Save] Insert result =", result);
     } else {
-      // Insert new
-      const payload = {
-        user_id: userId,
-        provider: 'gemini',
-        created_at: new Date().toISOString(),
-        ...commonFields
-      };
-      console.log("[Gemini Save] Insert payload =", payload);
-      console.log("[Gemini Save] About to insert");
       result = await supabase
         .from('user_api_keys')
-        .insert(payload);
-      console.log("[Gemini Save] Insert result =", result);
+        .insert({
+          user_id: userId,
+          provider: 'gemini',
+          created_at: new Date().toISOString(),
+          ...commonFields
+        });
     }
 
     if (result.error) {
-      console.error("[Gemini Save] Insert failed", result.error);
+      console.error("[Gemini Save] Persistence failed:", result.error.message);
       return {
         success: false,
-        error: result.error.message || JSON.stringify(result.error)
+        error: "Could not save Gemini API key. Please try again."
       };
     }
 
-    const verify = await supabase
-      .from("user_api_keys")
-      .select("*");
-
-    console.log("[Gemini Save] Verify rows", verify.data);
-
-    console.log("[Gemini Save] Saved key successfully", {
-      userId,
-      provider: "gemini"
-    });
+    console.log(`[Gemini Save] Successfully persisted key ${redactedKey} to Supabase`);
 
     // Update profiles gemini_status to READY
     await supabase.from('profiles').update({
@@ -167,10 +222,10 @@ export async function saveGeminiKey(key: string): Promise<{ success: boolean; er
     // Resume all paused watchers
     await supabase.from('watchers').update({ status: 'active', updated_at: new Date().toISOString() }).eq('user_id', userId).eq('status', 'paused');
 
-    return { success: true };
+    return { success: true, status: testRes.status };
   } catch (err: any) {
     console.error("Exception in saveGeminiKey:", err);
-    return { success: false, error: err.message || "An unexpected error occurred." };
+    return { success: false, error: "Could not save Gemini API key. Please try again." };
   }
 }
 
@@ -178,7 +233,7 @@ export async function saveGeminiKey(key: string): Promise<{ success: boolean; er
  * Updates an existing Gemini API key.
  */
 export async function updateGeminiKey(key: string): Promise<{ success: boolean; error?: string }> {
-  return saveGeminiKey(key); // Reuses the upsert logic in saveGeminiKey
+  return saveGeminiKey(key);
 }
 
 /**

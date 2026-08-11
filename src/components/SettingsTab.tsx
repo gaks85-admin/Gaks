@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { 
   Shield, 
   User as UserIcon, 
@@ -6,8 +6,16 @@ import {
   LogOut, 
   Sparkles,
   Sun,
-  Moon
+  Moon,
+  ExternalLink,
+  Eye,
+  EyeOff,
+  CheckCircle2,
+  Trash2,
+  AlertTriangle,
+  XCircle
 } from 'lucide-react';
+import { GEMINI_API_KEY_URL, GeminiTestResult } from '../lib/apiKeys.js';
 
 export interface SettingsTabProps {
   profileAvatarUrl: string;
@@ -27,6 +35,14 @@ export interface SettingsTabProps {
   handleLogout: () => void;
   theme?: 'light' | 'dark';
   toggleTheme?: () => void;
+  // Gemini Onboarding Props
+  handleTestGeminiKey?: () => void;
+  isGeminiKeyTesting?: boolean;
+  geminiTestResult?: GeminiTestResult | null;
+  geminiStatus?: 'connected' | 'not_connected' | 'quota_exhausted' | 'invalid' | 'connection_failed' | string;
+  handleDeleteGeminiKey?: () => void;
+  geminiSaveError?: string | null;
+  geminiSaveSuccess?: string | null;
 }
 
 export const SettingsTab: React.FC<SettingsTabProps> = ({
@@ -47,7 +63,16 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
   handleLogout,
   theme = 'dark',
   toggleTheme,
+  handleTestGeminiKey,
+  isGeminiKeyTesting = false,
+  geminiTestResult = null,
+  geminiStatus = 'not_connected',
+  handleDeleteGeminiKey,
+  geminiSaveError = null,
+  geminiSaveSuccess = null,
 }) => {
+  const [showKeyText, setShowKeyText] = useState(false);
+
   return (
     <div className="space-y-10 animate-fade-in pb-20">
       
@@ -227,33 +252,183 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
           </form>
         </div>
 
-        {/* AI Configuration */}
+        {/* AI Configuration / Gemini API Key Section */}
         <div className="space-y-8">
-          {/* AI Settings Section */}
           <div className="space-y-6">
-            <div className="flex items-center gap-2 px-1">
-              <Sparkles className="w-4 h-4 text-zinc-400 dark:text-zinc-500" />
-              <h3 className="text-xs font-bold text-zinc-900 dark:text-white uppercase tracking-widest">AI Engine</h3>
+            <div className="flex items-center justify-between px-1">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-amber-500" />
+                <h3 className="text-xs font-bold text-zinc-900 dark:text-white uppercase tracking-widest">Gemini API Key</h3>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-widest">Gemini:</span>
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-[11px] font-semibold">
+                  {geminiStatus === 'connected' && (
+                    <>
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                      <span className="text-emerald-600 dark:text-emerald-400">Connected</span>
+                    </>
+                  )}
+                  {geminiStatus === 'quota_exhausted' && (
+                    <>
+                      <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+                      <span className="text-amber-600 dark:text-amber-400">Quota exhausted</span>
+                    </>
+                  )}
+                  {geminiStatus === 'invalid' && (
+                    <>
+                      <span className="w-2 h-2 rounded-full bg-rose-500"></span>
+                      <span className="text-rose-600 dark:text-rose-400">Invalid key</span>
+                    </>
+                  )}
+                  {geminiStatus === 'connection_failed' && (
+                    <>
+                      <span className="w-2 h-2 rounded-full bg-rose-500"></span>
+                      <span className="text-rose-600 dark:text-rose-400">Connection failed</span>
+                    </>
+                  )}
+                  {(geminiStatus === 'not_connected' || !geminiStatus) && (
+                    <>
+                      <span className="w-2 h-2 rounded-full bg-zinc-400"></span>
+                      <span className="text-zinc-500 dark:text-zinc-400">Not connected</span>
+                    </>
+                  )}
+                </span>
+              </div>
             </div>
             
             <div className="p-8 rounded-[32px] border border-zinc-100 dark:border-zinc-900 bg-zinc-50/50 dark:bg-[#0c0c0e]/60 space-y-6">
-              <div className="space-y-4">
-                <div className="relative rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950/40 focus-within:border-zinc-400 dark:focus-within:border-zinc-700 transition-all overflow-hidden">
+              <div className="space-y-3">
+                <p className="text-xs text-zinc-600 dark:text-zinc-300 leading-relaxed font-medium">
+                  Your Gemini API key allows Gaks AI to use Gemini when a market setup requires additional AI evaluation.
+                </p>
+
+                {/* Official Google AI Studio API Key URL */}
+                <div>
+                  <a
+                    href={GEMINI_API_KEY_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-gradient-to-r from-amber-500/10 to-amber-600/10 hover:from-amber-500/20 hover:to-amber-600/20 border border-amber-500/30 text-amber-600 dark:text-amber-400 text-xs font-bold transition-all shadow-xs group cursor-pointer"
+                  >
+                    <span>Get Gemini API Key →</span>
+                    <ExternalLink className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
+                  </a>
+                </div>
+              </div>
+
+              {/* 3-Step Guided Onboarding Helper */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-1">
+                <div className="p-3.5 rounded-2xl bg-white dark:bg-zinc-950/40 border border-zinc-200/80 dark:border-zinc-800/80 space-y-1">
+                  <div className="text-[10px] font-bold text-amber-600 dark:text-amber-400 uppercase tracking-widest">Step 1 — Get your key</div>
+                  <p className="text-[11px] text-zinc-600 dark:text-zinc-400 leading-snug">Open Google AI Studio and create a Gemini API key.</p>
+                </div>
+                <div className="p-3.5 rounded-2xl bg-white dark:bg-zinc-950/40 border border-zinc-200/80 dark:border-zinc-800/80 space-y-1">
+                  <div className="text-[10px] font-bold text-amber-600 dark:text-amber-400 uppercase tracking-widest">Step 2 — Copy it</div>
+                  <p className="text-[11px] text-zinc-600 dark:text-zinc-400 leading-snug">Copy the generated API key.</p>
+                </div>
+                <div className="p-3.5 rounded-2xl bg-white dark:bg-zinc-950/40 border border-zinc-200/80 dark:border-zinc-800/80 space-y-1">
+                  <div className="text-[10px] font-bold text-amber-600 dark:text-amber-400 uppercase tracking-widest">Step 3 — Paste it here</div>
+                  <p className="text-[11px] text-zinc-600 dark:text-zinc-400 leading-snug">Return to Gaks AI, paste the key, test it, and save it.</p>
+                </div>
+              </div>
+
+              {/* Key Input & Actions */}
+              <div className="space-y-4 pt-2">
+                <div className="relative rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950/40 focus-within:border-zinc-400 dark:focus-within:border-zinc-700 transition-all overflow-hidden flex items-center pr-2">
                   <input
-                    type="password"
+                    type={showKeyText ? "text" : "password"}
                     value={geminiKey}
                     onChange={(e) => setGeminiKey(e.target.value)}
-                    placeholder={geminiKeyExists ? "••••••••••••••••••••••••••••" : "Enter Gemini API Key"}
-                    className="w-full bg-transparent border-0 px-4 py-3.5 text-xs text-zinc-900 dark:text-white focus:outline-none focus:ring-0 font-mono"
+                    placeholder="Paste your Gemini API key"
+                    className="w-full bg-transparent border-0 px-4 py-3.5 text-xs text-zinc-900 dark:text-white focus:outline-none focus:ring-0 font-mono placeholder:text-zinc-400 dark:placeholder:text-zinc-600"
                   />
+                  <button
+                    type="button"
+                    onClick={() => setShowKeyText(!showKeyText)}
+                    className="p-2 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors cursor-pointer"
+                    title={showKeyText ? "Hide key" : "Show key"}
+                  >
+                    {showKeyText ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
                 </div>
-                <button
-                  onClick={handleSaveGeminiKey}
-                  disabled={isGeminiKeySaving}
-                  className="w-full flex items-center justify-center gap-2 px-5 py-3.5 rounded-full bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-xs font-bold text-zinc-900 dark:text-white hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-all cursor-pointer disabled:opacity-50"
-                >
-                  {isGeminiKeySaving ? 'Saving...' : 'Update API Key'}
-                </button>
+
+                <div className="flex flex-col sm:flex-row items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={handleTestGeminiKey}
+                    disabled={isGeminiKeyTesting || isGeminiKeySaving || !geminiKey.trim()}
+                    className="w-full sm:w-1/2 flex items-center justify-center gap-2 px-5 py-3 rounded-full bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-xs font-bold text-zinc-900 dark:text-white hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    {isGeminiKeyTesting ? (
+                      <>
+                        <div className="w-3.5 h-3.5 rounded-full border-2 border-zinc-900 dark:border-white border-t-transparent animate-spin"></div>
+                        <span>Testing Key...</span>
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                        <span>Test API Key</span>
+                      </>
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleSaveGeminiKey}
+                    disabled={isGeminiKeySaving || isGeminiKeyTesting || !geminiKey.trim()}
+                    className="w-full sm:w-1/2 flex items-center justify-center gap-2 px-5 py-3 rounded-full bg-zinc-900 dark:bg-white text-xs font-bold text-white dark:text-black hover:bg-zinc-800 dark:hover:bg-zinc-200 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed shadow-sm"
+                  >
+                    {isGeminiKeySaving ? (
+                      <>
+                        <div className="w-3.5 h-3.5 rounded-full border-2 border-white dark:border-black border-t-transparent animate-spin"></div>
+                        <span>Saving...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="w-4 h-4" />
+                        <span>Save API Key</span>
+                      </>
+                    )}
+                  </button>
+
+                  {geminiKeyExists && handleDeleteGeminiKey && (
+                    <button
+                      type="button"
+                      onClick={handleDeleteGeminiKey}
+                      disabled={isGeminiKeySaving || isGeminiKeyTesting}
+                      className="p-3 rounded-full bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 transition-colors cursor-pointer disabled:opacity-40 shrink-0"
+                      title="Delete saved API key"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+
+                {/* Feedback Badges */}
+                {geminiTestResult && (
+                  <div className={`p-3.5 rounded-2xl border text-xs font-semibold flex items-center gap-2 ${
+                    geminiTestResult.status === 'connected'
+                      ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400'
+                      : geminiTestResult.status === 'quota_exhausted'
+                      ? 'bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-400'
+                      : 'bg-rose-500/10 border-rose-500/30 text-rose-600 dark:text-rose-400'
+                  }`}>
+                    <span>{geminiTestResult.message}</span>
+                  </div>
+                )}
+
+                {geminiSaveError && !geminiTestResult && (
+                  <div className="p-3.5 rounded-2xl border border-rose-500/30 bg-rose-500/10 text-rose-600 dark:text-rose-400 text-xs font-medium">
+                    {geminiSaveError}
+                  </div>
+                )}
+
+                {geminiSaveSuccess && !geminiTestResult && (
+                  <div className="p-3.5 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs font-medium">
+                    {geminiSaveSuccess}
+                  </div>
+                )}
               </div>
             </div>
             
@@ -317,3 +492,4 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
 };
 
 export default SettingsTab;
+

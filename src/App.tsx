@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useLiveRates } from './hooks/useLiveRates';
 import { supabase } from './supabaseClient';
-import { getGeminiKey, saveGeminiKey, deleteGeminiKey } from './lib/apiKeys';
+import { getGeminiKey, saveGeminiKey, deleteGeminiKey, testGeminiKey, GeminiTestResult, GeminiTestStatus } from './lib/apiKeys';
 import { toCanonicalSymbol, toDisplaySymbol, normalizeSymbol } from '../lib/market-utils';
 import { parseUserStrategy } from "./lib/strategy-parser";
 import { compileStrategy } from './lib/strategy-compiler';
@@ -218,7 +218,10 @@ export default function App() {
   const [geminiKey, setGeminiKey] = useState('');
   const [isGeminiKeyLoading, setIsGeminiKeyLoading] = useState(false);
   const [isGeminiKeySaving, setIsGeminiKeySaving] = useState(false);
+  const [isGeminiKeyTesting, setIsGeminiKeyTesting] = useState(false);
   const [geminiKeyExists, setGeminiKeyExists] = useState(false);
+  const [geminiStatus, setGeminiStatus] = useState<string>('not_connected');
+  const [geminiTestResult, setGeminiTestResult] = useState<GeminiTestResult | null>(null);
   const [geminiKeySuccess, setGeminiKeySuccess] = useState<string | null>(null);
   const [geminiKeyError, setGeminiKeyError] = useState<string | null>(null);
 
@@ -1291,24 +1294,60 @@ export default function App() {
       if (key) {
         setGeminiKey(key);
         setGeminiKeyExists(true);
+        setGeminiStatus('connected');
       } else {
         setGeminiKey('');
         setGeminiKeyExists(false);
+        setGeminiStatus('not_connected');
       }
     } catch (err: any) {
       console.error("Error loading Gemini key:", err);
+      setGeminiStatus('not_connected');
     } finally {
       setIsGeminiKeyLoading(false);
+    }
+  };
+
+  const handleTestGeminiKey = async () => {
+    setGeminiKeySuccess(null);
+    setGeminiKeyError(null);
+    setGeminiTestResult(null);
+    const trimmed = geminiKey.trim();
+    if (!trimmed) {
+      const res = { status: 'invalid' as const, message: '✕ Invalid Gemini API key' };
+      setGeminiTestResult(res);
+      setGeminiStatus('invalid');
+      return;
+    }
+
+    setIsGeminiKeyTesting(true);
+    try {
+      const res = await testGeminiKey(trimmed);
+      setGeminiTestResult(res);
+      setGeminiStatus(res.status);
+      if (res.status === 'connected') {
+        triggerNotification("✓ Gemini API connected", "success");
+      } else {
+        triggerNotification(res.message, "info");
+      }
+    } catch (err: any) {
+      const res = { status: 'connection_failed' as const, message: '⚠ Gemini connection failed' };
+      setGeminiTestResult(res);
+      setGeminiStatus('connection_failed');
+      triggerNotification("⚠ Gemini connection failed", "info");
+    } finally {
+      setIsGeminiKeyTesting(false);
     }
   };
 
   const handleSaveGeminiKey = async () => {
     setGeminiKeySuccess(null);
     setGeminiKeyError(null);
+    setGeminiTestResult(null);
     const trimmed = geminiKey.trim();
     if (!trimmed) {
-      setGeminiKeyError("API Key cannot be empty.");
-      triggerNotification("API Key cannot be empty.", "info");
+      setGeminiKeyError("API key cannot be empty.");
+      triggerNotification("API key cannot be empty.", "info");
       return;
     }
 
@@ -1317,15 +1356,22 @@ export default function App() {
       const result = await saveGeminiKey(trimmed);
       if (result.success) {
         setGeminiKeyExists(true);
+        setGeminiStatus(result.status || 'connected');
         setWatcherErrorMessage(null);
         setGeminiKeySuccess(geminiKeyExists ? "Gemini API key updated successfully!" : "Gemini API key saved successfully!");
         triggerNotification(geminiKeyExists ? "Gemini API key updated!" : "Gemini API key saved!", "success");
       } else {
-        setGeminiKeyError(result.error || "Failed to save API key.");
-        triggerNotification(result.error || "Failed to save API key.", "info");
+        const errorMsg = result.error || "Could not save Gemini API key. Please try again.";
+        setGeminiKeyError(errorMsg);
+        if (result.status) {
+          setGeminiStatus(result.status);
+        }
+        triggerNotification(errorMsg, "info");
       }
     } catch (err: any) {
-      setGeminiKeyError(err.message || "An unexpected error occurred.");
+      const errorMsg = "Could not save Gemini API key. Please try again.";
+      setGeminiKeyError(errorMsg);
+      triggerNotification(errorMsg, "info");
     } finally {
       setIsGeminiKeySaving(false);
     }
@@ -1334,6 +1380,7 @@ export default function App() {
   const handleDeleteGeminiKey = async () => {
     setGeminiKeySuccess(null);
     setGeminiKeyError(null);
+    setGeminiTestResult(null);
     if (!window.confirm("Are you sure you want to delete your saved Gemini API key?")) {
       return;
     }
@@ -1344,6 +1391,7 @@ export default function App() {
       if (result.success) {
         setGeminiKey('');
         setGeminiKeyExists(false);
+        setGeminiStatus('not_connected');
         setGeminiKeySuccess("Gemini API key deleted successfully!");
         triggerNotification("Gemini API key deleted!", "info");
       } else {
@@ -2285,6 +2333,13 @@ export default function App() {
               handleLogout={handleLogout}
               theme={theme}
               toggleTheme={toggleTheme}
+              handleTestGeminiKey={handleTestGeminiKey}
+              isGeminiKeyTesting={isGeminiKeyTesting}
+              geminiTestResult={geminiTestResult}
+              geminiStatus={geminiStatus}
+              handleDeleteGeminiKey={handleDeleteGeminiKey}
+              geminiSaveError={geminiKeyError}
+              geminiSaveSuccess={geminiKeySuccess}
             />
           )}
 
