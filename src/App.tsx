@@ -1112,19 +1112,30 @@ export default function App() {
         const customCapVal = data.custom_capital || '';
         const riskVal = data.preferred_risk || '1%';
         const rrVal = data.risk_reward || '1:2';
-        const accountVal = (data.account_type === 'personal' || data.account_type === 'prop') ? data.account_type : 'personal';
-        const modeVal = (data.position_mode === 'FIXED_LOT' || data.position_size_mode === 'FIXED_LOT') ? 'FIXED_LOT' : 'AUTO_RISK';
-        const lotVal = data.preferred_lot_size || data.fixed_lot_size || '0.01';
+        
+        const rawAccountType = String(data.account_type || 'personal');
+        const accountVal = rawAccountType.startsWith('prop') ? 'prop' : 'personal';
+
+        let modeVal: 'AUTO_RISK' | 'FIXED_LOT' = 'AUTO_RISK';
+        if (data.position_mode === 'FIXED_LOT' || data.position_size_mode === 'FIXED_LOT' || rawAccountType.includes('MODE:FIXED_LOT')) {
+          modeVal = 'FIXED_LOT';
+        }
+
+        let lotVal = data.preferred_lot_size || data.fixed_lot_size || data.custom_lot_size;
+        if (!lotVal && rawAccountType.includes('|LOT:')) {
+          const match = rawAccountType.match(/\|LOT:([0-9.]+)/);
+          if (match) lotVal = match[1];
+        }
+        if (!lotVal) lotVal = '0.01';
+
         const sessionsVal = data.preferred_sessions || ['London', 'New York', 'Tokyo'];
         const timeframesVal = data.preferred_timeframes || ['M15', 'H1'];
 
-        if (data.capital) setCapital(data.capital);
-        if (data.custom_capital) setCustomCapital(data.custom_capital);
-        if (data.preferred_risk) setPreferredRisk(data.preferred_risk);
-        if (data.risk_reward) setRiskReward(data.risk_reward);
-        if (data.account_type === 'personal' || data.account_type === 'prop') {
-          setAccountType(data.account_type);
-        }
+        setCapital(capVal);
+        setCustomCapital(customCapVal);
+        setPreferredRisk(riskVal);
+        setRiskReward(rrVal);
+        setAccountType(accountVal as 'personal' | 'prop');
         setPositionMode(modeVal);
         setFixedLotSize(String(lotVal));
         if (data.preferred_sessions) setPreferredSessions(data.preferred_sessions);
@@ -1141,6 +1152,16 @@ export default function App() {
           preferredSessions: sessionsVal,
           preferredTimeframes: timeframesVal
         });
+
+        localStorage.setItem('gaks_capital', capVal);
+        localStorage.setItem('gaks_custom_capital', customCapVal);
+        localStorage.setItem('gaks_preferred_risk', riskVal);
+        localStorage.setItem('gaks_risk_reward', rrVal);
+        localStorage.setItem('gaks_account_type', accountVal);
+        localStorage.setItem('gaks_position_mode', modeVal);
+        localStorage.setItem('gaks_fixed_lot_size', String(lotVal));
+        localStorage.setItem('gaks_sessions', JSON.stringify(sessionsVal));
+        localStorage.setItem('gaks_timeframes', JSON.stringify(timeframesVal));
       }
     } catch (err: any) {
       console.error("Exception loading trading preferences:", err);
@@ -1506,38 +1527,49 @@ export default function App() {
   }, [session]);
 
   const savePreferences = async () => {
-    localStorage.setItem('gaks_capital', capital);
-    localStorage.setItem('gaks_custom_capital', customCapital);
-    localStorage.setItem('gaks_preferred_risk', preferredRisk);
-    localStorage.setItem('gaks_risk_reward', riskReward);
-    localStorage.setItem('gaks_account_type', accountType);
-    localStorage.setItem('gaks_position_mode', positionMode);
-    localStorage.setItem('gaks_fixed_lot_size', fixedLotSize);
-    localStorage.setItem('gaks_sessions', JSON.stringify(preferredSessions));
-    localStorage.setItem('gaks_timeframes', JSON.stringify(preferredTimeframes));
+    // Client-side validation
+    if (positionMode === 'FIXED_LOT') {
+      const parsedLot = parseFloat(fixedLotSize);
+      if (isNaN(parsedLot) || parsedLot <= 0) {
+        triggerNotification("Please enter a valid fixed lot size greater than 0.", "info");
+        return;
+      }
+    }
+    if (capital === 'Custom') {
+      const parsedCustomCap = parseFloat(customCapital.replace(/[^0-9.]/g, ''));
+      if (isNaN(parsedCustomCap) || parsedCustomCap <= 0) {
+        triggerNotification("Please enter a valid custom account capital.", "info");
+        return;
+      }
+    }
+
+    const encodedAccountType = `${accountType}|MODE:${positionMode}|LOT:${fixedLotSize}`;
     
     if (session?.user) {
       try {
+        const payload = {
+          user_id: session.user.id,
+          capital: capital,
+          custom_capital: customCapital,
+          preferred_risk: preferredRisk,
+          risk_reward: riskReward,
+          account_type: encodedAccountType,
+          preferred_sessions: preferredSessions,
+          preferred_timeframes: preferredTimeframes,
+          strategy_text: strategyText,
+          updated_at: new Date().toISOString()
+        };
+
         const { error } = await supabase
           .from('trading_preferences')
-          .upsert({
-            user_id: session.user.id,
-            capital: capital,
-            custom_capital: customCapital,
-            preferred_risk: preferredRisk,
-            risk_reward: riskReward,
-            account_type: accountType,
-            position_mode: positionMode,
-            preferred_lot_size: fixedLotSize,
-            preferred_sessions: preferredSessions,
-            preferred_timeframes: preferredTimeframes,
-            updated_at: new Date().toISOString()
-          }, { onConflict: 'user_id' });
+          .upsert(payload, { onConflict: 'user_id' });
           
         if (error) {
-          console.error("Error saving preferences to Supabase:", error.message);
-          triggerNotification("Preferences saved locally. Sync failed.", "info");
+          console.error(`[Preferences Sync]\nUser ID: ${session.user.id}\nOperation: UPSERT\nStatus: FAILED\nError: ${error.message}\nDatabase Code: ${error.code || 'N/A'}`);
+          triggerNotification("Could not save preferences. Please try again.", "info");
         } else {
+          console.log(`[Preferences Sync]\nUser ID: ${session.user.id}\nOperation: UPSERT\nStatus: SUCCESS`);
+          
           setInitialPrefs({
             capital,
             customCapital,
@@ -1549,11 +1581,22 @@ export default function App() {
             preferredSessions,
             preferredTimeframes
           });
-          triggerNotification("Trading preferences saved & synced successfully!");
+
+          localStorage.setItem('gaks_capital', capital);
+          localStorage.setItem('gaks_custom_capital', customCapital);
+          localStorage.setItem('gaks_preferred_risk', preferredRisk);
+          localStorage.setItem('gaks_risk_reward', riskReward);
+          localStorage.setItem('gaks_account_type', accountType);
+          localStorage.setItem('gaks_position_mode', positionMode);
+          localStorage.setItem('gaks_fixed_lot_size', fixedLotSize);
+          localStorage.setItem('gaks_sessions', JSON.stringify(preferredSessions));
+          localStorage.setItem('gaks_timeframes', JSON.stringify(preferredTimeframes));
+
+          triggerNotification("Preferences saved.");
         }
       } catch (err: any) {
-        console.error("Exception saving preferences to Supabase:", err);
-        triggerNotification("Preferences saved locally.", "info");
+        console.error(`[Preferences Sync]\nUser ID: ${session.user.id}\nOperation: UPSERT\nStatus: FAILED\nError: ${err?.message || err}`);
+        triggerNotification("Could not save preferences. Please try again.", "info");
       }
     } else {
       setInitialPrefs({
@@ -1562,10 +1605,23 @@ export default function App() {
         preferredRisk,
         riskReward,
         accountType,
+        positionMode,
+        fixedLotSize,
         preferredSessions,
         preferredTimeframes
       });
-      triggerNotification("Trading preferences successfully saved!");
+
+      localStorage.setItem('gaks_capital', capital);
+      localStorage.setItem('gaks_custom_capital', customCapital);
+      localStorage.setItem('gaks_preferred_risk', preferredRisk);
+      localStorage.setItem('gaks_risk_reward', riskReward);
+      localStorage.setItem('gaks_account_type', accountType);
+      localStorage.setItem('gaks_position_mode', positionMode);
+      localStorage.setItem('gaks_fixed_lot_size', fixedLotSize);
+      localStorage.setItem('gaks_sessions', JSON.stringify(preferredSessions));
+      localStorage.setItem('gaks_timeframes', JSON.stringify(preferredTimeframes));
+
+      triggerNotification("Preferences saved.");
     }
   };
 

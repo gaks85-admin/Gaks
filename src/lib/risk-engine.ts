@@ -206,10 +206,20 @@ export function extractRiskPreferences(prefsRecord: any, userId: string): RiskPr
   const strategySummary = prefsRecord?.strategy_summary || 'Custom Strategy';
   const dbTimestamp = prefsRecord?.updated_at || prefsRecord?.created_at || 'N/A';
 
-  const rawMode = prefsRecord?.position_mode || prefsRecord?.position_size_mode || 'AUTO_RISK';
+  const rawAccountType = String(prefsRecord?.account_type || '');
+  let rawMode = prefsRecord?.position_mode || prefsRecord?.position_size_mode;
+  if (!rawMode && rawAccountType.includes('MODE:FIXED_LOT')) {
+    rawMode = 'FIXED_LOT';
+  }
+  if (!rawMode) rawMode = 'AUTO_RISK';
   const positionMode: 'AUTO_RISK' | 'FIXED_LOT' = rawMode === 'FIXED_LOT' ? 'FIXED_LOT' : 'AUTO_RISK';
 
-  const rawLot = prefsRecord?.preferred_lot_size || prefsRecord?.fixed_lot_size || prefsRecord?.custom_lot_size || '0.01';
+  let rawLot = prefsRecord?.preferred_lot_size || prefsRecord?.fixed_lot_size || prefsRecord?.custom_lot_size;
+  if (!rawLot && rawAccountType.includes('|LOT:')) {
+    const lotMatch = rawAccountType.match(/\|LOT:([0-9.]+)/);
+    if (lotMatch) rawLot = lotMatch[1];
+  }
+  if (!rawLot) rawLot = '0.01';
   const parsedLot = parseFloat(String(rawLot).replace(/[^0-9.]/g, ""));
   const preferredLotSize = isNaN(parsedLot) || parsedLot <= 0 ? 0.01 : parsedLot;
 
