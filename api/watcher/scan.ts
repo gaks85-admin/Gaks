@@ -236,6 +236,8 @@ export default async function handler(req: any, res: any) {
     const riskPercentage = riskPrefs.riskPercentage;
     const riskRewardStr = riskPrefs.riskRewardStr;
     const maxDailyRiskStr = riskPrefs.maxDailyRiskStr;
+    const positionMode = riskPrefs.positionMode;
+    const preferredLotSize = riskPrefs.preferredLotSize;
 
     // 5. Parsed Strategy Loaded
     let parsed_strategy: any = null;
@@ -585,7 +587,9 @@ Fallback: NO_TRADE`.trim());
         geminiTp: analysis.takeProfit ? Number(analysis.takeProfit) : null,
         symbol: symbol,
         direction: analysis.signal,
-        riskRewardStr: riskRewardStr
+        riskRewardStr: riskRewardStr,
+        positionMode: positionMode,
+        preferredLotSize: preferredLotSize
       });
 
       console.log(`

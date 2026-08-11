@@ -42,7 +42,11 @@ export function evaluateQualityGate(input: QualityGateInput): QualityGateResult 
   const ruleScore = Math.max(0, Math.min(100, Math.round(input.ruleScore || 0)));
 
   const ms = input.marketStructure || {};
-  const htfBias = Boolean(ms.htfBiasAligned || (ms.trend && ms.trend !== 'Neutral'));
+  const dirUpper = (input.direction || '').toUpperCase();
+  const trendUpper = (ms.trend || '').toUpperCase();
+  const isTrendAligned = (dirUpper === 'BUY' && ['BULLISH', 'UP', 'UPTREND'].includes(trendUpper)) ||
+                         (dirUpper === 'SELL' && ['BEARISH', 'DOWN', 'DOWNTREND'].includes(trendUpper));
+  const htfBias = Boolean(ms.htfBiasAligned || isTrendAligned);
   const bosOrChoch = Boolean(ms.bos || ms.choch || ms.structureShift);
   const fvgOrLiquidity = Boolean(
     (ms.fairValueGaps && ms.fairValueGaps.length > 0) ||

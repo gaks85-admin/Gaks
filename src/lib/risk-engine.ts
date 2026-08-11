@@ -374,7 +374,7 @@ export function calculatePositionSize(config: {
   const tpDistance = Math.abs(executedTP - executedEntry);
   const actualRisk = stopDistance;
   const actualReward = tpDistance;
-  const actualRr = actualRisk > 0 ? actualReward / actualRisk : 0;
+  const actualRr = actualRisk > 0 ? Number((actualReward / actualRisk).toFixed(4)) : 0;
 
   // Phase 5: Stop Loss & Take Profit Structural Validation
   let slValidationPassed = true;
@@ -454,36 +454,44 @@ export function calculatePositionSize(config: {
 
   if (positionMode === 'FIXED_LOT') {
     const requestedLot = preferredLotSize;
-    const expectedLossAtFixedLot = requestedLot * lossPerOneLot;
-    const expectedProfitAtFixedLot = requestedLot * profitPerOneLot;
+    const autoLot = lossPerOneLot > 0 ? (riskAmount / lossPerOneLot) : 0;
+    
+    // Step normalization without silently increasing
+    const stepMultiplier = lotStep > 0 ? Math.round(1 / lotStep) : 100;
+    let finalLotBeforeVal = Math.floor(requestedLot * stepMultiplier + 1e-9) / stepMultiplier;
+    finalLotBeforeVal = Number(finalLotBeforeVal.toFixed(4));
+    
+    const expectedLossAtFixedLot = finalLotBeforeVal * lossPerOneLot;
+    const expectedProfitAtFixedLot = finalLotBeforeVal * profitPerOneLot;
     const maxAllowedRisk = riskAmount;
+
+    if (requestedLot < minLot - 1e-7 || finalLotBeforeVal < minLot - 1e-7) {
+      accepted = false;
+      skipReason = `Fixed lot size (${requestedLot}) is below broker minimum lot (${minLot}).`;
+    } else if (expectedLossAtFixedLot > maxAllowedRisk + 1e-4) {
+      accepted = false;
+      skipReason = `Fixed lot exceeds maximum allowed risk (Expected loss: $${expectedLossAtFixedLot.toFixed(2)} > Maximum allowed risk: $${maxAllowedRisk.toFixed(2)}).`;
+    } else if (!slValidationPassed || !rrValidationPassed) {
+      accepted = false;
+      skipReason = !slValidationPassed
+        ? `Stop loss validation failed: ${slValidationError}`
+        : `RR validation failed. Expected RR: ${targetRrRatio}, Actual RR: ${actualRr.toFixed(4)}.`;
+    }
 
     console.log(`
 [Position Sizing]
-Mode: FIXED_LOT
+Position Mode: FIXED_LOT
 Requested Lot: ${requestedLot}
+Calculated Auto Lot: ${autoLot.toFixed(4)}
+Final Lot Before Validation: ${finalLotBeforeVal}
+Instrument Min Lot: ${minLot}
+Instrument Lot Step: ${lotStep}
+Expected Loss: $${expectedLossAtFixedLot.toFixed(2)}
+Maximum Allowed Risk: $${maxAllowedRisk.toFixed(2)}
+Accepted: ${accepted ? 'YES' : 'NO'}
 `.trim());
 
-    if (requestedLot < minLot - 1e-7) {
-      accepted = false;
-      skipReason = `Fixed lot size (${requestedLot}) is below broker minimum lot (${minLot}).`;
-    } else {
-      const remainder = Math.abs((requestedLot * 1000) % (lotStep * 1000));
-      if (remainder > 1e-4 && Math.abs(remainder - lotStep * 1000) > 1e-4) {
-        accepted = false;
-        skipReason = `Fixed lot size (${requestedLot}) is not aligned to broker lot step (${lotStep}).`;
-      } else if (expectedLossAtFixedLot > maxAllowedRisk + 1e-4) {
-        accepted = false;
-        skipReason = `Fixed lot exceeds maximum allowed risk (Expected loss: $${expectedLossAtFixedLot.toFixed(2)} > Maximum allowed risk: $${maxAllowedRisk.toFixed(2)}).`;
-      } else if (!slValidationPassed || !rrValidationPassed) {
-        accepted = false;
-        skipReason = !slValidationPassed
-          ? `Stop loss validation failed: ${slValidationError}`
-          : `RR validation failed. Expected RR: ${targetRrRatio}, Actual RR: ${actualRr.toFixed(4)}.`;
-      }
-    }
-
-    const execDisplay = accepted ? requestedLot.toString() : 'NONE';
+    const execDisplay = accepted ? finalLotBeforeVal.toString() : 'NONE';
     console.log(`
 [Trade Risk]
 Position Mode: FIXED_LOT
@@ -505,18 +513,18 @@ ${accepted ? '' : `Reason: ${skipReason}`}
       stopDistance,
       pipValue,
       contractSize,
-      calculatedLotSize: accepted ? requestedLot : 0,
+      calculatedLotSize: accepted ? finalLotBeforeVal : 0,
       exactLotSize: requestedLot,
       expectedLoss: expectedLossAtFixedLot,
       expectedProfit: accepted ? expectedProfitAtFixedLot : 0,
       assetClass,
-      normalizedLotSize: accepted ? requestedLot : 0,
-      lotType: classifyLotType(requestedLot),
+      normalizedLotSize: accepted ? finalLotBeforeVal : 0,
+      lotType: classifyLotType(finalLotBeforeVal),
       lotStep,
       minLot,
       symbol: config.symbol,
       accepted,
-      skipReason: accepted ? `Fixed lot (${requestedLot}) accepted within maximum risk.` : skipReason,
+      skipReason: accepted ? `Fixed lot (${finalLotBeforeVal}) accepted within maximum risk.` : skipReason,
       expectedLossAtRequiredLot: expectedLossAtFixedLot,
       expectedLossAtMinLot,
       userRr,
