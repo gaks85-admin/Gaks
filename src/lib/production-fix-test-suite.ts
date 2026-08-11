@@ -5,6 +5,7 @@ import { normalizeConfidence } from './confidence-engine.js';
 import { evaluateQualityGate } from './quality-gate.js';
 import { checkSignalDeduplication } from './signal-deduplication.js';
 import { runGeminiAuditTestSuite } from './gemini-audit-test-suite.js';
+import { runTradeValidatorTestSuite } from './trade-validator-test-suite.js';
 
 export function runProductionFixTestSuite() {
   console.log("==========================================");
@@ -161,6 +162,61 @@ export function runProductionFixTestSuite() {
   ];
   const outOfOrderResult = validateMarketDataIntegrity('EURUSD', outOfOrderCandles);
   assert(outOfOrderResult.valid === false, 'Test A4 - Out-of-order candles rejected');
+
+  // Regression tests A through H for timezone normalization & market integrity
+  const sydneyPastTime = new Date(now - 7200000);
+  const sydneyIsoBase = sydneyPastTime.toISOString().replace('Z', '');
+  const sydneyCandlesEUR = [
+    { timestamp: `${sydneyIsoBase} Australia/Sydney`, open: 1.0800, high: 1.0850, low: 1.0790, close: 1.0820 },
+    { timestamp: new Date(now - 3600000).toISOString(), open: 1.0820, high: 1.0880, low: 1.0810, close: 1.0870 }
+  ];
+  const sydneyResultEUR = validateMarketDataIntegrity('EURUSD', sydneyCandlesEUR);
+  assert(sydneyResultEUR.valid === true, 'Test A_Sydney - EURUSD Australia/Sydney timestamp normalized and validated successfully');
+
+  const sydneyCandlesGBP = [
+    { timestamp: `${sydneyIsoBase} Australia/Sydney`, open: 1.2500, high: 1.2550, low: 1.2490, close: 1.2520 },
+    { timestamp: new Date(now - 3600000).toISOString(), open: 1.2520, high: 1.2580, low: 1.2510, close: 1.2570 }
+  ];
+  const sydneyResultGBP = validateMarketDataIntegrity('GBPUSD', sydneyCandlesGBP);
+  assert(sydneyResultGBP.valid === true, 'Test B_Sydney - GBPUSD Australia/Sydney timestamp normalized and validated successfully');
+
+  const utcCandles = [
+    { timestamp: new Date(now - 7200000).toISOString(), open: 1.1000, high: 1.1050, low: 1.0990, close: 1.1020 },
+    { timestamp: new Date(now - 3600000).toISOString(), open: 1.1020, high: 1.1080, low: 1.1010, close: 1.1070 }
+  ];
+  const utcResult = validateMarketDataIntegrity('EURUSD', utcCandles);
+  assert(utcResult.valid === true, 'Test C_UTC - Standard UTC timestamps validate successfully');
+
+  const futureCandlesTest = [
+    { timestamp: new Date(now - 3600000).toISOString(), open: 1.1000, high: 1.1050, low: 1.0990, close: 1.1020 },
+    { timestamp: new Date(now + 86400000).toISOString(), open: 1.1020, high: 1.1080, low: 1.010, close: 1.1070 }
+  ];
+  const futureRes = validateMarketDataIntegrity('EURUSD', futureCandlesTest);
+  assert(futureRes.valid === false && futureRes.status === 'INVALID_FUTURE_CANDLE', 'Test D_Future - Genuinely future timestamp is rejected');
+
+  const incompleteCandles = [
+    { timestamp: new Date(now - 3600000).toISOString(), open: 1.1000, high: 1.1050, low: 1.0990, close: 1.1020 },
+    { timestamp: new Date(now + 60000).toISOString(), open: 1.1020, high: 1.1080, low: 1.1010, close: 1.1070 }
+  ];
+  const incompleteRes = validateMarketDataIntegrity('EURUSD', incompleteCandles);
+  assert(incompleteRes.valid === false && incompleteRes.status === 'INVALID_FUTURE_CANDLE', 'Test E_Incomplete - Current/future candle rejected');
+
+  const ascendingRes = validateMarketDataIntegrity('EURUSD', validCandles);
+  assert(ascendingRes.valid === true, 'Test F_Ascending - Strictly ascending candles pass');
+
+  const dupCandles = [
+    { timestamp: new Date(now - 3600000).toISOString(), open: 1.1000, high: 1.1050, low: 1.0990, close: 1.1020 },
+    { timestamp: new Date(now - 3600000).toISOString(), open: 1.1020, high: 1.1080, low: 1.1010, close: 1.1070 }
+  ];
+  const dupRes = validateMarketDataIntegrity('EURUSD', dupCandles);
+  assert(dupRes.valid === false && dupRes.status === 'INVALID_DUPLICATE', 'Test G_Duplicate - Duplicate timestamps rejected');
+
+  const dstCandles = [
+    { timestamp: '2026-04-05T02:00:00+10:00', open: 1.0800, high: 1.0850, low: 1.0790, close: 1.0820 },
+    { timestamp: '2026-04-05T03:00:00+10:00', open: 1.0820, high: 1.0880, low: 1.0810, close: 1.0870 }
+  ];
+  const dstRes = validateMarketDataIntegrity('EURUSD', dstCandles);
+  assert(dstRes.status !== 'INVALID_CHRONOLOGY', 'Test H_DST - DST transition offsets parsed without chronology error');
 
   // ==========================================
   // TEST B: CONFIDENCE NORMALIZATION
@@ -598,7 +654,10 @@ export function runProductionFixTestSuite() {
   assert(isBuyWin === true, 'Test L24 - Accepted trade reaching TP is recorded as WIN');
   assert(isBuyLoss === true, 'Test L25 - Accepted trade reaching SL is recorded as LOSS');
 
-  // 26. Run Gemini Audit Test Suite
+  // 26. Run Trade Validator & Scheduler Test Suite
+  runTradeValidatorTestSuite();
+
+  // 27. Run Gemini Audit Test Suite
   runGeminiAuditTestSuite();
 
   // 27. Final confirmation

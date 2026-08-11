@@ -259,7 +259,7 @@ export default async function handler(req: any, res: any) {
     const selectedTimeframe = watcher.selected_timeframe || 'H1';
     const interval = '1h'; // Simplified
 
-    const timeSeriesUrl = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(mappedSymbol)}&interval=${interval}&outputsize=20&apikey=${twelveDataKey}`;
+    const timeSeriesUrl = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(mappedSymbol)}&interval=${interval}&outputsize=20&timezone=UTC&apikey=${twelveDataKey}`;
     
     const tsRes = await fetch(timeSeriesUrl);
     const tsData = await tsRes.json();

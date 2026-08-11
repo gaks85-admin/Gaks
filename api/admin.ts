@@ -1905,7 +1905,7 @@ async function inspector_candles_handler(req: any, res: any) {
 
     const mappedSymbol = convertSymbolForTwelveData(symbol);
     const interval = mapTimeframeToInterval(timeframe);
-    const tsUrl = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(mappedSymbol)}&interval=${interval}&outputsize=50&apikey=${twelveDataKey}`;
+    const tsUrl = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(mappedSymbol)}&interval=${interval}&outputsize=50&timezone=UTC&apikey=${twelveDataKey}`;
 
     const tsRes = await fetchWithRetry(tsUrl, {}, 3, 1000);
     const tsData = await tsRes.json();

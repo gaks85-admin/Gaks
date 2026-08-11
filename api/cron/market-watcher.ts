@@ -18,6 +18,7 @@ import { normalizeConfidence } from '../../src/lib/confidence-engine.js';
 import { evaluateQualityGate } from '../../src/lib/quality-gate.js';
 import { checkSignalDeduplication } from '../../src/lib/signal-deduplication.js';
 import { resolveUserGeminiKey, classifyAndRedactGeminiError } from '../../src/lib/gemini-key-resolver.js';
+import { validateActiveTradeState, isWatcherDue } from '../../src/lib/trade-validator.js';
 
 // --- Inlined Gemini Wrapper ---
 
@@ -675,7 +676,8 @@ export default async function handler(req: any, res: any) {
     const { data: watchers, error: fetchError } = await supabase
       .from("watchers")
       .select("*")
-      .eq("status", "active");
+      .eq("status", "active")
+      .order('last_scan_at', { ascending: true, nullsFirst: true });
       
     if (fetchError) {
       throw fetchError;
@@ -774,23 +776,43 @@ export default async function handler(req: any, res: any) {
         }
       }
 
-      let nextScanDate: Date | null = null;
-      if (lastScanDate) {
-        nextScanDate = new Date(lastScanDate.getTime() + scanIntervalMinutes * 60 * 1000);
+      const SCAN_DUE_GRACE_MS = 30000;
+      const dueResult = isWatcherDue(watcher, now, scanIntervalMinutes, SCAN_DUE_GRACE_MS);
+      let isDue = dueResult.isDue;
+      const dueReason = dueResult.reason;
+      const nextScanDate = dueResult.nextScanDate;
+
+      // Prevent duplicate scanning if two cron invocations overlap
+      if (lastScanDate && (now.getTime() - lastScanDate.getTime() < 5000) && tradeStatus !== 'ACTIVE') {
+        isDue = false;
       }
 
       const cooldownUntilStr = watcher.cooldown_until ? new Date(watcher.cooldown_until).toISOString() : 'NULL';
+
+      console.log(`[Watcher Scheduling]
+Watcher ID: ${watcher.id}
+Symbol: ${selectedPair}
+Last Scan: ${lastScanDate ? lastScanDate.toISOString() : 'NULL'}
+Next Eligible: ${nextScanDate ? nextScanDate.toISOString() : 'NOW'}
+Current Time: ${now.toISOString()}
+Grace Window: ${SCAN_DUE_GRACE_MS} ms
+Due: ${isDue ? 'YES' : 'NO'}
+Reason: ${dueReason}`);
 
       console.log(`--- Processing Watcher ${watcher.id} (${selectedPair}) ---`);
       console.log(`Watcher ID: ${watcher.id}`);
       console.log(`trade_status from database: ${watcher.trade_status}`);
       console.log(`selected_pair: ${selectedPair}`);
       console.log(`State: ${tradeStatus}`);
-      console.log(`Current Time: ${now.toISOString()}`);
-      console.log(`Last Scan: ${lastScanDate ? lastScanDate.toISOString() : 'NULL'}`);
       console.log(`Cooldown Until: ${cooldownUntilStr}`);
-      console.log(`Next Eligible Scan: ${nextScanDate ? nextScanDate.toISOString() : 'NOW'}`);
       console.log(`Trade Status: ${tradeStatus}`);
+
+      if (!isDue) {
+        console.log(`LOG: Watcher ${watcher.id} skipped - Not due yet`);
+        skipped.push({ userId, reason: `Not due yet (${dueReason})` });
+        watchersSkippedCount++;
+        continue;
+      }
 
       if (!selectedPair) {
         console.log(`LOG: Watcher ${watcher.id} skipped - No selected pair`);
@@ -858,6 +880,55 @@ export default async function handler(req: any, res: any) {
       console.log(`ENTERING ACTIVE`);
       if (tradeStatus === 'ACTIVE') {
         console.log(`[BRANCH EXECUTED] ACTIVE branch (Price Monitoring Only) for Watcher ID: ${watcher.id}`);
+
+        const activeValidation = validateActiveTradeState(watcher);
+        if (!activeValidation.valid) {
+          let currentPriceFetch: number | null = null;
+          try {
+            const symbolKey = toDisplaySymbol(selectedPair);
+            if (cronPriceCache[symbolKey] !== undefined) {
+              currentPriceFetch = cronPriceCache[symbolKey];
+            } else {
+              currentPriceFetch = await fetchCurrentPrice(selectedPair, twelveDataKey, tdStats);
+            }
+          } catch (e) {}
+
+          console.error(`[ACTIVE STATE INVALID]
+Watcher ID: ${watcher.id}
+Symbol: ${selectedPair}
+Direction: ${watcher.direction}
+Entry: ${watcher.entry_price}
+SL: ${watcher.stop_loss}
+TP: ${watcher.take_profit}
+Current Price: ${currentPriceFetch !== null ? currentPriceFetch : 'N/A'}
+Reason: ${activeValidation.reason}`);
+
+          const { error: invalidUpdateErr } = await supabase.from("watchers").update({
+            trade_status: 'WAITING',
+            direction: null,
+            entry_price: null,
+            stop_loss: null,
+            take_profit: null,
+            signal_message_id: null,
+            opened_at: null,
+            closed_at: null,
+            cooldown_until: null,
+            last_scan_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          }).eq("id", watcher.id);
+
+          if (invalidUpdateErr) {
+            console.error(`[ACTIVE STATE INVALID UPDATE ERROR] Watcher ID: ${watcher.id} failed to transition to WAITING:`, invalidUpdateErr.message);
+          } else {
+            console.log(`[ACTIVE STATE INVALID SUCCESS] Watcher ID: ${watcher.id} successfully transitioned to WAITING from invalid ACTIVE state.`);
+          }
+
+          skipped.push({ userId, reason: `Invalid ACTIVE state: ${activeValidation.reason}` });
+          watchersSkippedCount++;
+          console.log(`ACTIVE branch exited due to invalid state.`);
+          continue;
+        }
+
         console.log(`[STATE 2 - ACTIVE] Monitoring open trade for Watcher ID: ${watcher.id} (${selectedPair}). Skipping Gemini, strategy load, and candle download.`);
 
         // telegramChatId already available from loop start
@@ -1120,22 +1191,7 @@ export default async function handler(req: any, res: any) {
       };
 
       addLog("Cron Started", "success");
-
-      // Determine if watcher is due for a scan
-      let isDue = false;
-      if (!lastScanDate) {
-        isDue = true;
-      } else {
-        isDue = now.getTime() >= nextScanDate!.getTime();
-      }
-
-      // Skip watcher if not due yet
-      if (!isDue) {
-        console.log("[Watcher Skip] Not due yet.");
-        skipped.push({ userId, reason: "Not due yet" });
-        watchersSkippedCount++;
-        continue;
-      }
+      addLog("Watcher Due / Grace Window Passed", "success");
 
       let scanStart: number = 0;
       try {
@@ -1253,7 +1309,7 @@ export default async function handler(req: any, res: any) {
           candleData = cronTimeSeriesCache[tsCacheKey].candleData;
         } else {
           addLog("Candle Downloaded", "success");
-          const timeSeriesUrl = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(finalSymbol)}&interval=${interval}&outputsize=20&apikey=${twelveDataKey}`;
+          const timeSeriesUrl = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(finalSymbol)}&interval=${interval}&outputsize=20&timezone=UTC&apikey=${twelveDataKey}`;
           try {
             tdStats.requests++;
             const tsRes = await fetchWithRetry(timeSeriesUrl, { signal: AbortSignal.timeout(4000) }, 2, 500);

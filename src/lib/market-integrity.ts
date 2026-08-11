@@ -15,18 +15,57 @@ export interface MarketDataIntegrityResult {
   currentUtc?: string;
 }
 
-export function parseUtcTimestamp(ts: string | number): number {
-  if (!ts) return NaN;
-  if (typeof ts === 'number') return ts;
-  
-  let formatted = ts.trim();
+export function normalizeCandleTimestamp(symbol: string, rawTimestamp: string | number): { timestampMs: number; normalizedIso: string } {
+  const now = new Date();
+  const serverUtc = now.toISOString();
+  if (!rawTimestamp) {
+    return { timestampMs: NaN, normalizedIso: '' };
+  }
+
+  let rawStr = String(rawTimestamp).trim();
+  let providerTimezone = 'UTC (via &timezone=UTC)';
+  let isSydneyTime = rawStr.includes('Australia/Sydney') || rawStr.includes('Sydney');
+  if (isSydneyTime) {
+    providerTimezone = 'Australia/Sydney (AEST/AEDT)';
+    rawStr = rawStr.replace('Australia/Sydney', '').replace('Sydney', '').trim();
+  }
+
+  let formatted = rawStr;
   if (formatted.includes(' ') && !formatted.includes('T')) {
     formatted = formatted.replace(' ', 'T');
   }
   if (!formatted.endsWith('Z') && !formatted.includes('+') && !formatted.includes('-')) {
     formatted += 'Z';
   }
-  return new Date(formatted).getTime();
+
+  let dateObj = new Date(formatted);
+  let timestampMs = dateObj.getTime();
+
+  if (isSydneyTime && !isNaN(timestampMs)) {
+    // Australia/Sydney AEST is UTC+10 (August). Subtract 10 hours to normalize to UTC.
+    const sydneyOffsetHours = 10;
+    timestampMs -= sydneyOffsetHours * 3600 * 1000;
+    dateObj = new Date(timestampMs);
+  }
+
+  const normalizedIso = isNaN(timestampMs) ? '' : dateObj.toISOString();
+  const deltaMs = isNaN(timestampMs) ? 0 : timestampMs - now.getTime();
+  const status = isNaN(timestampMs) ? 'INVALID' : 'NORMALIZED';
+
+  console.log(`[Market Data Timestamp Normalization]
+Symbol: ${symbol}
+Provider Timezone: ${providerTimezone}
+Raw Timestamp: ${rawTimestamp}
+Normalized UTC: ${normalizedIso}
+Server UTC: ${serverUtc}
+Timestamp Delta: ${deltaMs} ms
+Status: ${status}`);
+
+  return { timestampMs, normalizedIso };
+}
+
+export function parseUtcTimestamp(ts: string | number, symbol: string = 'GENERIC'): number {
+  return normalizeCandleTimestamp(symbol, ts).timestampMs;
 }
 
 export function validateMarketDataIntegrity(
@@ -55,7 +94,7 @@ Reason: ${res.reason}`.trim());
 
   // 1. Validate chronology and duplicates
   for (let i = 0; i < candleData.length; i++) {
-    const currentMs = parseUtcTimestamp(candleData[i].timestamp);
+    const currentMs = parseUtcTimestamp(candleData[i].timestamp, symbol);
     if (isNaN(currentMs)) {
       const res: MarketDataIntegrityResult = {
         valid: false,
@@ -74,7 +113,7 @@ Reason: ${res.reason}`.trim());
     }
 
     if (i > 0) {
-      const prevMs = parseUtcTimestamp(candleData[i - 1].timestamp);
+      const prevMs = parseUtcTimestamp(candleData[i - 1].timestamp, symbol);
       if (currentMs === prevMs) {
         const res: MarketDataIntegrityResult = {
           valid: false,
@@ -112,11 +151,11 @@ Reason: ${res.reason}`.trim());
 
   // 2. Identify last closed candle (second to last candle in array if latest is open candle)
   const lastClosedCandle = candleData[candleData.length - 2];
-  const lastClosedMs = parseUtcTimestamp(lastClosedCandle.timestamp);
+  const lastClosedMs = parseUtcTimestamp(lastClosedCandle.timestamp, symbol);
   const lastClosedUtc = new Date(lastClosedMs).toISOString();
 
   const latestCandle = candleData[candleData.length - 1];
-  const latestCandleMs = parseUtcTimestamp(latestCandle.timestamp);
+  const latestCandleMs = parseUtcTimestamp(latestCandle.timestamp, symbol);
   const nowMs = now.getTime();
 
   // Strict check: if any candle timestamp (last closed or latest) > currentTimeUTC
