@@ -6,6 +6,7 @@ export type DecisionGateType =
   | 'ADAPTIVE_LEARNING'
   | 'ADAPTIVE_QUALITY'
   | 'ADAPTIVE_EXECUTION'
+  | 'CLOSED_LOOP_CALIBRATION'
   | 'RISK_GOVERNOR'
   | 'POSITION_SIZING'
   | 'TRADE_GEOMETRY'
@@ -28,6 +29,8 @@ export interface DecisionAttribution {
   finalDecision: FinalDecision;
   authoritativeReasonCode: string;
   authoritativeReason: string;
+  rejectedGate?: DecisionGateType | null;
+  rejectionReason?: string | null;
   decisionChain: DecisionGateResult[];
   tradeId?: string | null;
   userId: string;
@@ -83,6 +86,7 @@ export function resolveAuthoritativeDecision(input: ResolveDecisionInput): Decis
     'ADAPTIVE_LEARNING',
     'ADAPTIVE_QUALITY',
     'ADAPTIVE_EXECUTION',
+    'CLOSED_LOOP_CALIBRATION',
     'RISK_GOVERNOR',
     'POSITION_SIZING',
     'TRADE_GEOMETRY',
@@ -110,17 +114,23 @@ export function resolveAuthoritativeDecision(input: ResolveDecisionInput): Decis
   let finalDecision: FinalDecision = 'EXECUTE';
   let authoritativeReasonCode = 'ALL_GATES_PASSED';
   let authoritativeReason = 'All evaluation gates passed successfully; trade authorized for execution.';
+  let rejectedGate: DecisionGateType | null = null;
+  let rejectionReason: string | null = null;
 
   for (const gate of orderedGates) {
     if (gate.status === 'REJECT') {
       finalDecision = 'NO_TRADE';
       authoritativeReasonCode = gate.reasonCode || `${gate.gate}_REJECTED`;
       authoritativeReason = gate.reason || `Rejected by ${gate.gate} gate.`;
+      rejectedGate = gate.gate;
+      rejectionReason = authoritativeReason;
       break;
     } else if (gate.status === 'WAIT') {
       finalDecision = 'WAIT';
       authoritativeReasonCode = gate.reasonCode || `${gate.gate}_WAIT`;
       authoritativeReason = gate.reason || `Execution paused / waiting by ${gate.gate} gate.`;
+      rejectedGate = gate.gate;
+      rejectionReason = authoritativeReason;
       break;
     }
   }
@@ -129,6 +139,8 @@ export function resolveAuthoritativeDecision(input: ResolveDecisionInput): Decis
     finalDecision,
     authoritativeReasonCode,
     authoritativeReason,
+    rejectedGate,
+    rejectionReason,
     decisionChain: orderedGates,
     tradeId: finalDecision === 'EXECUTE' ? (input.tradeId || null) : null,
     userId: input.userId,

@@ -8,10 +8,30 @@ import {
   AlertTriangle, 
   X, 
   Play, 
-  Check 
+  Check,
+  TrendingUp,
+  TrendingDown,
+  Target,
+  ShieldAlert,
+  Clock,
+  Activity,
+  Zap
 } from 'lucide-react';
 import { WatchlistItem } from '../types';
 import { normalizeSymbol } from '../../lib/market-utils';
+
+export interface ActiveTradeData {
+  watcherId?: string;
+  tradeId?: string | null;
+  symbol: string;
+  timeframe: string;
+  direction: 'BUY' | 'SELL';
+  entryPrice: number;
+  stopLoss: number;
+  takeProfit: number;
+  currentPrice?: number;
+  openedAt?: string | null;
+}
 
 export interface WatcherTabProps {
   isTelegramLoading: boolean;
@@ -38,6 +58,9 @@ export interface WatcherTabProps {
   handleRemovePair: (symbol: string) => void;
   geminiKeyExists?: boolean;
   onGoToSettings?: () => void;
+  activeTrade?: ActiveTradeData | null;
+  onResolveTrade?: (watcherId: string, resolutionType: 'TP_HIT' | 'SL_HIT' | 'BREAKEVEN' | 'MANUAL_CLOSE', exitPrice?: number) => Promise<void>;
+  isResolvingTrade?: boolean;
 }
 
 export const WatcherTab: React.FC<WatcherTabProps> = ({
@@ -65,7 +88,51 @@ export const WatcherTab: React.FC<WatcherTabProps> = ({
   handleRemovePair,
   geminiKeyExists = true,
   onGoToSettings,
+  activeTrade,
+  onResolveTrade,
+  isResolvingTrade = false,
 }) => {
+  // Derive telemetry if activeTrade is available
+  const activeTelemetry = React.useMemo(() => {
+    if (!activeTrade || !activeTrade.entryPrice || !activeTrade.stopLoss || !activeTrade.takeProfit) {
+      return null;
+    }
+    const cleanSym = (activeTrade.symbol || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const pipSize = (cleanSym.includes('JPY') || cleanSym.includes('XAU') || cleanSym.includes('GOLD') || cleanSym.includes('BTC')) ? 0.01 : 0.0001;
+    const isBuy = (activeTrade.direction || 'BUY').toUpperCase() === 'BUY';
+    const currentPrice = activeTrade.currentPrice || activeTrade.entryPrice;
+    
+    const riskDist = isBuy ? activeTrade.entryPrice - activeTrade.stopLoss : activeTrade.stopLoss - activeTrade.entryPrice;
+    const rewardDist = isBuy ? activeTrade.takeProfit - activeTrade.entryPrice : activeTrade.entryPrice - activeTrade.takeProfit;
+    const profitDist = isBuy ? currentPrice - activeTrade.entryPrice : activeTrade.entryPrice - currentPrice;
+
+    const unrealizedR = riskDist > 0 ? Math.round((profitDist / riskDist) * 100) / 100 : 0;
+    const targetR = riskDist > 0 ? Math.round((rewardDist / riskDist) * 100) / 100 : 2.0;
+
+    const pipsProfit = Math.round((profitDist / pipSize) * 10) / 10;
+    const pipsToTP = Math.round((Math.abs(activeTrade.takeProfit - currentPrice) / pipSize) * 10) / 10;
+    const pipsToSL = Math.round((Math.abs(activeTrade.stopLoss - currentPrice) / pipSize) * 10) / 10;
+
+    const totalRange = Math.abs(activeTrade.takeProfit - activeTrade.stopLoss);
+    let progressPct = 50;
+    if (totalRange > 0) {
+      if (isBuy) {
+        progressPct = Math.min(100, Math.max(0, Math.round(((currentPrice - activeTrade.stopLoss) / totalRange) * 100)));
+      } else {
+        progressPct = Math.min(100, Math.max(0, Math.round(((activeTrade.stopLoss - currentPrice) / totalRange) * 100)));
+      }
+    }
+
+    return {
+      unrealizedR,
+      targetR,
+      pipsProfit,
+      pipsToTP,
+      pipsToSL,
+      progressPct,
+      currentPrice
+    };
+  }, [activeTrade]);
   return (
     <div className="space-y-8 animate-fade-in">
       
@@ -209,6 +276,143 @@ export const WatcherTab: React.FC<WatcherTabProps> = ({
           </div>
         )}
       </div>
+
+      {/* Active Trade Live Telemetry Card (When in ACTIVE trade status) */}
+      {isWatcherActive && watcherTradeStatus === 'ACTIVE' && activeTrade && activeTelemetry && (
+        <div className="p-6 rounded-3xl border border-emerald-500/30 dark:border-emerald-500/20 bg-emerald-500/5 dark:bg-[#0c1610]/80 space-y-5 shadow-md animate-fade-in relative overflow-hidden">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5">
+              <span className="flex h-2.5 w-2.5 relative">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+              </span>
+              <span className="text-xs font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-400">
+                Active Live Position
+              </span>
+              <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold tracking-wider uppercase border ${
+                activeTrade.direction === 'BUY'
+                  ? 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800'
+                  : 'bg-rose-100 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border-rose-300 dark:border-rose-800'
+              }`}>
+                {activeTrade.direction}
+              </span>
+              <span className="text-xs font-bold text-zinc-900 dark:text-white">
+                {activeTrade.symbol} · {activeTrade.timeframe}
+              </span>
+              {activeTrade.tradeId && (
+                <span className="text-[10px] font-mono text-zinc-500 dark:text-zinc-400 bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 rounded-md">
+                  {activeTrade.tradeId}
+                </span>
+              )}
+            </div>
+
+            <div className="text-right">
+              <div className={`text-base sm:text-lg font-bold font-mono tracking-tight ${
+                activeTelemetry.unrealizedR >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-500'
+              }`}>
+                {activeTelemetry.unrealizedR >= 0 ? '+' : ''}{activeTelemetry.unrealizedR.toFixed(2)} R
+                <span className="text-xs font-normal text-zinc-500 dark:text-zinc-400 ml-1.5 font-sans">
+                  ({activeTelemetry.pipsProfit >= 0 ? '+' : ''}{activeTelemetry.pipsProfit} pips)
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* 4-Metric Grid */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-1">
+            <div className="p-3 rounded-2xl bg-white/80 dark:bg-zinc-900/60 border border-zinc-200/80 dark:border-zinc-800 space-y-0.5 shadow-xs">
+              <span className="text-[10px] uppercase font-bold text-zinc-500 block">Entry Price</span>
+              <span className="text-xs sm:text-sm font-bold font-mono text-zinc-900 dark:text-white tabular-nums">
+                {activeTrade.entryPrice}
+              </span>
+            </div>
+            <div className="p-3 rounded-2xl bg-white/80 dark:bg-zinc-900/60 border border-zinc-200/80 dark:border-zinc-800 space-y-0.5 shadow-xs">
+              <span className="text-[10px] uppercase font-bold text-zinc-500 block">Current Price</span>
+              <span className="text-xs sm:text-sm font-bold font-mono text-zinc-900 dark:text-white tabular-nums">
+                {activeTelemetry.currentPrice}
+              </span>
+            </div>
+            <div className="p-3 rounded-2xl bg-white/80 dark:bg-zinc-900/60 border border-zinc-200/80 dark:border-zinc-800 space-y-0.5 shadow-xs">
+              <span className="text-[10px] uppercase font-bold text-rose-500 block">Stop Loss</span>
+              <div className="flex items-center justify-between">
+                <span className="text-xs sm:text-sm font-bold font-mono text-zinc-900 dark:text-white tabular-nums">
+                  {activeTrade.stopLoss}
+                </span>
+                <span className="text-[10px] text-zinc-400 font-mono">
+                  {activeTelemetry.pipsToSL}p
+                </span>
+              </div>
+            </div>
+            <div className="p-3 rounded-2xl bg-white/80 dark:bg-zinc-900/60 border border-zinc-200/80 dark:border-zinc-800 space-y-0.5 shadow-xs">
+              <span className="text-[10px] uppercase font-bold text-emerald-600 dark:text-emerald-400 block">Take Profit</span>
+              <div className="flex items-center justify-between">
+                <span className="text-xs sm:text-sm font-bold font-mono text-zinc-900 dark:text-white tabular-nums">
+                  {activeTrade.takeProfit}
+                </span>
+                <span className="text-[10px] text-zinc-400 font-mono">
+                  {activeTelemetry.pipsToTP}p
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Visual Range Bar */}
+          <div className="space-y-1.5 pt-1">
+            <div className="flex justify-between text-[10px] font-bold text-zinc-500">
+              <span className="text-rose-500">SL: {activeTrade.stopLoss}</span>
+              <span className="text-zinc-600 dark:text-zinc-300">Progress: {activeTelemetry.progressPct}%</span>
+              <span className="text-emerald-600 dark:text-emerald-400">TP: {activeTrade.takeProfit} ({activeTelemetry.targetR}R)</span>
+            </div>
+            <div className="w-full h-2 rounded-full bg-zinc-200 dark:bg-zinc-800 overflow-hidden relative">
+              <div 
+                className={`h-full transition-all duration-500 ${
+                  activeTelemetry.unrealizedR >= 0 ? 'bg-emerald-500' : 'bg-rose-500'
+                }`}
+                style={{ width: `${activeTelemetry.progressPct}%` }}
+              ></div>
+            </div>
+          </div>
+
+          {/* Manual Outcome Resolution Controls */}
+          {onResolveTrade && activeTrade.watcherId && (
+            <div className="pt-2 border-t border-emerald-500/20 dark:border-emerald-500/10 flex flex-wrap items-center justify-between gap-2">
+              <span className="text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
+                Manual broker sync actions:
+              </span>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <button
+                  disabled={isResolvingTrade}
+                  onClick={() => onResolveTrade(activeTrade.watcherId!, 'TP_HIT', activeTrade.takeProfit)}
+                  className="px-3 py-1.5 rounded-xl text-[10px] font-bold bg-emerald-600 hover:bg-emerald-700 text-white transition-all cursor-pointer shadow-xs disabled:opacity-50"
+                >
+                  Hit Target (+{activeTelemetry.targetR}R)
+                </button>
+                <button
+                  disabled={isResolvingTrade}
+                  onClick={() => onResolveTrade(activeTrade.watcherId!, 'BREAKEVEN', activeTrade.entryPrice)}
+                  className="px-3 py-1.5 rounded-xl text-[10px] font-bold bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 transition-all cursor-pointer shadow-xs disabled:opacity-50"
+                >
+                  Breakeven (0.0R)
+                </button>
+                <button
+                  disabled={isResolvingTrade}
+                  onClick={() => onResolveTrade(activeTrade.watcherId!, 'SL_HIT', activeTrade.stopLoss)}
+                  className="px-3 py-1.5 rounded-xl text-[10px] font-bold bg-rose-600 hover:bg-rose-700 text-white transition-all cursor-pointer shadow-xs disabled:opacity-50"
+                >
+                  Hit Stop (-1.0R)
+                </button>
+                <button
+                  disabled={isResolvingTrade}
+                  onClick={() => onResolveTrade(activeTrade.watcherId!, 'MANUAL_CLOSE', activeTelemetry.currentPrice)}
+                  className="px-3 py-1.5 rounded-xl text-[10px] font-bold border border-zinc-300 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-800 dark:text-zinc-200 transition-all cursor-pointer shadow-xs disabled:opacity-50"
+                >
+                  Close at Market
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Add Custom Forex Ticker Form with Timeframe and Activate Button */}
       <div className="p-6 rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-[#0c0c0e]/80 space-y-5 shadow-sm">

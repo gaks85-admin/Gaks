@@ -8,7 +8,9 @@ import telegramWebhookHandler from "./api/telegram/webhook";
 import watcherStartHandler from "./api/watcher/start";
 import watcherScanHandler from "./api/watcher/scan";
 import watcherStopHandler from "./api/watcher/stop";
+import watcherResolveTradeHandler from "./api/watcher/resolve-trade";
 import strategySummaryHandler from "./api/strategy/summary";
+import performanceSnapshotHandler from "./api/performance/snapshot";
 
 async function startServer() {
   const app = express();
@@ -87,12 +89,17 @@ async function startServer() {
   // Strategy APIs
   app.post("/api/strategy/summary", strategySummaryHandler as any);
 
+  // Performance Visibility APIs
+  app.get("/api/performance/snapshot", performanceSnapshotHandler as any);
+  app.post("/api/performance/snapshot", performanceSnapshotHandler as any);
+
   // Watcher APIs
   app.post("/api/watcher/start", watcherStartHandler as any);
   app.post("/api/watcher/scan", watcherScanHandler as any);
   app.post("/api/watcher/activate", watcherStartHandler as any);
   app.post("/api/watcher/stop", watcherStopHandler as any);
   app.delete("/api/watcher/stop", watcherStopHandler as any);
+  app.post("/api/watcher/resolve-trade", watcherResolveTradeHandler as any);
 
   // Live Rates
   app.get("/api/live-rates", liveRatesHandler as any);

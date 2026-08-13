@@ -2,6 +2,7 @@ import { supabase as defaultSupabase } from '../supabaseClient.js';
 
 export interface TradeLearningRecord {
   id?: string;
+  trade_id?: string | null;
   created_at?: string;
   user_id: string;
   watcher_id: string;
@@ -65,6 +66,7 @@ export async function recordCompletedTrade(
   params: {
     user_id: string;
     watcher_id: string;
+    trade_id?: string | null;
     evaluation_id?: string | null;
     pair: string;
     timeframe: string;
@@ -76,6 +78,7 @@ export async function recordCompletedTrade(
     direction: string; // 'BUY', 'SELL', etc.
     opened_at: string | Date;
     closed_at: string | Date;
+    outcome?: 'WIN' | 'LOSS' | 'BREAKEVEN' | string;
     decision_score?: number | null;
     matched_weight?: number | null;
     possible_weight?: number | null;
@@ -94,6 +97,30 @@ export async function recordCompletedTrade(
   const start = Date.now();
 
   try {
+    // 1. Strict user_id validation
+    if (!params.user_id || typeof params.user_id !== 'string' || !params.user_id.trim()) {
+      console.error('[Learning Engine] user_id is required to record completed trade. Aborting.');
+      return null;
+    }
+
+    // 2. Strict idempotency check using trade_id
+    if (params.trade_id && client && typeof client.from === 'function') {
+      try {
+        const { data: existingTrade } = await client
+          .from('trade_learning')
+          .select('*')
+          .eq('trade_id', params.trade_id)
+          .maybeSingle();
+
+        if (existingTrade) {
+          console.log(`[Learning Engine] Trade ${params.trade_id} already recorded in trade_learning. Idempotent return.`);
+          return existingTrade;
+        }
+      } catch (e: any) {
+        console.warn(`[Learning Engine] Idempotency check error for trade_id ${params.trade_id}:`, e.message);
+      }
+    }
+
     const dir = (params.direction || '').toUpperCase().trim();
     const isBuy = dir === 'BUY' || dir === 'LONG';
     const cleanSym = (params.pair || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
@@ -104,14 +131,36 @@ export async function recordCompletedTrade(
     const diff = params.exit_price - params.entry_price;
     const pips = isBuy ? diff / pipSize : -diff / pipSize;
 
-    // Calculate Outcome if not provided
+    // Calculate Outcome
     let outcome: 'WIN' | 'LOSS' | 'BREAKEVEN' = 'BREAKEVEN';
-    if (Math.abs(pips) < 1.0) {
-      outcome = 'BREAKEVEN';
-    } else if (pips > 0) {
-      outcome = 'WIN';
+    if (params.outcome) {
+      const sanitized = String(params.outcome).toUpperCase().trim();
+      if (sanitized === 'WIN' || sanitized === 'LOSS' || sanitized === 'BREAKEVEN') {
+        outcome = sanitized as 'WIN' | 'LOSS' | 'BREAKEVEN';
+      } else {
+        console.warn(`[Learning Engine] Non-terminal or invalid outcome passed ('${params.outcome}'). Calculating strictly from pips.`);
+        if (Math.abs(pips) < 1.0) {
+          outcome = 'BREAKEVEN';
+        } else if (pips > 0) {
+          outcome = 'WIN';
+        } else {
+          outcome = 'LOSS';
+        }
+      }
     } else {
-      outcome = 'LOSS';
+      if (Math.abs(pips) < 1.0) {
+        outcome = 'BREAKEVEN';
+      } else if (pips > 0) {
+        outcome = 'WIN';
+      } else {
+        outcome = 'LOSS';
+      }
+    }
+
+    // Double check: strictly block any non-terminal outcome from entering learning database
+    if (outcome !== 'WIN' && outcome !== 'LOSS' && outcome !== 'BREAKEVEN') {
+      console.warn(`[Learning Engine] Blocked non-terminal outcome '${outcome}' from entering learning database.`);
+      return null;
     }
 
     // Calculate expected & achieved RR
@@ -142,6 +191,7 @@ export async function recordCompletedTrade(
     const payload: TradeLearningRecord = {
       user_id: params.user_id,
       watcher_id: params.watcher_id,
+      trade_id: params.trade_id || null,
       evaluation_id: params.evaluation_id || null,
       pair: params.pair,
       timeframe: params.timeframe,
@@ -199,10 +249,13 @@ export async function recordCompletedTrade(
  */
 async function fetchAllUserTrades(supabase: any, userId: string): Promise<TradeLearningRecord[]> {
   const client = supabase || defaultSupabase;
+  if (!userId) return [];
+
   const { data, error } = await client
     .from('trade_learning')
     .select('*')
-    .eq('user_id', userId);
+    .eq('user_id', userId)
+    .in('outcome', ['WIN', 'LOSS', 'BREAKEVEN']);
 
   if (error) {
     console.error('[Learning Engine] Fetch trades error:', error.message);

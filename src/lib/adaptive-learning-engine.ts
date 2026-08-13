@@ -35,6 +35,19 @@ export async function fetchCompletedTradesForAdaptiveLearning(supabase: any, use
   if (!userId) return [];
 
   try {
+    // 1. Primary: fetch from trade_learning table
+    const { data: learningData, error: learningErr } = await client
+      .from('trade_learning')
+      .select('*')
+      .eq('user_id', userId)
+      .in('outcome', ['WIN', 'LOSS', 'BREAKEVEN'])
+      .order('created_at', { ascending: true });
+
+    if (!learningErr && Array.isArray(learningData) && learningData.length > 0) {
+      return learningData;
+    }
+
+    // 2. Fallback: fetch from watcher_evaluations table
     const { data, error } = await client
       .from('watcher_evaluations')
       .select('*')
@@ -43,14 +56,7 @@ export async function fetchCompletedTradesForAdaptiveLearning(supabase: any, use
       .order('created_at', { ascending: true });
 
     if (error || !data) {
-      const { data: learningData, error: learningErr } = await client
-        .from('trade_learning')
-        .select('*')
-        .eq('user_id', userId)
-        .order('created_at', { ascending: true });
-
-      if (learningErr || !learningData) return [];
-      return learningData;
+      return [];
     }
     return data;
   } catch (err) {
@@ -69,7 +75,7 @@ export function filterValidCompletedTrades(trades: any[]): any[] {
     return (outcome === 'WIN' || outcome === 'LOSS' || outcome === 'BREAKEVEN') &&
            t.user_id &&
            !t.is_active &&
-           t.trade_id;
+           (t.trade_id || t.id);
   });
 }
 

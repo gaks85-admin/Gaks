@@ -41,6 +41,7 @@ export function runDecisionAttributionTestSuite() {
     { gate: 'ADAPTIVE_LEARNING', status: 'PASS', reasonCode: 'ADAPTIVE_LEARNING_PASSED', reason: 'Adaptive learning passed', timestamp: new Date().toISOString() },
     { gate: 'ADAPTIVE_QUALITY', status: 'PASS', reasonCode: 'ADAPTIVE_QUALITY_PASSED', reason: 'Adaptive quality passed', timestamp: new Date().toISOString() },
     { gate: 'ADAPTIVE_EXECUTION', status: 'PASS', reasonCode: 'ADAPTIVE_EXECUTION_PASSED', reason: 'Adaptive execution passed', timestamp: new Date().toISOString() },
+    { gate: 'CLOSED_LOOP_CALIBRATION', status: 'PASS', reasonCode: 'CALIBRATION_NORMAL', reason: 'Closed-loop calibration passed', timestamp: new Date().toISOString() },
     { gate: 'RISK_GOVERNOR', status: 'PASS', reasonCode: 'RISK_GOVERNOR_PASSED', reason: 'Risk governor passed', timestamp: new Date().toISOString() },
     { gate: 'POSITION_SIZING', status: 'PASS', reasonCode: 'POSITION_SIZE_PASSED', reason: 'Position size valid', timestamp: new Date().toISOString() },
     { gate: 'TRADE_GEOMETRY', status: 'PASS', reasonCode: 'GEOMETRY_VALID', reason: 'Geometry valid', timestamp: new Date().toISOString() },
@@ -119,7 +120,7 @@ export function runDecisionAttributionTestSuite() {
   assert(r14.authoritativeReasonCode === 'STRATEGY_MISMATCH', 'Test 14 - Pipeline precedence resolves to earliest failure');
 
   // 15. Deterministic reason precedence
-  assert(r14.decisionChain.length === 11, 'Test 15 - Full 11-gate decision chain evaluated');
+  assert(r14.decisionChain.length === 12, 'Test 15 - Full 12-gate decision chain evaluated');
 
   // 16. Direction consistency
   assert(r1.direction === 'BUY', 'Test 16 - Direction preserved in attribution');
@@ -198,7 +199,7 @@ export function runDecisionAttributionTestSuite() {
 
   // 40. Full decision-chain determinism
   const r40 = resolveAuthoritativeDecision({ ...baseInput, gates: passingGates });
-  assert(r40.decisionChain.length === 11 && r40.finalDecision === 'EXECUTE', 'Test 40 - Full decision chain determinism verified');
+  assert(r40.decisionChain.length === 12 && r40.finalDecision === 'EXECUTE', 'Test 40 - Full decision chain determinism verified');
 
   console.log(`\n--- DECISION ATTRIBUTION TEST SUITE RESULTS ---`);
   console.log(`Passed: ${passed}`);

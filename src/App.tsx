@@ -11,8 +11,9 @@ import { AuthSkeleton } from './components/Auth';
 const ResetPassword = React.lazy(() => import('./components/ResetPassword'));
 import AdminDashboard from './components/admin/AdminDashboard';
 import { StrategyTab } from './components/StrategyTab';
-import { WatcherTab } from './components/WatcherTab';
+import { WatcherTab, ActiveTradeData } from './components/WatcherTab';
 import { SettingsTab } from './components/SettingsTab';
+import { LearningPerformanceView } from './components/LearningPerformanceView';
 
 const TabLoading = () => (
   <div className="space-y-8 animate-pulse p-4">
@@ -24,6 +25,7 @@ const TabLoading = () => (
 import {
   Home as HomeIcon,
   TrendingUp,
+  Activity,
   Eye,
   LogOut,
   RefreshCw,
@@ -142,7 +144,7 @@ const serializeStrategies = (activeId: string, list: Strategy[]) => {
 };
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'home' | 'strategy' | 'watcher' | 'settings' | 'admin'>('home');
+  const [activeTab, setActiveTab] = useState<'home' | 'strategy' | 'watcher' | 'performance' | 'settings' | 'admin'>('home');
 
   const [isResetPasswordPage, setIsResetPasswordPage] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -337,6 +339,8 @@ export default function App() {
   const [watcherTradeStatus, setWatcherTradeStatus] = useState<string>('WAITING');
   const [watcherLastScanAt, setWatcherLastScanAt] = useState<string>('');
   const [watcherLastCandle, setWatcherLastCandle] = useState<string>('');
+  const [activeTrade, setActiveTrade] = useState<ActiveTradeData | null>(null);
+  const [isResolvingTrade, setIsResolvingTrade] = useState<boolean>(false);
 
   // Client-side Strategy Timeframe Compilation
   const compiledStrategyTimeframes = useMemo(() => {
@@ -1175,7 +1179,7 @@ export default function App() {
     try {
       const { data, error } = await supabase
         .from('watchers')
-        .select('id, status, selected_pair, selected_timeframe, trade_status, last_scan_at, last_analyzed_closed_candle_time')
+        .select('id, status, selected_pair, selected_timeframe, trade_status, active_trade_id, direction, entry_price, stop_loss, take_profit, opened_at, cooldown_until, last_scan_at, last_analyzed_closed_candle_time, last_signal_data')
         .eq('user_id', userId);
       console.log(`[WATCHER LIFECYCLE] WATCHER FETCHED (loadWatcherStatus): ${JSON.stringify(data)}`);
         
@@ -1215,9 +1219,62 @@ export default function App() {
         if (activeOne.trade_status) setWatcherTradeStatus(activeOne.trade_status);
         if (activeOne.last_scan_at) setWatcherLastScanAt(activeOne.last_scan_at);
         if (activeOne.last_analyzed_closed_candle_time) setWatcherLastCandle(activeOne.last_analyzed_closed_candle_time);
+
+        if (activeOne.trade_status === 'ACTIVE' && activeOne.entry_price && activeOne.stop_loss && activeOne.take_profit) {
+          const matchingRate = liveRates.find(r => normalizeSymbol(r.symbol) === normalizeSymbol(activeOne.selected_pair));
+          setActiveTrade({
+            watcherId: activeOne.id,
+            tradeId: activeOne.active_trade_id || activeOne.last_signal_data?.trade_id || null,
+            symbol: activeOne.selected_pair,
+            timeframe: activeOne.selected_timeframe || 'H1',
+            direction: ((activeOne.direction || 'BUY').toUpperCase() === 'SELL' ? 'SELL' : 'BUY'),
+            entryPrice: parseFloat(String(activeOne.entry_price)),
+            stopLoss: parseFloat(String(activeOne.stop_loss)),
+            takeProfit: parseFloat(String(activeOne.take_profit)),
+            currentPrice: matchingRate?.price ? matchingRate.price : undefined,
+            openedAt: activeOne.opened_at
+          });
+        } else {
+          setActiveTrade(null);
+        }
+      } else {
+        setActiveTrade(null);
       }
     } catch (err) {
       console.error("Error loading watcher status:", err);
+    }
+  };
+
+  const handleResolveTrade = async (watcherId: string, resolutionType: 'TP_HIT' | 'SL_HIT' | 'BREAKEVEN' | 'MANUAL_CLOSE', exitPrice?: number) => {
+    if (!session?.user) return;
+    setIsResolvingTrade(true);
+    try {
+      const res = await fetch('/api/watcher/resolve-trade', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`
+        },
+        body: JSON.stringify({
+          userId: session.user.id,
+          watcherId,
+          resolutionType,
+          exitPrice
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        const pnlLabel = data.data?.pnlR !== undefined ? ` (${data.data.pnlR >= 0 ? '+' : ''}${data.data.pnlR}R)` : '';
+        triggerNotification(`Trade resolved: ${resolutionType}${pnlLabel}`, 'success');
+        await loadWatcherStatus(session.user.id);
+      } else {
+        triggerNotification(data.error || "Failed to resolve trade", "info");
+      }
+    } catch (err: any) {
+      console.error("Error resolving trade:", err);
+      triggerNotification("Failed to resolve trade", "info");
+    } finally {
+      setIsResolvingTrade(false);
     }
   };
 
@@ -2310,10 +2367,18 @@ export default function App() {
               handleRemovePair={handleRemovePair}
               geminiKeyExists={geminiKeyExists}
               onGoToSettings={() => setActiveTab('settings')}
+              activeTrade={activeTrade}
+              onResolveTrade={handleResolveTrade}
+              isResolvingTrade={isResolvingTrade}
             />
           )}
 
-          {/* ==================== TAB 4: SETTINGS & PROFILE ==================== */}
+          {/* ==================== TAB 4: PERFORMANCE & LEARNING ==================== */}
+          {activeTab === 'performance' && (
+            <LearningPerformanceView userId={session?.user?.id} authToken={session?.access_token} />
+          )}
+
+          {/* ==================== TAB 5: SETTINGS & PROFILE ==================== */}
           {activeTab === 'settings' && (
             <SettingsTab
               profileAvatarUrl={profileAvatarUrl}
@@ -2397,6 +2462,22 @@ export default function App() {
             }`}>
               <Eye className="w-4 h-4 stroke-[1.8]" />
               <span className="text-[10px] font-medium tracking-normal">Watcher</span>
+            </div>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('performance')}
+            className={`flex-1 flex flex-col items-center gap-1 cursor-pointer transition-all ${
+              activeTab === 'performance'
+                ? 'text-zinc-950 dark:text-white'
+                : 'text-zinc-400 hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300'
+            }`}
+          >
+            <div className={`py-1.5 px-3 rounded-2xl flex flex-col items-center gap-1 transition-all ${
+              activeTab === 'performance' ? 'bg-zinc-100 dark:bg-[#1a1a1e] text-zinc-950 dark:text-white shadow-sm font-medium' : ''
+            }`}>
+              <Activity className="w-4 h-4 stroke-[1.8]" />
+              <span className="text-[10px] font-medium tracking-normal">Learning</span>
             </div>
           </button>
 

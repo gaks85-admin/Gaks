@@ -26,6 +26,7 @@ import { evaluateAdaptiveLearning, fetchCompletedTradesForAdaptiveLearning } fro
 import { calculateAdaptiveQualityRequirement } from '../../src/lib/quality-gate.js';
 import { evaluateAdaptiveExecution } from '../../src/lib/adaptive-execution-engine.js';
 import { evaluateClosedLoopCalibration } from '../../src/lib/closed-loop-calibration-engine.js';
+import { resolveAuthoritativeDecision, DecisionGateResult } from '../../src/lib/decision-attribution.js';
 
 // --- Inlined Gemini Wrapper ---
 
@@ -912,6 +913,7 @@ Reason: ${activeValidation.reason}`);
 
           const { error: invalidUpdateErr } = await supabase.from("watchers").update({
             trade_status: 'WAITING',
+            active_trade_id: null,
             direction: null,
             entry_price: null,
             stop_loss: null,
@@ -1045,9 +1047,12 @@ Reason: ${activeValidation.reason}`);
             console.warn('[Learning Engine] Could not fetch latest evaluation:', e.message);
           }
 
+          const activeTradeId = watcher.active_trade_id || watcher.last_signal_data?.trade_id || watcher.last_signal_data?.tradeId || null;
+
           await recordCompletedTrade(supabase, {
             user_id: userId,
             watcher_id: watcher.id,
+            trade_id: activeTradeId,
             evaluation_id: latestEval?.id || null,
             pair: selectedPair,
             timeframe: selectedTimeframe,
@@ -1078,6 +1083,7 @@ Reason: ${activeValidation.reason}`);
             .from("watchers")
             .update({
               trade_status: 'COOLDOWN',
+              active_trade_id: null,
               closed_at: new Date().toISOString(),
               cooldown_until: cooldownUntilIso,
               last_scan_at: new Date().toISOString(),
@@ -1123,9 +1129,12 @@ Reason: ${activeValidation.reason}`);
             console.warn('[Learning Engine] Could not fetch latest evaluation:', e.message);
           }
 
+          const activeTradeIdSL = watcher.active_trade_id || watcher.last_signal_data?.trade_id || watcher.last_signal_data?.tradeId || null;
+
           await recordCompletedTrade(supabase, {
             user_id: userId,
             watcher_id: watcher.id,
+            trade_id: activeTradeIdSL,
             evaluation_id: latestEval?.id || null,
             pair: selectedPair,
             timeframe: selectedTimeframe,
@@ -1156,6 +1165,7 @@ Reason: ${activeValidation.reason}`);
             .from("watchers")
             .update({
               trade_status: 'COOLDOWN',
+              active_trade_id: null,
               closed_at: new Date().toISOString(),
               cooldown_until: cooldownUntilIso,
               last_scan_at: new Date().toISOString(),
@@ -1472,7 +1482,7 @@ Reason: ${activeValidation.reason}`);
         );
         const ruleDecisionScore = ruleDecisionScoreRecord.normalized;
 
-        const decisionSnapshot = buildDecisionSnapshot(decisionResult, histResult, compiledStrategy);
+        let decisionSnapshot: any = buildDecisionSnapshot(decisionResult, histResult, compiledStrategy);
 
         // Stage 4
         addLog("Decision Engine Complete", "success");
@@ -1926,9 +1936,16 @@ Fallback: NO_TRADE`.trim());
 
         console.log(`LOG: Signal result for ${selectedPair}: ${analysis.signal} (Confidence: ${analysis.confidence}%)`);
 
+        let qualityResult: any = null;
+        let governorResult: any = null;
+        let calibrationResult: any = null;
+        let adaptiveResult: any = null;
+        let adaptiveReq: any = null;
+        let executionResult: any = null;
+
         // Quality Gate Check (QUALITY OVER QUANTITY)
         if (analysis.signal === 'BUY' || analysis.signal === 'SELL') {
-          const qualityResult = evaluateQualityGate({
+          qualityResult = evaluateQualityGate({
             ruleScore: ruleDecisionScore,
             marketStructure: marketStructure,
             mandatoryRulesPassed: decisionResult.mandatory_rules_passed ?? true,
@@ -1948,7 +1965,6 @@ Fallback: NO_TRADE`.trim());
         }
 
         // Equity-Aware Learning & Risk Governor Evaluation
-        let governorResult: any = null;
         if (analysis.signal === 'BUY' || analysis.signal === 'SELL') {
           try {
             const completedTrades = await fetchUserCompletedTrades(supabase, userId);
@@ -1994,7 +2010,7 @@ Fallback: NO_TRADE`.trim());
         if (analysis.signal === 'BUY' || analysis.signal === 'SELL') {
           try {
             const completedTrades = await fetchCompletedTradesForAdaptiveLearning(supabase, userId);
-            const calibrationResult = evaluateClosedLoopCalibration({
+            calibrationResult = evaluateClosedLoopCalibration({
               userId,
               pair: selectedPair,
               timeframe: selectedTimeframe,
@@ -2043,7 +2059,7 @@ Fallback: NO_TRADE`.trim());
         if (analysis.signal === 'BUY' || analysis.signal === 'SELL') {
           try {
             const completedTrades = await fetchCompletedTradesForAdaptiveLearning(supabase, userId);
-            const adaptiveResult = evaluateAdaptiveLearning({
+            adaptiveResult = evaluateAdaptiveLearning({
               pair: selectedPair,
               timeframe: selectedTimeframe,
               setup: compiledStrategy?.strategy_mode || 'HYBRID',
@@ -2052,7 +2068,7 @@ Fallback: NO_TRADE`.trim());
               completedTrades
             });
 
-            const adaptiveReq = calculateAdaptiveQualityRequirement({
+            adaptiveReq = calculateAdaptiveQualityRequirement({
               baseThreshold: 75,
               classification: adaptiveResult.classification,
               tier: adaptiveResult.tier,
@@ -2110,7 +2126,7 @@ Reason: ${adaptiveReq.reason}
             // Adaptive Execution Timing (Stage 3D)
             if (analysis.signal === 'BUY' || analysis.signal === 'SELL') {
               try {
-                const executionResult = evaluateAdaptiveExecution({
+                executionResult = evaluateAdaptiveExecution({
                   pair: selectedPair,
                   timeframe: selectedTimeframe,
                   setup: compiledStrategy?.strategy_mode || 'HYBRID',
@@ -2278,6 +2294,159 @@ ${analysis.stopLossBasis === 'ATR_FALLBACK' ? `ATR: ${marketStructure.volatility
           continue;
         }
 
+        const candidateTradeId = `TR-${watcher.id}-${Date.now()}`;
+
+        const gatesList: DecisionGateResult[] = [
+          {
+            gate: 'MARKET_DATA',
+            status: candleData && candleData.length > 0 ? 'PASS' : 'REJECT',
+            reasonCode: candleData && candleData.length > 0 ? 'MARKET_DATA_VALID' : 'MARKET_DATA_EMPTY',
+            reason: candleData && candleData.length > 0 ? 'Market candle data received and valid' : 'Market data missing or empty',
+            timestamp: new Date().toISOString()
+          },
+          {
+            gate: 'STRATEGY',
+            status: recommendation !== 'FAIL' ? 'PASS' : 'REJECT',
+            reasonCode: recommendation !== 'FAIL' ? 'STRATEGY_PASSED' : 'STRATEGY_FAILED',
+            reason: decisionResult.explanation || `Strategy recommendation: ${recommendation}`,
+            timestamp: new Date().toISOString()
+          },
+          {
+            gate: 'GEMINI',
+            status: !requiresGemini ? 'NOT_EVALUATED' : (geminiSucceeded ? 'PASS' : 'REJECT'),
+            reasonCode: !requiresGemini ? 'NOT_EVALUATED' : (geminiSucceeded ? 'GEMINI_PASSED' : 'GEMINI_REJECTED'),
+            reason: !requiresGemini ? 'Gemini AI verification not required' : (geminiSucceeded ? 'Gemini AI confirmed trade setup' : 'Gemini AI rejected or unavailable'),
+            timestamp: new Date().toISOString()
+          },
+          {
+            gate: 'QUALITY',
+            status: qualityResult ? (qualityResult.passed ? 'PASS' : 'REJECT') : 'NOT_EVALUATED',
+            reasonCode: qualityResult ? (qualityResult.passed ? 'QUALITY_PASSED' : 'QUALITY_REJECTED') : 'NOT_EVALUATED',
+            reason: qualityResult?.reason || 'Quality gate validation',
+            timestamp: new Date().toISOString()
+          },
+          {
+            gate: 'ADAPTIVE_LEARNING',
+            status: adaptiveResult ? (adaptiveResult.decision === 'REJECT' ? 'REJECT' : 'PASS') : 'NOT_EVALUATED',
+            reasonCode: adaptiveResult ? (adaptiveResult.decision === 'REJECT' ? 'ADAPTIVE_LEARNING_REJECT' : 'ADAPTIVE_LEARNING_PASS') : 'NOT_EVALUATED',
+            reason: adaptiveResult?.reason || 'Adaptive historical learning evaluation',
+            timestamp: new Date().toISOString()
+          },
+          {
+            gate: 'ADAPTIVE_QUALITY',
+            status: adaptiveReq ? (analysis.confidence >= adaptiveReq.minRequired ? 'PASS' : 'REJECT') : 'NOT_EVALUATED',
+            reasonCode: adaptiveReq ? (analysis.confidence >= adaptiveReq.minRequired ? 'ADAPTIVE_QUALITY_PASSED' : 'ADAPTIVE_QUALITY_REJECTED') : 'NOT_EVALUATED',
+            reason: adaptiveReq?.reason || 'Adaptive quality requirement',
+            timestamp: new Date().toISOString()
+          },
+          {
+            gate: 'ADAPTIVE_EXECUTION',
+            status: executionResult ? (executionResult.status === 'WAIT' ? 'WAIT' : (executionResult.status === 'NO_TRADE' ? 'REJECT' : 'PASS')) : 'NOT_EVALUATED',
+            reasonCode: executionResult ? (executionResult.status === 'WAIT' ? 'ADAPTIVE_TIMING_WAIT' : (executionResult.status === 'NO_TRADE' ? 'ADAPTIVE_TIMING_REJECT' : 'ADAPTIVE_TIMING_PASS')) : 'NOT_EVALUATED',
+            reason: executionResult?.explanation || 'Adaptive execution timing',
+            timestamp: new Date().toISOString()
+          },
+          {
+            gate: 'CLOSED_LOOP_CALIBRATION',
+            status: calibrationResult ? (calibrationResult.recommendedAction === 'NO_TRADE' ? 'REJECT' : 'PASS') : 'NOT_EVALUATED',
+            reasonCode: calibrationResult ? (calibrationResult.recommendedAction === 'NO_TRADE' ? 'CALIBRATION_REJECT' : 'CALIBRATION_PASS') : 'NOT_EVALUATED',
+            reason: calibrationResult?.explanation || 'Closed-loop calibration check',
+            timestamp: new Date().toISOString()
+          },
+          {
+            gate: 'RISK_GOVERNOR',
+            status: governorResult ? (governorResult.status === 'NO_TRADE' ? 'REJECT' : 'PASS') : 'NOT_EVALUATED',
+            reasonCode: governorResult ? (governorResult.status === 'NO_TRADE' ? 'RISK_GOVERNOR_REJECT' : 'RISK_GOVERNOR_PASS') : 'NOT_EVALUATED',
+            reason: governorResult?.explanation || 'Risk governor state check',
+            timestamp: new Date().toISOString()
+          },
+          {
+            gate: 'POSITION_SIZING',
+            status: posSizeResult ? (posSizeResult.accepted ? 'PASS' : 'REJECT') : 'NOT_EVALUATED',
+            reasonCode: posSizeResult ? (posSizeResult.accepted ? 'POSITION_SIZING_PASS' : 'POSITION_SIZING_REJECT') : 'NOT_EVALUATED',
+            reason: posSizeResult?.skipReason || 'Position sizing calculated',
+            timestamp: new Date().toISOString()
+          },
+          {
+            gate: 'TRADE_GEOMETRY',
+            status: posSizeResult ? (posSizeResult.accepted ? 'PASS' : 'REJECT') : 'NOT_EVALUATED',
+            reasonCode: posSizeResult ? (posSizeResult.accepted ? 'GEOMETRY_VALID' : 'GEOMETRY_INVALID') : 'NOT_EVALUATED',
+            reason: posSizeResult?.skipReason || 'Trade geometry and R:R structure valid',
+            timestamp: new Date().toISOString()
+          },
+          {
+            gate: 'FINAL_TELEGRAM',
+            status: (analysis.signal !== 'NO_TRADE' && posSizeResult?.accepted && telegramChatId) ? 'PASS' : (analysis.signal === 'NO_TRADE' ? 'NOT_EVALUATED' : 'REJECT'),
+            reasonCode: (analysis.signal !== 'NO_TRADE' && posSizeResult?.accepted && telegramChatId) ? 'TELEGRAM_AUTHORIZED' : 'TELEGRAM_GATE_REJECTED',
+            reason: telegramChatId ? 'Telegram alert payload authorized' : 'Telegram chat not connected',
+            timestamp: new Date().toISOString()
+          }
+        ];
+
+        const attribution = resolveAuthoritativeDecision({
+          userId,
+          watcherId: watcher.id,
+          pair: selectedPair,
+          timeframe: selectedTimeframe,
+          direction: analysis.signal,
+          setup: compiledStrategy?.strategy_mode || 'HYBRID',
+          regime: analysis.regime || 'UNKNOWN',
+          entryPrice: analysis.entryPrice,
+          stopLoss: analysis.stopLoss,
+          takeProfit: analysis.takeProfit,
+          expectedRR: parseRiskRewardRatio(riskRewardStr),
+          positionSize: posSizeResult?.calculatedLotSize || null,
+          confidence: analysis.confidence,
+          qualityScore: analysis.confidence,
+          tradeId: candidateTradeId,
+          gates: gatesList
+        });
+
+        decisionSnapshot = {
+          ...decisionSnapshot,
+          attribution
+        };
+
+        if (attribution.finalDecision !== 'EXECUTE') {
+          console.log(`[Authoritative Decision] Signal suppressed for Watcher ID: ${watcher.id} (${selectedPair}): Final decision is ${attribution.finalDecision} from gate ${attribution.rejectedGate || 'UNKNOWN'}.`);
+          analysis.signal = 'NO_TRADE';
+
+          const scanDurationMs = Date.now() - scanStart;
+          await recordEvaluation(supabase, {
+            user_id: userId,
+            watcher_id: watcher.id,
+            pair: selectedPair,
+            timeframe: selectedTimeframe,
+            strategy_mode: compiledStrategy.strategy_mode,
+            decision_score: decisionResult.decision_score,
+            matched_weight: decisionResult.matched_weight,
+            possible_weight: decisionResult.possible_weight,
+            recommendation: decisionResult.recommendation,
+            mandatory_rules_passed: decisionResult.mandatory_rules_passed,
+            matched_rules: decisionResult.matched_rules,
+            failed_rules: decisionResult.failed_rules,
+            gemini_used: geminiCalled,
+            gemini_result: geminiTextResult || null,
+            trade_sent: false,
+            trade_reason: `Authoritative decision rejected by gate ${attribution.rejectedGate}: ${attribution.rejectionReason}`,
+            scan_duration_ms: scanDurationMs,
+            gemini_duration_ms: geminiDuration,
+            decision_snapshot: decisionSnapshot
+          });
+
+          await supabase
+            .from("watchers")
+            .update({ 
+               last_scan_at: new Date().toISOString(),
+               last_analyzed_closed_candle_time: latestClosedCandleTime,
+               updated_at: new Date().toISOString()
+            })
+            .eq("id", watcher.id);
+
+          watchersProcessedCount++;
+          continue;
+        }
+
         let signal: any = null;
         let isRegistered = false;
 
@@ -2312,7 +2481,9 @@ ${analysis.stopLossBasis === 'ATR_FALLBACK' ? `ATR: ${marketStructure.volatility
               lotSize: posSizeResult.calculatedLotSize,
               riskAmount: posSizeResult.riskAmount,
               expectedLoss: posSizeResult.expectedLoss,
-              lotType: posSizeResult.lotType
+              lotType: posSizeResult.lotType,
+              tradeId: candidateTradeId,
+              trade_id: candidateTradeId
           };
 
           isRegistered = await registerSignal(supabase, watcher, signal);
@@ -2414,12 +2585,13 @@ ${analysis.stopLossBasis === 'ATR_FALLBACK' ? `ATR: ${marketStructure.volatility
         });
 
         // Save active trade state in Supabase:
-        // trade_status = 'ACTIVE', entry_price, stop_loss, take_profit, direction, opened_at
-        console.log(`[ACTIVE UPDATE START] Attempting to update Watcher ID: ${watcher.id} to trade_status = ACTIVE in Supabase...`);
+        // trade_status = 'ACTIVE', active_trade_id = candidateTradeId, entry_price, stop_loss, take_profit, direction, opened_at
+        console.log(`[ACTIVE UPDATE START] Attempting to update Watcher ID: ${watcher.id} to trade_status = ACTIVE with trade_id: ${candidateTradeId} in Supabase...`);
         const { data: activeUpdateRows, error: activeUpdateErr } = await supabase
           .from("watchers")
           .update({ 
             trade_status: 'ACTIVE',
+            active_trade_id: candidateTradeId,
             entry_price: analysis.entryPrice,
             stop_loss: analysis.stopLoss,
             take_profit: analysis.takeProfit,

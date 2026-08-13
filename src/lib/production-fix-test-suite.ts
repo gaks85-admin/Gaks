@@ -16,14 +16,16 @@ import { runAdaptiveExecutionTestSuite } from './adaptive-execution-test-suite.j
 import { runAdaptivePerformanceTestSuite } from './adaptive-performance-test-suite.js';
 import { runDecisionAttributionTestSuite } from './decision-attribution-test-suite.js';
 import { runClosedLoopCalibrationTestSuite } from './closed-loop-calibration-test-suite.js';
+import { runStage3GTestSuite } from './stage3g-test-suite.js';
 
-export function runProductionFixTestSuite() {
+export async function runProductionFixTestSuite() {
   console.log("==========================================");
   console.log("RUNNING PRODUCTION FIX TEST SUITE");
   console.log("==========================================");
 
   let passedCount = 0;
   let totalCount = 0;
+  const failedTests: string[] = [];
 
   function assert(condition: boolean, testName: string, detail?: string) {
     totalCount++;
@@ -32,6 +34,7 @@ export function runProductionFixTestSuite() {
       passedCount++;
     } else {
       console.error(`❌ [FAIL] ${testName}${detail ? ` - ${detail}` : ''}`);
+      failedTests.push(`${testName}${detail ? ` - ${detail}` : ''}`);
     }
   }
 
@@ -774,7 +777,8 @@ export function runProductionFixTestSuite() {
   runTradeValidatorTestSuite();
 
   // 27. Run Gemini Audit Test Suite
-  runGeminiAuditTestSuite();
+  const geminiRes = await runGeminiAuditTestSuite();
+  assert(geminiRes.failed === 0, 'Test M - Gemini Audit Test Suite passes successfully');
 
   // 28. Run Equity Learning & Risk Governor Test Suite
   const equityRes = runEquityLearningTestSuite();
@@ -808,11 +812,16 @@ export function runProductionFixTestSuite() {
   const closedLoopCalibrationRes = runClosedLoopCalibrationTestSuite();
   assert(closedLoopCalibrationRes.failed === 0, 'Test U - Closed-Loop Calibration Test Suite passes successfully');
 
+  // 36. Run Stage 3G Performance Visibility Test Suite
+  const stage3gRes = await runStage3GTestSuite();
+  assert(stage3gRes.success, 'Test V - Stage 3G Performance Visibility Test Suite passes successfully');
+
   // 27. Final confirmation
   assert(passedCount > 50, 'Test L26 - All existing 55+ production tests pass successfully');
   console.log("==========================================");
 
   if (passedCount !== totalCount) {
-    throw new Error(`Test suite failed: ${totalCount - passedCount} test(s) failed.`);
+    console.error('Failed test names:', failedTests);
+    throw new Error(`Test suite failed: ${totalCount - passedCount} test(s) failed: ${failedTests.join(', ')}`);
   }
 }

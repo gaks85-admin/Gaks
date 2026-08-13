@@ -14,9 +14,13 @@ import { resolveUserGeminiKey, classifyAndRedactGeminiError } from "../../src/li
 import { computeEquityAnalytics, deriveEquityState, fetchUserCompletedTrades } from "../../src/lib/equity-learning-engine.js";
 import { evaluateRiskGovernor } from "../../src/lib/risk-governor.js";
 import { evaluateAdaptiveLearning, fetchCompletedTradesForAdaptiveLearning } from "../../src/lib/adaptive-learning-engine.js";
-import { calculateAdaptiveQualityRequirement } from "../../src/lib/quality-gate.js";
+import { evaluateQualityGate, calculateAdaptiveQualityRequirement } from "../../src/lib/quality-gate.js";
 import { evaluateAdaptiveExecution } from "../../src/lib/adaptive-execution-engine.js";
 import { evaluateClosedLoopCalibration } from "../../src/lib/closed-loop-calibration-engine.js";
+import { resolveAuthoritativeDecision, DecisionGateResult } from "../../src/lib/decision-attribution.js";
+import { calculateHistoricalProbability, recordCompletedTrade } from "../../src/lib/learning-engine.js";
+import { validateActiveTradeState } from "../../src/lib/trade-validator.js";
+import { buildActiveTradeTelemetry, evaluateActiveTradeExit } from "../../src/lib/active-trade-monitor.js";
 
 
 /**
@@ -228,6 +232,293 @@ export default async function handler(req: any, res: any) {
 
     if (watcherError) throw watcherError;
     if (!watcher) throw new Error("No watcher found.");
+
+    // =====================================================================
+    // STATE 2 — ACTIVE TRADE MONITORING (Parity with Cron Engine)
+    // =====================================================================
+    const tradeStatus = (watcher.trade_status || 'WAITING').toUpperCase().trim();
+    if (tradeStatus === 'ACTIVE') {
+      const activeValidation = validateActiveTradeState(watcher);
+      if (!activeValidation.valid) {
+        console.warn(`[Manual Scan] Invalid ACTIVE trade state detected for watcher ${watcher.id}: ${activeValidation.reason}. Healing to WAITING.`);
+        await supabase.from("watchers").update({
+          trade_status: 'WAITING',
+          active_trade_id: null,
+          direction: null,
+          entry_price: null,
+          stop_loss: null,
+          take_profit: null,
+          signal_message_id: null,
+          opened_at: null,
+          closed_at: null,
+          cooldown_until: null,
+          last_scan_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        }).eq("id", watcher.id);
+
+        return res.status(200).json({
+          success: true,
+          data: {
+            watcher_id: watcher.id,
+            pair: watcher.selected_pair,
+            signal: 'WAIT',
+            status: 'WAITING',
+            healed: true,
+            reasoning: [`Invalid active trade state healed to WAITING: ${activeValidation.reason}`]
+          }
+        });
+      }
+
+      // Fetch latest market price for active position
+      const symbol = watcher.selected_pair;
+      let currentPrice: number | null = null;
+      try {
+        const priceUrl = `https://api.twelvedata.com/price?symbol=${encodeURIComponent(symbol)}&apikey=${twelveDataKey}`;
+        const priceRes = await fetch(priceUrl);
+        const priceData = await priceRes.json();
+        if (priceData && priceData.price) {
+          currentPrice = parseFloat(priceData.price);
+        }
+      } catch (err: any) {
+        console.warn(`[Manual Scan] Could not fetch real-time price from Twelve Data:`, err.message);
+      }
+
+      if (currentPrice === null || isNaN(currentPrice)) {
+        try {
+          const tsUrl = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(symbol)}&interval=1min&outputsize=1&apikey=${twelveDataKey}`;
+          const tsRes = await fetch(tsUrl);
+          const tsData = await tsRes.json();
+          if (tsData?.values?.[0]?.close) {
+            currentPrice = parseFloat(tsData.values[0].close);
+          }
+        } catch (e) {}
+      }
+
+      if (currentPrice === null || isNaN(currentPrice)) {
+        return res.status(200).json({
+          success: true,
+          data: {
+            watcher_id: watcher.id,
+            pair: symbol,
+            signal: 'WAIT',
+            status: 'ACTIVE',
+            subStatus: 'HOLDING',
+            message: 'Active trade open. Market price temporarily unavailable.',
+            active_trade: {
+              trade_id: watcher.active_trade_id,
+              direction: watcher.direction,
+              entry_price: watcher.entry_price,
+              stop_loss: watcher.stop_loss,
+              take_profit: watcher.take_profit,
+              opened_at: watcher.opened_at
+            }
+          }
+        });
+      }
+
+      const entryPrice = parseFloat(String(watcher.entry_price));
+      const stopLoss = parseFloat(String(watcher.stop_loss));
+      const takeProfit = parseFloat(String(watcher.take_profit));
+      const dir = (watcher.direction || '').toUpperCase().trim();
+      const exitEval = evaluateActiveTradeExit(dir, entryPrice, stopLoss, takeProfit, currentPrice);
+      const telemetry = buildActiveTradeTelemetry(watcher, currentPrice);
+
+      // 1. Target Reached (TP_HIT)
+      if (exitEval.exitStatus === 'TP_HIT') {
+        const { data: conn } = await supabase
+          .from("telegram_connections")
+          .select("telegram_chat_id, connected")
+          .eq("user_id", userId)
+          .maybeSingle();
+
+        if (conn?.connected && conn?.telegram_chat_id) {
+          await sendTelegramMessage(conn.telegram_chat_id, `✅ Trade closed\nTarget reached`);
+        }
+
+        let latestEval: any = null;
+        try {
+          const { data } = await supabase
+            .from('watcher_evaluations')
+            .select('*')
+            .eq('watcher_id', watcher.id)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          latestEval = data;
+        } catch (e) {}
+
+        const activeTradeId = watcher.active_trade_id || watcher.last_signal_data?.trade_id || null;
+
+        await recordCompletedTrade(supabase, {
+          user_id: userId,
+          watcher_id: watcher.id,
+          trade_id: activeTradeId,
+          evaluation_id: latestEval?.id || null,
+          pair: symbol,
+          timeframe: watcher.selected_timeframe || 'H1',
+          strategy_mode: latestEval?.strategy_mode || 'HYBRID',
+          entry_price: entryPrice,
+          stop_loss: stopLoss,
+          take_profit: takeProfit,
+          exit_price: currentPrice,
+          direction: dir,
+          opened_at: watcher.opened_at || new Date(Date.now() - 30 * 60 * 1000).toISOString(),
+          closed_at: new Date().toISOString(),
+          decision_score: latestEval?.decision_score || null,
+          matched_weight: latestEval?.matched_weight || null,
+          possible_weight: latestEval?.possible_weight || null,
+          matched_rules: latestEval?.matched_rules || [],
+          failed_rules: latestEval?.failed_rules || [],
+          gemini_used: latestEval?.gemini_used || false,
+          notes: `Trade closed via TP. Exit Price: ${currentPrice}`,
+          decision_snapshot: latestEval?.decision_snapshot || null
+        });
+
+        const cooldownUntilIso = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+        await supabase.from("watchers").update({
+          trade_status: 'COOLDOWN',
+          active_trade_id: null,
+          closed_at: new Date().toISOString(),
+          cooldown_until: cooldownUntilIso,
+          last_scan_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        }).eq("id", watcher.id);
+
+        return res.status(200).json({
+          success: true,
+          data: {
+            watcher_id: watcher.id,
+            pair: symbol,
+            signal: 'NO_TRADE',
+            status: 'COOLDOWN',
+            resolution: 'TP_HIT',
+            outcome: 'WIN',
+            realizedR: exitEval.realizedR,
+            exitPrice: currentPrice,
+            telemetry,
+            message: `Target reached! Trade closed at ${currentPrice} (+${exitEval.realizedR}R)`
+          }
+        });
+      }
+
+      // 2. Stop Loss Hit (SL_HIT)
+      if (exitEval.exitStatus === 'SL_HIT') {
+        const { data: conn } = await supabase
+          .from("telegram_connections")
+          .select("telegram_chat_id, connected")
+          .eq("user_id", userId)
+          .maybeSingle();
+
+        if (conn?.connected && conn?.telegram_chat_id) {
+          await sendTelegramMessage(conn.telegram_chat_id, `❌ Trade closed\nStop loss hit`);
+        }
+
+        let latestEval: any = null;
+        try {
+          const { data } = await supabase
+            .from('watcher_evaluations')
+            .select('*')
+            .eq('watcher_id', watcher.id)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          latestEval = data;
+        } catch (e) {}
+
+        const activeTradeId = watcher.active_trade_id || watcher.last_signal_data?.trade_id || null;
+
+        await recordCompletedTrade(supabase, {
+          user_id: userId,
+          watcher_id: watcher.id,
+          trade_id: activeTradeId,
+          evaluation_id: latestEval?.id || null,
+          pair: symbol,
+          timeframe: watcher.selected_timeframe || 'H1',
+          strategy_mode: latestEval?.strategy_mode || 'HYBRID',
+          entry_price: entryPrice,
+          stop_loss: stopLoss,
+          take_profit: takeProfit,
+          exit_price: currentPrice,
+          direction: dir,
+          opened_at: watcher.opened_at || new Date(Date.now() - 30 * 60 * 1000).toISOString(),
+          closed_at: new Date().toISOString(),
+          decision_score: latestEval?.decision_score || null,
+          matched_weight: latestEval?.matched_weight || null,
+          possible_weight: latestEval?.possible_weight || null,
+          matched_rules: latestEval?.matched_rules || [],
+          failed_rules: latestEval?.failed_rules || [],
+          gemini_used: latestEval?.gemini_used || false,
+          notes: `Trade closed via SL. Exit Price: ${currentPrice}`,
+          decision_snapshot: latestEval?.decision_snapshot || null
+        });
+
+        const cooldownUntilIso = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+        await supabase.from("watchers").update({
+          trade_status: 'COOLDOWN',
+          active_trade_id: null,
+          closed_at: new Date().toISOString(),
+          cooldown_until: cooldownUntilIso,
+          last_scan_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        }).eq("id", watcher.id);
+
+        return res.status(200).json({
+          success: true,
+          data: {
+            watcher_id: watcher.id,
+            pair: symbol,
+            signal: 'NO_TRADE',
+            status: 'COOLDOWN',
+            resolution: 'SL_HIT',
+            outcome: 'LOSS',
+            realizedR: -1.0,
+            exitPrice: currentPrice,
+            telemetry,
+            message: `Stop loss hit. Trade closed at ${currentPrice} (-1.0R)`
+          }
+        });
+      }
+
+      // 3. Trade is currently HOLDING
+      return res.status(200).json({
+        success: true,
+        data: {
+          watcher_id: watcher.id,
+          pair: symbol,
+          signal: 'WAIT',
+          status: 'ACTIVE',
+          subStatus: 'HOLDING',
+          telemetry,
+          message: `Active trade holding: ${telemetry ? `${telemetry.unrealizedPnlR >= 0 ? '+' : ''}${telemetry.unrealizedPnlR}R (${telemetry.pipsInProfit >= 0 ? '+' : ''}${telemetry.pipsInProfit} pips)` : 'Monitoring price'}`
+        }
+      });
+    }
+
+    // Cooldown Expiry Auto-Reset
+    if (tradeStatus === 'COOLDOWN') {
+      const cooldownUntil = watcher.cooldown_until ? new Date(watcher.cooldown_until).getTime() : 0;
+      if (Date.now() >= cooldownUntil) {
+        await supabase.from("watchers").update({
+          trade_status: 'WAITING',
+          cooldown_until: null,
+          updated_at: new Date().toISOString()
+        }).eq("id", watcher.id);
+        watcher.trade_status = 'WAITING';
+      } else {
+        const remainingSec = Math.max(0, Math.round((cooldownUntil - Date.now()) / 1000));
+        return res.status(200).json({
+          success: true,
+          data: {
+            watcher_id: watcher.id,
+            pair: watcher.selected_pair,
+            signal: 'WAIT',
+            status: 'COOLDOWN',
+            remainingSeconds: remainingSec,
+            reasoning: [`Watcher is in cooldown for ${remainingSec} more seconds.`]
+          }
+        });
+      }
+    }
     
     // 4. Strategy Loaded
     const { data: prefsRecord } = await supabase
@@ -312,11 +603,30 @@ export default async function handler(req: any, res: any) {
     const cleanSymUpper = (symbol || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
     const pipSize = (cleanSymUpper.includes('JPY') || cleanSymUpper.includes('XAU') || cleanSymUpper.includes('GOLD')) ? 0.01 : 0.0001;
 
-    // 8. Weighted Decision Engine Execution
+    // 8. Weighted Decision Engine Execution (Pass 1 to get matched rules)
     (marketStructure as any).pair = symbol;
     (marketStructure as any).timeframe = selectedTimeframe;
     (marketStructure as any).lastClosedCandleTimestamp = candleData[candleData.length - 2]?.timestamp || '';
-    const decisionResult = evaluateDecision(compiledStrategy, marketStructure);
+    const initialResult = evaluateDecision(compiledStrategy, marketStructure);
+
+    // Fetch Historical Probability from Learning Engine
+    const histResult = await calculateHistoricalProbability(
+      supabase,
+      userId,
+      symbol,
+      selectedTimeframe,
+      initialResult.matched_rules,
+      compiledStrategy.strategy_mode || 'HYBRID'
+    );
+
+    // Run Weighted Decision Engine (Pass 2 with historical context)
+    const decisionResult = evaluateDecision(
+      compiledStrategy,
+      marketStructure,
+      undefined,
+      histResult.historical_probability,
+      histResult.sample_size
+    );
 
     const ruleDecisionScoreRecord = normalizeConfidence(
       decisionResult.decision_score,
@@ -336,6 +646,7 @@ export default async function handler(req: any, res: any) {
     };
 
     let geminiCalled = false;
+    let geminiSucceeded = false;
     let geminiTextResult = "";
     let geminiStart = 0;
     let geminiDuration = 0;
@@ -438,6 +749,7 @@ Answer with JSON matching schema.
           const parsedResult = JSON.parse(geminiTextResult);
 
           if (parsedResult.satisfies && parsedResult.direction && parsedResult.direction !== 'NO_TRADE') {
+            geminiSucceeded = true;
             const signalDir = parsedResult.direction as 'BUY' | 'SELL';
             const entry = Number(parsedResult.entryPrice) || candleData[candleData.length - 1].close;
 
@@ -602,103 +914,39 @@ Fallback: NO_TRADE`.trim());
       }
     }
 
-    // 9. Signal Result & Risk Engine
-    let governorResult: any = null;
+    // Quality Gate Check (QUALITY OVER QUANTITY)
+    let qualityResult: any = null;
     if (analysis.signal === 'BUY' || analysis.signal === 'SELL') {
-      try {
-        const completedTrades = await fetchUserCompletedTrades(supabase, userId);
-        const equityMetrics = computeEquityAnalytics(completedTrades);
-        const equityState = deriveEquityState(accountSize, equityMetrics);
-        governorResult = evaluateRiskGovernor({
-          metrics: equityMetrics,
-          equityState,
-          candidate: {
-            pair: symbol,
-            timeframe: selectedTimeframe,
-            strategySetup: compiledStrategy?.strategy_mode || 'DEFAULT',
-            qualityScore: analysis.confidence,
-            confidence: analysis.confidence
-          }
-        });
+      qualityResult = evaluateQualityGate({
+        ruleScore: ruleDecisionScore,
+        marketStructure: marketStructure,
+        mandatoryRulesPassed: decisionResult.mandatory_rules_passed ?? true,
+        geminiApproved: geminiCalled ? geminiSucceeded : undefined,
+        geminiRequired: requiresGemini,
+        direction: analysis.signal,
+        slValid: Boolean(analysis.stopLoss),
+        tpValid: Boolean(analysis.takeProfit),
+        rrValid: true,
+        historicalProbability: histResult?.historical_probability || 50
+      });
 
-        if (governorResult.status === 'NO_TRADE') {
-          console.log(`[Risk Governor] REJECTED signal for ${symbol}: Governor status is NO_TRADE. Reason: ${governorResult.reasonCodes.join(', ')}`);
-          analysis.signal = 'NO_TRADE';
-          if (analysis.reasoning) {
-            if (Array.isArray(analysis.reasoning)) {
-              analysis.reasoning.push(`Risk Governor NO_TRADE: ${governorResult.explanation}`);
-            } else {
-              analysis.reasoning = [analysis.reasoning, `Risk Governor NO_TRADE: ${governorResult.explanation}`];
-            }
-          } else {
-            analysis.reasoning = [`Risk Governor NO_TRADE: ${governorResult.explanation}`];
-          }
-        } else if (governorResult.status === 'RESTRICTED_SELECTIVITY') {
-          console.log(`[Risk Governor] RESTRICTED_SELECTIVITY active for ${symbol}. Reason: ${governorResult.reasonCodes.join(', ')}`);
-          if (analysis.confidence < 80) {
-            console.log(`[Risk Governor] Rejecting ${symbol} under RESTRICTED_SELECTIVITY because confidence (${analysis.confidence}%) is below strict 80% threshold.`);
-            analysis.signal = 'NO_TRADE';
-          }
-        }
-      } catch (govErr) {
-        console.error('[Risk Governor Error] Failed to evaluate equity learning governor in manual scan:', govErr);
-      }
-    }
-
-    // Closed-Loop Strategy Calibration (Stage 3G)
-    if (analysis.signal === 'BUY' || analysis.signal === 'SELL') {
-      try {
-        const completedTrades = await fetchCompletedTradesForAdaptiveLearning(supabase, userId);
-        const calibrationResult = evaluateClosedLoopCalibration({
-          userId,
-          pair: symbol,
-          timeframe: selectedTimeframe,
-          setup: compiledStrategy?.strategy_mode || 'HYBRID',
-          direction: analysis.signal,
-          marketRegime: analysis.regime || 'UNKNOWN',
-          confidence: analysis.confidence,
-          qualityScore: analysis.confidence,
-          executionScore: 80,
-          expectedRR: parseRiskRewardRatio(riskRewardStr),
-          completedTrades
-        });
-
-        console.log(`[Closed-Loop Calibration] Action: ${calibrationResult.recommendedAction}, Evidence: ${calibrationResult.evidenceLevel}, Trades: ${calibrationResult.tradeCount}, Reliability: ${calibrationResult.overallReliability}`);
-
-        if (calibrationResult.recommendedAction === 'NO_TRADE') {
-          console.log(`[Closed-Loop Calibration] REJECTED signal for ${symbol} (${analysis.signal}): ${calibrationResult.explanation}`);
-          analysis.signal = 'NO_TRADE';
-          const calibMsg = `[Closed-Loop Calibration] NO_TRADE: ${calibrationResult.explanation}`;
-          if (analysis.reasoning) {
-            if (Array.isArray(analysis.reasoning)) {
-              analysis.reasoning.push(calibMsg);
-            } else {
-              analysis.reasoning = [analysis.reasoning, calibMsg];
-            }
-          } else {
-            analysis.reasoning = [calibMsg];
-          }
-        } else if (calibrationResult.recommendedAction === 'RESTRICT') {
-          if (analysis.confidence < 80) {
-            console.log(`[Closed-Loop Calibration] Rejecting ${symbol} under RESTRICT recommendation because confidence (${analysis.confidence}%) < 80% threshold.`);
-            analysis.signal = 'NO_TRADE';
-          }
-        } else if (calibrationResult.recommendedAction === 'SELECTIVE') {
-          if (analysis.confidence < 75) {
-            console.log(`[Closed-Loop Calibration] Rejecting ${symbol} under SELECTIVE recommendation because confidence (${analysis.confidence}%) < 75% threshold.`);
-            analysis.signal = 'NO_TRADE';
-          }
-        }
-      } catch (calibErr) {
-        console.error('[Closed-Loop Calibration Error] Failed to evaluate closed-loop calibration in manual scan:', calibErr);
+      if (!qualityResult.passed) {
+        console.log(`[Signal Quality] Signal rejected by Quality Gate for ${symbol}: ${qualityResult.reason} (Score: ${qualityResult.qualityScore})`);
+        analysis.signal = 'NO_TRADE';
       }
     }
 
     // Adaptive Learning Evaluation (Stage 3B) & Adaptive Quality Requirement (Stage 3C)
+    let adaptiveResult: any = null;
+    let adaptiveReq: any = null;
+    let executionResult: any = null;
+    let calibrationResult: any = null;
+    let governorResult: any = null;
+
     if (analysis.signal === 'BUY' || analysis.signal === 'SELL') {
       try {
         const completedTrades = await fetchCompletedTradesForAdaptiveLearning(supabase, userId);
-        const adaptiveResult = evaluateAdaptiveLearning({
+        adaptiveResult = evaluateAdaptiveLearning({
           pair: symbol,
           timeframe: selectedTimeframe,
           setup: compiledStrategy?.strategy_mode || 'HYBRID',
@@ -707,7 +955,7 @@ Fallback: NO_TRADE`.trim());
           completedTrades
         });
 
-        const adaptiveReq = calculateAdaptiveQualityRequirement({
+        adaptiveReq = calculateAdaptiveQualityRequirement({
           baseThreshold: 75,
           classification: adaptiveResult.classification,
           tier: adaptiveResult.tier,
@@ -765,7 +1013,7 @@ Reason: ${adaptiveReq.reason}
         // Adaptive Execution Timing (Stage 3D)
         if (analysis.signal === 'BUY' || analysis.signal === 'SELL') {
           try {
-            const executionResult = evaluateAdaptiveExecution({
+            executionResult = evaluateAdaptiveExecution({
               pair: symbol,
               timeframe: selectedTimeframe,
               setup: compiledStrategy?.strategy_mode || 'HYBRID',
@@ -815,11 +1063,103 @@ Reason: ${adaptiveReq.reason}
       }
     }
 
+    // Closed-Loop Strategy Calibration (Stage 3G)
+    if (analysis.signal === 'BUY' || analysis.signal === 'SELL') {
+      try {
+        const completedTrades = await fetchCompletedTradesForAdaptiveLearning(supabase, userId);
+        calibrationResult = evaluateClosedLoopCalibration({
+          userId,
+          pair: symbol,
+          timeframe: selectedTimeframe,
+          setup: compiledStrategy?.strategy_mode || 'HYBRID',
+          direction: analysis.signal,
+          marketRegime: analysis.regime || 'UNKNOWN',
+          confidence: analysis.confidence,
+          qualityScore: analysis.confidence,
+          executionScore: 80,
+          expectedRR: parseRiskRewardRatio(riskRewardStr),
+          completedTrades
+        });
+
+        console.log(`[Closed-Loop Calibration] Action: ${calibrationResult.recommendedAction}, Evidence: ${calibrationResult.evidenceLevel}, Trades: ${calibrationResult.tradeCount}, Reliability: ${calibrationResult.overallReliability}`);
+
+        if (calibrationResult.recommendedAction === 'NO_TRADE') {
+          console.log(`[Closed-Loop Calibration] REJECTED signal for ${symbol} (${analysis.signal}): ${calibrationResult.explanation}`);
+          analysis.signal = 'NO_TRADE';
+          const calibMsg = `[Closed-Loop Calibration] NO_TRADE: ${calibrationResult.explanation}`;
+          if (analysis.reasoning) {
+            if (Array.isArray(analysis.reasoning)) {
+              analysis.reasoning.push(calibMsg);
+            } else {
+              analysis.reasoning = [analysis.reasoning, calibMsg];
+            }
+          } else {
+            analysis.reasoning = [calibMsg];
+          }
+        } else if (calibrationResult.recommendedAction === 'RESTRICT') {
+          if (analysis.confidence < 80) {
+            console.log(`[Closed-Loop Calibration] Rejecting ${symbol} under RESTRICT recommendation because confidence (${analysis.confidence}%) < 80% threshold.`);
+            analysis.signal = 'NO_TRADE';
+          }
+        } else if (calibrationResult.recommendedAction === 'SELECTIVE') {
+          if (analysis.confidence < 75) {
+            console.log(`[Closed-Loop Calibration] Rejecting ${symbol} under SELECTIVE recommendation because confidence (${analysis.confidence}%) < 75% threshold.`);
+            analysis.signal = 'NO_TRADE';
+          }
+        }
+      } catch (calibErr) {
+        console.error('[Closed-Loop Calibration Error] Failed to evaluate closed-loop calibration in manual scan:', calibErr);
+      }
+    }
+
+    // Equity-Aware Learning & Risk Governor Evaluation
+    if (analysis.signal === 'BUY' || analysis.signal === 'SELL') {
+      try {
+        const completedTrades = await fetchUserCompletedTrades(supabase, userId);
+        const equityMetrics = computeEquityAnalytics(completedTrades);
+        const equityState = deriveEquityState(accountSize, equityMetrics);
+        governorResult = evaluateRiskGovernor({
+          metrics: equityMetrics,
+          equityState,
+          candidate: {
+            pair: symbol,
+            timeframe: selectedTimeframe,
+            strategySetup: compiledStrategy?.strategy_mode || 'DEFAULT',
+            qualityScore: analysis.confidence,
+            confidence: analysis.confidence
+          }
+        });
+
+        if (governorResult.status === 'NO_TRADE') {
+          console.log(`[Risk Governor] REJECTED signal for ${symbol}: Governor status is NO_TRADE. Reason: ${governorResult.reasonCodes.join(', ')}`);
+          analysis.signal = 'NO_TRADE';
+          if (analysis.reasoning) {
+            if (Array.isArray(analysis.reasoning)) {
+              analysis.reasoning.push(`Risk Governor NO_TRADE: ${governorResult.explanation}`);
+            } else {
+              analysis.reasoning = [analysis.reasoning, `Risk Governor NO_TRADE: ${governorResult.explanation}`];
+            }
+          } else {
+            analysis.reasoning = [`Risk Governor NO_TRADE: ${governorResult.explanation}`];
+          }
+        } else if (governorResult.status === 'RESTRICTED_SELECTIVITY') {
+          console.log(`[Risk Governor] RESTRICTED_SELECTIVITY active for ${symbol}. Reason: ${governorResult.reasonCodes.join(', ')}`);
+          if (analysis.confidence < 80) {
+            console.log(`[Risk Governor] Rejecting ${symbol} under RESTRICTED_SELECTIVITY because confidence (${analysis.confidence}%) is below strict 80% threshold.`);
+            analysis.signal = 'NO_TRADE';
+          }
+        }
+      } catch (govErr) {
+        console.error('[Risk Governor Error] Failed to evaluate equity learning governor in manual scan:', govErr);
+      }
+    }
+
     let riskResult = { accepted: false, skipReason: "No trade setup" };
+    let posSizeResult: any = null;
 
     if (analysis.signal !== 'NO_TRADE' && analysis.confidence >= 70) {
       const executedPrice = Number(candleData[candleData.length - 1]?.close) || Number(analysis.entryPrice) || 0;
-      const posSizeResult = calculatePositionSize({
+      posSizeResult = calculatePositionSize({
         accountSize: accountSize,
         riskPercentage: riskPercentage,
         entryPrice: Number(analysis.entryPrice) || 0,
@@ -843,13 +1183,13 @@ TP: ${posSizeResult.takeProfit}
 SL Basis: ${analysis.stopLossBasis || 'STRUCTURAL'}
 Structural Level: ${analysis.structuralLevel !== null && analysis.structuralLevel !== undefined ? analysis.structuralLevel : 'N/A'}
 Stop Distance: ${posSizeResult.stopDistance.toFixed(5)}
-Risk Amount: $${posSizeResult.riskAmount.toFixed(2)}
+Risk Amount: ${posSizeResult.riskAmount.toFixed(2)}
 Required Lot: ${posSizeResult.exactLotSize}
 Minimum Lot: ${posSizeResult.minLot}
 Executable Lot: ${posSizeResult.accepted ? posSizeResult.calculatedLotSize : 'NONE'}
-Theoretical Expected Loss: $${posSizeResult.expectedLossAtRequiredLot.toFixed(2)}
-Minimum Lot Expected Loss: $${posSizeResult.expectedLossAtMinLot.toFixed(2)}
-Expected Loss: $${posSizeResult.accepted ? posSizeResult.expectedLoss.toFixed(2) : posSizeResult.expectedLossAtRequiredLot.toFixed(2)}
+Theoretical Expected Loss: ${posSizeResult.expectedLossAtRequiredLot.toFixed(2)}
+Minimum Lot Expected Loss: ${posSizeResult.expectedLossAtMinLot.toFixed(2)}
+Expected Loss: ${posSizeResult.accepted ? posSizeResult.expectedLoss.toFixed(2) : posSizeResult.expectedLossAtRequiredLot.toFixed(2)}
 Accepted: ${posSizeResult.accepted ? 'YES' : 'NO'}
 ${analysis.stopLossBasis === 'ATR_FALLBACK' ? `ATR: ${marketStructure.volatilityInformation.atr.toFixed(5)}\nATR Multiplier: 1.5` : ''}
 `.trim());
@@ -877,6 +1217,121 @@ ${analysis.stopLossBasis === 'ATR_FALLBACK' ? `ATR: ${marketStructure.volatility
       }
     }
 
+    const candidateTradeId = `TR-${watcher.id}-${Date.now()}`;
+    const gatesList: DecisionGateResult[] = [
+      {
+        gate: 'MARKET_DATA',
+        status: candleData && candleData.length > 0 ? 'PASS' : 'REJECT',
+        reasonCode: candleData && candleData.length > 0 ? 'MARKET_DATA_VALID' : 'MARKET_DATA_EMPTY',
+        reason: candleData && candleData.length > 0 ? 'Market candle data received and valid' : 'Market data missing or empty',
+        timestamp: new Date().toISOString()
+      },
+      {
+        gate: 'STRATEGY',
+        status: recommendation !== 'FAIL' ? 'PASS' : 'REJECT',
+        reasonCode: recommendation !== 'FAIL' ? 'STRATEGY_PASSED' : 'STRATEGY_FAILED',
+        reason: decisionResult.explanation || `Strategy recommendation: ${recommendation}`,
+        timestamp: new Date().toISOString()
+      },
+      {
+        gate: 'GEMINI',
+        status: !requiresGemini ? 'NOT_EVALUATED' : (geminiSucceeded ? 'PASS' : 'REJECT'),
+        reasonCode: !requiresGemini ? 'NOT_EVALUATED' : (geminiSucceeded ? 'GEMINI_PASSED' : 'GEMINI_REJECTED'),
+        reason: !requiresGemini ? 'Gemini AI verification not required' : (geminiSucceeded ? 'Gemini AI confirmed trade setup' : 'Gemini AI rejected or unavailable'),
+        timestamp: new Date().toISOString()
+      },
+      {
+        gate: 'QUALITY',
+        status: qualityResult ? (qualityResult.passed ? 'PASS' : 'REJECT') : 'NOT_EVALUATED',
+        reasonCode: qualityResult ? (qualityResult.passed ? 'QUALITY_PASSED' : 'QUALITY_REJECTED') : 'NOT_EVALUATED',
+        reason: qualityResult?.reason || 'Quality gate validation',
+        timestamp: new Date().toISOString()
+      },
+      {
+        gate: 'ADAPTIVE_LEARNING',
+        status: adaptiveResult ? (adaptiveResult.decision === 'REJECT' ? 'REJECT' : 'PASS') : 'NOT_EVALUATED',
+        reasonCode: adaptiveResult ? (adaptiveResult.decision === 'REJECT' ? 'ADAPTIVE_LEARNING_REJECT' : 'ADAPTIVE_LEARNING_PASS') : 'NOT_EVALUATED',
+        reason: adaptiveResult?.reason || 'Adaptive historical learning evaluation',
+        timestamp: new Date().toISOString()
+      },
+      {
+        gate: 'ADAPTIVE_QUALITY',
+        status: adaptiveReq ? (analysis.confidence >= adaptiveReq.minRequired ? 'PASS' : 'REJECT') : 'NOT_EVALUATED',
+        reasonCode: adaptiveReq ? (analysis.confidence >= adaptiveReq.minRequired ? 'ADAPTIVE_QUALITY_PASSED' : 'ADAPTIVE_QUALITY_REJECTED') : 'NOT_EVALUATED',
+        reason: adaptiveReq?.reason || 'Adaptive quality requirement',
+        timestamp: new Date().toISOString()
+      },
+      {
+        gate: 'ADAPTIVE_EXECUTION',
+        status: executionResult ? (executionResult.status === 'WAIT' ? 'WAIT' : (executionResult.status === 'NO_TRADE' ? 'REJECT' : 'PASS')) : 'NOT_EVALUATED',
+        reasonCode: executionResult ? (executionResult.status === 'WAIT' ? 'ADAPTIVE_TIMING_WAIT' : (executionResult.status === 'NO_TRADE' ? 'ADAPTIVE_TIMING_REJECT' : 'ADAPTIVE_TIMING_PASS')) : 'NOT_EVALUATED',
+        reason: executionResult?.explanation || 'Adaptive execution timing',
+        timestamp: new Date().toISOString()
+      },
+      {
+        gate: 'CLOSED_LOOP_CALIBRATION',
+        status: calibrationResult ? (calibrationResult.recommendedAction === 'NO_TRADE' ? 'REJECT' : 'PASS') : 'NOT_EVALUATED',
+        reasonCode: calibrationResult ? (calibrationResult.recommendedAction === 'NO_TRADE' ? 'CALIBRATION_REJECT' : 'CALIBRATION_PASS') : 'NOT_EVALUATED',
+        reason: calibrationResult?.explanation || 'Closed-loop calibration check',
+        timestamp: new Date().toISOString()
+      },
+      {
+        gate: 'RISK_GOVERNOR',
+        status: governorResult ? (governorResult.status === 'NO_TRADE' ? 'REJECT' : 'PASS') : 'NOT_EVALUATED',
+        reasonCode: governorResult ? (governorResult.status === 'NO_TRADE' ? 'RISK_GOVERNOR_REJECT' : 'RISK_GOVERNOR_PASS') : 'NOT_EVALUATED',
+        reason: governorResult?.explanation || 'Risk governor state check',
+        timestamp: new Date().toISOString()
+      },
+      {
+        gate: 'POSITION_SIZING',
+        status: posSizeResult ? (posSizeResult.accepted ? 'PASS' : 'REJECT') : 'NOT_EVALUATED',
+        reasonCode: posSizeResult ? (posSizeResult.accepted ? 'POSITION_SIZING_PASS' : 'POSITION_SIZING_REJECT') : 'NOT_EVALUATED',
+        reason: posSizeResult?.skipReason || 'Position sizing calculated',
+        timestamp: new Date().toISOString()
+      },
+      {
+        gate: 'TRADE_GEOMETRY',
+        status: posSizeResult ? (posSizeResult.accepted ? 'PASS' : 'REJECT') : 'NOT_EVALUATED',
+        reasonCode: posSizeResult ? (posSizeResult.accepted ? 'GEOMETRY_VALID' : 'GEOMETRY_INVALID') : 'NOT_EVALUATED',
+        reason: posSizeResult?.skipReason || 'Trade geometry and R:R structure valid',
+        timestamp: new Date().toISOString()
+      },
+      {
+        gate: 'FINAL_TELEGRAM',
+        status: analysis.signal !== 'NO_TRADE' && posSizeResult?.accepted ? 'PASS' : 'NOT_EVALUATED',
+        reasonCode: analysis.signal !== 'NO_TRADE' && posSizeResult?.accepted ? 'TELEGRAM_AUTHORIZED' : 'TELEGRAM_GATE_REJECTED',
+        reason: 'Telegram notification gate verification',
+        timestamp: new Date().toISOString()
+      }
+    ];
+
+    const attribution = resolveAuthoritativeDecision({
+      userId,
+      watcherId: watcher.id,
+      pair: symbol,
+      timeframe: selectedTimeframe,
+      direction: analysis.signal,
+      setup: compiledStrategy?.strategy_mode || 'HYBRID',
+      regime: analysis.regime || 'UNKNOWN',
+      entryPrice: analysis.entryPrice,
+      stopLoss: analysis.stopLoss,
+      takeProfit: analysis.takeProfit,
+      expectedRR: parseRiskRewardRatio(riskRewardStr),
+      positionSize: posSizeResult?.calculatedLotSize || null,
+      confidence: analysis.confidence,
+      qualityScore: analysis.confidence,
+      tradeId: candidateTradeId,
+      gates: gatesList
+    });
+
+    const decisionSnapshot = {
+      attribution
+    };
+
+    if (attribution.finalDecision !== 'EXECUTE') {
+      analysis.signal = 'NO_TRADE';
+    }
+
     // 10. Telegram Send Decision (No actual telegram sending in manual scan)
     const shouldSend = analysis.signal !== 'NO_TRADE' && analysis.confidence >= 70;
 
@@ -902,7 +1357,8 @@ ${analysis.stopLossBasis === 'ATR_FALLBACK' ? `ATR: ${marketStructure.volatility
         trade_sent: false, // Manual scan doesn't send real alerts
         trade_reason: "Manual scan completed: " + (analysis.signal !== 'NO_TRADE' ? `Setup found (${analysis.signal})` : (riskResult.skipReason || "No setup found")),
         scan_duration_ms: scanDurationMs,
-        gemini_duration_ms: geminiDuration
+        gemini_duration_ms: geminiDuration,
+        decision_snapshot: decisionSnapshot
       });
     } catch (evalErr) {
       console.warn(`[Explainability Engine Warning] Failed to log scan evaluation:`, evalErr);
