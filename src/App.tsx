@@ -320,7 +320,7 @@ export default function App() {
 
   // Enforce access control on admin-only tabs
   useEffect(() => {
-    if (!isAuthLoading && !isAdmin && (activeTab as string === 'performance' || activeTab === 'admin')) {
+    if (!isAuthLoading && !isAdmin && activeTab === 'admin') {
       setActiveTab('home');
     }
   }, [isAuthLoading, isAdmin, activeTab]);
