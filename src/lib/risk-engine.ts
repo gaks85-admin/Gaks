@@ -347,9 +347,80 @@ export function calculatePositionSize(config: {
   // 4. Retrieve Actual Executed Entry Price
   const executedEntry = config.executedEntry !== undefined ? config.executedEntry : intendedEntry;
 
-  // 2. Calculate Risk Distance
+  // 2. Calculate Risk Distance & Check Initial SL Geometry
+  if (direction === 'SELL' && config.stopLoss <= intendedEntry) {
+    return {
+      accountSize: config.accountSize,
+      riskPercentage: config.riskPercentage,
+      riskAmount,
+      entryPrice: intendedEntry,
+      stopLoss: config.stopLoss,
+      takeProfit: config.takeProfit || 0,
+      stopDistance: Math.abs(intendedEntry - config.stopLoss),
+      pipValue: 10,
+      contractSize,
+      calculatedLotSize: 0,
+      exactLotSize: 0,
+      expectedLoss: 0,
+      expectedProfit: 0,
+      assetClass,
+      normalizedLotSize: 0,
+      lotType: 'INVALID',
+      lotStep,
+      minLot,
+      symbol: config.symbol,
+      accepted: false,
+      skipReason: `Invalid SELL StopLoss: SL (${config.stopLoss}) must be > Entry (${intendedEntry})`,
+      expectedLossAtRequiredLot: 0,
+      expectedLossAtMinLot: 0,
+      userRr,
+      geminiTp: config.geminiTp ?? config.takeProfit,
+      actualRisk: 0,
+      actualReward: 0,
+      actualRr: 0,
+      rrValidationPassed: false,
+      executableLotDisplay: '0',
+      theoreticalExpectedLoss: 0
+    };
+  }
+
+  if (direction === 'BUY' && config.stopLoss >= intendedEntry) {
+    return {
+      accountSize: config.accountSize,
+      riskPercentage: config.riskPercentage,
+      riskAmount,
+      entryPrice: intendedEntry,
+      stopLoss: config.stopLoss,
+      takeProfit: config.takeProfit || 0,
+      stopDistance: Math.abs(intendedEntry - config.stopLoss),
+      pipValue: 10,
+      contractSize,
+      calculatedLotSize: 0,
+      exactLotSize: 0,
+      expectedLoss: 0,
+      expectedProfit: 0,
+      assetClass,
+      normalizedLotSize: 0,
+      lotType: 'INVALID',
+      lotStep,
+      minLot,
+      symbol: config.symbol,
+      accepted: false,
+      skipReason: `Invalid BUY StopLoss: SL (${config.stopLoss}) must be < Entry (${intendedEntry})`,
+      expectedLossAtRequiredLot: 0,
+      expectedLossAtMinLot: 0,
+      userRr,
+      geminiTp: config.geminiTp ?? config.takeProfit,
+      actualRisk: 0,
+      actualReward: 0,
+      actualRr: 0,
+      rrValidationPassed: false,
+      executableLotDisplay: '0',
+      theoreticalExpectedLoss: 0
+    };
+  }
+
   let riskDistance = direction === 'SELL' ? config.stopLoss - intendedEntry : intendedEntry - config.stopLoss;
-  riskDistance = Math.abs(riskDistance);
 
   // 3. Calculate TP
   const rawProvidedTp = config.takeProfit !== undefined && config.takeProfit !== null ? Number(config.takeProfit) : (config.geminiTp !== undefined && config.geminiTp !== null ? Number(config.geminiTp) : null);

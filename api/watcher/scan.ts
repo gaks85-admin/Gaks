@@ -11,6 +11,12 @@ import { recordEvaluation } from "../../src/lib/explainability-engine.js";
 import { validateMarketDataIntegrity } from "../../src/lib/market-integrity.js";
 import { normalizeConfidence } from "../../src/lib/confidence-engine.js";
 import { resolveUserGeminiKey, classifyAndRedactGeminiError } from "../../src/lib/gemini-key-resolver.js";
+import { computeEquityAnalytics, deriveEquityState, fetchUserCompletedTrades } from "../../src/lib/equity-learning-engine.js";
+import { evaluateRiskGovernor } from "../../src/lib/risk-governor.js";
+import { evaluateAdaptiveLearning, fetchCompletedTradesForAdaptiveLearning } from "../../src/lib/adaptive-learning-engine.js";
+import { calculateAdaptiveQualityRequirement } from "../../src/lib/quality-gate.js";
+import { evaluateAdaptiveExecution } from "../../src/lib/adaptive-execution-engine.js";
+import { evaluateClosedLoopCalibration } from "../../src/lib/closed-loop-calibration-engine.js";
 
 
 /**
@@ -597,6 +603,217 @@ Fallback: NO_TRADE`.trim());
     }
 
     // 9. Signal Result & Risk Engine
+    let governorResult: any = null;
+    if (analysis.signal === 'BUY' || analysis.signal === 'SELL') {
+      try {
+        const completedTrades = await fetchUserCompletedTrades(supabase, userId);
+        const equityMetrics = computeEquityAnalytics(completedTrades);
+        const equityState = deriveEquityState(accountSize, equityMetrics);
+        governorResult = evaluateRiskGovernor({
+          metrics: equityMetrics,
+          equityState,
+          candidate: {
+            pair: symbol,
+            timeframe: selectedTimeframe,
+            strategySetup: compiledStrategy?.strategy_mode || 'DEFAULT',
+            qualityScore: analysis.confidence,
+            confidence: analysis.confidence
+          }
+        });
+
+        if (governorResult.status === 'NO_TRADE') {
+          console.log(`[Risk Governor] REJECTED signal for ${symbol}: Governor status is NO_TRADE. Reason: ${governorResult.reasonCodes.join(', ')}`);
+          analysis.signal = 'NO_TRADE';
+          if (analysis.reasoning) {
+            if (Array.isArray(analysis.reasoning)) {
+              analysis.reasoning.push(`Risk Governor NO_TRADE: ${governorResult.explanation}`);
+            } else {
+              analysis.reasoning = [analysis.reasoning, `Risk Governor NO_TRADE: ${governorResult.explanation}`];
+            }
+          } else {
+            analysis.reasoning = [`Risk Governor NO_TRADE: ${governorResult.explanation}`];
+          }
+        } else if (governorResult.status === 'RESTRICTED_SELECTIVITY') {
+          console.log(`[Risk Governor] RESTRICTED_SELECTIVITY active for ${symbol}. Reason: ${governorResult.reasonCodes.join(', ')}`);
+          if (analysis.confidence < 80) {
+            console.log(`[Risk Governor] Rejecting ${symbol} under RESTRICTED_SELECTIVITY because confidence (${analysis.confidence}%) is below strict 80% threshold.`);
+            analysis.signal = 'NO_TRADE';
+          }
+        }
+      } catch (govErr) {
+        console.error('[Risk Governor Error] Failed to evaluate equity learning governor in manual scan:', govErr);
+      }
+    }
+
+    // Closed-Loop Strategy Calibration (Stage 3G)
+    if (analysis.signal === 'BUY' || analysis.signal === 'SELL') {
+      try {
+        const completedTrades = await fetchCompletedTradesForAdaptiveLearning(supabase, userId);
+        const calibrationResult = evaluateClosedLoopCalibration({
+          userId,
+          pair: symbol,
+          timeframe: selectedTimeframe,
+          setup: compiledStrategy?.strategy_mode || 'HYBRID',
+          direction: analysis.signal,
+          marketRegime: analysis.regime || 'UNKNOWN',
+          confidence: analysis.confidence,
+          qualityScore: analysis.confidence,
+          executionScore: 80,
+          expectedRR: parseRiskRewardRatio(riskRewardStr),
+          completedTrades
+        });
+
+        console.log(`[Closed-Loop Calibration] Action: ${calibrationResult.recommendedAction}, Evidence: ${calibrationResult.evidenceLevel}, Trades: ${calibrationResult.tradeCount}, Reliability: ${calibrationResult.overallReliability}`);
+
+        if (calibrationResult.recommendedAction === 'NO_TRADE') {
+          console.log(`[Closed-Loop Calibration] REJECTED signal for ${symbol} (${analysis.signal}): ${calibrationResult.explanation}`);
+          analysis.signal = 'NO_TRADE';
+          const calibMsg = `[Closed-Loop Calibration] NO_TRADE: ${calibrationResult.explanation}`;
+          if (analysis.reasoning) {
+            if (Array.isArray(analysis.reasoning)) {
+              analysis.reasoning.push(calibMsg);
+            } else {
+              analysis.reasoning = [analysis.reasoning, calibMsg];
+            }
+          } else {
+            analysis.reasoning = [calibMsg];
+          }
+        } else if (calibrationResult.recommendedAction === 'RESTRICT') {
+          if (analysis.confidence < 80) {
+            console.log(`[Closed-Loop Calibration] Rejecting ${symbol} under RESTRICT recommendation because confidence (${analysis.confidence}%) < 80% threshold.`);
+            analysis.signal = 'NO_TRADE';
+          }
+        } else if (calibrationResult.recommendedAction === 'SELECTIVE') {
+          if (analysis.confidence < 75) {
+            console.log(`[Closed-Loop Calibration] Rejecting ${symbol} under SELECTIVE recommendation because confidence (${analysis.confidence}%) < 75% threshold.`);
+            analysis.signal = 'NO_TRADE';
+          }
+        }
+      } catch (calibErr) {
+        console.error('[Closed-Loop Calibration Error] Failed to evaluate closed-loop calibration in manual scan:', calibErr);
+      }
+    }
+
+    // Adaptive Learning Evaluation (Stage 3B) & Adaptive Quality Requirement (Stage 3C)
+    if (analysis.signal === 'BUY' || analysis.signal === 'SELL') {
+      try {
+        const completedTrades = await fetchCompletedTradesForAdaptiveLearning(supabase, userId);
+        const adaptiveResult = evaluateAdaptiveLearning({
+          pair: symbol,
+          timeframe: selectedTimeframe,
+          setup: compiledStrategy?.strategy_mode || 'HYBRID',
+          direction: analysis.signal,
+          marketRegime: analysis.regime || 'UNKNOWN',
+          completedTrades
+        });
+
+        const adaptiveReq = calculateAdaptiveQualityRequirement({
+          baseThreshold: 75,
+          classification: adaptiveResult.classification,
+          tier: adaptiveResult.tier,
+          expectancyR: adaptiveResult.expectancyR,
+          recentExpectancyR: adaptiveResult.recentExpectancyR,
+          sampleSize: adaptiveResult.sampleSize
+        });
+
+        console.log(`
+[Adaptive Quality]
+Requested: ${symbol} + ${selectedTimeframe} + ${compiledStrategy?.strategy_mode || 'HYBRID'} + ${analysis.signal} + ${analysis.regime || 'UNKNOWN'}
+Specific Sample: ${adaptiveResult.sampleSize}
+Fallback: ${adaptiveResult.fallbackLevelUsed}
+Classification: ${adaptiveResult.classification}
+Expectancy: ${adaptiveResult.expectancyR.toFixed(2)}R
+Recent Expectancy: ${adaptiveResult.recentExpectancyR.toFixed(2)}R
+Base Quality: ${analysis.confidence}%
+Adaptive Requirement: ${adaptiveReq.minRequired}%
+Reason: ${adaptiveReq.reason}
+        `.trim());
+
+        if (adaptiveResult.decision === 'REJECT') {
+          console.log(`[Adaptive Learning] REJECTED signal for ${symbol} (${analysis.signal}): ${adaptiveResult.reason}`);
+          analysis.signal = 'NO_TRADE';
+          if (analysis.reasoning) {
+            if (Array.isArray(analysis.reasoning)) {
+              analysis.reasoning.push(`Adaptive Learning REJECT: ${adaptiveResult.explanation}`);
+            } else {
+              analysis.reasoning = [analysis.reasoning, `Adaptive Learning REJECT: ${adaptiveResult.explanation}`];
+            }
+          } else {
+            analysis.reasoning = [`Adaptive Learning REJECT: ${adaptiveResult.explanation}`];
+          }
+        } else if (adaptiveResult.decision === 'RESTRICT') {
+          console.log(`[Adaptive Learning] RESTRICT active for ${symbol} (${analysis.signal}): ${adaptiveResult.reason}`);
+          if (analysis.confidence < 85) {
+            console.log(`[Adaptive Learning] Rejecting ${symbol} under RESTRICT decision because confidence (${analysis.confidence}%) is below strict 85% threshold.`);
+            analysis.signal = 'NO_TRADE';
+          }
+        } else if (analysis.confidence < adaptiveReq.minRequired) {
+          console.log(`[Adaptive Quality] REJECTED signal for ${symbol}: Quality score (${analysis.confidence}%) < adaptive requirement (${adaptiveReq.minRequired}%)`);
+          analysis.signal = 'NO_TRADE';
+          const qualMsg = `[Adaptive Quality] Historical configuration deterioration requires stronger confluence (Score ${analysis.confidence}% < ${adaptiveReq.minRequired}%).`;
+          if (analysis.reasoning) {
+            if (Array.isArray(analysis.reasoning)) {
+              analysis.reasoning.push(qualMsg);
+            } else {
+              analysis.reasoning = [analysis.reasoning, qualMsg];
+            }
+          } else {
+            analysis.reasoning = [qualMsg];
+          }
+        }
+
+        // Adaptive Execution Timing (Stage 3D)
+        if (analysis.signal === 'BUY' || analysis.signal === 'SELL') {
+          try {
+            const executionResult = evaluateAdaptiveExecution({
+              pair: symbol,
+              timeframe: selectedTimeframe,
+              setup: compiledStrategy?.strategy_mode || 'HYBRID',
+              direction: analysis.signal,
+              marketRegime: analysis.regime || 'UNKNOWN',
+              entryPrice: analysis.entryPrice,
+              structurePrice: analysis.structurePrice || analysis.sl,
+              atr: analysis.atr,
+              completedTrades,
+              adaptiveQuality: adaptiveResult,
+              riskGovernor: governorResult
+            });
+
+            if (executionResult.status === 'WAIT') {
+              console.log(`[Adaptive Execution] WAIT state triggered for ${symbol}: ${executionResult.explanation}`);
+              analysis.signal = 'NO_TRADE';
+              const waitMsg = `[Adaptive Execution] WAIT: Sub-optimal execution timing (${executionResult.timingQuality}). ${executionResult.reasonCodes.join(', ')}`;
+              if (analysis.reasoning) {
+                if (Array.isArray(analysis.reasoning)) {
+                  analysis.reasoning.push(waitMsg);
+                } else {
+                  analysis.reasoning = [analysis.reasoning, waitMsg];
+                }
+              } else {
+                analysis.reasoning = [waitMsg];
+              }
+            } else if (executionResult.status === 'NO_TRADE') {
+              console.log(`[Adaptive Execution] NO_TRADE triggered for ${symbol}: ${executionResult.explanation}`);
+              analysis.signal = 'NO_TRADE';
+              const rejMsg = `[Adaptive Execution] REJECT: Poor execution timing / entry chasing protection (${executionResult.reasonCodes.join(', ')}).`;
+              if (analysis.reasoning) {
+                if (Array.isArray(analysis.reasoning)) {
+                  analysis.reasoning.push(rejMsg);
+                } else {
+                  analysis.reasoning = [analysis.reasoning, rejMsg];
+                }
+              } else {
+                analysis.reasoning = [rejMsg];
+              }
+            }
+          } catch (execErr) {
+            console.error('[Adaptive Execution Error] Failed to evaluate adaptive execution timing in manual scan:', execErr);
+          }
+        }
+      } catch (adaptErr) {
+        console.error('[Adaptive Quality Error] Failed to evaluate adaptive quality requirement in manual scan:', adaptErr);
+      }
+    }
 
     let riskResult = { accepted: false, skipReason: "No trade setup" };
 

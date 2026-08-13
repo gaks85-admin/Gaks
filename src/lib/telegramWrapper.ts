@@ -1,3 +1,6 @@
+import { validateFinalTelegramTradePayload, computeTradeFingerprint } from './final-telegram-gate.js';
+import { buildTelegramAlertMessage } from './telegram-formatter.js';
+
 export async function sendTelegramMessage(chatId: string | number, text: string): Promise<boolean> {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) {
@@ -29,3 +32,33 @@ export async function sendTelegramMessage(chatId: string | number, text: string)
     return false;
   }
 }
+
+export async function dispatchTradeAlert(chatId: string | number, payload: any): Promise<{ sent: boolean; reason: string }> {
+  const initialFp = computeTradeFingerprint(payload);
+  
+  const gateResult = validateFinalTelegramTradePayload(payload);
+
+  console.log(`[TELEGRAM OBJECT FINGERPRINT]
+Direction: ${payload.direction}
+Entry: ${payload.entryPrice}
+SL: ${payload.stopLoss}
+TP: ${payload.takeProfit}
+RR: ${payload.riskRewardRatio || 'N/A'}
+Fingerprint: ${initialFp}`);
+
+  const postFp = computeTradeFingerprint(payload);
+  if (initialFp !== postFp) {
+    console.error(`[TELEGRAM GATE BLOCKED] REASON: TRADE_OBJECT_MUTATED_AFTER_VALIDATION`);
+    return { sent: false, reason: 'TRADE_OBJECT_MUTATED_AFTER_VALIDATION' };
+  }
+
+  if (!gateResult.valid) {
+    console.error(`[TELEGRAM GATE BLOCKED] REASON: ${gateResult.reason}`);
+    return { sent: false, reason: gateResult.reason };
+  }
+
+  const message = buildTelegramAlertMessage(payload);
+  const success = await sendTelegramMessage(chatId, message);
+  return { sent: success, reason: success ? 'SUCCESS' : 'TELEGRAM_API_ERROR' };
+}
+

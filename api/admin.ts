@@ -2,6 +2,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { GoogleGenAI, Type } from '@google/genai';
 import { buildTelegramAlertMessage } from '../src/lib/telegram-formatter.js';
+import { dispatchTradeAlert } from '../src/lib/telegramWrapper.js';
 import { timeframeToMinutes } from '../src/lib/timeframe.js';
 import { extractRiskPreferences, calculatePositionSize } from '../src/lib/risk-engine.js';
 import { resolveUserGeminiKey } from '../src/lib/gemini-key-resolver.js';
@@ -1728,7 +1729,7 @@ ${JSON.stringify(collectedData, null, 2)}
           // Signals history is tracked via watcher_evaluations
           
           if (watcher.telegram_chat_id && sig.confidenceScore >= 70) {
-            const alertMessage = buildTelegramAlertMessage({
+            const tradePayload = {
               pair: sig.pair,
               timeframe: watcher.selected_timeframe || 'H1',
               direction: sig.direction,
@@ -1743,10 +1744,12 @@ ${JSON.stringify(collectedData, null, 2)}
               riskAmount: posSizeResult.riskAmount,
               expectedLoss: posSizeResult.expectedLoss,
               lotType: posSizeResult.lotType
-            });
+            };
               
-            await sendTelegramMessage_watcher(watcher.telegram_chat_id, alertMessage);
-            signalsSent++;
+            const dispatchRes = await dispatchTradeAlert(watcher.telegram_chat_id, tradePayload);
+            if (dispatchRes.sent) {
+              signalsSent++;
+            }
           }
         }
       }

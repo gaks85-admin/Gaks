@@ -8,6 +8,14 @@ import { validateTradeGeometry } from './trade-geometry-validator.js';
 import { validateActiveTradeState } from './trade-validator.js';
 import { runGeminiAuditTestSuite } from './gemini-audit-test-suite.js';
 import { runTradeValidatorTestSuite } from './trade-validator-test-suite.js';
+import { runEquityLearningTestSuite } from './equity-learning-test-suite.js';
+import { runTradeIdentityTestSuite } from './trade-identity-test-suite.js';
+import { runAdaptiveLearningTestSuite } from './adaptive-learning-test-suite.js';
+import { runAdaptiveQualityTestSuite } from './adaptive-quality-test-suite.js';
+import { runAdaptiveExecutionTestSuite } from './adaptive-execution-test-suite.js';
+import { runAdaptivePerformanceTestSuite } from './adaptive-performance-test-suite.js';
+import { runDecisionAttributionTestSuite } from './decision-attribution-test-suite.js';
+import { runClosedLoopCalibrationTestSuite } from './closed-loop-calibration-test-suite.js';
 
 export function runProductionFixTestSuite() {
   console.log("==========================================");
@@ -767,6 +775,38 @@ export function runProductionFixTestSuite() {
 
   // 27. Run Gemini Audit Test Suite
   runGeminiAuditTestSuite();
+
+  // 28. Run Equity Learning & Risk Governor Test Suite
+  const equityRes = runEquityLearningTestSuite();
+  assert(equityRes.failed === 0, 'Test N - Equity Learning & Risk Governor Test Suite passes successfully');
+
+  // 29. Run Trade Identity & Outcome Attribution Test Suite (Stage 3A)
+  const tradeIdRes = runTradeIdentityTestSuite();
+  assert(tradeIdRes.failed === 0, 'Test O - Trade Identity & Outcome Attribution Test Suite passes successfully');
+
+  // 30. Run Adaptive Learning Test Suite (Stage 3B)
+  const adaptiveRes = runAdaptiveLearningTestSuite();
+  assert(adaptiveRes.failed === 0, 'Test P - Adaptive Learning Test Suite passes successfully');
+
+  // 31. Run Adaptive Quality Test Suite (Stage 3C)
+  const adaptiveQualityRes = runAdaptiveQualityTestSuite();
+  assert(adaptiveQualityRes.failed === 0, 'Test Q - Adaptive Quality Test Suite passes successfully');
+
+  // 32. Run Adaptive Execution Test Suite (Stage 3D)
+  const adaptiveExecutionRes = runAdaptiveExecutionTestSuite();
+  assert(adaptiveExecutionRes.failed === 0, 'Test R - Adaptive Execution Test Suite passes successfully');
+
+  // 33. Run Adaptive Performance Test Suite (Stage 3E)
+  const adaptivePerformanceRes = runAdaptivePerformanceTestSuite();
+  assert(adaptivePerformanceRes.failed === 0, 'Test S - Adaptive Performance Test Suite passes successfully');
+
+  // 34. Run Decision Attribution Test Suite (Stage 3F)
+  const decisionAttributionRes = runDecisionAttributionTestSuite();
+  assert(decisionAttributionRes.failed === 0, 'Test T - Decision Attribution Test Suite passes successfully');
+
+  // 35. Run Closed-Loop Calibration Test Suite (Stage 3G)
+  const closedLoopCalibrationRes = runClosedLoopCalibrationTestSuite();
+  assert(closedLoopCalibrationRes.failed === 0, 'Test U - Closed-Loop Calibration Test Suite passes successfully');
 
   // 27. Final confirmation
   assert(passedCount > 50, 'Test L26 - All existing 55+ production tests pass successfully');

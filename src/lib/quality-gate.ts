@@ -34,6 +34,56 @@ export interface QualityGateResult {
   };
 }
 
+export interface AdaptiveQualityInput {
+  baseThreshold?: number; // default 75
+  classification: string; // 'HEALTHY' | 'NEUTRAL' | 'DETERIORATING' | 'POOR' | 'INSUFFICIENT_DATA'
+  tier: string; // 'INSUFFICIENT_DATA' | 'WEAK_SAMPLE' | 'ELIGIBLE' | 'STRONG_SAMPLE'
+  expectancyR: number;
+  recentExpectancyR: number;
+  sampleSize: number;
+}
+
+export function calculateAdaptiveQualityRequirement(input: AdaptiveQualityInput): {
+  minRequired: number;
+  reason: string;
+} {
+  const base = input.baseThreshold ?? 75;
+  const classification = (input.classification || 'INSUFFICIENT_DATA').toUpperCase();
+  const tier = (input.tier || 'INSUFFICIENT_DATA').toUpperCase();
+  const sampleSize = Number(input.sampleSize || 0);
+
+  if (tier === 'INSUFFICIENT_DATA' || sampleSize < 10) {
+    return {
+      minRequired: base,
+      reason: `Insufficient historical sample (${sampleSize} trades); using base threshold (${base}%).`
+    };
+  }
+
+  let adjusted = base;
+  let reason = `Historical performance neutral/healthy; using base threshold (${base}%).`;
+
+  if (classification === 'HEALTHY' || classification === 'NEUTRAL') {
+    adjusted = base;
+    reason = `Historical performance ${classification.toLowerCase()} (${input.expectancyR}R); maintaining baseline threshold (${base}%).`;
+  } else if (classification === 'DETERIORATING') {
+    adjusted = Math.min(100, base + 5); // 80%
+    reason = `Historical performance deteriorating (recent expectancy ${input.recentExpectancyR}R); elevated quality requirement (${adjusted}%).`;
+  } else if (classification === 'POOR') {
+    if (tier === 'STRONG_SAMPLE' && sampleSize >= 50) {
+      adjusted = Math.min(100, base + 15); // 90%
+    } else {
+      adjusted = Math.min(100, base + 10); // 85%
+    }
+    reason = `Historical performance poor (${input.expectancyR}R, sample ${sampleSize}); strict quality requirement (${adjusted}%).`;
+  }
+
+  const finalThreshold = Math.max(base, Math.min(100, adjusted));
+  return {
+    minRequired: finalThreshold,
+    reason
+  };
+}
+
 /**
  * Evaluates high-confluence setup quality before risk validation and execution.
  */
