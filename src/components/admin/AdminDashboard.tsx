@@ -3,9 +3,10 @@ import {
   LayoutDashboard, Users, Eye, Zap, Activity, Settings as SettingsIcon, 
   Shield, Menu, X, Key, MessageSquare, Clock, Heart, Search, RefreshCw, 
   Play, Pause, Trash2, AlertTriangle, CheckCircle2, Power, Terminal, Sliders, Check, ExternalLink, Send, Plus,
-  ShieldCheck
+  ShieldCheck, Sparkles
 } from 'lucide-react';
 import { supabase } from '../../supabaseClient';
+import { LearningPerformanceView } from '../LearningPerformanceView';
 
 // ----------------------------------------------------
 // Toast Component
@@ -1986,10 +1987,26 @@ const LiveLogsPage = ({ fetchWithAuth }: { fetchWithAuth: any }) => {
 // ----------------------------------------------------
 // Main Admin Component
 // ----------------------------------------------------
-export default function AdminDashboard({ userProfile, session, authLoading }: { userProfile: any, session: any, authLoading: boolean }) {
-  const [activeAdminTab, setActiveAdminTab] = useState<'dashboard' | 'users' | 'watchers' | 'signals' | 'health' | 'settings' | 'live-logs'>('dashboard');
+export default function AdminDashboard({ 
+  userProfile, 
+  session, 
+  authLoading,
+  initialTab
+}: { 
+  userProfile: any, 
+  session: any, 
+  authLoading: boolean,
+  initialTab?: 'dashboard' | 'learning' | 'live-logs' | 'users' | 'watchers' | 'signals' | 'health' | 'settings'
+}) {
+  const [activeAdminTab, setActiveAdminTab] = useState<'dashboard' | 'learning' | 'live-logs' | 'users' | 'watchers' | 'signals' | 'health' | 'settings'>(initialTab || 'dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+
+  useEffect(() => {
+    if (initialTab) {
+      setActiveAdminTab(initialTab);
+    }
+  }, [initialTab]);
 
   const ADMIN_EMAIL = "gaks6535@gmail.com";
   
@@ -2072,7 +2089,8 @@ export default function AdminDashboard({ userProfile, session, authLoading }: { 
   }
 
   const menuItems = [
-    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    { id: 'dashboard', label: 'Overview', icon: LayoutDashboard },
+    { id: 'learning', label: 'Learning & Performance', icon: Sparkles },
     { id: 'live-logs', label: 'Live Logs', icon: Terminal },
     { id: 'users', label: 'Users', icon: Users },
     { id: 'watchers', label: 'Watchers', icon: Eye },
@@ -2111,13 +2129,21 @@ export default function AdminDashboard({ userProfile, session, authLoading }: { 
         {/* Sub-header for mobile sidebar trigger */}
         <header className="px-6 py-4 border-b border-zinc-900/60 flex items-center justify-between bg-[#080808]/50 md:hidden shrink-0">
           <button onClick={() => setIsSidebarOpen(true)} className="p-1 text-zinc-400 hover:text-white cursor-pointer"><Menu className="w-5 h-5" /></button>
-          <span className="text-xs font-bold uppercase tracking-widest text-zinc-400">{activeAdminTab}</span>
+          <span className="text-xs font-bold uppercase tracking-widest text-zinc-400">{menuItems.find(m => m.id === activeAdminTab)?.label || activeAdminTab}</span>
           <div className="w-5" /> {/* Spacer */}
         </header>
 
         {/* Scrollable Subpage Frame */}
         <div className="flex-1 overflow-y-auto pb-16">
           {activeAdminTab === 'dashboard' && <DashboardPage fetchWithAuth={fetchWithAuth} />}
+          {activeAdminTab === 'learning' && (
+            <div className="p-4 sm:p-6 space-y-6">
+              <LearningPerformanceView 
+                userId={session?.user?.id || userProfile?.id} 
+                authToken={session?.access_token} 
+              />
+            </div>
+          )}
           {activeAdminTab === 'live-logs' && <LiveLogsPage fetchWithAuth={fetchWithAuth} />}
           {activeAdminTab === 'users' && <UsersPage fetchWithAuth={fetchWithAuth} showToast={showToast} />}
           {activeAdminTab === 'watchers' && <WatchersPage fetchWithAuth={fetchWithAuth} showToast={showToast} />}
