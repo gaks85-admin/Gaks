@@ -31,19 +31,30 @@ export const LearningPerformanceView: React.FC<LearningPerformanceViewProps> = (
   const [activeTab, setActiveTab] = useState<'pairs' | 'setups' | 'timeframes' | 'directions' | 'regimes' | 'execution'>('pairs');
 
   const fetchPerformanceData = async () => {
+    if (!authToken) {
+      setLoading(false);
+      setError('Authentication required to access administrator learning diagnostics.');
+      return;
+    }
+
     setLoading(true);
     setError(null);
     try {
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (authToken) {
-        headers['Authorization'] = `Bearer ${authToken}`;
-      }
+      const headers: Record<string, string> = { 
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${authToken}`
+      };
 
       const res = await fetch('/api/performance/snapshot', {
-        method: authToken ? 'GET' : 'POST',
-        headers,
-        body: !authToken && userId ? JSON.stringify({ userId }) : undefined
+        method: 'GET',
+        headers
       });
+
+      if (res.status === 403) {
+        setError('Access Restricted: Administrator privileges required.');
+        setLoading(false);
+        return;
+      }
 
       const data = await res.json();
       if (res.ok && data.success) {

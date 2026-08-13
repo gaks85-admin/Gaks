@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { getUserPerformanceSnapshot } from '../../src/lib/performance-snapshot.js';
 import { getLearningStatus } from '../../src/lib/learning-status.js';
+import { verifyAdminAuth } from '../auth-admin.js';
 
 const getSupabase = (token?: string) => {
   const url = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "https://wkujrqmxivljnuvumfau.supabase.co";
@@ -23,38 +24,42 @@ const getSupabase = (token?: string) => {
 
 export default async function performanceSnapshotHandler(req: any, res: any) {
   if (req.method !== 'GET' && req.method !== 'POST') {
-    return res.status(405).json({ success: false, error: 'Method not allowed' });
+    return res.status(405).json({ error: 'Method not allowed' });
   }
 
   try {
-    const authHeader = req.headers.authorization || '';
-    const token = authHeader.startsWith('Bearer ') ? authHeader.substring(7) : authHeader;
+    const authHeader = req.headers?.authorization || req.headers?.Authorization || '';
+    const token = authHeader.startsWith('Bearer ') ? authHeader.substring(7).trim() : authHeader.trim();
 
-    let userId: string | null = null;
-    let supabase = getSupabase(token);
-
-    if (token) {
-      const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
-      if (!authErr && user) {
-        userId = user.id;
-      }
-    }
-
-    if (!userId && req.body?.userId) {
-      userId = req.body.userId;
-    }
-
-    if (!userId) {
+    if (!token) {
       return res.status(401).json({
-        success: false,
-        error: 'Unauthorized: Valid user authentication token required.'
+        error: 'Unauthorized'
       });
     }
 
-    console.log(`[PERFORMANCE SNAPSHOT API] Fetching snapshot for user: ${userId}`);
+    const supabase = getSupabase(token);
 
-    const snapshot = await getUserPerformanceSnapshot(userId, { supabase });
-    const learningStatus = await getLearningStatus(userId, { supabase, completedTrades: snapshot ? undefined : [] });
+    // 1. Enforce Server-Side Admin Authorization Check FIRST
+    // Prevents unauthorized calculation of expensive performance diagnostics
+    const authResult = await verifyAdminAuth(req, supabase);
+    if (!authResult.isAdmin) {
+      return res.status(authResult.statusCode || 403).json({
+        error: authResult.error || 'Forbidden'
+      });
+    }
+
+    // 2. Admin authorized: determine target user scope
+    const targetUserId = req.query?.userId || req.body?.userId || authResult.userId;
+    if (!targetUserId) {
+      return res.status(400).json({
+        error: 'Missing user ID'
+      });
+    }
+
+    console.log(`[PERFORMANCE SNAPSHOT API] Admin (${authResult.email}) requesting snapshot for user: ${targetUserId}`);
+
+    const snapshot = await getUserPerformanceSnapshot(targetUserId, { supabase });
+    const learningStatus = await getLearningStatus(targetUserId, { supabase, completedTrades: snapshot ? undefined : [] });
 
     return res.status(200).json({
       success: true,
@@ -64,8 +69,7 @@ export default async function performanceSnapshotHandler(req: any, res: any) {
   } catch (err: any) {
     console.error('[PERFORMANCE SNAPSHOT API Error]', err);
     return res.status(500).json({
-      success: false,
-      error: err.message || 'Internal server error while compiling performance snapshot'
+      error: 'Internal server error while compiling performance snapshot'
     });
   }
 }
