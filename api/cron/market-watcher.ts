@@ -475,12 +475,22 @@ export default async function handler(req: any, res: any) {
     const startTime = Date.now();
 
     // 1. Load Environment Variables
-    const supabaseUrl = process.env.VITE_SUPABASE_URL || '';
+    const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
     const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || '';
     const twelveDataKey = process.env.TWELVE_DATA_API_KEY;
     const cronSecretRaw = process.env.CRON_SECRET;
     const telegramBotToken = process.env.TELEGRAM_BOT_TOKEN;
     const liveTradingEnabled = process.env.LIVE_TRADING_ENABLED === 'true';
+
+    // Safe Startup Validation (STEP 4)
+    if (!supabaseUrl) {
+      console.error("[CRON ERROR] SUPABASE_URL_MISSING: The Supabase URL (SUPABASE_URL or VITE_SUPABASE_URL) is not set.");
+      return res.status(500).json({ success: false, error: "SUPABASE_URL_MISSING" });
+    }
+    if (!supabaseKey) {
+      console.error("[CRON ERROR] SUPABASE_KEY_MISSING: The Supabase key (SUPABASE_SERVICE_ROLE_KEY or VITE_SUPABASE_ANON_KEY) is not set.");
+      return res.status(500).json({ success: false, error: "SUPABASE_KEY_MISSING" });
+    }
     
     // 2. Initialize Core Services Early (Stage 8 Scope Safety)
     const supabase = createClient(supabaseUrl, supabaseKey);

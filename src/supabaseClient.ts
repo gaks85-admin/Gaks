@@ -15,7 +15,7 @@ const getEnvVar = (key: string): string => {
 };
 
 const getSupabaseUrl = (): string => {
-  let url = getEnvVar('VITE_SUPABASE_URL');
+  let url = getEnvVar('SUPABASE_URL') || getEnvVar('VITE_SUPABASE_URL');
   if (url.endsWith('/rest/v1/')) {
     url = url.slice(0, -9);
   } else if (url.endsWith('/rest/v1')) {
@@ -25,7 +25,7 @@ const getSupabaseUrl = (): string => {
 };
 
 const SUPABASE_URL = getSupabaseUrl();
-const SUPABASE_PUBLIC_KEY = getEnvVar('VITE_SUPABASE_ANON_KEY');
+const SUPABASE_PUBLIC_KEY = getEnvVar('SUPABASE_ANON_KEY') || getEnvVar('VITE_SUPABASE_ANON_KEY');
 
 export const isRealSupabaseConfigured = !!(SUPABASE_URL && SUPABASE_PUBLIC_KEY);
 
