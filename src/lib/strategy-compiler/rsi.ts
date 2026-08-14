@@ -10,7 +10,7 @@ export interface RsiRule {
 
 export class RsiParser implements StrategyParserModule<RsiRule> {
   parse(text: string): ParserResult<RsiRule> {
-    const match = findSynonymMatch(text, rsiSynonyms, 'RSI_FILTER', 0.96);
+    const match = findSynonymMatch(text, rsiSynonyms, 'rsi', 0.96);
     
     let overbought: number | undefined;
     let oversold: number | undefined;
@@ -48,7 +48,7 @@ export class RsiParser implements StrategyParserModule<RsiRule> {
         oversold
       },
       matchedPhrase: match.matched ? match.matchedPhrase : (hasRsi ? "rsi" : ""),
-      canonicalRule: match.matched ? match.canonicalRule : (hasRsi ? "RSI_FILTER" : "")
+      canonicalRule: match.matched ? match.canonicalRule : (hasRsi ? "rsi" : "")
     };
   }
 }

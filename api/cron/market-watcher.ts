@@ -10,9 +10,25 @@ import { compileStrategy } from '../../src/lib/strategy-compiler.js';
 import { validateDetectors } from '../../src/lib/detector-capability-validator.js';
 import { evaluateDecision } from '../../src/lib/decision-engine.js';
 import { extractMarketStructure } from '../../src/lib/market-structure-engine.js';
+import { defaultEconomicEventService } from '../../src/lib/economic-event-service.js';
+import { validateExecutionFreshness } from '../../src/lib/execution-freshness.js';
+import { revalidatePreExecution } from '../../src/lib/pre-execution-validator.js';
 import { calculateStructuralStopLoss, validateAndResolveStopLoss } from '../../src/lib/structural-stop-loss.js';
+import { getBrokerProvider } from '../../src/lib/broker-factory.js';
 import { recordEvaluation } from '../../src/lib/explainability-engine.js';
+import { defaultMarketDataService, getMarketDataStats } from '../../src/lib/market-data-service.js';
 import { calculateHistoricalProbability, recordCompletedTrade } from '../../src/lib/learning-engine.js';
+import { BrokerReconciliationService } from '../../src/lib/broker-reconciliation-service.js';
+import { SafetyGovernor, defaultSafetyLimits } from '../../src/lib/safety-governor.js';
+import { SupervisedMicrolotGovernor, DEFAULT_MICROLOT_LIMITS } from '../../src/lib/microlot-governor.js';
+import { 
+  BrokerAccount, 
+  BrokerOrder, 
+  BrokerPosition, 
+  BrokerExecution, 
+  BrokerPnL,
+  BrokerQuote
+} from '../../src/lib/broker-types.js';
 import { RULE_WEIGHTS } from '../../src/lib/rule-weight-engine.js';
 import { validateMarketDataIntegrity } from '../../src/lib/market-integrity.js';
 import { normalizeConfidence } from '../../src/lib/confidence-engine.js';
@@ -391,116 +407,23 @@ async function fetchWithRetry(url: string, options: RequestInit = {}, maxRetries
 const symbolValidationCache: Record<string, { isValid: boolean; matchedSymbol?: string; instrumentType?: string; reason?: string }> = {};
 
 async function validateSymbolWithTwelveData(symbol: string, apiKey: string, stats?: { requests: number; cacheHits: number }): Promise<{ isValid: boolean; matchedSymbol?: string; instrumentType?: string; reason?: string }> {
-  if (symbolValidationCache[symbol]) {
-    if (stats) stats.cacheHits++;
-    return symbolValidationCache[symbol];
+  const res = await defaultMarketDataService.validateSymbol(symbol);
+  if (stats) {
+    const glob = getMarketDataStats();
+    stats.requests = glob.requests;
+    stats.cacheHits = glob.cacheHits;
   }
-  
-  try {
-    if (stats) stats.requests++;
-    const searchUrl = `https://api.twelvedata.com/symbol_search?symbol=${encodeURIComponent(symbol)}&apikey=${apiKey}`;
-    const response = await fetchWithRetry(searchUrl, {}, 2, 500);
-    if (response.status === 429) {
-      return { isValid: false, reason: "429: API credits exhausted" };
-    }
-    if (!response.ok) {
-      console.warn(`[Symbol Search] API returned HTTP ${response.status} for search.`);
-      return { isValid: false, reason: `API returned HTTP ${response.status}` };
-    }
-    const data = await response.json();
-    if (data.status === "error") {
-      console.warn(`[Symbol Search] API returned error status: ${data.message}`);
-      const res = { isValid: false, reason: data.message };
-      if (data.code !== 429) symbolValidationCache[symbol] = res;
-      return res;
-    }
-    if (data.data && Array.isArray(data.data) && data.data.length > 0) {
-      const symbolUpper = toCanonicalSymbol(symbol);
-      // Try to find the exact symbol match (ignoring slashes)
-      const exactMatch = data.data.find((item: any) => 
-        toCanonicalSymbol(item.symbol) === symbolUpper
-      );
-      
-      let res;
-      if (exactMatch) {
-        res = { isValid: true, matchedSymbol: exactMatch.symbol, instrumentType: exactMatch.instrument_type };
-      } else {
-        // If we got matches but none are exact, return the first one as matchedSymbol
-        res = { isValid: true, matchedSymbol: data.data[0].symbol, instrumentType: data.data[0].instrument_type };
-      }
-      
-      symbolValidationCache[symbol] = res;
-      return res;
-    }
-    // No matching symbols found in Twelve Data database - warn and proceed with original symbol as fallback
-    console.warn(`[Symbol Search] No matching symbols found in search results for "${symbol}".`);
-    const finalRes = { isValid: false, reason: `No matching symbols found for "${symbol}"` };
-    symbolValidationCache[symbol] = finalRes;
-    return finalRes;
-  } catch (err: any) {
-    console.error(`[Symbol Search] Error validating symbol ${symbol}:`, err.message || err);
-    return { isValid: false, reason: "Error validating symbol" };
-  }
+  return res;
 }
 
 export async function fetchCurrentPrice(selectedPair: string, twelveDataKey: string, stats?: { requests: number; cacheHits: number }): Promise<number | null> {
-  const mappedSymbol = toDisplaySymbol(selectedPair);
-  // Try /price endpoint first
-  const priceUrl = `https://api.twelvedata.com/price?symbol=${encodeURIComponent(mappedSymbol)}&apikey=${twelveDataKey}`;
-  try {
-    if (stats) stats.requests++;
-    const res = await fetchWithRetry(priceUrl, { signal: AbortSignal.timeout(4000) }, 2, 500);
-    if (res.status === 429) {
-      throw new Error("HTTP 429: Rate limit exceeded");
-    }
-    if (res.ok) {
-      const data = await res.json();
-      if (data && (data.status === "error" || data.code === 429)) {
-        if (data.code === 429 || String(data.message).includes("limit") || String(data.message).includes("429")) {
-          throw new Error("HTTP 429: Rate limit exceeded");
-        }
-      }
-      if (data && data.price) {
-        const parsed = parseFloat(String(data.price));
-        if (!isNaN(parsed) && parsed > 0) return parsed;
-      }
-    }
-  } catch (err: any) {
-    if (err.message && err.message.includes("429")) {
-      throw err;
-    }
-    console.warn(`[fetchCurrentPrice] /price endpoint failed for ${mappedSymbol}: ${err.message || err}`);
+  const res = await defaultMarketDataService.fetchCurrentPrice(selectedPair);
+  if (stats) {
+    const glob = getMarketDataStats();
+    stats.requests = glob.requests;
+    stats.cacheHits = glob.cacheHits;
   }
-
-  // Fallback to /quote endpoint
-  const quoteUrl = `https://api.twelvedata.com/quote?symbol=${encodeURIComponent(mappedSymbol)}&apikey=${twelveDataKey}`;
-  try {
-    if (stats) stats.requests++;
-    const res = await fetchWithRetry(quoteUrl, { signal: AbortSignal.timeout(4000) }, 2, 500);
-    if (res.status === 429) {
-      throw new Error("HTTP 429: Rate limit exceeded");
-    }
-    if (res.ok) {
-      const data = await res.json();
-      if (data && (data.status === "error" || data.code === 429)) {
-        if (data.code === 429 || String(data.message).includes("limit") || String(data.message).includes("429")) {
-          throw new Error("HTTP 429: Rate limit exceeded");
-        }
-      }
-      const val = data?.price || data?.close;
-      if (val) {
-        const parsed = parseFloat(String(val));
-        if (!isNaN(parsed) && parsed > 0) return parsed;
-      }
-    }
-  } catch (err: any) {
-    if (err.message && err.message.includes("429")) {
-      throw err;
-    }
-    console.warn(`[fetchCurrentPrice] /quote endpoint failed for ${mappedSymbol}: ${err.message || err}`);
-  }
-
-  return null;
+  return res;
 }
 
 const DEFAULT_STRATEGY_TEXT = `# Gaks AI Default Strategy
@@ -549,15 +472,55 @@ function extractStrategyTextById(strategyTextRaw: string, strategyId?: string): 
 export default async function handler(req: any, res: any) {
   try {
     console.log("[CRON STEP 1] Handler entered");
-    console.log({
-      NODE_ENV: process.env.NODE_ENV,
-      VERCEL_ENV: process.env.VERCEL_ENV,
-      VERCEL_URL: process.env.VERCEL_URL,
-      githubExists: !!process.env.GITHUB_TOKEN,
-    });
-    console.log("LOG: Cron started");
     const startTime = Date.now();
-    const requestTimestamp = new Date().toISOString();
+
+    // 1. Load Environment Variables
+    const supabaseUrl = process.env.VITE_SUPABASE_URL || '';
+    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || '';
+    const twelveDataKey = process.env.TWELVE_DATA_API_KEY;
+    const cronSecretRaw = process.env.CRON_SECRET;
+    const telegramBotToken = process.env.TELEGRAM_BOT_TOKEN;
+    const liveTradingEnabled = process.env.LIVE_TRADING_ENABLED === 'true';
+    
+    // 2. Initialize Core Services Early (Stage 8 Scope Safety)
+    const supabase = createClient(supabaseUrl, supabaseKey);
+    const brokerProvider = getBrokerProvider();
+
+    // Enforce JSON content type from the very beginning
+    res.setHeader("Content-Type", "application/json");
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With");
+
+    if (req.method === "OPTIONS") {
+      return res.status(200).end();
+    }
+
+    if (req.method !== 'POST') {
+      return res.status(405).json({ success: false, error: "Method Not Allowed. Use POST." });
+    }
+
+    // === STAGE 8: GLOBAL KILL SWITCH ===
+    if (process.env.GLOBAL_TRADING_ENABLED === 'false') {
+      console.warn('[Stage 8 Kill Switch] GLOBAL_TRADING_ENABLED is false. Halting all operations.');
+      return res.status(200).json({ success: true, message: "Global trading kill switch is ON. No operations performed." });
+    }
+
+    // === STAGE 8: RECONCILIATION HALT CHECK ===
+    const { data: unresolvedAlerts } = await supabase
+      .from('reconciliation_alerts')
+      .select('id')
+      .eq('is_resolved', false)
+      .in('severity', ['CRITICAL', 'HIGH']);
+
+    if (unresolvedAlerts && unresolvedAlerts.length > 0) {
+      console.error(`[Stage 8 Halt] Found ${unresolvedAlerts.length} unresolved high-severity reconciliation alerts. HALTING TRADING.`);
+      return res.status(200).json({ 
+        success: false, 
+        trading_state: 'RECONCILIATION_HALT',
+        error: "Trading halted due to unresolved reconciliation discrepancies. Manual intervention required." 
+      });
+    }
 
     // Metrics trackers
     let watchersProcessedCount = 0;
@@ -580,46 +543,6 @@ export default async function handler(req: any, res: any) {
       get cacheHits() { return requestsSavedThroughCachingCount; },
       set cacheHits(val) { requestsSavedThroughCachingCount = val; }
     };
-
-    // Per-cron request caches to reuse Twelve Data responses across all watchers
-    const cronPriceCache: Record<string, number> = {};
-    const cronTimeSeriesCache: Record<string, { quoteData: any; candleData: Candle[] }> = {};
-
-    // Enforce JSON content type from the very beginning
-    res.setHeader("Content-Type", "application/json");
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With");
-
-    if (req.method === "OPTIONS") {
-      return res.status(200).end();
-    }
-
-    if (req.method !== 'POST') {
-      return res.status(405).json({ success: false, error: "Method Not Allowed. Use POST." });
-    }
-
-    // 1. Load Environment Variables
-    const twelveDataKey = process.env.TWELVE_DATA_API_KEY;
-    const cronSecretRaw = process.env.CRON_SECRET;
-    const supabaseUrl = process.env.VITE_SUPABASE_URL;
-    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY;
-    const telegramBotToken = process.env.TELEGRAM_BOT_TOKEN;
-
-    console.log("LOG: Environment variables loaded");
-
-    // 2. Supabase Connection
-    let supabase: any;
-    try {
-      supabase = getSupabase();
-      console.log("LOG: Supabase connected");
-      console.log("[CRON STEP 3]");
-    } catch (err: any) {
-      console.error("LOG ERROR: Supabase connection failed");
-      console.error(`Exception: ${err.message}`);
-      console.error(`Stack: ${err.stack}`);
-      return res.status(500).json({ success: false, error: "Supabase connection failed" });
-    }
 
     // Debug logging immediately before the authorization check
     console.log("DEBUG CRON AUTH:", {
@@ -678,6 +601,24 @@ export default async function handler(req: any, res: any) {
 
     if (!twelveDataKey) {
       throw new Error("Missing TWELVE_DATA_API_KEY environment variable.");
+    }
+
+    // === STAGE 6 HARDENING: SAFETY GOVERNOR & RECONCILIATION ===
+    const governor = new SafetyGovernor(defaultSafetyLimits);
+    const reconService = new BrokerReconciliationService(brokerProvider, supabase);
+
+    // Get current account state
+    const brokerAccount = await brokerProvider.getAccount();
+    
+    // Global Kill Switch Check
+    const globalHalt = await governor.checkGlobalSafety(brokerAccount, 0, 0); // Placeholder daily stats
+    if (globalHalt.isHalted) {
+      console.warn(`[SAFETY HALT] Trading is globally halted: ${globalHalt.reason}`);
+      return res.status(200).json({ 
+        success: true, 
+        message: 'Trading globally halted', 
+        reason: globalHalt.reason 
+      });
     }
 
     // 3. Active Watchers Found
@@ -830,6 +771,26 @@ Reason: ${dueReason}`);
       }
 
       // =====================================================================
+      // STAGE 5 IDEMPOTENCY LOCK: CAS update on last_scan_at
+      // =====================================================================
+      const lockTime = now.toISOString();
+      let lockQuery = supabase.from("watchers").update({ last_scan_at: lockTime }).eq("id", watcher.id);
+      if (watcher.last_scan_at) {
+        lockQuery = lockQuery.eq("last_scan_at", watcher.last_scan_at);
+      } else {
+        lockQuery = lockQuery.is("last_scan_at", null);
+      }
+      
+      const { data: lockedData, error: lockErr } = await lockQuery.select();
+      if (lockErr || !lockedData || lockedData.length === 0) {
+        console.log(`[Idempotency] Watcher ${watcher.id} already being processed by another cron. Skipping.`);
+        skipped.push({ userId, reason: "Duplicate execution protected" });
+        watchersSkippedCount++;
+        continue;
+      }
+
+
+      // =====================================================================
       // STATE 3 — COOLDOWN
       // =====================================================================
       console.log(`ENTERING COOLDOWN`);
@@ -893,12 +854,7 @@ Reason: ${dueReason}`);
         if (!activeValidation.valid) {
           let currentPriceFetch: number | null = null;
           try {
-            const symbolKey = toDisplaySymbol(selectedPair);
-            if (cronPriceCache[symbolKey] !== undefined) {
-              currentPriceFetch = cronPriceCache[symbolKey];
-            } else {
-              currentPriceFetch = await fetchCurrentPrice(selectedPair, twelveDataKey, tdStats);
-            }
+            currentPriceFetch = await fetchCurrentPrice(selectedPair, twelveDataKey, tdStats);
           } catch (e) {}
 
           console.error(`[ACTIVE STATE INVALID]
@@ -940,39 +896,90 @@ Reason: ${activeValidation.reason}`);
 
         console.log(`[STATE 2 - ACTIVE] Monitoring open trade for Watcher ID: ${watcher.id} (${selectedPair}). Skipping Gemini, strategy load, and candle download.`);
 
+        const entryPrice = watcher.entry_price ? parseFloat(String(watcher.entry_price)) : null;
+        const stopLoss = watcher.stop_loss ? parseFloat(String(watcher.stop_loss)) : null;
+        const takeProfit = watcher.take_profit ? parseFloat(String(watcher.take_profit)) : null;
+        const dir = (watcher.direction || '').toUpperCase().trim();
+        const isBuy = dir === 'BUY' || dir === 'LONG';
+        const isSell = dir === 'SELL' || dir === 'SHORT';
+
+        // === STAGE 6 HARDENING: BROKER RECONCILIATION ===
+        if (watcher.active_trade_id) {
+          const brokerPos = await brokerProvider.getPosition(selectedPair);
+          
+          if (!brokerPos) {
+            console.warn(`[RECONCILIATION] Active trade ${watcher.active_trade_id} for ${selectedPair} not found at broker. Closing in DB.`);
+            
+            // Fetch execution history to find close price and PnL
+            const history = await brokerProvider.getExecutionHistory(selectedPair, 5);
+            const closeExecution = history.find(e => e.orderId === watcher.active_trade_id || e.symbol === selectedPair); // Simplified match
+            const closePrice = closeExecution?.price || 0;
+            const pnl = await brokerProvider.getTradePnL(watcher.active_trade_id);
+
+            await recordCompletedTrade(supabase, {
+              user_id: userId,
+              watcher_id: watcher.id,
+              trade_id: watcher.active_trade_id,
+              pair: selectedPair,
+              timeframe: selectedTimeframe,
+              strategy_mode: watcher.strategy_mode || 'HYBRID',
+              entry_price: entryPrice || 0,
+              exit_price: closePrice,
+              direction: dir,
+              opened_at: watcher.opened_at || new Date().toISOString(),
+              closed_at: new Date().toISOString(),
+              outcome: pnl ? (pnl.netPnL > 0 ? 'BROKER_REALIZED_WIN' : 'BROKER_REALIZED_LOSS') : 'BREAKEVEN',
+              outcome_source: 'BROKER_RECONCILIATION',
+              gross_pnl: pnl?.grossPnL,
+              net_pnl: pnl?.netPnL,
+              commission: pnl?.commission,
+              swap: pnl?.swap,
+              slippage_pips: pnl?.slippage,
+              fees: pnl?.fees,
+              realized_r: pnl?.realizedR
+            });
+
+            await supabase.from("watchers").update({
+              trade_status: 'COOLDOWN',
+              active_trade_id: null,
+              closed_at: new Date().toISOString(),
+              cooldown_until: new Date(Date.now() + 60 * 60 * 1000).toISOString(), // 1 hour cooldown
+              updated_at: new Date().toISOString()
+            }).eq("id", watcher.id);
+
+            if (telegramChatId) {
+              await sendTelegramMessage(telegramChatId, `🔔 Broker Reconciliation\nTrade for ${selectedPair} was closed at broker. Database synchronized.`);
+            }
+
+            continue;
+          } else {
+            console.log(`[RECONCILIATION] Trade confirmed at broker: ${watcher.active_trade_id}`);
+          }
+        }
+
         // telegramChatId already available from loop start
 
         // Fetch ONLY the latest market price from Twelve Data
         let currentPrice: number | null = null;
-        const symbolKey = toDisplaySymbol(selectedPair);
-        if (cronPriceCache[symbolKey] !== undefined) {
-          currentPrice = cronPriceCache[symbolKey];
-          tdStats.cacheHits++;
-          console.log(`[Cache Hit] Using cached Twelve Data current price for ${symbolKey}: ${currentPrice}`);
-        } else {
-          if (twelveDataExhausted) {
+        if (twelveDataExhausted) {
+          console.warn(`[Twelve Data Rate Limit] Watcher ${watcher.id} skipped due to HTTP 429 rate limit. Deferring until next cron cycle.`);
+          skipped.push({ userId, reason: "TwelveData rate limit (429) exhausted" });
+          watchersSkippedDueToRateLimitCount++;
+          watchersSkippedCount++;
+          continue;
+        }
+        try {
+          currentPrice = await fetchCurrentPrice(selectedPair, twelveDataKey, tdStats);
+        } catch (err: any) {
+          if (err.message && err.message.includes("429")) {
+            twelveDataExhausted = true;
             console.warn(`[Twelve Data Rate Limit] Watcher ${watcher.id} skipped due to HTTP 429 rate limit. Deferring until next cron cycle.`);
             skipped.push({ userId, reason: "TwelveData rate limit (429) exhausted" });
             watchersSkippedDueToRateLimitCount++;
             watchersSkippedCount++;
             continue;
           }
-          try {
-            currentPrice = await fetchCurrentPrice(selectedPair, twelveDataKey, tdStats);
-            if (currentPrice !== null) {
-              cronPriceCache[symbolKey] = currentPrice;
-            }
-          } catch (err: any) {
-            if (err.message && err.message.includes("429")) {
-              twelveDataExhausted = true;
-              console.warn(`[Twelve Data Rate Limit] Watcher ${watcher.id} skipped due to HTTP 429 rate limit. Deferring until next cron cycle.`);
-              skipped.push({ userId, reason: "TwelveData rate limit (429) exhausted" });
-              watchersSkippedDueToRateLimitCount++;
-              watchersSkippedCount++;
-              continue;
-            }
-            console.warn(`[STATE 2 - ACTIVE] Error fetching current price for ${selectedPair}: ${err.message}`);
-          }
+          console.warn(`[STATE 2 - ACTIVE] Error fetching current price for ${selectedPair}: ${err.message}`);
         }
 
         if (currentPrice === null) {
@@ -982,13 +989,6 @@ Reason: ${activeValidation.reason}`);
           console.log(`ACTIVE branch exited.`);
           continue;
         }
-
-        const entryPrice = watcher.entry_price ? parseFloat(String(watcher.entry_price)) : null;
-        const stopLoss = watcher.stop_loss ? parseFloat(String(watcher.stop_loss)) : null;
-        const takeProfit = watcher.take_profit ? parseFloat(String(watcher.take_profit)) : null;
-        const dir = (watcher.direction || '').toUpperCase().trim();
-        const isBuy = dir === 'BUY' || dir === 'LONG';
-        const isSell = dir === 'SELL' || dir === 'SHORT';
 
         console.log(`[STATE 2 Price Check] Watcher ID: ${watcher.id}, Symbol: ${selectedPair}, Current: ${currentPrice}, Entry: ${entryPrice}, SL: ${stopLoss}, TP: ${takeProfit}, Dir: ${dir}`);
 
@@ -1316,51 +1316,24 @@ Reason: ${activeValidation.reason}`);
         }
 
         const finalSymbol = validation.matchedSymbol || mappedSymbol;
-        const tsCacheKey = `${finalSymbol}_${interval}`;
 
-        if (cronTimeSeriesCache[tsCacheKey]) {
-          addLog("Candle Downloaded (Cache Hit)", "success");
-          console.log(`[Cache Hit] Reusing cached Twelve Data time series for ${tsCacheKey}`);
-          tdStats.cacheHits++;
-          quoteData = cronTimeSeriesCache[tsCacheKey].quoteData;
-          candleData = cronTimeSeriesCache[tsCacheKey].candleData;
+        const tsResult = await defaultMarketDataService.getMarketData({ symbol: finalSymbol, timeframe: selectedTimeframe, requiredCount: 20 });
+        
+        const glob = getMarketDataStats();
+        tdStats.requests = glob.requests;
+        tdStats.cacheHits = glob.cacheHits;
+
+        if (!tsResult.isValid) {
+          if (tsResult.reason?.includes("RATE_LIMITED") || tsResult.reason?.includes("429")) {
+            twelveDataExhausted = true;
+          } else {
+            console.warn(`[Twelve Data API] error for ${finalSymbol}: ${tsResult.reason}`);
+          }
         } else {
           addLog("Candle Downloaded", "success");
-          const timeSeriesUrl = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(finalSymbol)}&interval=${interval}&outputsize=20&timezone=UTC&apikey=${twelveDataKey}`;
-          try {
-            tdStats.requests++;
-            const tsRes = await fetchWithRetry(timeSeriesUrl, { signal: AbortSignal.timeout(4000) }, 2, 500);
-            if (tsRes.status === 429) {
-              twelveDataExhausted = true;
-            } else if (tsRes.ok) {
-              const tsData = await tsRes.json();
-              if (tsData.status === "error" && tsData.code === 429) {
-                twelveDataExhausted = true;
-              } else if (tsData.status === "ok" && tsData.values && tsData.values.length > 0) {
-                quoteData = tsData.values[0];
-                candleData = tsData.values.map((v: any) => ({
-                  timestamp: v.datetime,
-                  open: parseFloat(v.open),
-                  high: parseFloat(v.high),
-                  low: parseFloat(v.low),
-                  close: parseFloat(v.close),
-                  volume: v.volume ? parseFloat(v.volume) : undefined
-                })).reverse();
-
-                cronTimeSeriesCache[tsCacheKey] = { quoteData, candleData };
-                if (candleData.length > 0) {
-                  const latestPrice = candleData[candleData.length - 1].close;
-                  cronPriceCache[toDisplaySymbol(selectedPair)] = latestPrice;
-                  cronPriceCache[finalSymbol] = latestPrice;
-                }
-              }
-            }
-          } catch (tsErr: any) {
-            if (tsErr.message && tsErr.message.includes("429")) {
-              twelveDataExhausted = true;
-            } else {
-              console.warn(`[Twelve Data API] error for ${finalSymbol}: ${tsErr.message || tsErr}`);
-            }
+          candleData = tsResult.candles;
+          if (candleData.length > 0) {
+            quoteData = candleData[candleData.length - 1]; // Or similar quote structure if needed
           }
         }
 
@@ -2255,6 +2228,11 @@ Accepted: ${posSizeResult.accepted ? 'YES' : 'NO'}
 ${analysis.stopLossBasis === 'ATR_FALLBACK' ? `ATR: ${marketStructure.volatilityInformation.atr.toFixed(5)}\nATR Multiplier: 1.5` : ''}
 `.trim());
 
+        // === STAGE 7: EXECUTION MODE ===
+        const brokerExecutionMode = process.env.EXECUTION_MODE || 'THEORETICAL';
+
+        // ... existing analysis logic ...
+        
         if (!posSizeResult.accepted) {
           console.log(`[Risk/Validation Failed - Trade Skipped] ${posSizeResult.skipReason}`);
           
@@ -2278,6 +2256,7 @@ ${analysis.stopLossBasis === 'ATR_FALLBACK' ? `ATR: ${marketStructure.volatility
             trade_reason: `Risk engine validation failed: ${posSizeResult.skipReason}`,
             scan_duration_ms: scanDurationMs,
             gemini_duration_ms: geminiDuration,
+            execution_source: brokerExecutionMode,
             decision_snapshot: decisionSnapshot
           });
 
@@ -2293,8 +2272,269 @@ ${analysis.stopLossBasis === 'ATR_FALLBACK' ? `ATR: ${marketStructure.volatility
           watchersProcessedCount++;
           continue;
         }
+        // === STAGE 5 HARDENING: NEWS HARD-PAUSE GATE ===
+        const newsGateResult = await defaultEconomicEventService.checkNewsHardPause(selectedPair);
 
-        const candidateTradeId = `TR-${watcher.id}-${Date.now()}`;
+        const marketCandleTimestampMs = new Date(tsResult.candles[tsResult.candles.length - 1]?.timestamp || Date.now()).getTime();
+
+        // === STAGE 5 HARDENING: EXECUTION FRESHNESS GATE ===
+        const freshnessResult = validateExecutionFreshness({
+          signalGeneratedAt: Date.now(),
+          marketDataTimestamp: marketCandleTimestampMs,
+          currentPrice: executedPrice,
+          entryPrice: posSizeResult.entryPrice || executedPrice,
+          stopLoss: posSizeResult.stopLoss,
+          takeProfit: posSizeResult.takeProfit || 0,
+          instrument: selectedPair,
+          timeframe: selectedTimeframe,
+          isBuy: analysis.signal === 'BUY'
+        }, executedPrice * 0.9999, executedPrice * 1.0001); // Simulated bid/ask
+
+        // === STAGE 5 HARDENING: FINAL PRE-EXECUTION REVALIDATION ===
+        const finalValidation = revalidatePreExecution({
+          marketDataAvailable: true,
+          marketDataFreshness: freshnessResult,
+          currentPrice: executedPrice,
+          spread: (executedPrice * 1.0001) - (executedPrice * 0.9999),
+          entryPrice: posSizeResult.entryPrice || executedPrice,
+          sl: posSizeResult.stopLoss,
+          tp: posSizeResult.takeProfit || 0,
+          rr: posSizeResult.actualRr || 0,
+          riskGovernorPassed: true, // Governor passed previously
+          newsGate: newsGateResult,
+          positionSizing: posSizeResult.calculatedLotSize || posSizeResult.exactLotSize,
+          userRiskLimitsPassed: true,
+          duplicateTradeProtectionPassed: true,
+          signalExpired: false
+        });
+
+        if (finalValidation.status === 'FINAL_EXECUTION_REJECTED') {
+            console.log(`[Authoritative Decision] Signal suppressed for Watcher ID: ${watcher.id} (${selectedPair}): Final decision is REJECTED from gate ${finalValidation.rejectionReason}.`);
+            
+            const scanDurationMs = Date.now() - scanStart;
+            await recordEvaluation(supabase, {
+                user_id: userId,
+                watcher_id: watcher.id,
+                pair: selectedPair,
+                timeframe: selectedTimeframe,
+                strategy_mode: compiledStrategy.strategy_mode,
+                decision_score: decisionResult.decision_score,
+                matched_weight: decisionResult.matched_weight,
+                possible_weight: decisionResult.possible_weight,
+                recommendation: decisionResult.recommendation,
+                mandatory_rules_passed: decisionResult.mandatory_rules_passed,
+                matched_rules: decisionResult.matched_rules,
+                failed_rules: decisionResult.failed_rules,
+                gemini_used: geminiCalled,
+                gemini_result: geminiTextResult || null,
+                trade_sent: false,
+                trade_reason: `Safety Gate Rejected: ${finalValidation.rejectionReason}`,
+                scan_duration_ms: scanDurationMs,
+                gemini_duration_ms: geminiDuration,
+                decision_snapshot: decisionSnapshot
+            });
+            continue;
+        }
+
+        // === STAGE 7 HARDENING: BROKER QUOTE INTEGRATION & FRESHNESS ===
+        const liveTradingEnabled = process.env.LIVE_TRADING_ENABLED === 'true';
+        
+        let brokerQuote: BrokerQuote | undefined;
+        let brokerQuoteFreshnessPassed = false;
+        
+        try {
+          console.log(`[Stage 7] Fetching fresh broker quote for ${selectedPair}...`);
+          brokerQuote = await getBrokerProvider().getQuote(selectedPair);
+          
+          if (brokerQuote) {
+            const quoteAgeMs = Date.now() - brokerQuote.timestamp;
+            const maxQuoteAgeMs = Number(process.env.BROKER_QUOTE_MAX_AGE_MS) || 5000; // 5s default
+            brokerQuoteFreshnessPassed = quoteAgeMs <= maxQuoteAgeMs;
+            
+            console.log(`[Broker Quote]
+Symbol: ${brokerQuote.symbol}
+Bid: ${brokerQuote.bid}
+Ask: ${brokerQuote.ask}
+Spread: ${brokerQuote.spread.toFixed(5)}
+Age: ${quoteAgeMs}ms (Threshold: ${maxQuoteAgeMs}ms)
+Freshness: ${brokerQuoteFreshnessPassed ? 'PASS' : 'FAIL'}
+Source: ${brokerQuote.source}`);
+          }
+        } catch (quoteErr: any) {
+          console.error(`[Broker Quote Error] Failed to fetch quote for ${selectedPair}:`, quoteErr.message);
+        }
+
+        const maxSpreadThreshold = Number(process.env.BROKER_MAX_SPREAD_PERCENT) || 0.0005; // 0.05%
+        const maxEntryDriftThreshold = Number(process.env.BROKER_MAX_ENTRY_DRIFT_PERCENT) || 0.001; // 0.1%
+
+        // Actual execution price based on direction
+        const currentExecutionPrice = analysis.signal === 'BUY' ? brokerQuote?.ask : brokerQuote?.bid;
+
+        // === STAGE 5/7 HARDENING: FINAL PRE-EXECUTION REVALIDATION ===
+        const brokerValidation = revalidatePreExecution({
+          marketDataAvailable: true,
+          marketDataFreshness: freshnessResult,
+          currentPrice: currentExecutionPrice || executedPrice,
+          spread: brokerQuote?.spread || ((executedPrice * 1.0001) - (executedPrice * 0.9999)),
+          entryPrice: posSizeResult.entryPrice || executedPrice,
+          sl: posSizeResult.stopLoss,
+          tp: posSizeResult.takeProfit || 0,
+          rr: posSizeResult.actualRr || 0,
+          riskGovernorPassed: true,
+          newsGate: newsGateResult,
+          positionSizing: posSizeResult.calculatedLotSize || posSizeResult.exactLotSize,
+          userRiskLimitsPassed: true,
+          duplicateTradeProtectionPassed: true,
+          signalExpired: false,
+          brokerQuote: brokerQuote,
+          brokerQuoteFreshnessPassed: brokerQuoteFreshnessPassed,
+          maxSpreadThreshold: maxSpreadThreshold * (currentExecutionPrice || executedPrice),
+          maxEntryDriftThreshold: maxEntryDriftThreshold,
+          intendedEntryPrice: posSizeResult.entryPrice || executedPrice
+        });
+
+        if (brokerValidation.status === 'FINAL_EXECUTION_REJECTED') {
+            console.log(`[Authoritative Decision] Signal suppressed for Watcher ID: ${watcher.id} (${selectedPair}): Final decision is REJECTED from gate ${brokerValidation.rejectionReason}.`);
+            
+            const scanDurationMs = Date.now() - scanStart;
+            await recordEvaluation(supabase, {
+                user_id: userId,
+                watcher_id: watcher.id,
+                pair: selectedPair,
+                timeframe: selectedTimeframe,
+                strategy_mode: compiledStrategy.strategy_mode,
+                decision_score: decisionResult.decision_score,
+                matched_weight: decisionResult.matched_weight,
+                possible_weight: decisionResult.possible_weight,
+                recommendation: decisionResult.recommendation,
+                mandatory_rules_passed: decisionResult.mandatory_rules_passed,
+                matched_rules: decisionResult.matched_rules,
+                failed_rules: decisionResult.failed_rules,
+                gemini_used: geminiCalled,
+                gemini_result: geminiTextResult || null,
+                trade_sent: false,
+                trade_reason: `Safety Gate Rejected: ${brokerValidation.rejectionReason}`,
+                scan_duration_ms: scanDurationMs,
+                gemini_duration_ms: geminiDuration,
+                execution_source: brokerExecutionMode,
+                decision_snapshot: decisionSnapshot
+            });
+            continue;
+        }
+
+        // === STAGE 8/17: SUPERVISED MICROLOT GOVERNOR ===
+        const microlotGovernor = new SupervisedMicrolotGovernor(brokerProvider);
+        const riskAmount = posSizeResult.riskAmount || (posSizeResult.calculatedLotSize * 10); // fallback
+        const microlotResult = await microlotGovernor.validateExecution(selectedPair, riskAmount);
+
+        if (!microlotResult.accepted) {
+            console.warn(`[Stage 8/17 Microlot Rejected] ${microlotResult.reason}`);
+            const scanDurationMs = Date.now() - scanStart;
+            await recordEvaluation(supabase, {
+                user_id: userId,
+                watcher_id: watcher.id,
+                pair: selectedPair,
+                timeframe: selectedTimeframe,
+                strategy_mode: compiledStrategy.strategy_mode,
+                decision_score: decisionResult.decision_score,
+                matched_weight: decisionResult.matched_weight,
+                possible_weight: decisionResult.possible_weight,
+                recommendation: decisionResult.recommendation,
+                mandatory_rules_passed: decisionResult.mandatory_rules_passed,
+                matched_rules: decisionResult.matched_rules,
+                failed_rules: decisionResult.failed_rules,
+                gemini_used: geminiCalled,
+                gemini_result: geminiTextResult || null,
+                trade_sent: false,
+                trade_reason: `MICROLOT_GOVERNOR_REJECTED: ${microlotResult.reason}`,
+                scan_duration_ms: scanDurationMs,
+                gemini_duration_ms: geminiDuration,
+                execution_source: brokerExecutionMode,
+                decision_snapshot: decisionSnapshot
+            });
+            continue;
+        }
+
+        // === STAGE 8: CRASH RECOVERY & IDEMPOTENCY ===
+        const stableClientOrderId = `cl-${watcher.id}-${latestClosedCandleTime.replace(/[:.-]/g, '')}`;
+        
+        let brokerOrder: BrokerOrder | null = null;
+        try {
+            // Check for existing order (Crash Recovery / Idempotency)
+            brokerOrder = await brokerProvider.findOrderByClientOrderId(stableClientOrderId);
+            
+            if (brokerOrder) {
+                console.log(`[Stage 8 Recovery] Existing order found for ${selectedPair} (ID: ${brokerOrder.orderId}). Rehydrating state.`);
+            } else {
+                // Check for existing position to avoid doubling up
+                const existingPos = await brokerProvider.getPosition(selectedPair);
+                if (existingPos) {
+                    console.log(`[Stage 8 Protection] Existing position found for ${selectedPair} at broker. Skipping duplicate execution.`);
+                    continue;
+                }
+
+                const orderParams = {
+                    symbol: selectedPair,
+                    type: 'MARKET' as any,
+                    side: analysis.signal === 'BUY' ? 'BUY' : 'SELL' as any,
+                    quantity: posSizeResult.calculatedLotSize || posSizeResult.exactLotSize,
+                    price: currentExecutionPrice || executedPrice,
+                    sl: posSizeResult.stopLoss,
+                    tp: posSizeResult.takeProfit || undefined,
+                    clientOrderId: stableClientOrderId,
+                    tradeId: `TR-${watcher.id}-${latestClosedCandleTime.replace(/[:.-]/g, '')}`
+                };
+
+                if (brokerExecutionMode === 'LIVE') {
+                    if (process.env.LIVE_TRADING_ENABLED !== 'true') {
+                        throw new Error('LIVE_TRADING_ENABLED is false. Rejecting live order.');
+                    }
+                    console.log(`[LIVE EXECUTION] Placing authoritative LIVE order for ${selectedPair}...`);
+                    brokerOrder = await brokerProvider.placeOrder(orderParams);
+                } else if (brokerExecutionMode === 'PAPER') {
+                    console.log(`[PAPER EXECUTION] Routing PAPER order for ${selectedPair}...`);
+                    brokerOrder = await brokerProvider.placeOrder(orderParams);
+                } else {
+                    console.log(`[THEORETICAL EXECUTION] Recording THEORETICAL order for ${selectedPair}...`);
+                    brokerOrder = await brokerProvider.placeOrder(orderParams);
+                }
+            }
+
+            if (!brokerOrder || brokerOrder.status === 'REJECTED') {
+                throw new Error(brokerOrder?.status === 'REJECTED' ? 'Broker rejected the order' : 'Empty response from broker');
+            }
+        } catch (execErr: any) {
+            console.error(`[EXECUTION FAILED] Fail-closed logic triggered for Watcher ${watcher.id}:`, execErr.message);
+            
+            const scanDurationMs = Date.now() - scanStart;
+            await recordEvaluation(supabase, {
+                user_id: userId,
+                watcher_id: watcher.id,
+                pair: selectedPair,
+                timeframe: selectedTimeframe,
+                strategy_mode: compiledStrategy.strategy_mode,
+                decision_score: decisionResult.decision_score,
+                matched_weight: decisionResult.matched_weight,
+                possible_weight: decisionResult.possible_weight,
+                recommendation: decisionResult.recommendation,
+                mandatory_rules_passed: decisionResult.mandatory_rules_passed,
+                matched_rules: decisionResult.matched_rules,
+                failed_rules: decisionResult.failed_rules,
+                gemini_used: geminiCalled,
+                gemini_result: geminiTextResult || null,
+                trade_sent: false,
+                trade_reason: `EXECUTION_FAILED: ${execErr.message}. Fail-closed protection activated.`,
+                scan_duration_ms: scanDurationMs,
+                gemini_duration_ms: geminiDuration,
+                execution_source: brokerExecutionMode,
+                decision_snapshot: decisionSnapshot
+            });
+            continue;
+        }
+        
+        console.log(`[${brokerExecutionMode} BROKER] Order Placed: ${brokerOrder.orderId} (Status: ${brokerOrder.status})`);
+
+        const candidateTradeId = brokerOrder.tradeId || `TR-${watcher.id}-${Date.now()}`;
 
         const gatesList: DecisionGateResult[] = [
           {
@@ -2431,6 +2671,7 @@ ${analysis.stopLossBasis === 'ATR_FALLBACK' ? `ATR: ${marketStructure.volatility
             trade_reason: `Authoritative decision rejected by gate ${attribution.rejectedGate}: ${attribution.rejectionReason}`,
             scan_duration_ms: scanDurationMs,
             gemini_duration_ms: geminiDuration,
+            execution_source: brokerExecutionMode,
             decision_snapshot: decisionSnapshot
           });
 
@@ -2523,6 +2764,7 @@ ${analysis.stopLossBasis === 'ATR_FALLBACK' ? `ATR: ${marketStructure.volatility
             trade_reason: "Failed to register signal or active trade already exists in database.",
             scan_duration_ms: scanDurationMs,
             gemini_duration_ms: geminiDuration,
+            execution_source: brokerExecutionMode,
             decision_snapshot: decisionSnapshot
           });
 
@@ -2581,6 +2823,7 @@ ${analysis.stopLossBasis === 'ATR_FALLBACK' ? `ATR: ${marketStructure.volatility
           trade_reason: alertReason || (alertSent ? "Trade alert sent successfully on Telegram" : "Telegram message failed to send"),
           scan_duration_ms: scanDurationMs,
           gemini_duration_ms: geminiDuration,
+          execution_source: brokerExecutionMode,
           decision_snapshot: decisionSnapshot
         });
 

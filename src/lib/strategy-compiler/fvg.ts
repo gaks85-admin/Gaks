@@ -4,7 +4,7 @@ import { findSynonymMatch } from './normalizer.js';
 
 export class FvgParser implements StrategyParserModule<boolean> {
   parse(text: string): ParserResult<boolean> {
-    const match = findSynonymMatch(text, fvgSynonyms, 'FAIR_VALUE_GAP', 0.98);
+    const match = findSynonymMatch(text, fvgSynonyms, 'fair_value_gap', 0.98);
     
     return {
       supported: match.matched,

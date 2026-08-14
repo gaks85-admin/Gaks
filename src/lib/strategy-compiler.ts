@@ -15,6 +15,7 @@ import { ConfirmationCandleParser } from './strategy-compiler/confirmation-candl
 import { RiskRewardParser } from './strategy-compiler/risk-reward.js';
 import { TimeframeParser } from './strategy-compiler/timeframe.js';
 import { ClassificationParser } from './strategy-compiler/classification.js';
+import { isMandatory } from './strategy-compiler/normalizer.js';
 import { validateDetectors } from './detector-capability-validator.js';
 
 export * from './strategy-compiler/types.js';
@@ -33,7 +34,11 @@ export function compileStrategy(strategyText: string): CompilerOutput {
       overall_confidence: 0.0,
       module_confidence: {},
       matched_phrases: [],
-      canonical_rules: []
+      canonical_rules: [],
+      mandatory_rules: [],
+      optional_rules: [],
+      weighted_rules: [],
+      status: 'AMBIGUOUS_STRATEGY'
     };
   }
 
@@ -156,6 +161,9 @@ export function compileStrategy(strategyText: string): CompilerOutput {
   const module_confidence: { [key: string]: number } = {};
   const matched_phrases: string[] = [];
   const canonical_rules: string[] = [];
+  const mandatory_rules: string[] = [];
+  const optional_rules: string[] = [];
+  const weighted_rules: { rule: string; weight: number }[] = [];
 
   for (const m of modules) {
     if (m.result.supported) {
@@ -164,19 +172,60 @@ export function compileStrategy(strategyText: string): CompilerOutput {
         matched_phrases.push(m.result.matchedPhrase);
       }
       if (m.result.canonicalRule) {
-        canonical_rules.push(m.result.canonicalRule);
+        if (m.name === 'support_resistance') {
+          // Special handling for SR sub-rules
+          const sr = m.result.parsedRule as any;
+          if (sr.support) {
+            canonical_rules.push('support');
+            if (isMandatory(strategyText, 'support')) mandatory_rules.push('support');
+            else optional_rules.push('support');
+          }
+          if (sr.resistance) {
+            canonical_rules.push('resistance');
+            if (isMandatory(strategyText, 'resistance')) mandatory_rules.push('resistance');
+            else optional_rules.push('resistance');
+          }
+          if (sr.support_rejection) {
+            canonical_rules.push('support_rejection');
+            if (isMandatory(strategyText, 'support rejection')) mandatory_rules.push('support_rejection');
+            else optional_rules.push('support_rejection');
+          }
+          if (sr.resistance_rejection) {
+            canonical_rules.push('resistance_rejection');
+            if (isMandatory(strategyText, 'resistance rejection')) mandatory_rules.push('resistance_rejection');
+            else optional_rules.push('resistance_rejection');
+          }
+        } else {
+          canonical_rules.push(m.result.canonicalRule);
+          
+          // Use isMandatory to classify
+          if (isMandatory(strategyText, m.result.matchedPhrase)) {
+            mandatory_rules.push(m.result.canonicalRule);
+          } else {
+            optional_rules.push(m.result.canonicalRule);
+          }
+        }
       }
     }
+  }
+
+  // Handle ambiguous strategy
+  let status: 'SUCCESS' | 'AMBIGUOUS_STRATEGY' | 'FAILURE' = 'SUCCESS';
+  let error_message = undefined;
+
+  if (canonical_rules.length === 0 && strategyText.trim().length > 30) {
+    status = 'AMBIGUOUS_STRATEGY';
+    error_message = "Strategy text is descriptive but no deterministic indicators were identified. Please mention specific rules like BOS, EMA, or FVG.";
   }
 
   // Internal logging for developers as requested
   console.log(`========== AI STATUS ==========`);
   console.log(`Strategy: [${strategyText.slice(0, 40)}${strategyText.length > 40 ? '...' : ''}]`);
-  console.log(`Status: COMPILATION_SUCCESS`);
+  console.log(`Status: ${status === 'SUCCESS' ? 'COMPILATION_SUCCESS' : status}`);
   console.log(`Mode: ${strategy_mode}`);
+  console.log(`Mandatory: ${mandatory_rules.join(', ')}`);
+  console.log(`Optional: ${optional_rules.join(', ')}`);
   console.log(`Confidence: ${confidence}`);
-  console.log(`Matched Phrases: ${matched_phrases.join(', ')}`);
-  console.log(`Canonical Rules: ${canonical_rules.join(', ')}`);
   console.log(`===============================`);
 
   const detector_validation = validateDetectors(Object.keys(compiled_rules));
@@ -184,11 +233,16 @@ export function compileStrategy(strategyText: string): CompilerOutput {
   return {
     strategy_mode,
     compiled_rules,
+    mandatory_rules,
+    optional_rules,
+    weighted_rules,
     confidence: Math.round(confidence <= 1.0 ? confidence * 100 : confidence),
     overall_confidence: Math.round(confidence <= 1.0 ? confidence * 100 : confidence),
     module_confidence,
     matched_phrases,
     canonical_rules,
-    detector_validation
+    detector_validation,
+    status,
+    error_message
   };
 }

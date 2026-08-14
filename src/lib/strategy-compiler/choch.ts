@@ -4,7 +4,7 @@ import { findSynonymMatch } from './normalizer.js';
 
 export class ChochParser implements StrategyParserModule<boolean> {
   parse(text: string): ParserResult<boolean> {
-    const match = findSynonymMatch(text, chochSynonyms, 'CHANGE_OF_CHARACTER', 0.98);
+    const match = findSynonymMatch(text, chochSynonyms, 'choch', 0.98);
     
     return {
       supported: match.matched,

@@ -569,6 +569,7 @@ CREATE TABLE IF NOT EXISTS public.watcher_evaluations (
     trade_reason TEXT,
     scan_duration_ms INTEGER,
     gemini_duration_ms INTEGER,
+    execution_source TEXT DEFAULT 'THEORETICAL',
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -639,8 +640,36 @@ CREATE TABLE IF NOT EXISTS public.trade_learning (
     market_snapshot JSONB DEFAULT '{}'::jsonb,
     session TEXT,
     volatility TEXT,
-    notes TEXT
+    notes TEXT,
+    execution_source TEXT DEFAULT 'THEORETICAL',
+    execution_latency_ms INTEGER,
+    slippage_pips NUMERIC,
+    actual_spread NUMERIC,
+    commission_paid NUMERIC,
+    fees_paid NUMERIC,
+    is_reconciled BOOLEAN DEFAULT false
 );
+
+-- Create the reconciliation_alerts table
+CREATE TABLE IF NOT EXISTS public.reconciliation_alerts (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    watcher_id UUID REFERENCES public.watchers(id) ON DELETE CASCADE,
+    symbol TEXT NOT NULL,
+    alert_type TEXT NOT NULL,
+    details TEXT NOT NULL,
+    severity TEXT NOT NULL,
+    is_resolved BOOLEAN DEFAULT false,
+    resolved_at TIMESTAMPTZ,
+    resolution_notes TEXT
+);
+
+-- Enable RLS for reconciliation_alerts
+ALTER TABLE public.reconciliation_alerts ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can read own alerts" ON public.reconciliation_alerts FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "Users can update own alerts" ON public.reconciliation_alerts FOR UPDATE USING (auth.uid() = user_id);
 
 -- Enable Row Level Security (RLS) for trade_learning
 ALTER TABLE public.trade_learning ENABLE ROW LEVEL SECURITY;

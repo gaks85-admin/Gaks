@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { GoogleGenAI, Type } from "@google/genai";
+import { defaultMarketDataService, getMarketDataStats } from '../../src/lib/market-data-service.js';
 import { analyzeMarket, Candle } from "../../src/lib/strategy-engine.js";
 import { extractRiskPreferences, calculatePositionSize, parseRiskRewardRatio } from "../../src/lib/risk-engine.js";
 import { calculateStructuralStopLoss, validateAndResolveStopLoss } from "../../src/lib/structural-stop-loss.js";
@@ -100,35 +101,11 @@ async function fetchWithRetry(url: string, options: RequestInit = {}, maxRetries
 }
 
 async function validateSymbolWithTwelveData(symbol: string, apiKey: string): Promise<{ isValid: boolean; matchedSymbol?: string; instrumentType?: string }> {
-  try {
-    const searchUrl = `https://api.twelvedata.com/symbol_search?symbol=${encodeURIComponent(symbol)}&apikey=${apiKey}`;
-    const response = await fetchWithRetry(searchUrl, {}, 2, 500);
-    if (!response.ok) {
-      console.warn(`[Symbol Search] API returned HTTP ${response.status} for search. Skipping search validation and proceeding.`);
-      return { isValid: true };
-    }
-    const data = await response.json();
-    if (data.status === "error") {
-      console.warn(`[Symbol Search] API returned error status: ${data.message}`);
-      return { isValid: true };
-    }
-    if (data.data && Array.isArray(data.data) && data.data.length > 0) {
-      const symbolUpper = symbol.toUpperCase().replace('/', '');
-      const exactMatch = data.data.find((item: any) => 
-        item.symbol.toUpperCase().replace('/', '') === symbolUpper
-      );
-      if (exactMatch) {
-        return { isValid: true, matchedSymbol: exactMatch.symbol, instrumentType: exactMatch.instrument_type };
-      }
-      return { isValid: true, matchedSymbol: data.data[0].symbol, instrumentType: data.data[0].instrument_type };
-    }
-    // No matching symbols found in Twelve Data database - warn and proceed with original symbol as fallback
-    console.warn(`[Symbol Search] No matching symbols found in search results for "${symbol}". Proceeding with original symbol.`);
-    return { isValid: true, matchedSymbol: symbol };
-  } catch (err: any) {
-    console.error(`[Symbol Search] Error validating symbol ${symbol}:`, err.message || err);
-    return { isValid: true };
+  const res = await defaultMarketDataService.validateSymbol(symbol);
+  if (res.isValid) {
+    return { isValid: true, matchedSymbol: res.matchedSymbol, instrumentType: res.instrumentType };
   }
+  return { isValid: true, matchedSymbol: symbol };
 }
 
 const DEFAULT_STRATEGY_TEXT = `# Gaks AI Default Strategy
@@ -273,25 +250,9 @@ export default async function handler(req: any, res: any) {
       const symbol = watcher.selected_pair;
       let currentPrice: number | null = null;
       try {
-        const priceUrl = `https://api.twelvedata.com/price?symbol=${encodeURIComponent(symbol)}&apikey=${twelveDataKey}`;
-        const priceRes = await fetch(priceUrl);
-        const priceData = await priceRes.json();
-        if (priceData && priceData.price) {
-          currentPrice = parseFloat(priceData.price);
-        }
+        currentPrice = await defaultMarketDataService.fetchCurrentPrice(symbol);
       } catch (err: any) {
-        console.warn(`[Manual Scan] Could not fetch real-time price from Twelve Data:`, err.message);
-      }
-
-      if (currentPrice === null || isNaN(currentPrice)) {
-        try {
-          const tsUrl = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(symbol)}&interval=1min&outputsize=1&apikey=${twelveDataKey}`;
-          const tsRes = await fetch(tsUrl);
-          const tsData = await tsRes.json();
-          if (tsData?.values?.[0]?.close) {
-            currentPrice = parseFloat(tsData.values[0].close);
-          }
-        } catch (e) {}
+        console.warn(`[Manual Scan] Could not fetch real-time price from Provider:`, err.message);
       }
 
       if (currentPrice === null || isNaN(currentPrice)) {
@@ -556,17 +517,9 @@ export default async function handler(req: any, res: any) {
     const selectedTimeframe = watcher.selected_timeframe || 'H1';
     const interval = '1h'; // Simplified
 
-    const timeSeriesUrl = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(mappedSymbol)}&interval=${interval}&outputsize=20&timezone=UTC&apikey=${twelveDataKey}`;
-    
-    const tsRes = await fetch(timeSeriesUrl);
-    const tsData = await tsRes.json();
-    const candleData = tsData.values?.map((v: any) => ({
-      timestamp: v.datetime,
-      open: parseFloat(v.open),
-      high: parseFloat(v.high),
-      low: parseFloat(v.low),
-      close: parseFloat(v.close)
-    })) || [];
+    const reqArgs = { symbol: mappedSymbol, timeframe: selectedTimeframe, requiredCount: 20 };
+    const tsResult = await defaultMarketDataService.getMarketData(reqArgs);
+    const candleData = tsResult.candles || [];
 
     if (candleData.length < 2) throw new Error("Insufficient candle data.");
 

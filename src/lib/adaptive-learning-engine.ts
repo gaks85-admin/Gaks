@@ -30,17 +30,28 @@ export interface AdaptiveLearningResult {
 /**
  * Fetches completed trades for adaptive learning, ensuring strict user isolation.
  */
-export async function fetchCompletedTradesForAdaptiveLearning(supabase: any, userId: string): Promise<any[]> {
+export async function fetchCompletedTradesForAdaptiveLearning(supabase: any, userId: string, preferredSource?: 'THEORETICAL' | 'PAPER' | 'LIVE'): Promise<any[]> {
   const client = supabase || defaultSupabase;
   if (!userId) return [];
 
+  const source = preferredSource || process.env.EXECUTION_MODE || 'THEORETICAL';
+
   try {
     // 1. Primary: fetch from trade_learning table
-    const { data: learningData, error: learningErr } = await client
+    let query = client
       .from('trade_learning')
       .select('*')
       .eq('user_id', userId)
-      .in('outcome', ['WIN', 'LOSS', 'BREAKEVEN'])
+      .in('outcome', ['WIN', 'LOSS', 'BREAKEVEN']);
+
+    // Stage 7 Requirement: Only broker-reconciled results for LIVE
+    if (source === 'LIVE') {
+      query = query.eq('execution_source', 'LIVE').eq('is_reconciled', true);
+    } else if (source === 'PAPER') {
+      query = query.eq('execution_source', 'PAPER');
+    }
+
+    const { data: learningData, error: learningErr } = await query
       .order('created_at', { ascending: true });
 
     if (!learningErr && Array.isArray(learningData) && learningData.length > 0) {

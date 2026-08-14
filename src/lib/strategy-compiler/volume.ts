@@ -4,7 +4,7 @@ import { findSynonymMatch } from './normalizer.js';
 
 export class VolumeParser implements StrategyParserModule<boolean> {
   parse(text: string): ParserResult<boolean> {
-    const match = findSynonymMatch(text, volumeSynonyms, 'VOLUME_CONFIRMATION', 0.95);
+    const match = findSynonymMatch(text, volumeSynonyms, 'volume_confirmation', 0.95);
     
     return {
       supported: match.matched,

@@ -8,7 +8,7 @@ export interface AtrRule {
 
 export class AtrParser implements StrategyParserModule<AtrRule> {
   parse(text: string): ParserResult<AtrRule> {
-    const match = findSynonymMatch(text, atrSynonyms, 'ATR_FILTER', 0.98);
+    const match = findSynonymMatch(text, atrSynonyms, 'atr', 0.98);
     
     return {
       supported: match.matched,

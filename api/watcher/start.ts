@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import { randomUUID } from 'crypto';
 import { generateStrategySummary } from '../../src/lib/strategy-summarizer.js';
 import { timeframeToMinutes } from '../../src/lib/timeframe.js';
+import { defaultMarketDataService } from '../../src/lib/market-data-service.js';
 
 /**
  * Self-contained Supabase client initialization.
@@ -519,63 +520,19 @@ export default async function handler(req: any, res: any) {
       console.log(`[Watcher Start] Validating symbol "${mappedSymbol}" (converted from "${selectedPair}") against Twelve Data API...`);
       
       try {
-        const searchUrl = `https://api.twelvedata.com/symbol_search?symbol=${encodeURIComponent(mappedSymbol)}&apikey=${twelveDataKey}`;
-        const searchRes = await fetch(searchUrl);
-        if (searchRes.ok) {
-          const searchData = await searchRes.json();
-          if (searchData.status === "error") {
-            console.warn(`[Watcher Start] Symbol search API returned error: ${searchData.message}`);
-          } else if (searchData.data && Array.isArray(searchData.data)) {
-            const symbolUpper = mappedSymbol.toUpperCase().replace('/', '');
-            const hasMatch = searchData.data.some((item: any) => 
-              item.symbol.toUpperCase().replace('/', '') === symbolUpper
-            );
-            if (!hasMatch && searchData.data.length === 0) {
-              console.log("[Watcher Activation] FAILED at Step 9:", {
-                step: 9,
-                reason: `TwelveData HTTP Error: 404. The symbol "${selectedPair}" was not found or is invalid on Twelve Data.`,
-                user_id: userId,
-                selected_pair: selectedPair,
-                selected_timeframe: selectedTimeframe
-              });
-              return res.status(400).json({
-                success: false,
-                error: `TwelveData HTTP Error: 404. The symbol "${selectedPair}" was not found or is invalid on Twelve Data. Please use standard tickers like EURUSD, BTCUSD, AAPL.`
-              });
-            }
-          }
-        }
-        
-        // Also perform a lightweight quote validation to be absolutely sure the symbol works
-        const quoteUrl = `https://api.twelvedata.com/quote?symbol=${encodeURIComponent(mappedSymbol)}&apikey=${twelveDataKey}`;
-        const quoteRes = await fetch(quoteUrl);
-        if (quoteRes.status === 404) {
-          console.log("[Watcher Activation] FAILED at Step 10:", {
-            step: 10,
-            reason: `TwelveData HTTP Error: 404. Symbol "${selectedPair}" is not recognized or not supported by Twelve Data.`,
+        const valRes = await defaultMarketDataService.validateSymbol(mappedSymbol);
+        if (!valRes.isValid && !valRes.reason?.includes("RATE_LIMITED") && !valRes.reason?.includes("429")) {
+          console.log("[Watcher Activation] FAILED at Step 9:", {
+            step: 9,
+            reason: `TwelveData Error: The symbol "${selectedPair}" was not found or is invalid on Twelve Data. (${valRes.reason})`,
             user_id: userId,
             selected_pair: selectedPair,
             selected_timeframe: selectedTimeframe
           });
           return res.status(400).json({
             success: false,
-            error: `TwelveData HTTP Error: 404. Symbol "${selectedPair}" is not recognized or not supported by Twelve Data. Please try another symbol.`
+            error: `TwelveData Error: Symbol "${selectedPair}" is not recognized or not supported. Please try another symbol.`
           });
-        } else if (quoteRes.ok) {
-          const quoteData = await quoteRes.json();
-          if (quoteData.status === "error") {
-            console.log("[Watcher Activation] FAILED at Step 11:", {
-              step: 11,
-              reason: `TwelveData Error: ${quoteData.message || "Invalid symbol on Twelve Data."}`,
-              user_id: userId,
-              selected_pair: selectedPair,
-              selected_timeframe: selectedTimeframe
-            });
-            return res.status(400).json({
-              success: false,
-              error: `TwelveData Error: ${quoteData.message || "Invalid symbol on Twelve Data."}`
-            });
-          }
         }
       } catch (validationErr: any) {
         console.warn("[Watcher Start] Warning during Twelve Data symbol validation check:", validationErr.message || validationErr);

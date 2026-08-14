@@ -10,7 +10,7 @@ export interface EmaRule {
 
 export class EmaParser implements StrategyParserModule<EmaRule> {
   parse(text: string): ParserResult<EmaRule> {
-    const match = findSynonymMatch(text, emaSynonyms, 'EMA_CROSSOVER', 0.95);
+    const match = findSynonymMatch(text, emaSynonyms, 'ema', 0.95);
     
     let supported = match.matched;
     let matchedPhrase = match.matchedPhrase;
@@ -21,7 +21,7 @@ export class EmaParser implements StrategyParserModule<EmaRule> {
     if (!supported && (normalizedInput.includes('ema') || normalizedInput.includes('exponential moving average') || normalizedInput.includes('moving average'))) {
       supported = true;
       matchedPhrase = normalizedInput.includes('ema') ? 'EMA' : 'moving average';
-      canonicalRule = 'EMA';
+      canonicalRule = 'ema';
       confidence = 0.90;
     }
     

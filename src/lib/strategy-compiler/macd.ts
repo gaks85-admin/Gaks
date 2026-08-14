@@ -8,7 +8,7 @@ export interface MacdRule {
 
 export class MacdParser implements StrategyParserModule<MacdRule> {
   parse(text: string): ParserResult<MacdRule> {
-    const match = findSynonymMatch(text, macdSynonyms, 'MACD_FILTER', 0.98);
+    const match = findSynonymMatch(text, macdSynonyms, 'macd', 0.98);
     
     return {
       supported: match.matched,

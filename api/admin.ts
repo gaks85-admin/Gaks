@@ -6,6 +6,7 @@ import { dispatchTradeAlert } from '../src/lib/telegramWrapper.js';
 import { timeframeToMinutes } from '../src/lib/timeframe.js';
 import { extractRiskPreferences, calculatePositionSize } from '../src/lib/risk-engine.js';
 import { resolveUserGeminiKey } from '../src/lib/gemini-key-resolver.js';
+import { defaultMarketDataService } from '../src/lib/market-data-service.js';
 
 // --- Inlined Gemini & Telegram Wrappers ---
 
@@ -253,28 +254,33 @@ async function health_handler(req: any, res: any) {
     let latestPriceReceived = null;
     let twelveDataLatency = 0;
     let twelveErrorMsg = null;
-    if (process.env.TWELVE_DATA_API_KEY) {
-      try {
-        const startTwelve = Date.now();
-        const resQuote = await fetch(`https://api.twelvedata.com/quote?symbol=EUR/USD&apikey=${process.env.TWELVE_DATA_API_KEY}`);
-        twelveDataLatency = Date.now() - startTwelve;
-        if (resQuote.ok) {
-          const quoteData = await resQuote.json();
-          if (quoteData.status !== 'error' && quoteData.code !== 400) {
-            twelveDataStatus = 'ONLINE';
-            latestPriceReceived = parseFloat(quoteData.close || quoteData.price || '0');
-          } else {
-            twelveDataStatus = 'ERROR';
-            twelveErrorMsg = quoteData.message || 'Twelve Data error payload';
-          }
+    let marketDataProviders: any[] = [];
+    
+    try {
+        const providers = defaultMarketDataService.getProviders();
+        marketDataProviders = providers.map(p => ({
+            id: p.getId(),
+            name: p.getName(),
+            health: p.getHealth()
+        }));
+
+        if (providers.length > 0) {
+            const startTwelve = Date.now();
+            const price = await defaultMarketDataService.fetchCurrentPrice('EUR/USD');
+            twelveDataLatency = Date.now() - startTwelve;
+            if (price !== null) {
+                twelveDataStatus = 'ONLINE';
+                latestPriceReceived = price;
+            } else {
+                twelveDataStatus = 'ERROR';
+                twelveErrorMsg = 'Market Data Providers returned null price';
+            }
         } else {
-          twelveDataStatus = 'ERROR';
-          twelveErrorMsg = `HTTP Code ${resQuote.status}`;
+            twelveErrorMsg = 'No configured market data providers';
         }
-      } catch (err: any) {
+    } catch (err: any) {
         twelveDataStatus = 'ERROR';
-        twelveErrorMsg = err.message || 'Twelve Data network timeout';
-      }
+        twelveErrorMsg = err.message || 'Market Data Provider network timeout';
     }
 
     // Fetch details of Gemini
@@ -495,7 +501,8 @@ async function health_handler(req: any, res: any) {
           price: latestPriceReceived,
           symbol: 'EUR/USD',
           responseTime: twelveDataLatency,
-          error: twelveErrorMsg
+          error: twelveErrorMsg,
+          providers: marketDataProviders
         },
         gemini: {
           status: geminiStatus,
@@ -520,11 +527,40 @@ async function health_handler(req: any, res: any) {
           nextExecutionTime: calculatedNextExecution,
           lastDuration: lastWatcherScanAt ? "1.8s" : "N/A" // Realistic estimation or fetch from logs
         },
+
         stats: {
           watchers: {
             total: totalWatchersCount,
             active: activeWatchersCount,
-            disabled: disabledWatchersCount
+            disabled: disabledWatchersCount,
+            waiting: 0,
+            cooldown: 0,
+            blocked: 0,
+            market_data_unavailable: 0,
+            news_hard_pause: 0
+          },
+          marketData: {
+            cacheHits: 0,
+            cacheMisses: 0,
+            rateLimitEvents: 0,
+            requestsSaved: 0,
+            dataFreshnessAvgMs: 0
+          },
+          safetyGates: {
+            newsHardPauseRejections: 0,
+            staleDataRejections: 0,
+            entryDriftRejections: 0,
+            spreadRejections: 0,
+            riskGovernorRejections: 0,
+            executionRejections: 0
+          },
+          execution: {
+            candidates: 0,
+            authorized: 0,
+            rejected: 0,
+            theoreticalTrades: 0,
+            brokerTrades: 0,
+            reconciledTrades: 0
           },
           signals: {
             detectedToday: signalsDetectedToday,
@@ -1573,33 +1609,26 @@ async function watchers_action_handler(req: any, res: any) {
       const strategyText = extractStrategyTextById(strategyTextRaw, watcher.strategy_id);
       
       let collectedData: Record<string, any> = {};
-      const twelveDataKey = process.env.TWELVE_DATA_API_KEY;
       const symbol = watcher.selected_pair || 'EURUSD';
       
-      if (twelveDataKey) {
-        try {
-          const mappedSymbol = symbol.length === 6 ? `${symbol.slice(0, 3)}/${symbol.slice(3)}` : symbol;
-          const response = await fetch(`https://api.twelvedata.com/quote?symbol=${encodeURIComponent(mappedSymbol)}&apikey=${twelveDataKey}`);
-          if (response.ok) {
-            const quoteData = await response.json();
-            if (quoteData && !quoteData.error && quoteData.close) {
-              const currentPrice = parseFloat(quoteData.close);
-              collectedData[symbol] = {
-                current_price: currentPrice,
-                open: parseFloat(quoteData.open || "0") || currentPrice,
-                high: parseFloat(quoteData.high || "0") || currentPrice,
-                low: parseFloat(quoteData.low || "0") || currentPrice,
-                close: currentPrice,
-                bid: quoteData.bid ? parseFloat(quoteData.bid) : currentPrice * 0.9999,
-                ask: quoteData.ask ? parseFloat(quoteData.ask) : currentPrice * 1.0001,
-                volume: parseFloat(quoteData.volume || "0"),
-                timestamp: quoteData.timestamp || Math.floor(Date.now() / 1000)
-              };
-            }
-          }
-        } catch (e) {
-          console.error("Twelve data fetch failed in Vercel force scan, falling back:", e);
+      try {
+        const mappedSymbol = symbol.length === 6 ? `${symbol.slice(0, 3)}/${symbol.slice(3)}` : symbol;
+        const currentPrice = await defaultMarketDataService.fetchCurrentPrice(mappedSymbol);
+        if (currentPrice !== null) {
+          collectedData[symbol] = {
+            current_price: currentPrice,
+            open: currentPrice,
+            high: currentPrice,
+            low: currentPrice,
+            close: currentPrice,
+            bid: currentPrice * 0.9999,
+            ask: currentPrice * 1.0001,
+            volume: 0,
+            timestamp: Math.floor(Date.now() / 1000)
+          };
         }
+      } catch (e) {
+        console.error("Market data fetch failed in Vercel force scan, falling back:", e);
       }
       
       if (Object.keys(collectedData).length === 0) {
@@ -1903,28 +1932,15 @@ async function inspector_candles_handler(req: any, res: any) {
   if (!symbol) return res.status(400).json({ success: false, error: "Symbol is required" });
 
   try {
-    const twelveDataKey = process.env.TWELVE_DATA_API_KEY;
-    if (!twelveDataKey) return res.status(500).json({ success: false, error: "Twelve Data API key missing" });
-
     const mappedSymbol = convertSymbolForTwelveData(symbol);
-    const interval = mapTimeframeToInterval(timeframe);
-    const tsUrl = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(mappedSymbol)}&interval=${interval}&outputsize=50&timezone=UTC&apikey=${twelveDataKey}`;
-
-    const tsRes = await fetchWithRetry(tsUrl, {}, 3, 1000);
-    const tsData = await tsRes.json();
-
-    if (tsData.status !== "ok") {
-      return res.status(400).json({ success: false, error: tsData.message || "Twelve Data error" });
+    
+    const tsResult = await defaultMarketDataService.getMarketData({ symbol: mappedSymbol, timeframe, requiredCount: 50 });
+    
+    if (!tsResult.isValid) {
+      return res.status(400).json({ success: false, error: tsResult.reason || "Market Data error" });
     }
 
-    const candles = tsData.values.map((v: any) => ({
-      timestamp: v.datetime,
-      open: parseFloat(v.open),
-      high: parseFloat(v.high),
-      low: parseFloat(v.low),
-      close: parseFloat(v.close),
-      volume: v.volume ? parseFloat(v.volume) : undefined
-    })).reverse();
+    const candles = tsResult.candles;
 
     return res.status(200).json({ success: true, candles, currentPrice: candles[candles.length - 1]?.close, timeframe });
   } catch (err: any) {

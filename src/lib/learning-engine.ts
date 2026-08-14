@@ -14,7 +14,7 @@ export interface TradeLearningRecord {
   stop_loss?: number | null;
   take_profit?: number | null;
   exit_price: number;
-  outcome?: 'WIN' | 'LOSS' | 'BREAKEVEN';
+  outcome?: 'WIN' | 'LOSS' | 'BREAKEVEN' | 'BROKER_REALIZED_WIN' | 'BROKER_REALIZED_LOSS' | 'BROKER_REALIZED_BREAKEVEN';
   rr_expected?: number | null;
   rr_achieved?: number | null;
   pips?: number | null;
@@ -31,6 +31,21 @@ export interface TradeLearningRecord {
   volatility?: string | null;
   notes?: string | null;
   decision_snapshot?: any;
+  
+  // Broker Fields
+  execution_mode?: 'THEORETICAL' | 'PAPER' | 'LIVE';
+  actual_entry_price?: number | null;
+  requested_entry_price?: number | null;
+  entry_slippage_pips?: number | null;
+  gross_pnl?: number | null;
+  net_pnl?: number | null;
+  fees?: number | null;
+  commission?: number | null;
+  swap?: number | null;
+  slippage_pips?: number | null;
+  realized_r?: number | null;
+  broker_order_id?: string | null;
+  outcome_source?: 'THEORETICAL' | 'BROKER_RECONCILIATION' | 'MANUAL';
 }
 
 // In-memory cache for stats calculations
@@ -91,6 +106,21 @@ export async function recordCompletedTrade(
     volatility?: string | null;
     notes?: string | null;
     decision_snapshot?: any;
+    
+    // Broker Fields
+    execution_mode?: 'THEORETICAL' | 'PAPER' | 'LIVE';
+    actual_entry_price?: number | null;
+    requested_entry_price?: number | null;
+    entry_slippage_pips?: number | null;
+    gross_pnl?: number | null;
+    net_pnl?: number | null;
+    fees?: number | null;
+    commission?: number | null;
+    swap?: number | null;
+    slippage_pips?: number | null;
+    realized_r?: number | null;
+    broker_order_id?: string | null;
+    outcome_source?: 'THEORETICAL' | 'BROKER_RECONCILIATION' | 'MANUAL';
   }
 ): Promise<TradeLearningRecord | null> {
   const client = supabase || defaultSupabase;
@@ -100,6 +130,14 @@ export async function recordCompletedTrade(
     // 1. Strict user_id validation
     if (!params.user_id || typeof params.user_id !== 'string' || !params.user_id.trim()) {
       console.error('[Learning Engine] user_id is required to record completed trade. Aborting.');
+      return null;
+    }
+
+    
+    // STAGE 5: Only terminal outcomes may enter the learning dataset
+    const validOutcomes = ['WIN', 'LOSS', 'BREAKEVEN', 'BROKER_REALIZED_WIN', 'BROKER_REALIZED_LOSS', 'BROKER_REALIZED_BREAKEVEN'];
+    if (!params.outcome || !validOutcomes.includes(params.outcome.toUpperCase())) {
+      console.warn(`[Learning Engine] Rejected non-terminal or invalid outcome: ${params.outcome}`);
       return null;
     }
 
@@ -132,13 +170,13 @@ export async function recordCompletedTrade(
     const pips = isBuy ? diff / pipSize : -diff / pipSize;
 
     // Calculate Outcome
-    let outcome: 'WIN' | 'LOSS' | 'BREAKEVEN' = 'BREAKEVEN';
+    let outcome: any = 'BREAKEVEN';
     if (params.outcome) {
       const sanitized = String(params.outcome).toUpperCase().trim();
-      if (sanitized === 'WIN' || sanitized === 'LOSS' || sanitized === 'BREAKEVEN') {
-        outcome = sanitized as 'WIN' | 'LOSS' | 'BREAKEVEN';
+      const terminalOutcomes = ['WIN', 'LOSS', 'BREAKEVEN', 'BROKER_REALIZED_WIN', 'BROKER_REALIZED_LOSS', 'BROKER_REALIZED_BREAKEVEN'];
+      if (terminalOutcomes.includes(sanitized)) {
+        outcome = sanitized;
       } else {
-        console.warn(`[Learning Engine] Non-terminal or invalid outcome passed ('${params.outcome}'). Calculating strictly from pips.`);
         if (Math.abs(pips) < 1.0) {
           outcome = 'BREAKEVEN';
         } else if (pips > 0) {
@@ -147,20 +185,6 @@ export async function recordCompletedTrade(
           outcome = 'LOSS';
         }
       }
-    } else {
-      if (Math.abs(pips) < 1.0) {
-        outcome = 'BREAKEVEN';
-      } else if (pips > 0) {
-        outcome = 'WIN';
-      } else {
-        outcome = 'LOSS';
-      }
-    }
-
-    // Double check: strictly block any non-terminal outcome from entering learning database
-    if (outcome !== 'WIN' && outcome !== 'LOSS' && outcome !== 'BREAKEVEN') {
-      console.warn(`[Learning Engine] Blocked non-terminal outcome '${outcome}' from entering learning database.`);
-      return null;
     }
 
     // Calculate expected & achieved RR
@@ -216,7 +240,22 @@ export async function recordCompletedTrade(
       session,
       volatility: params.volatility || 'MEDIUM',
       notes: params.notes || `Auto-recorded by Learning Engine. Outcome: ${outcome}`,
-      decision_snapshot: params.decision_snapshot || {}
+      decision_snapshot: params.decision_snapshot || {},
+      
+      // Broker Fields
+      execution_mode: params.execution_mode || 'THEORETICAL',
+      actual_entry_price: params.actual_entry_price || null,
+      requested_entry_price: params.requested_entry_price || null,
+      entry_slippage_pips: params.entry_slippage_pips || null,
+      gross_pnl: params.gross_pnl || null,
+      net_pnl: params.net_pnl || null,
+      fees: params.fees || null,
+      commission: params.commission || null,
+      swap: params.swap || null,
+      slippage_pips: params.slippage_pips || null,
+      realized_r: params.realized_r || null,
+      broker_order_id: params.broker_order_id || null,
+      outcome_source: params.outcome_source || 'THEORETICAL'
     };
 
     console.log(`[Learning Engine] Recording completed trade: Pair ${payload.pair}, Outcome: ${payload.outcome}, Pips: ${payload.pips}`);

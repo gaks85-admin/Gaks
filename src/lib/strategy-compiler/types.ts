@@ -47,7 +47,10 @@ export interface CompiledRules {
 export interface CompilerOutput {
   strategy_mode: 'RULE_ONLY' | 'HYBRID' | 'AI_ONLY';
   compiled_rules: CompiledRules;
-  confidence: number; // for backward compatibility
+  mandatory_rules: string[];
+  optional_rules: string[];
+  weighted_rules: { rule: string; weight: number }[];
+  confidence: number;
   overall_confidence: number;
   module_confidence: {
     [key: string]: number;
@@ -55,6 +58,8 @@ export interface CompilerOutput {
   matched_phrases: string[];
   canonical_rules: string[];
   detector_validation?: any;
+  status: 'SUCCESS' | 'AMBIGUOUS_STRATEGY' | 'FAILURE';
+  error_message?: string;
 }
 
 export interface StrategyParserModule<T = any> {

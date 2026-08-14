@@ -98,3 +98,30 @@ export function findSynonymMatch(
     confidence: 0.0
   };
 }
+
+export function isMandatory(originalText: string, matchedPhrase: string): boolean {
+  const normalizedPhrase = normalizeText(matchedPhrase);
+  
+  // 1. Identify the clause containing the phrase from the original text (preserving punctuation for splitting)
+  const clauses = originalText.toLowerCase().split(/[,.;]|\band\b/);
+  const targetClauseRaw = clauses.find(c => normalizeText(c).includes(normalizedPhrase)) || originalText.toLowerCase();
+  const targetClause = normalizeText(targetClauseRaw);
+
+  const mandatoryKeywords = ['must', 'required', 'mandatory', 'only', 'essential', 'strictly'];
+  const optionalKeywords = ['optional', 'confirmation', 'extra', 'additional', 'if possible', 'weighted'];
+
+  // Check for immediate word boundary matches within the same clause
+  const isOptional = optionalKeywords.some(k => {
+    const regex = new RegExp(`\\b${k}\\b`);
+    return regex.test(targetClause);
+  });
+  const isMandatoryExplicit = mandatoryKeywords.some(k => {
+    const regex = new RegExp(`\\b${k}\\b`);
+    return regex.test(targetClause);
+  });
+
+  if (isMandatoryExplicit) return true;
+  if (isOptional) return false;
+
+  return true; // Default to mandatory if not specified
+}

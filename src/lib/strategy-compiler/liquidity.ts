@@ -4,7 +4,7 @@ import { findSynonymMatch } from './normalizer.js';
 
 export class LiquidityParser implements StrategyParserModule<boolean> {
   parse(text: string): ParserResult<boolean> {
-    const match = findSynonymMatch(text, liquiditySynonyms, 'LIQUIDITY_SWEEP', 0.95);
+    const match = findSynonymMatch(text, liquiditySynonyms, 'liquidity_sweep', 0.95);
     
     return {
       supported: match.matched,
