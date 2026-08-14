@@ -283,11 +283,11 @@ export async function registerSignal(
  * Self-contained Supabase client initialization.
  */
 const getSupabase = () => {
-  const url = process.env.VITE_SUPABASE_URL || "https://wkujrqmxivljnuvumfau.supabase.co";
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+  const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "";
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || "";
   
   if (!url || !key) {
-    throw new Error('Supabase configuration missing (VITE_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required)');
+    throw new Error('Supabase configuration missing (SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required)');
   }
 
   return createClient(url, key, {
@@ -483,6 +483,15 @@ export default async function handler(req: any, res: any) {
     const liveTradingEnabled = process.env.LIVE_TRADING_ENABLED === 'true';
 
     // Safe Startup Validation (STEP 4)
+    console.log("DEBUG CONFIG:", {
+      SUPABASE_URL_PRESENT: !!supabaseUrl,
+      SUPABASE_KEY_PRESENT: !!supabaseKey,
+      TWELVE_DATA_KEY_PRESENT: !!twelveDataKey,
+      CRON_SECRET_PRESENT: !!cronSecretRaw,
+      TELEGRAM_BOT_TOKEN_PRESENT: !!telegramBotToken,
+      LIVE_TRADING_ENABLED: liveTradingEnabled
+    });
+
     if (!supabaseUrl) {
       console.error("[CRON ERROR] SUPABASE_URL_MISSING: The Supabase URL (SUPABASE_URL or VITE_SUPABASE_URL) is not set.");
       return res.status(500).json({ success: false, error: "SUPABASE_URL_MISSING" });

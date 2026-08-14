@@ -140,10 +140,10 @@ import path from 'path';
 import url from 'url';
 
 const getSupabase = () => {
-  const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://wkujrqmxivljnuvumfau.supabase.co";
-  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+  const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "";
+  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || "";
   if (!supabaseUrl || !supabaseKey) {
-    throw new Error('Supabase configuration missing');
+    throw new Error('Supabase configuration missing (SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required)');
   }
   return createClient(supabaseUrl, supabaseKey, {
     auth: {
