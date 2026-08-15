@@ -34,3 +34,7 @@ export const supabase = createClient(
   SUPABASE_PUBLIC_KEY || 'placeholder'
 );
 
+console.log('[DIAGNOSTIC] Supabase initialized. URL:', SUPABASE_URL?.replace(/^https:\/\//, '').split('.')[0] || 'PLACEHOLDER');
+console.log('[DIAGNOSTIC] Supabase KEY PRESENT:', !!SUPABASE_PUBLIC_KEY);
+
+
