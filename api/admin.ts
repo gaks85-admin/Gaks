@@ -969,6 +969,7 @@ async function signals_handler(req: any, res: any) {
  */
 
 async function stats_handler(req: any, res: any) {
+  console.log("[DIAGNOSTIC] stats_handler called for user:", req.user?.id);
   const supabase = getSupabase();
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, PATCH, DELETE");

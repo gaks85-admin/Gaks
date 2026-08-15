@@ -79,8 +79,8 @@ async function startServer() {
       (req as any).user = user;
       next();
     } catch (err: any) {
-      console.error("Admin guard error:", err);
-      return res.status(500).json({ success: false, error: "Internal server error during authorization check." });
+      console.error("[DIAGNOSTIC] Admin guard error:", err);
+      return res.status(500).json({ success: false, error: "Internal server error during authorization check.", details: err.message });
     }
   }
 
