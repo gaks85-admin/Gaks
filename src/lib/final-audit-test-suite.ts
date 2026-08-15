@@ -6,6 +6,7 @@ import { EconomicEventService } from './economic-event-service.js';
 import { evaluateDecision } from './decision-engine.js';
 import { compileStrategy } from './strategy-compiler.js';
 import { Candle } from './strategy-engine.js';
+import { runGaksAuditTests } from './gaks-audit-test-suite.js';
 
 async function runAudit() {
   console.log("Starting Final Production Trading Audit...");
@@ -124,6 +125,9 @@ async function runAudit() {
     const service = new EconomicEventService(); // No provider
     // Can't easily await here in synchronous test wrapper without async handling
   });
+
+  // 7. Gaks AI Signal Audit Requirements (12 test cases)
+  await runGaksAuditTests();
 
   console.log(`\nAudit Summary:`);
   console.log(`TOTAL: ${results.TOTAL}`);

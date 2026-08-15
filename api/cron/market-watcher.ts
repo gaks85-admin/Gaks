@@ -32,14 +32,13 @@ import {
 import { RULE_WEIGHTS } from '../../src/lib/rule-weight-engine.js';
 import { validateMarketDataIntegrity } from '../../src/lib/market-integrity.js';
 import { normalizeConfidence } from '../../src/lib/confidence-engine.js';
-import { evaluateQualityGate } from '../../src/lib/quality-gate.js';
+import { evaluateQualityGate, calculateAdaptiveQualityRequirement, calculateConsecutiveLossesForWatcher } from '../../src/lib/quality-gate.js';
 import { checkSignalDeduplication } from '../../src/lib/signal-deduplication.js';
 import { resolveUserGeminiKey, classifyAndRedactGeminiError } from '../../src/lib/gemini-key-resolver.js';
 import { validateActiveTradeState, isWatcherDue } from '../../src/lib/trade-validator.js';
 import { computeEquityAnalytics, deriveEquityState, fetchUserCompletedTrades } from '../../src/lib/equity-learning-engine.js';
 import { evaluateRiskGovernor } from '../../src/lib/risk-governor.js';
 import { evaluateAdaptiveLearning, fetchCompletedTradesForAdaptiveLearning } from '../../src/lib/adaptive-learning-engine.js';
-import { calculateAdaptiveQualityRequirement } from '../../src/lib/quality-gate.js';
 import { evaluateAdaptiveExecution } from '../../src/lib/adaptive-execution-engine.js';
 import { evaluateClosedLoopCalibration } from '../../src/lib/closed-loop-calibration-engine.js';
 import { resolveAuthoritativeDecision, DecisionGateResult } from '../../src/lib/decision-attribution.js';
@@ -1181,14 +1180,17 @@ Reason: ${activeValidation.reason}`);
             decision_snapshot: latestEval?.decision_snapshot || null
           });
 
-          // Transition to COOLDOWN
+          // Transition to COOLDOWN (4 hours for STOP_LOSS / LOSS)
+          const cooldownUntilSl = new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString();
+          console.log(`[LOSS COOLDOWN] Watcher ${watcher.id} entered 4-hour cooldown after STOP_LOSS.`);
+
           const { data: slCooldownData, error: slCooldownErr } = await supabase
             .from("watchers")
             .update({
               trade_status: 'COOLDOWN',
               active_trade_id: null,
               closed_at: new Date().toISOString(),
-              cooldown_until: cooldownUntilIso,
+              cooldown_until: cooldownUntilSl,
               last_scan_at: new Date().toISOString(),
               updated_at: new Date().toISOString()
             })
@@ -1937,6 +1939,17 @@ Fallback: NO_TRADE`.trim());
         let adaptiveReq: any = null;
         let executionResult: any = null;
 
+        // Fetch completed trades to compute consecutive losses for the watcher (Cold Start Protection)
+        let completedTradesForStreak: any[] = [];
+        let consecutiveLosses = 0;
+        try {
+          completedTradesForStreak = await fetchCompletedTradesForAdaptiveLearning(supabase, userId);
+          consecutiveLosses = calculateConsecutiveLossesForWatcher(completedTradesForStreak, watcher.id);
+          console.log(`[Loss-Streak Protection] Watcher ID: ${watcher.id}, Consecutive Losses: ${consecutiveLosses}`);
+        } catch (tradeErr) {
+          console.error('[Completed Trades Fetch Error] Failed to compute consecutive losses:', tradeErr);
+        }
+
         // Quality Gate Check (QUALITY OVER QUANTITY)
         if (analysis.signal === 'BUY' || analysis.signal === 'SELL') {
           qualityResult = evaluateQualityGate({
@@ -1949,7 +1962,8 @@ Fallback: NO_TRADE`.trim());
             slValid: Boolean(analysis.stopLoss),
             tpValid: Boolean(analysis.takeProfit),
             rrValid: true,
-            historicalProbability: histResult.historical_probability
+            historicalProbability: histResult.historical_probability,
+            consecutiveLosses: consecutiveLosses
           });
 
           if (!qualityResult.passed) {

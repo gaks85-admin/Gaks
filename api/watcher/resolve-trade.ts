@@ -156,7 +156,14 @@ export default async function handler(req: any, res: any) {
     });
 
     // 4. Update watcher to COOLDOWN
-    const cooldownUntil = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+    const outcomeStr = String(outcome);
+    const isLoss = outcomeStr === 'LOSS' || outcomeStr === 'STOP_LOSS';
+    const cooldownMs = isLoss ? 4 * 60 * 60 * 1000 : 5 * 60 * 1000;
+    const cooldownUntil = new Date(Date.now() + cooldownMs).toISOString();
+    if (isLoss) {
+      console.log(`[LOSS COOLDOWN] Watcher ${watcher.id} entered 4-hour cooldown after STOP_LOSS.`);
+    }
+
     await supabase
       .from('watchers')
       .update({

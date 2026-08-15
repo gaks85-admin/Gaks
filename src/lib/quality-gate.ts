@@ -12,6 +12,7 @@ export interface QualityGateInput {
   rrValid: boolean;
   historicalProbability?: number; // 0-100 if available
   minQualityThreshold?: number; // Default 75
+  consecutiveLosses?: number; // Optional consecutive losses from watcher history
 }
 
 export interface QualityGateResult {
@@ -88,7 +89,21 @@ export function calculateAdaptiveQualityRequirement(input: AdaptiveQualityInput)
  * Evaluates high-confluence setup quality before risk validation and execution.
  */
 export function evaluateQualityGate(input: QualityGateInput): QualityGateResult {
-  const minRequired = input.minQualityThreshold ?? 75;
+  const baseThreshold = input.minQualityThreshold ?? 75;
+  const consecutiveLosses = input.consecutiveLosses ?? 0;
+
+  // Calculate deterministic loss-streak safety overlay
+  let lossStreakRequiredQuality = baseThreshold;
+  if (consecutiveLosses === 2) {
+    lossStreakRequiredQuality = Math.max(lossStreakRequiredQuality, 80);
+  } else if (consecutiveLosses === 3) {
+    lossStreakRequiredQuality = Math.max(lossStreakRequiredQuality, 85);
+  } else if (consecutiveLosses >= 4) {
+    lossStreakRequiredQuality = 101; // Reject all new trades (higher than max 100% score)
+  }
+
+  // Deterministically adjust minimum required score: max(existingRequiredQuality, lossStreakRequiredQuality)
+  const minRequired = Math.max(baseThreshold, lossStreakRequiredQuality);
   const ruleScore = Math.max(0, Math.min(100, Math.round(input.ruleScore || 0)));
 
   const ms = input.marketStructure || {};
@@ -156,8 +171,14 @@ export function evaluateQualityGate(input: QualityGateInput): QualityGateResult 
     reason = 'Minimum R:R not satisfied';
   } else if (input.geminiRequired && !input.geminiApproved) {
     reason = 'Gemini approval missing or rejected';
+  } else if (consecutiveLosses >= 4) {
+    reason = 'Loss streak protection: 4 consecutive losses. New trades rejected.';
   } else if (computedQuality < minRequired) {
-    reason = 'Insufficient confluence';
+    if (consecutiveLosses > 0) {
+      reason = `Insufficient confluence (Score ${computedQuality}% < required ${minRequired}% due to ${consecutiveLosses} consecutive losses)`;
+    } else {
+      reason = 'Insufficient confluence';
+    }
   }
 
   const result: QualityGateResult = {
@@ -192,4 +213,41 @@ Reason: ${reason}
 `.trim());
 
   return result;
+}
+
+/**
+ * Calculates consecutive losses for a specific watcher from completed trades.
+ */
+export function calculateConsecutiveLossesForWatcher(trades: any[], watcherId?: string): number {
+  if (!Array.isArray(trades)) return 0;
+
+  // Filter trades for this specific watcher (if specified) and keep only terminal outcomes: WIN, LOSS, STOP_LOSS, BREAKEVEN
+  const validTrades = trades.filter(t => {
+    if (watcherId) {
+      const tWatcherId = t.watcher_id || t.watcherId;
+      if (tWatcherId !== watcherId) return false;
+    }
+    
+    const outcome = (t.outcome || '').toUpperCase();
+    return outcome === 'WIN' || outcome === 'LOSS' || outcome === 'STOP_LOSS' || outcome === 'BREAKEVEN';
+  });
+
+  // Sort descending by timestamp (newest first)
+  const sortedTrades = [...validTrades].sort((a, b) => {
+    const timeA = new Date(a.created_at || a.closed_at || a.opened_at || 0).getTime();
+    const timeB = new Date(b.created_at || b.closed_at || b.opened_at || 0).getTime();
+    return timeB - timeA;
+  });
+
+  let consecutiveLosses = 0;
+  for (const t of sortedTrades) {
+    const outcome = (t.outcome || '').toUpperCase();
+    if (outcome === 'LOSS' || outcome === 'STOP_LOSS') {
+      consecutiveLosses++;
+    } else {
+      break; // Streak breaks as soon as we hit a non-loss valid outcome (WIN or BREAKEVEN)
+    }
+  }
+
+  return consecutiveLosses;
 }

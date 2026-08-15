@@ -415,7 +415,8 @@ export default async function handler(req: any, res: any) {
           decision_snapshot: latestEval?.decision_snapshot || null
         });
 
-        const cooldownUntilIso = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+        const cooldownUntilIso = new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString();
+        console.log(`[LOSS COOLDOWN] Watcher ${watcher.id} entered 4-hour cooldown after STOP_LOSS.`);
         await supabase.from("watchers").update({
           trade_status: 'COOLDOWN',
           active_trade_id: null,
