@@ -142,6 +142,7 @@ export default async function handler(req: any, res: any) {
       take_profit: takeProfit,
       exit_price: finalExitPrice,
       direction: direction,
+      outcome: outcome,
       opened_at: watcher.opened_at || new Date(Date.now() - 60000).toISOString(),
       closed_at: new Date().toISOString(),
       decision_score: latestEval?.decision_score || null,

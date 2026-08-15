@@ -135,14 +135,6 @@ export async function recordCompletedTrade(
       return null;
     }
 
-    
-    // STAGE 5: Only terminal outcomes may enter the learning dataset
-    const validOutcomes = ['WIN', 'LOSS', 'BREAKEVEN', 'BROKER_REALIZED_WIN', 'BROKER_REALIZED_LOSS', 'BROKER_REALIZED_BREAKEVEN'];
-    if (!params.outcome || !validOutcomes.includes(params.outcome.toUpperCase())) {
-      console.warn(`[Learning Engine] Rejected non-terminal or invalid outcome: ${params.outcome}`);
-      return null;
-    }
-
     // 2. Strict idempotency check using trade_id
     if (params.trade_id && client && typeof client.from === 'function') {
       try {
@@ -159,6 +151,12 @@ export async function recordCompletedTrade(
       } catch (e: any) {
         console.warn(`[Learning Engine] Idempotency check error for trade_id ${params.trade_id}:`, e.message);
       }
+    }
+
+    // If outcome is genuinely undefined or null, fail safely without recording or crashing
+    if (params.outcome === undefined || params.outcome === null || String(params.outcome).trim() === '') {
+      console.warn(`[Learning Engine] Genuinely unavailable, empty or undefined outcome for trade ${params.trade_id || 'unknown'}. Aborting recording to learning dataset.`);
+      return null;
     }
 
     const dir = (params.direction || '').toUpperCase().trim();
