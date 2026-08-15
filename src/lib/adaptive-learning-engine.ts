@@ -1,4 +1,5 @@
-import { supabase as defaultSupabase } from '../supabaseClient.js';
+import { getSupabase } from '../../lib/supabase-server.js';
+const defaultSupabase = getSupabase();
 
 export type LearningTier = 'INSUFFICIENT_DATA' | 'WEAK_SAMPLE' | 'ELIGIBLE' | 'STRONG_SAMPLE';
 export type PerformanceClassification = 'HEALTHY' | 'NEUTRAL' | 'DETERIORATING' | 'POOR' | 'INSUFFICIENT_DATA';

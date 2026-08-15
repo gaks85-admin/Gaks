@@ -1,7 +1,12 @@
-import { supabase } from '../supabaseClient.js';
 import { runGeminiRequest } from './geminiWrapper.js';
 import { GoogleGenAI } from '@google/genai';
 import { sendTelegramMessage } from './telegramWrapper.js';
+
+async function getSupabase() {
+  const { supabase } = await import('../supabaseClient.js');
+  return supabase;
+}
+
 
 export const GEMINI_API_KEY_URL = 'https://aistudio.google.com/app/apikey';
 
@@ -105,6 +110,7 @@ export async function testGeminiKey(key: string): Promise<GeminiTestResult> {
  */
 export async function getGeminiKey(): Promise<string | null> {
   try {
+    const supabase = await getSupabase();
     const { data: { session }, error: sessionError } = await supabase.auth.getSession();
     if (sessionError || !session?.user) {
       console.warn("getGeminiKey: No active session found", sessionError);
@@ -147,6 +153,7 @@ export async function saveGeminiKey(key: string): Promise<{ success: boolean; er
   }
 
   try {
+    const supabase = await getSupabase();
     const { data: { session }, error: sessionError } = await supabase.auth.getSession();
     if (sessionError || !session?.user) {
       console.warn("[Gemini Save] No session error or session user", sessionError);
@@ -241,6 +248,7 @@ export async function updateGeminiKey(key: string): Promise<{ success: boolean; 
  */
 export async function deleteGeminiKey(): Promise<{ success: boolean; error?: string }> {
   try {
+    const supabase = await getSupabase();
     const { data: { session }, error: sessionError } = await supabase.auth.getSession();
     if (sessionError || !session?.user) {
       return { success: false, error: "You must be logged in to delete API keys." };

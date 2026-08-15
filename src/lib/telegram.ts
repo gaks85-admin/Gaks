@@ -1,4 +1,7 @@
-import { supabase } from '../supabaseClient.js';
+async function getSupabase() {
+  const { supabase } = await import('../supabaseClient.js');
+  return supabase;
+}
 
 export interface TelegramConnection {
   id: string;
@@ -60,6 +63,7 @@ function saveLocalConnection(userId: string, connection: TelegramConnection) {
  */
 export async function getTelegramConnection(userId: string): Promise<{ data: TelegramConnection | null; isFallback: boolean; error: any }> {
   try {
+    const supabase = await getSupabase();
     const { data, error } = await supabase
       .from('telegram_connections')
       .select('*')
@@ -84,6 +88,7 @@ export async function getTelegramConnection(userId: string): Promise<{ data: Tel
  */
 export async function initiateTelegramConnection(userId: string): Promise<{ token: string | null; alreadyConnected: boolean; error: any }> {
   try {
+    const supabase = await getSupabase();
     const { data: existingConnection, isFallback } = await getTelegramConnection(userId);
     
     if (existingConnection && existingConnection.connected) {

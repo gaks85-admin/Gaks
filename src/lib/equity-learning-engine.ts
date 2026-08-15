@@ -1,4 +1,5 @@
-import { supabase as defaultSupabase } from '../supabaseClient.js';
+import { getSupabase } from '../../lib/supabase-server.js';
+const defaultSupabase = getSupabase();
 
 export interface EquityMetrics {
   totalTrades: number;

@@ -1,4 +1,5 @@
-import { supabase as defaultSupabase } from '../supabaseClient.js';
+import { getSupabase } from '../../lib/supabase-server.js';
+const defaultSupabase = getSupabase();
 import { fetchUserCompletedTrades, computeEquityAnalytics, deriveEquityState } from './equity-learning-engine.js';
 import { filterValidCompletedTrades, computeMetricsForSubset } from './adaptive-learning-engine.js';
 import { evaluateRiskGovernor, GovernorStatus } from './risk-governor.js';
