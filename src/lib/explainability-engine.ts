@@ -59,7 +59,6 @@ export async function recordEvaluation(
     trade_reason: record.trade_reason || null,
     scan_duration_ms: record.scan_duration_ms,
     gemini_duration_ms: record.gemini_duration_ms || null,
-    execution_source: record.execution_source || 'THEORETICAL',
     created_at: record.created_at || new Date().toISOString(),
     decision_snapshot: record.decision_snapshot || {}
   };

@@ -34,6 +34,10 @@ export const supabase = createClient(
   SUPABASE_PUBLIC_KEY || 'placeholder'
 );
 
+if (!SUPABASE_URL || !SUPABASE_PUBLIC_KEY) {
+  console.warn('[WARNING] Supabase is initialized with placeholder values!');
+}
+
 console.log('[DIAGNOSTIC] Supabase initialized. URL:', SUPABASE_URL?.replace(/^https:\/\//, '').split('.')[0] || 'PLACEHOLDER');
 console.log('[DIAGNOSTIC] Supabase KEY PRESENT:', !!SUPABASE_PUBLIC_KEY);
 
