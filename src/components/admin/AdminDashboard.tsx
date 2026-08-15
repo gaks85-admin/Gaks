@@ -42,6 +42,14 @@ const DashboardPage = ({ fetchWithAuth }: { fetchWithAuth: any }) => {
     setLoading(true);
     try {
       const res = await fetchWithAuth('/api/admin/stats');
+      
+      const contentType = res.headers.get("content-type");
+      if (!contentType || !contentType.includes("application/json")) {
+        const text = await res.text();
+        console.error("Admin stats: Received non-JSON response:", text);
+        throw new Error(`Server returned non-JSON response: ${text.substring(0, 50)}...`);
+      }
+      
       const json = await res.json();
       if (json.success) {
         setStats(json.stats);

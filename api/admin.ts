@@ -969,8 +969,7 @@ async function signals_handler(req: any, res: any) {
  */
 
 async function stats_handler(req: any, res: any) {
-  console.log("[DIAGNOSTIC] stats_handler called for user:", req.user?.id);
-  const supabase = getSupabase();
+  console.log("[DIAGNOSTIC] stats_handler called. Path:", req.url);
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, PATCH, DELETE");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With");
@@ -984,30 +983,38 @@ async function stats_handler(req: any, res: any) {
     return res.status(405).json({ success: false, error: 'Method Not Allowed' });
   }
 
-  const authHeader = req.headers.authorization || '';
-  const token = authHeader.startsWith('Bearer ') ? authHeader.substring(7) : authHeader;
-  
-  if (!token) {
-    return res.status(401).json({ success: false, error: "Unauthorized: Missing authentication token." });
-  }
-  
   try {
+    const supabase = getSupabase();
+    
+    const authHeader = req.headers.authorization || '';
+    const token = authHeader.startsWith('Bearer ') ? authHeader.substring(7) : authHeader;
+    
+    if (!token) {
+      console.warn("[DIAGNOSTIC] stats_handler: Missing auth token");
+      return res.status(401).json({ success: false, error: "Unauthorized: Missing authentication token." });
+    }
+    
     const { data: { user }, error: authError } = await supabase.auth.getUser(token);
     if (authError || !user) {
+      console.warn("[DIAGNOSTIC] stats_handler: Invalid token", authError);
       return res.status(401).json({ success: false, error: "Unauthorized: Invalid authentication token." });
     }
     
     const email = user.email?.trim().toLowerCase();
     const ADMIN_EMAIL = "gaks6535@gmail.com";
     if (email !== ADMIN_EMAIL) {
+      console.warn("[DIAGNOSTIC] stats_handler: Forbidden access by", email);
       return res.status(403).json({ success: false, error: "Unauthorized: Insufficient privileges." });
     }
+
+    console.log("[DIAGNOSTIC] stats_handler authorized for user:", user.id);
 
     // Fetch stats
     let profiles: any[] = [];
     try {
       const { data, error } = await supabase.from('profiles').select('id, gemini_status');
       if (error) {
+        console.warn("[DIAGNOSTIC] stats_handler: profiles query error:", error);
         const { data: fallbackData, error: fallbackError } = await supabase.from('profiles').select('id');
         if (fallbackError) throw fallbackError;
         profiles = (fallbackData || []).map((p: any) => ({ ...p, gemini_status: 'READY' }));
@@ -1015,14 +1022,8 @@ async function stats_handler(req: any, res: any) {
         profiles = data || [];
       }
     } catch (err) {
-      console.warn("Fallback query for stats profiles due to:", err);
-      try {
-        const { data: fallbackData, error: fallbackError } = await supabase.from('profiles').select('id');
-        if (fallbackError) throw fallbackError;
-        profiles = (fallbackData || []).map((p: any) => ({ ...p, gemini_status: 'READY' }));
-      } catch (err2: any) {
-        throw new Error("Failed to fetch profiles even with fallback: " + err2.message);
-      }
+      console.error("[DIAGNOSTIC] stats_handler: Failed to fetch profiles:", err);
+      throw err;
     }
     
     const readyCount = profiles?.filter(p => !p.gemini_status || p.gemini_status === 'READY').length || 0;
@@ -1077,7 +1078,7 @@ async function stats_handler(req: any, res: any) {
       totalSignalsCount = 0;
     }
 
-    return res.status(200).json({
+    const response = {
       success: true,
       stats: {
         totalUsers: profiles?.length || 0,
@@ -1099,10 +1100,13 @@ async function stats_handler(req: any, res: any) {
           billingRequired: billingRequiredCount
         }
       }
-    });
+    };
+    
+    console.log("[DIAGNOSTIC] stats_handler success for user:", user.id);
+    return res.status(200).json(response);
   } catch (err: any) {
-    console.error("Failed to fetch admin stats:", err);
-    return res.status(500).json({ success: false, error: err.message });
+    console.error("[DIAGNOSTIC] stats_handler failed:", err);
+    return res.status(500).json({ success: false, error: err.message || 'Internal health diagnostics exception' });
   }
 }
 
