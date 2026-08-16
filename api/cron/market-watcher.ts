@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { WatcherLogContext, logWatcherEvent, logWatcherError, logWatcherWarn } from '../../src/lib/watcher-logger.js';
 import { GoogleGenAI, Type } from '@google/genai';
 import { analyzeMarket, Candle } from '../../src/lib/strategy-engine.js';
 import { ParsedStrategy } from '../../src/lib/strategy-parser.js';
@@ -698,6 +699,20 @@ export default async function handler(req: any, res: any) {
         .eq("id", userId)
         .maybeSingle();
 
+      const userEmail = userProfile?.email || 'unknown';
+      const selectedPair = toCanonicalSymbol(watcher.selected_pair || "") || watcher.selected_pair || 'unknown';
+      const symbol = selectedPair;
+      const selectedTimeframe = watcher.selected_timeframe || 'H1';
+
+      const logCtx: WatcherLogContext = {
+        userEmail,
+        watcherId: watcher.id || 'unknown',
+        pair: selectedPair,
+        timeframe: selectedTimeframe
+      };
+
+      logWatcherEvent('WATCHER START', logCtx, `Status: ${watcher.status}`);
+
       const { data: telegramConn } = await supabase
         .from("telegram_connections")
         .select("telegram_chat_id, connected")
@@ -707,13 +722,10 @@ export default async function handler(req: any, res: any) {
 
       const geminiStatus = userProfile?.gemini_status || 'READY';
       if (geminiStatus !== 'READY') {
-        console.log(`========== AI STATUS ==========`);
-        console.log(`User: ${userProfile?.email || userId}`);
-        console.log(`Watcher: ${watcher.id} (${watcher.selected_pair})`);
-        console.log(`Gemini Status: ${geminiStatus}`);
-        console.log(`Reason: ${userProfile?.gemini_last_error || 'Gemini unavailable'}`);
-        console.log(`Action: Skipped`);
-        console.log(`===============================`);
+        logWatcherError('Gemini ERROR', logCtx, userProfile?.gemini_last_error || 'Gemini unavailable', {
+          'Gemini Status': geminiStatus,
+          'Action': 'Skipped'
+        });
 
         skipped.push({ userId, reason: `Gemini unavailable (${geminiStatus}): ${userProfile?.gemini_last_error || 'N/A'}` });
         watchersSkippedCount++;
@@ -727,10 +739,6 @@ export default async function handler(req: any, res: any) {
         break;
       }
 
-      // userId already declared above
-      const selectedPair = toCanonicalSymbol(watcher.selected_pair || "");
-      const symbol = selectedPair;
-      const selectedTimeframe = watcher.selected_timeframe || 'H1';
       let tradeStatus = (watcher.trade_status || 'WAITING').toUpperCase().trim();
       const now = new Date();
       const scanIntervalMinutes = getScanIntervalMinutes(watcher);
@@ -756,33 +764,26 @@ export default async function handler(req: any, res: any) {
 
       const cooldownUntilStr = watcher.cooldown_until ? new Date(watcher.cooldown_until).toISOString() : 'NULL';
 
-      console.log(`[Watcher Scheduling]
-Watcher ID: ${watcher.id}
-Symbol: ${selectedPair}
-Last Scan: ${lastScanDate ? lastScanDate.toISOString() : 'NULL'}
-Next Eligible: ${nextScanDate ? nextScanDate.toISOString() : 'NOW'}
-Current Time: ${now.toISOString()}
-Grace Window: ${SCAN_DUE_GRACE_MS} ms
-Due: ${isDue ? 'YES' : 'NO'}
-Reason: ${dueReason}`);
-
-      console.log(`--- Processing Watcher ${watcher.id} (${selectedPair}) ---`);
-      console.log(`Watcher ID: ${watcher.id}`);
-      console.log(`trade_status from database: ${watcher.trade_status}`);
-      console.log(`selected_pair: ${selectedPair}`);
-      console.log(`State: ${tradeStatus}`);
-      console.log(`Cooldown Until: ${cooldownUntilStr}`);
-      console.log(`Trade Status: ${tradeStatus}`);
+      logWatcherEvent('Watcher Scheduling', logCtx, {
+        'Last Scan': lastScanDate ? lastScanDate.toISOString() : 'NULL',
+        'Next Eligible': nextScanDate ? nextScanDate.toISOString() : 'NOW',
+        'Current Time': now.toISOString(),
+        'Grace Window': `${SCAN_DUE_GRACE_MS} ms`,
+        'Due': isDue ? 'YES' : 'NO',
+        'Reason': dueReason,
+        'Database Trade Status': watcher.trade_status,
+        'Cooldown Until': cooldownUntilStr
+      });
 
       if (!isDue) {
-        console.log(`LOG: Watcher ${watcher.id} skipped - Not due yet`);
+        logWatcherEvent('SIGNAL SKIPPED', logCtx, `Not due yet (${dueReason})`);
         skipped.push({ userId, reason: `Not due yet (${dueReason})` });
         watchersSkippedCount++;
         continue;
       }
 
-      if (!selectedPair) {
-        console.log(`LOG: Watcher ${watcher.id} skipped - No selected pair`);
+      if (!selectedPair || selectedPair === 'unknown') {
+        logWatcherEvent('SIGNAL SKIPPED', logCtx, 'No selected pair');
         skipped.push({ userId, reason: "No selected pair" });
         watchersSkippedCount++;
         continue;
@@ -811,20 +812,20 @@ Reason: ${dueReason}`);
       // =====================================================================
       // STATE 3 — COOLDOWN
       // =====================================================================
-      console.log(`ENTERING COOLDOWN`);
       if (tradeStatus === 'COOLDOWN') {
-        console.log(`[BRANCH EXECUTED] COOLDOWN branch for Watcher ID: ${watcher.id}`);
         const cooldownUntilDate = watcher.cooldown_until ? new Date(watcher.cooldown_until) : null;
         const isCooldownExpired = !cooldownUntilDate || (now.getTime() >= cooldownUntilDate.getTime());
 
         if (!isCooldownExpired) {
           const remainingMs = cooldownUntilDate ? (cooldownUntilDate.getTime() - now.getTime()) : 0;
           const remainingMin = Math.ceil(remainingMs / (1000 * 60));
-          console.log(`Watcher in cooldown`);
-          console.log(`Watcher ID: ${watcher.id}`);
-          console.log(`Current Time: ${now.toISOString()}`);
-          console.log(`Cooldown Until: ${cooldownUntilDate ? cooldownUntilDate.toISOString() : 'NULL'}`);
-          console.log(`Remaining: ${remainingMin} minute(s)`);
+
+          logWatcherEvent('LOSS COOLDOWN', logCtx, {
+            'State': 'ACTIVE_COOLDOWN',
+            'Current Time': now.toISOString(),
+            'Cooldown Until': cooldownUntilDate ? cooldownUntilDate.toISOString() : 'NULL',
+            'Remaining': `${remainingMin} minute(s)`
+          });
 
           watchersProcessedCount++;
           results.push({ userId, symbol, tradeStatus: 'COOLDOWN', result: 'In cooldown' });
@@ -832,7 +833,7 @@ Reason: ${dueReason}`);
         }
 
         // If TRUE (expired): Clear all previous trade fields and reset to WAITING
-        console.log(`[COOLDOWN EXPIRED] Resetting all trade fields and setting trade_status = WAITING for Watcher ID: ${watcher.id}`);
+        logWatcherEvent('LOSS COOLDOWN', logCtx, 'Cooldown expired. Resetting trade fields and setting trade_status = WAITING');
         const { data: cooldownResetData, error: cooldownResetErr } = await supabase
           .from("watchers")
           .update({
@@ -912,7 +913,7 @@ Reason: ${activeValidation.reason}`);
           continue;
         }
 
-        console.log(`[STATE 2 - ACTIVE] Monitoring open trade for Watcher ID: ${watcher.id} (${selectedPair}). Skipping Gemini, strategy load, and candle download.`);
+        logWatcherEvent('TRADE RECONCILIATION', logCtx, `Monitoring active trade for ${selectedPair}`);
 
         const entryPrice = watcher.entry_price ? parseFloat(String(watcher.entry_price)) : null;
         const stopLoss = watcher.stop_loss ? parseFloat(String(watcher.stop_loss)) : null;
@@ -926,7 +927,7 @@ Reason: ${activeValidation.reason}`);
           const brokerPos = await brokerProvider.getPosition(selectedPair);
           
           if (!brokerPos) {
-            console.warn(`[RECONCILIATION] Active trade ${watcher.active_trade_id} for ${selectedPair} not found at broker. Closing in DB.`);
+            logWatcherWarn('TRADE RECONCILIATION', logCtx, `Active trade ${watcher.active_trade_id} not found at broker. Closing in DB.`);
             
             // Fetch execution history to find close price and PnL
             const history = await brokerProvider.getExecutionHistory(selectedPair, 5);
@@ -971,7 +972,7 @@ Reason: ${activeValidation.reason}`);
 
             continue;
           } else {
-            console.log(`[RECONCILIATION] Trade confirmed at broker: ${watcher.active_trade_id}`);
+            logWatcherEvent('TRADE RECONCILIATION', logCtx, `Trade confirmed at broker: ${watcher.active_trade_id}`);
           }
         }
 
@@ -980,7 +981,7 @@ Reason: ${activeValidation.reason}`);
         // Fetch ONLY the latest market price from Twelve Data
         let currentPrice: number | null = null;
         if (twelveDataExhausted) {
-          console.warn(`[Twelve Data Rate Limit] Watcher ${watcher.id} skipped due to HTTP 429 rate limit. Deferring until next cron cycle.`);
+          logWatcherWarn('LIVE RATES ERROR', logCtx, 'TwelveData rate limit (429) exhausted. Deferring until next cron cycle.');
           skipped.push({ userId, reason: "TwelveData rate limit (429) exhausted" });
           watchersSkippedDueToRateLimitCount++;
           watchersSkippedCount++;
@@ -991,24 +992,29 @@ Reason: ${activeValidation.reason}`);
         } catch (err: any) {
           if (err.message && err.message.includes("429")) {
             twelveDataExhausted = true;
-            console.warn(`[Twelve Data Rate Limit] Watcher ${watcher.id} skipped due to HTTP 429 rate limit. Deferring until next cron cycle.`);
+            logWatcherWarn('LIVE RATES ERROR', logCtx, 'TwelveData rate limit (429) exhausted. Deferring until next cron cycle.');
             skipped.push({ userId, reason: "TwelveData rate limit (429) exhausted" });
             watchersSkippedDueToRateLimitCount++;
             watchersSkippedCount++;
             continue;
           }
-          console.warn(`[STATE 2 - ACTIVE] Error fetching current price for ${selectedPair}: ${err.message}`);
+          logWatcherError('LIVE RATES ERROR', logCtx, err);
         }
 
         if (currentPrice === null) {
-          console.warn(`[STATE 2 - ACTIVE] Could not fetch current price for ${selectedPair}. Skipping this check.`);
+          logWatcherWarn('LIVE RATES', logCtx, 'Could not fetch current price for active trade check.');
           skipped.push({ userId, reason: "Failed to fetch current price for active trade" });
           watchersSkippedCount++;
-          console.log(`ACTIVE branch exited.`);
           continue;
         }
 
-        console.log(`[STATE 2 Price Check] Watcher ID: ${watcher.id}, Symbol: ${selectedPair}, Current: ${currentPrice}, Entry: ${entryPrice}, SL: ${stopLoss}, TP: ${takeProfit}, Dir: ${dir}`);
+        logWatcherEvent('LIVE RATES', logCtx, {
+          'Current Price': currentPrice,
+          'Entry Price': entryPrice,
+          'Stop Loss': stopLoss,
+          'Take Profit': takeProfit,
+          'Direction': dir
+        });
 
         let isTP = false;
         let isSL = false;
@@ -1569,10 +1575,13 @@ Reason: ${decisionResult.explanation || (requiresGemini ? 'Strategy configuratio
             geminiCalled = true;
             geminiStart = Date.now();
 
-            const keyRes = await resolveUserGeminiKey(supabase, userId, watcher.id);
+            const keyRes = await resolveUserGeminiKey(supabase, userId, watcher.id, logCtx);
 
             if (!keyRes.keyPresent || !keyRes.apiKey) {
-              console.log(`[Decision Engine] User ${userId} has no Gemini API key in user_api_keys. Forcing NO_TRADE.`);
+              logWatcherError('Gemini ERROR', logCtx, 'Missing Gemini API key', {
+                'Gemini Status': 'NOT_CONNECTED',
+                'Action': 'Skipped'
+              });
 
               await supabase.from("profiles").update({
                 gemini_status: 'NOT_CONNECTED',
@@ -1612,14 +1621,12 @@ Reason: ${decisionResult.explanation || (requiresGemini ? 'Strategy configuratio
             try {
               const geminiKey = keyRes.apiKey;
               if (geminiKey) {
-                console.log("========== CALLING GEMINI ==========");
-                console.log("Watcher ID:", watcher.id);
-                console.log("Pair:", selectedPair);
-                console.log("Timeframe:", selectedTimeframe);
-                console.log("Decision Score:", decisionResult.decision_score);
-                console.log("Recommendation:", recommendation);
-                console.log("Gemini Required:", requiresGemini);
-                console.log("Sending prompt to Gemini...");
+                logWatcherEvent('Gemini Analysis', logCtx, {
+                  'Model': 'gemini-3.6-flash',
+                  'Decision Score': decisionResult.decision_score,
+                  'Recommendation': recommendation,
+                  'Gemini Required': requiresGemini ? 'YES' : 'NO'
+                });
 
                 const ai = new GoogleGenAI({ apiKey: geminiKey });
                 const currentPrice = candleData[candleData.length - 1].close;
@@ -1678,12 +1685,6 @@ Output ONLY valid JSON.
                 geminiDuration = Date.now() - geminiStart;
                 geminiTextResult = aiResponse.text || "";
                 
-                if (process.env.NODE_ENV !== 'production') {
-                  console.log("========== RAW GEMINI RESPONSE ==========");
-                  console.log(geminiTextResult);
-                  console.log("=========================================");
-                }
-                
                 if (watcher.gemini_status !== 'READY') {
                   if (watcher.gemini_status === 'QUOTA_EXHAUSTED' && !watcher.resume_notification_sent && telegramChatId) {
                     const resumeMsg = `⚠️ Gaks AI Notice\n\nYour Gemini API key quota has reset.\nMarket monitoring has resumed.`;
@@ -1706,8 +1707,6 @@ Output ONLY valid JSON.
                 parsedResult = JSON.parse(geminiTextResult);
                 addLog("Gemini Returned", "success");
                 addLog("Parsed Gemini Output", "success");
-                console.log("========== PARSED GEMINI OUTPUT ==========");
-                console.log(parsedResult);
 
                 geminiSucceeded = true;
                 geminiDecision = parsedResult.direction as 'BUY' | 'SELL' | 'NO_TRADE';
@@ -1738,21 +1737,12 @@ Output ONLY valid JSON.
                   const geminiConfRecord = normalizeConfidence(parsedResult.confidenceScore, 'gemini', 'Gemini AI Model');
                   const finalConfRecord = normalizeConfidence(geminiConfRecord.normalized, 'final_trade', 'Executable Signal');
 
-                  console.log(`[Gemini Decision]
-Required: YES
-Status: APPROVED
-Direction: ${geminiDirection}
-Confidence: ${geminiConfRecord.normalized}%
-Fallback: NO_TRADE`.trim());
-
-                  console.log(`[TP Analysis]
-Direction: ${geminiDirection}
-Entry: ${entry}
-SL: ${slResult.stopLoss}
-TP1: ${finalTP}
-TP2: ${parsedResult.tp2 ?? 'N/A'}
-TP3: ${parsedResult.tp3 ?? 'N/A'}
-TP Basis: ${parsedResult.stopLossBasis || 'Market Structure Target'}`);
+                  logWatcherEvent('Gemini Decision', logCtx, {
+                    'Status': 'APPROVED',
+                    'Direction': geminiDirection,
+                    'Confidence': `${geminiConfRecord.normalized}%`,
+                    'Fallback': 'NO_TRADE'
+                  });
 
                   analysis = {
                     signal: geminiDirection,
@@ -1769,12 +1759,12 @@ TP Basis: ${parsedResult.stopLossBasis || 'Market Structure Target'}`);
                     reasoning: [parsedResult.reasoning || "Satisfies strategy rules and Gemini validation."]
                   };
                 } else {
-                  console.log(`[Gemini Decision]
-Required: YES
-Status: REJECTED
-Direction: NO_TRADE
-Confidence: 0%
-Fallback: NO_TRADE`.trim());
+                  logWatcherEvent('Gemini Decision', logCtx, {
+                    'Status': 'REJECTED',
+                    'Direction': 'NO_TRADE',
+                    'Confidence': '0%',
+                    'Fallback': 'NO_TRADE'
+                  });
 
                   analysis = {
                     signal: 'NO_TRADE',
@@ -1784,25 +1774,19 @@ Fallback: NO_TRADE`.trim());
                 }
               }
             } catch (gemErr: any) {
-              console.error("========== GEMINI ERROR ==========");
-              console.error(gemErr);
-
               const { profileStatus, diagnosticStatus, cleanErrorMessage } = classifyAndRedactGeminiError(gemErr);
 
-              console.log(`[Gemini Key Resolution]
-User ID: ${userId}
-Watcher ID: ${watcher.id}
-Key Source: user_api_keys
-Key Present: YES
-Key Redacted: ${keyRes.keyRedacted}
-Status: ${diagnosticStatus}`);
+              logWatcherError('Gemini ERROR', logCtx, gemErr, {
+                'Diagnostic Status': diagnosticStatus,
+                'Clean Error': cleanErrorMessage
+              });
 
-              console.log(`[Gemini Decision]
-Required: YES
-Status: ${diagnosticStatus}
-Direction: NO_TRADE
-Confidence: 0%
-Fallback: NO_TRADE`.trim());
+              logWatcherEvent('Gemini Decision', logCtx, {
+                'Status': diagnosticStatus,
+                'Direction': 'NO_TRADE',
+                'Confidence': '0%',
+                'Fallback': 'NO_TRADE'
+              });
 
               await supabase.from("profiles").update({
                 gemini_status: profileStatus,
@@ -2190,7 +2174,11 @@ Reason: ${adaptiveReq.reason}
           : (analysis.signal === 'NO_TRADE' || analysis.confidence < 70);
 
         if (isWaiting) {
-            console.log(`[STATE 1 - WAITING] No setup for Watcher ID: ${watcher.id} (${selectedPair}). Signal: ${analysis.signal}, Confidence: ${analysis.confidence}%. Updating last_scan_at and exiting.`);
+            logWatcherEvent('SIGNAL SKIPPED', logCtx, {
+              'Reason': 'No setup found',
+              'Signal': analysis.signal,
+              'Confidence': `${analysis.confidence}%`
+            });
             
             const scanDurationMs = Date.now() - scanStart;
             await recordEvaluation(supabase, {
@@ -2732,8 +2720,14 @@ Source: ${brokerQuote.source}`);
           analysis.takeProfit = posSizeResult.takeProfit;
 
           const signalReasoning = Array.isArray(analysis.reasoning) ? analysis.reasoning.join("; ") : (analysis.reasoning || "Strategy criteria matched");
-          console.log(`[SIGNAL GENERATED] Watcher ID: ${watcher.id}`);
-          console.log(`Exact reason new signal was generated: Strategy evaluation returned signal '${analysis.signal}' with confidence ${analysis.confidence}% (>= 70 threshold) on pair ${selectedPair}. Executed Entry: ${analysis.entryPrice}, Stop Loss: ${analysis.stopLoss}, Take Profit: ${analysis.takeProfit}. Reasoning: ${signalReasoning}`);
+          logWatcherEvent('SIGNAL GENERATED', logCtx, {
+            'Direction': analysis.signal,
+            'Confidence': `${analysis.confidence}%`,
+            'Entry Price': analysis.entryPrice,
+            'Stop Loss': analysis.stopLoss,
+            'Take Profit': analysis.takeProfit,
+            'Reasoning': signalReasoning
+          });
 
           const actualRrVal = posSizeResult.actualRr;
           const formattedRr = actualRrVal > 0
@@ -2764,7 +2758,7 @@ Source: ${brokerQuote.source}`);
 
           isRegistered = await registerSignal(supabase, watcher, signal);
         } else {
-          console.log(`[SIGNAL SKIPPED] Watcher ID: ${watcher.id} - Recommendation is FAIL. Setting signal to NO_TRADE.`);
+          logWatcherEvent('SIGNAL SKIPPED', logCtx, 'Recommendation is FAIL. Setting signal to NO_TRADE.');
           analysis.signal = 'NO_TRADE';
         }
 
@@ -2777,7 +2771,7 @@ Source: ${brokerQuote.source}`);
           .eq("id", watcher.id);
 
         if (!isRegistered) {
-          console.log(`LOG: Telegram send decision for ${selectedPair}: NO (Failed to register signal or active trade already exists)`);
+          logWatcherEvent('SIGNAL REGISTERED', logCtx, 'Failed to register signal or active trade already exists in database');
           
           const scanDurationMs = Date.now() - scanStart;
           await recordEvaluation(supabase, {
@@ -2823,7 +2817,7 @@ Source: ${brokerQuote.source}`);
 
         if (dedupCheck.suppressed) {
           alertReason = dedupCheck.reason || "Suppressed by Signal Deduplication";
-          console.log(`[Signal Deduplication] Suppressed Telegram alert for Watcher ID: ${watcher.id} (${selectedPair}): ${dedupCheck.reason}`);
+          logWatcherEvent('Signal Deduplication', logCtx, `Suppressed Telegram alert: ${dedupCheck.reason}`);
         } else {
           const dispatchRes = await dispatchTradeAlert(telegramChatId, signal);
           alertSent = dispatchRes.sent;
@@ -2831,9 +2825,12 @@ Source: ${brokerQuote.source}`);
           if (alertSent) {
             addLog("Telegram Sent", "success");
             telegramMessagesSentCount++;
-            console.log(`LOG: Telegram message sent successfully for Watcher ID: ${watcher.id} (${selectedPair})`);
+            logWatcherEvent('SIGNAL REGISTERED', logCtx, {
+              'Message Sent': 'YES',
+              'Trade ID': candidateTradeId
+            });
           } else {
-            console.error(`LOG ERROR: Telegram message blocked or failed for Watcher ID: ${watcher.id} (${selectedPair}): ${alertReason}`);
+            logWatcherError('SIGNAL REGISTERED', logCtx, `Telegram message blocked or failed: ${alertReason}`);
           }
         }
 
@@ -2864,7 +2861,7 @@ Source: ${brokerQuote.source}`);
 
         // Save active trade state in Supabase:
         // trade_status = 'ACTIVE', active_trade_id = candidateTradeId, entry_price, stop_loss, take_profit, direction, opened_at
-        console.log(`[ACTIVE UPDATE START] Attempting to update Watcher ID: ${watcher.id} to trade_status = ACTIVE with trade_id: ${candidateTradeId} in Supabase...`);
+        logWatcherEvent('ACTIVE UPDATE START', logCtx, `Updating trade_status = ACTIVE with trade_id: ${candidateTradeId}`);
         const { data: activeUpdateRows, error: activeUpdateErr } = await supabase
           .from("watchers")
           .update({ 
@@ -2886,13 +2883,9 @@ Source: ${brokerQuote.source}`);
         const dbUpdateActiveSucceeded = !activeUpdateErr && activeUpdateRows && activeUpdateRows.length > 0;
 
         if (dbUpdateActiveSucceeded) {
-          console.log(`[ACTIVE UPDATE SUCCESS] Watcher ID: ${watcher.id} successfully updated to trade_status = ACTIVE in Supabase.`);
-          console.log(`Whether DB update to ACTIVE succeeded: YES`);
-          console.log(`Updated row data:`, JSON.stringify(activeUpdateRows[0]));
+          logWatcherEvent('ACTIVE UPDATE SUCCESS', logCtx, 'Watcher successfully updated to trade_status = ACTIVE in Supabase.');
         } else {
-          console.error(`[ACTIVE UPDATE FAILED] Watcher ID: ${watcher.id} failed to update to trade_status = ACTIVE in Supabase.`);
-          console.error(`Error details:`, activeUpdateErr?.message || 'No rows returned from update');
-          console.log(`Whether DB update to ACTIVE succeeded: NO`);
+          logWatcherError('ACTIVE UPDATE FAILED', logCtx, activeUpdateErr?.message || 'No rows returned from update');
         }
 
         addLog("Scan Completed", "success");
@@ -2912,9 +2905,13 @@ Source: ${brokerQuote.source}`);
         results.push({ userId, symbol, tradeStatus: 'ACTIVE', signalsFound: 1, signalsSent: alertSent ? 1 : 0 });
 
       } catch (err: any) {
-        console.error(`LOG ERROR: Watcher ${watcher.id} failed`);
-        console.error(`Exception: ${err.message}`);
-        console.error(`Stack: ${err.stack}`);
+        const fallbackCtx: WatcherLogContext = typeof logCtx !== 'undefined' ? logCtx : {
+          userEmail: userProfile?.email || 'unknown',
+          watcherId: watcher?.id || 'unknown',
+          pair: watcher?.selected_pair || 'unknown',
+          timeframe: watcher?.selected_timeframe || 'unknown'
+        };
+        logWatcherError('WATCHER ERROR', fallbackCtx, err);
         
         errors.push({ userId, error: err.message || "Unknown error" });
         watchersSkippedCount++;

@@ -26,7 +26,8 @@ export function redactApiKeyInText(text: string | null | undefined): string {
 export async function resolveUserGeminiKey(
   supabase: any,
   userId: string,
-  watcherId: string = 'manual-scan'
+  watcherId: string = 'manual-scan',
+  context?: { userEmail?: string; pair?: string; timeframe?: string }
 ): Promise<GeminiKeyResolutionResult> {
   let rawKey: string | null = null;
 
@@ -52,9 +53,15 @@ export async function resolveUserGeminiKey(
   const keyRedacted = redactApiKey(rawKey);
   const status = keyPresent ? 'RESOLVED' : 'MISSING_KEY';
 
+  const userEmail = context?.userEmail || 'unknown';
+  const pair = context?.pair || 'unknown';
+  const timeframe = context?.timeframe || 'unknown';
+
   console.log(`[Gemini Key Resolution]
-User ID: ${userId}
-Watcher ID: ${watcherId}
+User: ${userEmail}
+Watcher: ${watcherId}
+Pair: ${pair}
+Timeframe: ${timeframe}
 Key Source: ${keySource}
 Key Present: ${keyPresent ? 'YES' : 'NO'}
 Key Redacted: ${keyRedacted}
