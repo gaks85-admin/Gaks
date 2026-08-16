@@ -23,25 +23,13 @@ export async function sendNotificationEmail(
   const sendgridKey = process.env.SENDGRID_API_KEY;
   const customEmailEndpoint = process.env.EMAIL_WEBHOOK_URL;
 
-  const emailSubject = 'Gaks AI — Administrative Notification';
-  const htmlBody = `
-    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #09090b; color: #f4f4f5; border-radius: 12px;">
-      <div style="border-bottom: 1px solid #27272a; padding-bottom: 16px; margin-bottom: 20px;">
-        <h2 style="color: #38bdf8; margin: 0; font-size: 18px; font-weight: 700;">Gaks AI Administrator Notification</h2>
-      </div>
-      <div style="font-size: 14px; line-height: 1.6; color: #e4e4e7; white-space: pre-wrap; padding: 16px; background-color: #18181b; border-radius: 8px; border: 1px solid #27272a;">
-${escapeHtml(messageText)}
-      </div>
-      <div style="margin-top: 24px; font-size: 11px; color: #71717a; border-top: 1px solid #27272a; padding-top: 16px; text-align: center;">
-        This message was dispatched directly by a system administrator.
-      </div>
-    </div>
-  `;
+  const emailSubject = process.env.EMAIL_SUBJECT || 'Gaks AI Notification';
+  const htmlBody = `<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 14px; line-height: 1.6; color: #18181b; white-space: pre-wrap;">${escapeHtml(messageText)}</div>`;
 
   // 1. Send via Resend API if key is set
   if (resendKey) {
     try {
-      const fromEmail = process.env.EMAIL_FROM || 'Gaks AI Admin <notifications@gaks.ai>';
+      const fromEmail = process.env.EMAIL_FROM || 'Gaks AI <onboarding@resend.dev>';
       const resp = await fetch('https://api.resend.com/emails', {
         method: 'POST',
         headers: {
@@ -57,11 +45,12 @@ ${escapeHtml(messageText)}
         }),
       });
 
-      const data = await resp.json();
-      if (resp.ok && data.id) {
+      const data = await resp.json().catch(() => ({}));
+      if (resp.ok && data?.id) {
         return { success: true, messageId: data.id };
       }
-      return { success: false, error: data.message || data.error || 'Resend API returned an error.' };
+      const errMsg = data?.message || data?.error?.message || (typeof data?.error === 'string' ? data.error : null) || `Resend API error (${resp.status})`;
+      return { success: false, error: errMsg };
     } catch (err: any) {
       console.error('[Email Service Error - Resend]:', err);
       return { success: false, error: err.message || 'Failed to communicate with Resend API.' };
@@ -117,7 +106,7 @@ ${escapeHtml(messageText)}
 
       if (resp.ok) {
         const data = await resp.json().catch(() => ({}));
-        return { success: true, messageId: data.id || `webhook_${Date.now()}` };
+        return { success: true, messageId: data?.id || `webhook_${Date.now()}` };
       }
       return { success: false, error: `Email webhook returned status ${resp.status}` };
     } catch (err: any) {
@@ -126,11 +115,11 @@ ${escapeHtml(messageText)}
     }
   }
 
-  // Fallback mode when no external API key is configured
-  console.log(`[Email Service Simulated Delivery] To: ${recipient} | Message: ${messageText.substring(0, 50)}...`);
+  // Return failure when no provider is configured
+  console.warn('[Email Service] No email provider configured (RESEND_API_KEY, SENDGRID_API_KEY, or EMAIL_WEBHOOK_URL).');
   return {
-    success: true,
-    messageId: `simulated_${Date.now()}`,
+    success: false,
+    error: 'Email delivery provider is not configured on the server. Please configure RESEND_API_KEY or SENDGRID_API_KEY in environment variables.',
   };
 }
 

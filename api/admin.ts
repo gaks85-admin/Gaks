@@ -1432,6 +1432,68 @@ async function users_search_handler(req: any, res: any) {
   }
 }
 
+async function notifications_history_handler(req: any, res: any) {
+  const supabase = getSupabase();
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With");
+  res.setHeader("Content-Type", "application/json");
+
+  if (req.method === "OPTIONS") {
+    return res.status(200).end();
+  }
+
+  if (req.method !== 'GET') {
+    return res.status(405).json({ success: false, error: 'Method Not Allowed' });
+  }
+
+  const auth = await verifyAdminServerSide(req, supabase);
+  if (!auth.isAdmin) {
+    return res.status(auth.status || 403).json({ success: false, error: auth.error });
+  }
+
+  try {
+    const { data: logs, error } = await supabase
+      .from('admin_notifications')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(20);
+
+    if (error) {
+      return res.status(200).json({ success: true, history: [] });
+    }
+
+    const userIds = Array.from(new Set((logs || []).map((l: any) => l.target_user_id).filter(Boolean)));
+    let profileMap: Record<string, string> = {};
+    if (userIds.length > 0) {
+      const { data: profiles } = await supabase
+        .from('profiles')
+        .select('id, email')
+        .in('id', userIds);
+      if (profiles) {
+        profiles.forEach((p: any) => {
+          if (p.id && p.email) profileMap[p.id] = p.email;
+        });
+      }
+    }
+
+    const history = (logs || []).map((log: any) => ({
+      id: log.id,
+      recipient: profileMap[log.target_user_id] || log.target_user_id || 'User',
+      channel: log.channel,
+      status: log.status,
+      message: log.message,
+      sent_at: log.sent_at || log.created_at,
+      error_message: log.error_message
+    }));
+
+    return res.status(200).json({ success: true, history });
+  } catch (err: any) {
+    console.error("[Admin Notification History Error]:", err);
+    return res.status(200).json({ success: true, history: [] });
+  }
+}
+
 async function notifications_send_handler(req: any, res: any) {
   const supabase = getSupabase();
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -1500,8 +1562,7 @@ async function notifications_send_handler(req: any, res: any) {
         });
       }
 
-      const adminFormattedText = `*Gaks AI Admin Notification*\n\n${trimmedMessage}`;
-      const sentSuccess = await sendTelegramMessage(chatId, adminFormattedText);
+      const sentSuccess = await sendTelegramMessage(chatId, trimmedMessage);
 
       try {
         await supabase.from('admin_notifications').insert({
@@ -2912,6 +2973,9 @@ export default async function handler(req: any, res: any) {
     }
     if (pathname.endsWith('/users/search')) {
       return users_search_handler(req, res);
+    }
+    if (pathname.endsWith('/notifications/history')) {
+      return notifications_history_handler(req, res);
     }
     if (pathname.endsWith('/notifications/send')) {
       return notifications_send_handler(req, res);
