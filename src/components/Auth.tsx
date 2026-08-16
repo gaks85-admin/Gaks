@@ -1,45 +1,40 @@
 // src/components/Auth.tsx
 import React, { useState } from 'react';
 import { supabase } from '../supabaseClient';
-import { Lock, Mail, User, ArrowLeft, RefreshCw, AlertCircle, CheckCircle2, Eye, EyeOff, ShieldCheck, Zap, TrendingUp } from 'lucide-react';
+import { Lock, Mail, ArrowLeft, AlertCircle, Eye, EyeOff, CheckCircle2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 export interface AuthProps {
   onAuthSuccess: (session: any) => void;
-  initialMode?: 'login' | 'signup' | 'forgot' | 'reset';
+  initialMode?: 'login' | 'signup' | 'forgot' | 'reset' | 'verification';
   isInitializing?: boolean;
 }
 
 export function AuthSkeleton() {
   return (
-    <div className="h-[100dvh] w-full max-w-[100vw] bg-white dark:bg-[#030305] text-zinc-950 dark:text-white flex flex-col justify-between items-center px-3.5 py-2.5 sm:px-4 sm:py-4 font-sans select-none overflow-hidden box-border">
-      <div className="w-full max-w-[360px] sm:max-w-[380px] my-auto flex flex-col items-center animate-pulse space-y-3 sm:space-y-4">
-        {/* Brand title skeleton */}
-        <div className="h-8 w-32 bg-zinc-200 dark:bg-[#12121a] rounded-xl" />
-        {/* Title & subtitle */}
-        <div className="h-5 w-44 bg-zinc-200 dark:bg-[#12121a] rounded-lg" />
-        <div className="h-3.5 w-56 bg-zinc-100 dark:bg-[#0c0c12] rounded-md" />
-        {/* Social buttons */}
-        <div className="w-full space-y-2 pt-1">
-          <div className="h-[40px] w-full bg-zinc-50 dark:bg-[#0c0c12] rounded-xl border border-zinc-200 dark:border-[#1e1e2b]" />
-          <div className="h-[40px] w-full bg-zinc-50 dark:bg-[#0c0c12] rounded-xl border border-zinc-200 dark:border-[#1e1e2b]" />
+    <div className="min-h-[100dvh] w-full bg-[#050507] text-white flex flex-col justify-between items-center px-4 py-6 font-sans select-none overflow-hidden box-border relative">
+      <div className="w-full max-w-[380px] my-auto flex flex-col items-center animate-pulse space-y-4 relative z-10">
+        <div className="h-6 w-16 bg-zinc-800/60 rounded-md self-start" />
+        <div className="w-12 h-12 bg-zinc-800/80 rounded-2xl" />
+        <div className="h-7 w-52 bg-zinc-800/80 rounded-lg" />
+        <div className="h-4 w-60 bg-zinc-800/40 rounded-md" />
+        <div className="w-full space-y-2.5 pt-2">
+          <div className="h-12 w-full bg-[#121217] rounded-xl border border-zinc-800/60" />
+          <div className="h-12 w-full bg-[#121217] rounded-xl border border-zinc-800/60" />
         </div>
-        {/* OR divider */}
-        <div className="w-full h-2.5 bg-zinc-100 dark:bg-[#0a0a0d] rounded my-0.5" />
-        {/* Input skeletons */}
-        <div className="w-full space-y-2">
-          <div className="h-[40px] w-full bg-zinc-50 dark:bg-[#0c0c12] rounded-xl border border-zinc-200 dark:border-[#1e1e2b]" />
-          <div className="h-[40px] w-full bg-zinc-50 dark:bg-[#0c0c12] rounded-xl border border-zinc-200 dark:border-[#1e1e2b]" />
+        <div className="w-full h-3 bg-zinc-800/30 rounded my-1" />
+        <div className="w-full space-y-3">
+          <div className="h-12 w-full bg-[#121217] rounded-xl border border-zinc-800/60" />
+          <div className="h-12 w-full bg-[#121217] rounded-xl border border-zinc-800/60" />
         </div>
-        {/* Primary button skeleton */}
-        <div className="h-[40px] w-full bg-zinc-900/10 dark:bg-zinc-200/20 rounded-xl mt-1" />
+        <div className="h-12 w-full bg-zinc-200/20 rounded-xl mt-2" />
       </div>
     </div>
   );
 }
 
 export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializing = false }: AuthProps) {
-  const [mode, setMode] = useState<'login' | 'signup' | 'forgot' | 'reset'>(initialMode);
+  const [mode, setMode] = useState<'login' | 'signup' | 'forgot' | 'reset' | 'verification'>(initialMode);
   
   // Form states
   const [email, setEmail] = useState('');
@@ -78,9 +73,7 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
     if (mode === 'signup') {
       return (
         validEmail &&
-        password.length >= 6 &&
-        confirmPassword.length >= 6 &&
-        password === confirmPassword
+        password.length >= 6
       );
     }
     if (mode === 'forgot') {
@@ -132,11 +125,11 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
       if (error) {
         setErrorMessage(error.message);
       } else if (data && data.session) {
-        setSuccessMessage('Successfully signed in! Restoring workspace...');
+        setSuccessMessage('Successfully signed in!');
         setTimeout(() => {
           window.history.pushState({}, '', '/');
           onAuthSuccess(data.session);
-        }, 600);
+        }, 500);
       } else {
         setErrorMessage('Unexpected response from auth service.');
       }
@@ -171,10 +164,6 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
       setErrorMessage('Password must be at least 6 characters long.');
       return;
     }
-    if (password !== confirmPassword) {
-      setErrorMessage('Passwords do not match. Please verify your confirmation password.');
-      return;
-    }
 
     setIsLoading(true);
     try {
@@ -191,8 +180,8 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
       if (error) {
         setErrorMessage(error.message);
       } else {
-        setSuccessMessage('Registration successful! We have sent a verification email to your inbox. Please confirm your email address to activate your account.');
-        setFullName('');
+        // Transition cleanly to the Email Verification page
+        setMode('verification');
         setPassword('');
         setConfirmPassword('');
       }
@@ -227,54 +216,10 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
       if (error) {
         setErrorMessage(error.message);
       } else {
-        setSuccessMessage('We have sent a secure password reset link to your email address.');
+        setSuccessMessage('We have sent a password reset link to your email.');
       }
     } catch (err: any) {
       setErrorMessage(err.message || 'Failed to trigger password reset.');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleResetPassword = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setErrorMessage(null);
-    setSuccessMessage(null);
-
-    if (!newPassword) {
-      setErrorMessage('Please enter your new password.');
-      return;
-    }
-    if (newPassword.length < 6) {
-      setErrorMessage('Password must be at least 6 characters long.');
-      return;
-    }
-    if (newPassword !== confirmNewPassword) {
-      setErrorMessage('New passwords do not match.');
-      return;
-    }
-
-    setIsLoading(true);
-    try {
-      const { data, error } = await supabase.auth.updateUser({
-        password: newPassword,
-      });
-
-      if (error) {
-        setErrorMessage(error.message);
-      } else {
-        setSuccessMessage('Password updated successfully! Signing you into your workspace...');
-        setTimeout(async () => {
-          const { data: sessionData } = await supabase.auth.getSession();
-          if (sessionData?.session) {
-            onAuthSuccess(sessionData.session);
-          } else {
-            setMode('login');
-          }
-        }, 1500);
-      }
-    } catch (err: any) {
-      setErrorMessage(err.message || 'Failed to update your password.');
     } finally {
       setIsLoading(false);
     }
@@ -290,7 +235,7 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
     showTemporaryInfo('Please sign in with email first. You can connect your Telegram account for live alerts inside Settings.');
   };
 
-  const switchMode = (newMode: 'login' | 'signup' | 'forgot' | 'reset') => {
+  const switchMode = (newMode: 'login' | 'signup' | 'forgot' | 'reset' | 'verification') => {
     setErrorMessage(null);
     setSuccessMessage(null);
     setInfoToast(null);
@@ -298,181 +243,222 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
   };
 
   return (
-    <div className="min-h-[100dvh] h-[100dvh] w-full max-w-[100vw] bg-white dark:bg-[#030305] text-zinc-950 dark:text-white flex flex-col justify-between items-center px-4 py-3 sm:py-5 short:py-2 font-sans antialiased select-none relative overflow-hidden box-border">
+    <div className="min-h-[100dvh] w-full bg-[#050507] text-white flex flex-col justify-between items-center px-4 py-5 font-sans antialiased select-none relative overflow-x-hidden overflow-y-auto box-border">
       
-      {/* Top ambient aura */}
-      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-[500px] h-[250px] bg-[radial-gradient(ellipse_80%_80%_at_50%_-20%,rgba(0,0,0,0.03),rgba(255,255,255,0))] dark:bg-[radial-gradient(ellipse_80%_80%_at_50%_-20%,rgba(255,255,255,0.06),rgba(0,0,0,0))] pointer-events-none overflow-hidden" />
+      {/* Premium dark diagonal sheen overlay matching reference screenshot */}
+      <div className="fixed inset-0 pointer-events-none overflow-hidden z-0 bg-[#050507]">
+        <div className="absolute -top-[10%] -right-[10%] w-[700px] h-[700px] bg-gradient-to-bl from-zinc-800/15 via-zinc-900/5 to-transparent rounded-full blur-3xl" />
+        <div className="absolute top-0 right-0 w-full h-full bg-[radial-gradient(ellipse_at_top_right,rgba(255,255,255,0.03),transparent_75%)]" />
+      </div>
 
-      {/* Main content container */}
-      <div className="w-full max-w-[360px] sm:max-w-[380px] my-auto flex flex-col justify-center relative z-10 space-y-3 sm:space-y-4 short:space-y-2 box-border py-1">
-        
-        {/* Brand heading */}
-        <motion.div 
-          initial={{ scale: 0.95, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-          className="text-center space-y-1 mb-0.5 sm:mb-1 short:mb-0"
+      {/* Header Bar with Home link */}
+      <div className="w-full max-w-[380px] flex justify-start items-center pt-1 pb-2 relative z-10">
+        <button
+          type="button"
+          onClick={() => {
+            setErrorMessage(null);
+            setSuccessMessage(null);
+            setInfoToast(null);
+            setMode('login');
+            window.history.pushState({}, '', '/');
+          }}
+          className="inline-flex items-center gap-1.5 text-xs text-zinc-400 hover:text-white transition-colors cursor-pointer font-medium py-1 px-1 -ml-1"
         >
-          <div className="flex items-center justify-center gap-2">
-            <span className="text-3xl sm:text-4xl font-black tracking-tight text-zinc-950 dark:text-white">Gaks</span>
-            <span className="text-3xl sm:text-4xl font-black tracking-tight text-zinc-400">AI</span>
-          </div>
-          <div className="w-20 h-[1px] bg-gradient-to-r from-transparent via-zinc-300 dark:via-zinc-700/80 to-transparent mx-auto mt-1" />
-        </motion.div>
+          <ArrowLeft className="w-3.5 h-3.5" />
+          <span>Home</span>
+        </button>
+      </div>
 
+      {/* Main Content Container */}
+      <div className="w-full max-w-[380px] my-auto flex flex-col justify-center relative z-10 py-4 box-border">
+        
         <AnimatePresence mode="wait">
-          <motion.div
-            key={mode}
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
-            transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-            className="w-full space-y-2.5 sm:space-y-3.5 short:space-y-2"
-          >
-            {/* Title & Subtitle */}
-            <div className="text-center space-y-1.5 sm:space-y-2">
-              <h1 className="text-xl sm:text-2xl font-extrabold tracking-tight text-zinc-950 dark:text-white leading-snug">
-                {mode === 'signup' && 'Create account'}
-                {mode === 'login' && 'Welcome back'}
-                {mode === 'forgot' && 'Reset password'}
-                {mode === 'reset' && 'Create new password'}
-              </h1>
-              <p className="text-xs sm:text-sm text-zinc-600 dark:text-zinc-400 font-normal leading-relaxed max-w-[320px] mx-auto">
-                {mode === 'signup' && 'Start using AI-powered market monitoring in minutes.'}
-                {mode === 'login' && 'Log in to your account and continue monitoring the markets with AI.'}
-                {mode === 'forgot' && "Enter your email address and we'll send a recovery link."}
-                {mode === 'reset' && 'Enter and confirm your secure new password below.'}
-              </p>
-            </div>
+          {mode === 'verification' ? (
+            /* EMAIL VERIFICATION PAGE — Matches Reference Screenshot 2 */
+            <motion.div
+              key="verification"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
+              className="w-full flex flex-col items-center text-center space-y-6"
+            >
+              {/* Mail Icon in dark rounded badge */}
+              <div className="w-16 h-16 rounded-2xl bg-[#121217] border border-zinc-800 flex items-center justify-center text-white shadow-xl">
+                <Mail className="w-8 h-8 stroke-[1.5]" />
+              </div>
 
-            {/* Error & Info Feedback Banners */}
-            {errorMessage && (
-              <motion.div
-                initial={{ opacity: 0, scale: 0.98 }}
-                animate={{ opacity: 1, scale: 1 }}
-                className="p-2.5 sm:p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-400 flex items-start gap-2.5 text-xs leading-relaxed shadow-sm"
-              >
-                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-                <span>{errorMessage}</span>
-              </motion.div>
-            )}
+              <div className="space-y-2">
+                <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-white">
+                  Check your email
+                </h1>
+                <p className="text-sm text-zinc-400 leading-relaxed max-w-[310px] mx-auto">
+                  We just sent a verification link to<br />
+                  <span className="font-medium text-zinc-200">{email || 'your email address'}</span>.
+                </p>
+              </div>
 
-            {infoToast && (
-              <motion.div
-                initial={{ opacity: 0, y: -4 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="p-2.5 sm:p-3 rounded-xl bg-zinc-50 dark:bg-[#0c0c12] border border-zinc-200 dark:border-[#1e1e2b] text-zinc-700 dark:text-zinc-300 flex items-start gap-2.5 text-xs leading-relaxed shadow-sm"
-              >
-                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-zinc-400" />
-                <span className="flex-1">{infoToast}</span>
-              </motion.div>
-            )}
-
-            {/* SUCCESS CELEBRATION SCREEN */}
-            {successMessage ? (
-              <motion.div
-                initial={{ opacity: 0, scale: 0.96 }}
-                animate={{ opacity: 1, scale: 1 }}
-                className="p-4 sm:p-5 rounded-2xl border border-zinc-200 dark:border-[#1e1e2b] bg-zinc-50 dark:bg-[#0c0c12] text-center space-y-3 shadow-2xl relative overflow-hidden"
-              >
-                <div className="w-10 h-10 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mx-auto shadow-[0_0_15px_rgba(16,185,129,0.15)]">
-                  <CheckCircle2 className="w-5 h-5 stroke-[2]" />
+              <div className="pt-2 w-full">
+                <button
+                  type="button"
+                  onClick={() => switchMode('login')}
+                  className="w-full py-3.5 px-6 rounded-full bg-white text-black font-semibold text-sm hover:bg-zinc-200 active:scale-[0.99] transition-all cursor-pointer shadow-lg flex items-center justify-center gap-2"
+                >
+                  <span>Go to login</span>
+                  <span className="text-base">→</span>
+                </button>
+              </div>
+            </motion.div>
+          ) : (
+            /* SIGN UP & LOGIN PAGES — Matches Reference Screenshot 1 */
+            <motion.div
+              key={mode}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
+              className="w-full space-y-5"
+            >
+              {/* Brand Emblem / Logo Badge */}
+              <div className="flex justify-center">
+                <div className="w-12 h-12 rounded-2xl bg-[#121217] border border-zinc-800 flex items-center justify-center shadow-md relative overflow-hidden group">
+                  <span className="text-2xl font-black tracking-tighter text-white font-sans">G</span>
+                  <div className="absolute top-2 right-2 w-1.5 h-1.5 rounded-full bg-white shadow-[0_0_8px_rgba(255,255,255,0.8)]" />
                 </div>
-                <div className="space-y-1">
-                  <h3 className="text-sm sm:text-base font-bold text-zinc-950 dark:text-white tracking-tight">
-                    {mode === 'signup' ? 'Check your email' : 'Success!'}
-                  </h3>
-                  <p className="text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed max-w-[260px] mx-auto">
-                    {successMessage}
-                  </p>
-                </div>
-                {mode === 'signup' && (
+              </div>
+
+              {/* Title & Subtitle */}
+              <div className="text-center space-y-1.5">
+                <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-white leading-tight">
+                  {mode === 'signup' && 'Create a Gaks AI account'}
+                  {mode === 'login' && 'Welcome back'}
+                  {mode === 'forgot' && 'Reset password'}
+                  {mode === 'reset' && 'Create new password'}
+                </h1>
+                <p className="text-xs sm:text-sm text-zinc-400 font-normal leading-relaxed">
+                  {mode === 'signup' && (
+                    <>
+                      Already have an account?{' '}
+                      <button
+                        type="button"
+                        onClick={() => switchMode('login')}
+                        className="text-white font-bold hover:underline cursor-pointer transition-colors"
+                      >
+                        Log in.
+                      </button>
+                    </>
+                  )}
+                  {mode === 'login' && (
+                    <>
+                      Don't have an account?{' '}
+                      <button
+                        type="button"
+                        onClick={() => switchMode('signup')}
+                        className="text-white font-bold hover:underline cursor-pointer transition-colors"
+                      >
+                        Create one.
+                      </button>
+                    </>
+                  )}
+                  {mode === 'forgot' && "Enter your email address and we'll send a recovery link."}
+                  {mode === 'reset' && 'Enter and confirm your secure new password below.'}
+                </p>
+              </div>
+
+              {/* Error & Info Feedback Banners */}
+              {errorMessage && (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.98 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 flex items-start gap-2.5 text-xs leading-relaxed shadow-sm"
+                >
+                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span>{errorMessage}</span>
+                </motion.div>
+              )}
+
+              {infoToast && (
+                <motion.div
+                  initial={{ opacity: 0, y: -4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="p-3 rounded-xl bg-[#121217] border border-zinc-800 text-zinc-300 flex items-start gap-2.5 text-xs leading-relaxed shadow-sm"
+                >
+                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-zinc-400" />
+                  <span className="flex-1">{infoToast}</span>
+                </motion.div>
+              )}
+
+              {successMessage && (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.98 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-start gap-2.5 text-xs leading-relaxed"
+                >
+                  <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span>{successMessage}</span>
+                </motion.div>
+              )}
+
+              {/* Social Auth Buttons */}
+              {(mode === 'login' || mode === 'signup') && (
+                <div className="space-y-2.5">
                   <button
                     type="button"
-                    onClick={() => switchMode('login')}
-                    className="w-full py-2.5 sm:py-3 px-4 rounded-xl bg-zinc-950 dark:bg-white text-white dark:text-black font-semibold text-xs sm:text-sm hover:bg-zinc-800 dark:hover:bg-zinc-200 active:scale-[0.99] transition-all cursor-pointer shadow-md"
+                    onClick={handleGoogleSignIn}
+                    disabled={isLoading}
+                    className="w-full py-3 px-4 rounded-xl bg-[#121217] hover:bg-[#1a1a22] active:scale-[0.99] border border-zinc-800 text-white font-medium text-xs sm:text-sm flex items-center justify-center gap-3 transition-all duration-200 cursor-pointer shadow-sm disabled:opacity-50"
                   >
-                    Return to Sign In
+                    <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
+                      <path fill="#EA4335" d="M12 5.04c1.64 0 3.12.56 4.28 1.67l3.2-3.2C17.52 1.58 14.95 1 12 1 7.35 1 3.4 3.65 1.57 7.5l3.82 2.96C6.32 7.37 8.94 5.04 12 5.04z" />
+                      <path fill="#4285F4" d="M23.49 12.27c0-.81-.07-1.59-.2-2.36H12v4.51h6.46c-.29 1.48-1.14 2.73-2.43 3.58l3.78 2.92c2.2-2.03 3.48-5.01 3.48-8.65z" />
+                      <path fill="#FBBC05" d="M5.39 14.54c-.25-.75-.39-1.55-.39-2.38s.14-1.63.39-2.38L1.57 6.82C.73 8.49.25 10.37.25 12.37s.48 3.88 1.32 5.55l3.82-3.38z" />
+                      <path fill="#34A853" d="M12 23c3.24 0 5.97-1.07 7.96-2.91l-3.78-2.92c-1.05.7-2.4 1.13-4.18 1.13-3.06 0-5.68-2.33-6.61-5.42L1.57 16.2C3.4 20.05 7.35 23 12 23z" />
+                    </svg>
+                    <span>{mode === 'signup' ? 'Sign up with Google' : 'Log in with Google'}</span>
                   </button>
-                )}
-              </motion.div>
-            ) : (
-              <>
-                {/* SOCIAL BUTTONS (Login & Signup modes) */}
-                {(mode === 'login' || mode === 'signup') && (
-                  <div className="space-y-2 sm:space-y-2.5 my-1 sm:my-1.5 short:my-0.5">
-                    <button
-                      type="button"
-                      onClick={handleGoogleSignIn}
-                      disabled={isLoading}
-                      className="w-full py-2.5 sm:py-3 px-4 rounded-xl bg-zinc-50 dark:bg-[#0c0c12] hover:bg-zinc-100 dark:hover:bg-[#14141d] active:scale-[0.99] border border-zinc-200 dark:border-[#1e1e2b] text-zinc-900 dark:text-white font-medium text-xs sm:text-sm flex items-center justify-center gap-3 transition-all duration-200 cursor-pointer shadow-sm disabled:opacity-50"
-                    >
-                      <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
-                        <path fill="#EA4335" d="M12 5.04c1.64 0 3.12.56 4.28 1.67l3.2-3.2C17.52 1.58 14.95 1 12 1 7.35 1 3.4 3.65 1.57 7.5l3.82 2.96C6.32 7.37 8.94 5.04 12 5.04z" />
-                        <path fill="#4285F4" d="M23.49 12.27c0-.81-.07-1.59-.2-2.36H12v4.51h6.46c-.29 1.48-1.14 2.73-2.43 3.58l3.78 2.92c2.2-2.03 3.48-5.01 3.48-8.65z" />
-                        <path fill="#FBBC05" d="M5.39 14.54c-.25-.75-.39-1.55-.39-2.38s.14-1.63.39-2.38L1.57 6.82C.73 8.49.25 10.37.25 12.37s.48 3.88 1.32 5.55l3.82-3.38z" />
-                        <path fill="#34A853" d="M12 23c3.24 0 5.97-1.07 7.96-2.91l-3.78-2.92c-1.05.7-2.4 1.13-4.18 1.13-3.06 0-5.68-2.33-6.61-5.42L1.57 16.2C3.4 20.05 7.35 23 12 23z" />
+
+                  <button
+                    type="button"
+                    onClick={handleTelegramSignIn}
+                    disabled={isLoading}
+                    className="w-full py-3 px-4 rounded-xl bg-[#121217] hover:bg-[#1a1a22] active:scale-[0.99] border border-zinc-800 text-white font-medium text-xs sm:text-sm flex items-center justify-center gap-3 transition-all duration-200 cursor-pointer shadow-sm disabled:opacity-50"
+                  >
+                    <div className="w-4 h-4 rounded-full bg-[#2AA1DD] flex items-center justify-center shrink-0">
+                      <svg className="w-2.5 h-2.5 text-white transform -translate-x-[0.5px] translate-y-[0.5px]" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221l-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.446 1.394c-.14.18-.357.295-.6.295-.002 0-.003 0-.005 0l.213-3.054 5.56-5.022c.24-.213-.054-.334-.373-.121l-6.869 4.326-2.96-.924c-.64-.203-.658-.64.135-.954l11.566-4.458c.538-.196 1.006.128.832.94z"/>
                       </svg>
-                      <span>Continue with Google</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={handleTelegramSignIn}
-                      disabled={isLoading}
-                      className="w-full py-2.5 sm:py-3 px-4 rounded-xl bg-zinc-50 dark:bg-[#0c0c12] hover:bg-zinc-100 dark:hover:bg-[#14141d] active:scale-[0.99] border border-zinc-200 dark:border-[#1e1e2b] text-zinc-900 dark:text-white font-medium text-xs sm:text-sm flex items-center justify-center gap-3 transition-all duration-200 cursor-pointer shadow-sm disabled:opacity-50"
-                    >
-                      <div className="w-4 h-4 rounded-full bg-[#2AA1DD] flex items-center justify-center shrink-0">
-                        <svg className="w-3 h-3 text-white transform -translate-x-[0.5px] translate-y-[0.5px]" viewBox="0 0 24 24" fill="currentColor">
-                          <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221l-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.446 1.394c-.14.18-.357.295-.6.295-.002 0-.003 0-.005 0l.213-3.054 5.56-5.022c.24-.213-.054-.334-.373-.121l-6.869 4.326-2.96-.924c-.64-.203-.658-.64.135-.954l11.566-4.458c.538-.196 1.006.128.832.94z"/>
-                        </svg>
-                      </div>
-                      <span>Continue with Telegram</span>
-                    </button>
-
-                    {/* OR Divider */}
-                    <div className="flex items-center gap-3 py-1.5 sm:py-2 short:py-1">
-                      <div className="h-[1px] flex-1 bg-zinc-200 dark:bg-[#1e1e2b]" />
-                      <span className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-widest px-1">OR</span>
-                      <div className="h-[1px] flex-1 bg-zinc-200 dark:bg-[#1e1e2b]" />
                     </div>
+                    <span>{mode === 'signup' ? 'Sign up with Telegram' : 'Log in with Telegram'}</span>
+                  </button>
+
+                  {/* Divider */}
+                  <div className="flex items-center gap-3 py-1">
+                    <div className="h-[1px] flex-1 bg-zinc-800/80" />
+                    <span className="text-xs font-normal text-zinc-500">or</span>
+                    <div className="h-[1px] flex-1 bg-zinc-800/80" />
                   </div>
-                )}
+                </div>
+              )}
 
-                {/* PRIMARY FORM */}
-                <form
-                  onSubmit={
-                    mode === 'login'
-                      ? handleLogin
-                      : mode === 'signup'
-                      ? handleSignUp
-                      : mode === 'forgot'
-                      ? handleForgotPassword
-                      : handleResetPassword
-                  }
-                  className="space-y-2 sm:space-y-2.5 short:space-y-1.5"
-                  noValidate
-                >
-                  {/* Name field (Signup mode) */}
-                  {mode === 'signup' && (
-                    <div className="relative flex items-center bg-zinc-50 dark:bg-[#0c0c12] border border-zinc-200 dark:border-[#1e1e2b] focus-within:border-zinc-400 focus-within:ring-1 focus-within:ring-zinc-400/20 rounded-xl px-3.5 py-2.5 sm:py-3 transition-all">
-                      <User className="w-4 h-4 text-zinc-400 dark:text-zinc-500 shrink-0 mr-3" />
-                      <input
-                        type="text"
-                        value={fullName}
-                        onChange={(e) => setFullName(e.target.value)}
-                        placeholder="Full Name (optional)"
-                        disabled={isLoading}
-                        autoComplete="name"
-                        className="w-full bg-transparent text-xs sm:text-sm text-zinc-900 dark:text-white placeholder-zinc-400 dark:placeholder-zinc-500 focus:outline-none font-medium"
-                      />
-                    </div>
-                  )}
-
-                  {/* Email Field (All modes except reset) */}
-                  {mode !== 'reset' && (
-                    <div className="relative flex items-center bg-zinc-50 dark:bg-[#0c0c12] border border-zinc-200 dark:border-[#1e1e2b] focus-within:border-zinc-400 focus-within:ring-1 focus-within:ring-zinc-400/20 rounded-xl px-3.5 py-2.5 sm:py-3 transition-all">
-                      <Mail className="w-4 h-4 text-zinc-400 dark:text-zinc-500 shrink-0 mr-3" />
+              {/* Primary Form */}
+              <form
+                onSubmit={
+                  mode === 'login'
+                    ? handleLogin
+                    : mode === 'signup'
+                    ? handleSignUp
+                    : mode === 'forgot'
+                    ? handleForgotPassword
+                    : handleLogin
+                }
+                className="space-y-3.5"
+                noValidate
+              >
+                {/* Email Field */}
+                {mode !== 'reset' && (
+                  <div className="space-y-1.5 text-left">
+                    <label className="text-xs font-medium text-zinc-300 block">Email</label>
+                    <div className="relative rounded-xl border border-zinc-800 bg-[#121217] focus-within:border-zinc-500 transition-all overflow-hidden">
                       <input
                         type="email"
                         value={email}
@@ -480,251 +466,119 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
                           setEmail(e.target.value);
                           setErrorMessage(null);
                         }}
-                        placeholder="Email"
+                        placeholder="alan.turing@example.com"
                         disabled={isLoading}
                         autoComplete="email"
-                        className="w-full bg-transparent text-xs sm:text-sm text-zinc-900 dark:text-white placeholder-zinc-400 dark:placeholder-zinc-500 focus:outline-none font-medium"
+                        className="w-full bg-transparent px-3.5 py-3 text-xs sm:text-sm text-white placeholder-zinc-600 focus:outline-none font-sans"
                       />
                     </div>
-                  )}
+                  </div>
+                )}
 
-                  {/* Password Field (Login & Signup modes) */}
-                  {(mode === 'login' || mode === 'signup') && (
-                    <div className="space-y-1">
-                      <div className="relative flex items-center bg-zinc-50 dark:bg-[#0c0c12] border border-zinc-200 dark:border-[#1e1e2b] focus-within:border-zinc-400 focus-within:ring-1 focus-within:ring-zinc-400/20 rounded-xl px-3.5 py-2.5 sm:py-3 transition-all">
-                        <Lock className="w-4 h-4 text-zinc-400 dark:text-zinc-500 shrink-0 mr-3" />
-                        <input
-                          type={showPassword ? 'text' : 'password'}
-                          value={password}
-                          onChange={(e) => {
-                            setPassword(e.target.value);
-                            setErrorMessage(null);
-                          }}
-                          placeholder="Password"
-                          disabled={isLoading}
-                          autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
-                          className="w-full bg-transparent text-xs sm:text-sm text-zinc-900 dark:text-white placeholder-zinc-400 dark:placeholder-zinc-500 focus:outline-none font-medium pr-2"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setShowPassword(!showPassword)}
-                          className="p-1 text-zinc-400 dark:text-zinc-500 hover:text-zinc-950 dark:hover:text-white transition-colors cursor-pointer shrink-0"
-                          title={showPassword ? 'Hide password' : 'Show password'}
-                        >
-                          {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                        </button>
-                      </div>
-                      
-                      {/* Forgot password link on login mode */}
+                {/* Password Field (Login & Signup) */}
+                {(mode === 'login' || mode === 'signup') && (
+                  <div className="space-y-1.5 text-left">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-medium text-zinc-300 block">Password</label>
                       {mode === 'login' && (
-                        <div className="flex justify-end pt-1">
-                          <button
-                            type="button"
-                            onClick={() => switchMode('forgot')}
-                            className="text-xs font-medium text-zinc-500 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white transition-colors cursor-pointer"
-                          >
-                            Forgot password?
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Confirm Password Field (Signup mode only) */}
-                  {mode === 'signup' && (
-                    <div className="space-y-1">
-                      <div className="relative flex items-center bg-zinc-50 dark:bg-[#0c0c12] border border-zinc-200 dark:border-[#1e1e2b] focus-within:border-zinc-400 focus-within:ring-1 focus-within:ring-zinc-400/20 rounded-xl px-3.5 py-2.5 sm:py-3 transition-all">
-                        <Lock className="w-4 h-4 text-zinc-400 dark:text-zinc-500 shrink-0 mr-3" />
-                        <input
-                          type={showConfirmPassword ? 'text' : 'password'}
-                          value={confirmPassword}
-                          onChange={(e) => {
-                            setConfirmPassword(e.target.value);
-                            setErrorMessage(null);
-                          }}
-                          placeholder="Confirm Password"
-                          disabled={isLoading}
-                          autoComplete="new-password"
-                          className="w-full bg-transparent text-xs sm:text-sm text-zinc-900 dark:text-white placeholder-zinc-400 dark:placeholder-zinc-500 focus:outline-none font-medium pr-2"
-                        />
                         <button
                           type="button"
-                          onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                          className="p-1 text-zinc-400 dark:text-zinc-500 hover:text-zinc-950 dark:hover:text-white transition-colors cursor-pointer shrink-0"
-                          title={showConfirmPassword ? 'Hide password' : 'Show password'}
+                          onClick={() => switchMode('forgot')}
+                          className="text-xs text-zinc-400 hover:text-white transition-colors cursor-pointer"
                         >
-                          {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                          Forgot password?
                         </button>
-                      </div>
-                      {confirmPassword.length > 0 && password !== confirmPassword && (
-                        <p className="text-[11px] text-rose-500 dark:text-rose-400 font-medium pl-1">
-                          Passwords do not match
-                        </p>
                       )}
                     </div>
-                  )}
+                    <div className="relative rounded-xl border border-zinc-800 bg-[#121217] focus-within:border-zinc-500 transition-all overflow-hidden flex items-center pr-3">
+                      <input
+                        type={showPassword ? 'text' : 'password'}
+                        value={password}
+                        onChange={(e) => {
+                          setPassword(e.target.value);
+                          setErrorMessage(null);
+                        }}
+                        placeholder="••••••••••••"
+                        disabled={isLoading}
+                        autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
+                        className="w-full bg-transparent px-3.5 py-3 text-xs sm:text-sm text-white placeholder-zinc-600 focus:outline-none font-sans pr-2"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="p-1 text-zinc-500 hover:text-white transition-colors cursor-pointer shrink-0"
+                        title={showPassword ? 'Hide password' : 'Show password'}
+                      >
+                        {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  </div>
+                )}
 
-                  {/* New Password Fields (Reset mode) */}
-                  {mode === 'reset' && (
-                    <>
-                      <div className="relative flex items-center bg-zinc-50 dark:bg-[#0c0c12] border border-zinc-200 dark:border-[#1e1e2b] focus-within:border-zinc-400 focus-within:ring-1 focus-within:ring-zinc-400/20 rounded-xl px-3.5 py-2.5 sm:py-3 transition-all">
-                        <Lock className="w-4 h-4 text-zinc-400 dark:text-zinc-500 shrink-0 mr-3" />
-                        <input
-                          type={showPassword ? 'text' : 'password'}
-                          value={newPassword}
-                          onChange={(e) => setNewPassword(e.target.value)}
-                          placeholder="New Password"
-                          disabled={isLoading}
-                          className="w-full bg-transparent text-xs sm:text-sm text-zinc-900 dark:text-white placeholder-zinc-400 dark:placeholder-zinc-500 focus:outline-none font-medium pr-2"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setShowPassword(!showPassword)}
-                          className="p-1 text-zinc-400 dark:text-zinc-500 hover:text-zinc-950 dark:hover:text-white transition-colors cursor-pointer shrink-0"
-                        >
-                          {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                        </button>
-                      </div>
-                      <div className="space-y-1">
-                        <div className="relative flex items-center bg-zinc-50 dark:bg-[#0c0c12] border border-zinc-200 dark:border-[#1e1e2b] focus-within:border-zinc-400 focus-within:ring-1 focus-within:ring-zinc-400/20 rounded-xl px-3.5 py-2.5 sm:py-3 transition-all">
-                          <Lock className="w-4 h-4 text-zinc-400 dark:text-zinc-500 shrink-0 mr-3" />
-                          <input
-                            type={showConfirmPassword ? 'text' : 'password'}
-                            value={confirmNewPassword}
-                            onChange={(e) => setConfirmNewPassword(e.target.value)}
-                            placeholder="Confirm New Password"
-                            disabled={isLoading}
-                            className="w-full bg-transparent text-xs sm:text-sm text-zinc-900 dark:text-white placeholder-zinc-400 dark:placeholder-zinc-500 focus:outline-none font-medium pr-2"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                            className="p-1 text-zinc-400 dark:text-zinc-500 hover:text-zinc-950 dark:hover:text-white transition-colors cursor-pointer shrink-0"
-                          >
-                            {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                          </button>
-                        </div>
-                        {confirmNewPassword.length > 0 && newPassword !== confirmNewPassword && (
-                          <p className="text-[11px] text-rose-500 dark:text-rose-400 font-medium pl-1">
-                            New passwords do not match
-                          </p>
-                        )}
-                      </div>
-                    </>
-                  )}
-
-                  {/* PRIMARY SUBMIT BUTTON */}
-                  <div className="pt-1.5 sm:pt-2 short:pt-1">
-                    <button
-                      type="submit"
-                      disabled={!isFormValid() || isLoading}
-                      className="w-full py-3 sm:py-3.5 px-5 rounded-xl bg-zinc-950 dark:bg-white hover:bg-zinc-800 dark:hover:bg-zinc-200 text-white dark:text-black font-bold text-xs sm:text-sm active:scale-[0.99] transition-all duration-200 cursor-pointer flex items-center justify-center gap-2 shadow-sm disabled:opacity-35 disabled:cursor-not-allowed"
-                    >
-                      {isLoading ? (
-                        <div className="flex items-center gap-2">
-                          <div className="w-4 h-4 rounded-full border-2 border-white dark:border-black border-t-transparent animate-spin shrink-0" />
-                          <span>
-                            {mode === 'signup'
-                              ? 'Creating account...'
-                              : mode === 'login'
-                              ? 'Signing in...'
-                              : 'Processing...'}
-                          </span>
-                        </div>
-                      ) : (
+                {/* Primary Submit Button */}
+                <div className="pt-2">
+                  <button
+                    type="submit"
+                    disabled={!isFormValid() || isLoading}
+                    className="w-full py-3.5 px-4 rounded-xl bg-white text-black font-semibold text-xs sm:text-sm hover:bg-zinc-200 active:scale-[0.99] transition-all duration-200 cursor-pointer flex items-center justify-center gap-2 shadow-md disabled:opacity-35 disabled:cursor-not-allowed"
+                  >
+                    {isLoading ? (
+                      <div className="flex items-center gap-2">
+                        <div className="w-4 h-4 rounded-full border-2 border-black border-t-transparent animate-spin shrink-0" />
                         <span>
-                          {mode === 'login' && 'Sign in'}
-                          {mode === 'signup' && 'Create account'}
-                          {mode === 'forgot' && 'Send Reset Link'}
-                          {mode === 'reset' && 'Update Password'}
+                          {mode === 'signup'
+                            ? 'Creating account...'
+                            : mode === 'login'
+                            ? 'Logging in...'
+                            : 'Processing...'}
                         </span>
-                      )}
-                    </button>
-                  </div>
-                </form>
-
-                {/* BOTTOM NAVIGATION LINKS */}
-                <div className="text-center pt-2 sm:pt-2.5 short:pt-1.5">
-                  {mode === 'signup' && (
-                    <p className="text-xs sm:text-sm text-zinc-500 dark:text-zinc-400 font-normal">
-                      Already have an account?{' '}
-                      <button
-                        type="button"
-                        onClick={() => switchMode('login')}
-                        className="text-zinc-950 dark:text-white font-bold hover:underline cursor-pointer transition-colors ml-1"
-                      >
-                        Sign in
-                      </button>
-                    </p>
-                  )}
-
-                  {mode === 'login' && (
-                    <p className="text-xs sm:text-sm text-zinc-500 dark:text-zinc-400 font-normal">
-                      Don't have an account?{' '}
-                      <button
-                        type="button"
-                        onClick={() => switchMode('signup')}
-                        className="text-zinc-950 dark:text-white font-bold hover:underline cursor-pointer transition-colors ml-1"
-                      >
-                        Create account
-                      </button>
-                    </p>
-                  )}
-
-                  {(mode === 'forgot' || mode === 'reset') && (
-                    <button
-                      type="button"
-                      onClick={() => switchMode('login')}
-                      className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-500 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white transition-colors cursor-pointer"
-                    >
-                      <ArrowLeft className="w-3.5 h-3.5" />
-                      <span>Back to Sign In</span>
-                    </button>
-                  )}
+                      </div>
+                    ) : (
+                      <span>
+                        {mode === 'login' && 'Log in'}
+                        {mode === 'signup' && 'Create account'}
+                        {mode === 'forgot' && 'Send Reset Link'}
+                      </span>
+                    )}
+                  </button>
                 </div>
+              </form>
 
-                {/* Trust Badges - 3 feature items */}
-                <div className="grid grid-cols-3 gap-2 sm:gap-2.5 pt-3 sm:pt-4 border-t border-zinc-200 dark:border-[#181824] mt-3 sm:mt-4 short:mt-2 short:pt-2">
-                  <div className="flex flex-col items-center text-center p-2 sm:p-2.5 rounded-xl bg-zinc-50 dark:bg-[#09090f]/70 border border-zinc-200 dark:border-[#181826] hover:border-zinc-300 dark:hover:border-[#262638] transition-colors shadow-sm short:p-1.5">
-                    <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-zinc-100 dark:bg-[#11111b] border border-zinc-200 dark:border-[#222232] flex items-center justify-center text-zinc-700 dark:text-zinc-300 mb-1 shrink-0">
-                      <ShieldCheck className="w-3.5 h-3.5" />
-                    </div>
-                    <span className="text-[10px] sm:text-[11px] font-bold text-zinc-950 dark:text-white tracking-tight">Secure</span>
-                    <span className="text-[8.5px] sm:text-[9.5px] text-zinc-500 dark:text-zinc-400 leading-tight mt-0.5">Bank-level security</span>
-                  </div>
+              {/* Legal Agreement on Signup */}
+              {mode === 'signup' && (
+                <p className="text-[11px] text-zinc-500 text-center leading-relaxed max-w-xs mx-auto pt-2">
+                  By signing up, you agree to our{' '}
+                  <span className="underline text-zinc-400 hover:text-white cursor-pointer transition-colors">Terms</span>
+                  ,{' '}
+                  <span className="underline text-zinc-400 hover:text-white cursor-pointer transition-colors">Acceptable Use</span>
+                  , and{' '}
+                  <span className="underline text-zinc-400 hover:text-white cursor-pointer transition-colors">Privacy Policy</span>.
+                </p>
+              )}
 
-                  <div className="flex flex-col items-center text-center p-2 sm:p-2.5 rounded-xl bg-zinc-50 dark:bg-[#09090f]/70 border border-zinc-200 dark:border-[#181826] hover:border-zinc-300 dark:hover:border-[#262638] transition-colors shadow-sm short:p-1.5">
-                    <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-zinc-100 dark:bg-[#11111b] border border-zinc-200 dark:border-[#222232] flex items-center justify-center text-zinc-700 dark:text-zinc-300 mb-1 shrink-0">
-                      <Zap className="w-3.5 h-3.5" />
-                    </div>
-                    <span className="text-[10px] sm:text-[11px] font-bold text-zinc-950 dark:text-white tracking-tight">AI-Powered</span>
-                    <span className="text-[8.5px] sm:text-[9.5px] text-zinc-500 dark:text-zinc-400 leading-tight mt-0.5">Smarter insights</span>
-                  </div>
-
-                  <div className="flex flex-col items-center text-center p-2 sm:p-2.5 rounded-xl bg-zinc-50 dark:bg-[#09090f]/70 border border-zinc-200 dark:border-[#181826] hover:border-zinc-300 dark:hover:border-[#262638] transition-colors shadow-sm short:p-1.5">
-                    <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-zinc-100 dark:bg-[#11111b] border border-zinc-200 dark:border-[#222232] flex items-center justify-center text-zinc-700 dark:text-zinc-300 mb-1 shrink-0">
-                      <TrendingUp className="w-3.5 h-3.5" />
-                    </div>
-                    <span className="text-[10px] sm:text-[11px] font-bold text-zinc-950 dark:text-white tracking-tight">Real-Time</span>
-                    <span className="text-[8.5px] sm:text-[9.5px] text-zinc-500 dark:text-zinc-400 leading-tight mt-0.5">24/7 monitoring</span>
-                  </div>
+              {/* Forgot password mode back button */}
+              {mode === 'forgot' && (
+                <div className="text-center pt-2">
+                  <button
+                    type="button"
+                    onClick={() => switchMode('login')}
+                    className="inline-flex items-center gap-1.5 text-xs text-zinc-400 hover:text-white transition-colors cursor-pointer"
+                  >
+                    <ArrowLeft className="w-3.5 h-3.5" />
+                    <span>Back to Log in</span>
+                  </button>
                 </div>
-              </>
-            )}
-          </motion.div>
+              )}
+            </motion.div>
+          )}
         </AnimatePresence>
       </div>
 
-      {/* Minimal Footer */}
-      <p className="text-[10px] sm:text-[11px] text-zinc-500 text-center tracking-normal relative z-10 max-w-xs py-1 sm:py-2 shrink-0">
-        By continuing, you agree to our{' '}
-        <span className="underline text-zinc-600 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white cursor-pointer transition-colors">Terms of Service</span>
-        {' '}and{' '}
-        <span className="underline text-zinc-600 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white cursor-pointer transition-colors">Privacy Policy</span>.
-      </p>
+      {/* Footer Branding */}
+      <div className="text-[11px] text-zinc-600 text-center py-2 relative z-10">
+        Gaks AI
+      </div>
 
     </div>
   );
 }
-
-
