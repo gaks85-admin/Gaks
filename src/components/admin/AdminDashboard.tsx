@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '../../supabaseClient';
 import { LearningPerformanceView } from '../LearningPerformanceView';
+import { AdminUserNotificationSection } from './AdminUserNotificationSection';
 
 // ----------------------------------------------------
 // Toast Component
@@ -807,6 +808,11 @@ const UsersPage = ({ fetchWithAuth, showToast }: { fetchWithAuth: any; showToast
           </div>
         </div>
       )}
+
+      {/* User Notifications Section */}
+      <div className="pt-6 border-t border-zinc-200 dark:border-zinc-800">
+        <AdminUserNotificationSection fetchWithAuth={fetchWithAuth} showToast={showToast} />
+      </div>
     </div>
   );
 };
@@ -2004,9 +2010,9 @@ export default function AdminDashboard({
   userProfile: any, 
   session: any, 
   authLoading: boolean,
-  initialTab?: 'dashboard' | 'learning' | 'live-logs' | 'users' | 'watchers' | 'signals' | 'health' | 'settings'
+  initialTab?: 'dashboard' | 'learning' | 'live-logs' | 'users' | 'notifications' | 'watchers' | 'signals' | 'health' | 'settings'
 }) {
-  const [activeAdminTab, setActiveAdminTab] = useState<'dashboard' | 'learning' | 'live-logs' | 'users' | 'watchers' | 'signals' | 'health' | 'settings'>(initialTab || 'dashboard');
+  const [activeAdminTab, setActiveAdminTab] = useState<'dashboard' | 'learning' | 'live-logs' | 'users' | 'notifications' | 'watchers' | 'signals' | 'health' | 'settings'>(initialTab || 'dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
@@ -2101,6 +2107,7 @@ export default function AdminDashboard({
     { id: 'learning', label: 'Learning & Performance', icon: Sparkles },
     { id: 'live-logs', label: 'Live Logs', icon: Terminal },
     { id: 'users', label: 'Users', icon: Users },
+    { id: 'notifications', label: 'User Notifications', icon: Send },
     { id: 'watchers', label: 'Watchers', icon: Eye },
     { id: 'signals', label: 'Signals', icon: Zap },
     { id: 'health', label: 'System Health', icon: Activity },
@@ -2154,6 +2161,11 @@ export default function AdminDashboard({
           )}
           {activeAdminTab === 'live-logs' && <LiveLogsPage fetchWithAuth={fetchWithAuth} />}
           {activeAdminTab === 'users' && <UsersPage fetchWithAuth={fetchWithAuth} showToast={showToast} />}
+          {activeAdminTab === 'notifications' && (
+            <div className="p-6">
+              <AdminUserNotificationSection fetchWithAuth={fetchWithAuth} showToast={showToast} />
+            </div>
+          )}
           {activeAdminTab === 'watchers' && <WatchersPage fetchWithAuth={fetchWithAuth} showToast={showToast} />}
           {activeAdminTab === 'signals' && <SignalsPage fetchWithAuth={fetchWithAuth} />}
           {activeAdminTab === 'health' && <SystemHealthPage fetchWithAuth={fetchWithAuth} />}

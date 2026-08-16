@@ -7,6 +7,7 @@ import { timeframeToMinutes } from '../src/lib/timeframe.js';
 import { extractRiskPreferences, calculatePositionSize } from '../src/lib/risk-engine.js';
 import { resolveUserGeminiKey } from '../src/lib/gemini-key-resolver.js';
 import { defaultMarketDataService } from '../src/lib/market-data-service.js';
+import { sendNotificationEmail } from '../src/lib/email-service';
 
 // --- Inlined Gemini & Telegram Wrappers ---
 
@@ -1287,6 +1288,303 @@ async function users_handler(req: any, res: any) {
   } catch (err: any) {
     console.error("Failed to fetch admin users:", err);
     return res.status(500).json({ success: false, error: err.message });
+  }
+}
+
+async function verifyAdminServerSide(req: any, supabase: any) {
+  const authHeader = req.headers?.authorization || req.headers?.Authorization || '';
+  const token = authHeader.startsWith('Bearer ') ? authHeader.substring(7).trim() : authHeader.trim();
+
+  if (!token) {
+    return { isAdmin: false, error: "Unauthorized: Missing authentication token.", status: 401 };
+  }
+
+  const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+  if (authError || !user) {
+    return { isAdmin: false, error: "Unauthorized: Invalid authentication token.", status: 401 };
+  }
+
+  const email = user.email?.trim().toLowerCase();
+  const ADMIN_EMAIL = "gaks6535@gmail.com";
+
+  if (email === ADMIN_EMAIL) {
+    return { isAdmin: true, user, userId: user.id };
+  }
+
+  try {
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('role')
+      .eq('id', user.id)
+      .maybeSingle();
+
+    if (profile && profile.role === 'admin') {
+      return { isAdmin: true, user, userId: user.id };
+    }
+  } catch (err) {
+    console.warn("[Admin Auth Check] Profile role check error:", err);
+  }
+
+  return { isAdmin: false, error: "Forbidden: Admin access required.", status: 403 };
+}
+
+async function users_search_handler(req: any, res: any) {
+  const supabase = getSupabase();
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, PATCH, DELETE");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With");
+  res.setHeader("Content-Type", "application/json");
+
+  if (req.method === "OPTIONS") {
+    return res.status(200).end();
+  }
+
+  if (req.method !== 'GET') {
+    return res.status(405).json({ success: false, error: 'Method Not Allowed' });
+  }
+
+  const auth = await verifyAdminServerSide(req, supabase);
+  if (!auth.isAdmin) {
+    return res.status(auth.status || 403).json({ success: false, error: auth.error });
+  }
+
+  try {
+    const matchedPath = req.headers['x-matched-path'] || req.headers['x-original-url'] || req.url || '';
+    const parsedUrl = url.parse(matchedPath, true);
+    const query = String(parsedUrl.query?.q || '').trim();
+
+    if (!query) {
+      return res.status(200).json({ success: true, users: [] });
+    }
+
+    const cleanQuery = query.toLowerCase().replace(/^@/, '');
+
+    const { data: allProfiles, error: profErr } = await supabase
+      .from('profiles')
+      .select('*');
+
+    if (profErr) {
+      throw profErr;
+    }
+
+    let telegramConns: any[] = [];
+    try {
+      const { data: tcData } = await supabase
+        .from('telegram_connections')
+        .select('*');
+      telegramConns = tcData || [];
+    } catch (e) {
+      console.warn("[Admin Search] Could not query telegram_connections table:", e);
+    }
+
+    const matchedProfiles = (allProfiles || []).filter((p: any) => {
+      const emailMatch = p.email && p.email.toLowerCase().includes(cleanQuery);
+      const nameMatch = p.full_name && p.full_name.toLowerCase().includes(cleanQuery);
+      const idMatch = p.id && p.id.toLowerCase() === cleanQuery;
+
+      const whatsappVal = p.whatsapp || p.phone || p.whatsapp_number || p.whatsapp_id || '';
+      const whatsappMatch = whatsappVal && whatsappVal.toLowerCase().includes(cleanQuery);
+
+      const tc = telegramConns.find((t: any) => t.user_id === p.id);
+      const tgUserMatch = tc?.telegram_username && tc.telegram_username.toLowerCase().replace(/^@/, '').includes(cleanQuery);
+      const tgIdMatch = tc?.telegram_user_id && tc.telegram_user_id.toLowerCase().includes(cleanQuery);
+      const tgChatMatch = tc?.telegram_chat_id && tc.telegram_chat_id.toLowerCase().includes(cleanQuery);
+
+      return emailMatch || nameMatch || idMatch || whatsappMatch || tgUserMatch || tgIdMatch || tgChatMatch;
+    });
+
+    for (const tc of telegramConns) {
+      const tgUserMatch = tc.telegram_username && tc.telegram_username.toLowerCase().replace(/^@/, '').includes(cleanQuery);
+      const tgIdMatch = tc.telegram_user_id && tc.telegram_user_id.toLowerCase().includes(cleanQuery);
+      const tgChatMatch = tc.telegram_chat_id && tc.telegram_chat_id.toLowerCase().includes(cleanQuery);
+
+      if ((tgUserMatch || tgIdMatch || tgChatMatch) && !matchedProfiles.some((p: any) => p.id === tc.user_id)) {
+        const foundP = (allProfiles || []).find((p: any) => p.id === tc.user_id);
+        if (foundP) {
+          matchedProfiles.push(foundP);
+        }
+      }
+    }
+
+    const results = matchedProfiles.map((p: any) => {
+      const tc = telegramConns.find((t: any) => t.user_id === p.id);
+      const whatsappVal = p.whatsapp || p.phone || p.whatsapp_number || p.whatsapp_id || null;
+      const isTgConnected = Boolean(p.telegram_connected || (tc && tc.connected && tc.telegram_chat_id));
+      const isEmailAvailable = Boolean(p.email && p.email.includes('@'));
+
+      return {
+        id: p.id,
+        email: p.email,
+        full_name: p.full_name || null,
+        whatsapp: whatsappVal,
+        telegram_username: tc?.telegram_username ? `@${tc.telegram_username.replace(/^@/, '')}` : null,
+        telegram_chat_id: tc?.telegram_chat_id || tc?.telegram_user_id || null,
+        telegram_connected: isTgConnected,
+        email_available: isEmailAvailable,
+        telegram_available: Boolean(tc && tc.connected && tc.telegram_chat_id)
+      };
+    });
+
+    return res.status(200).json({ success: true, users: results });
+  } catch (err: any) {
+    console.error("[Admin User Search Error]:", err);
+    return res.status(500).json({ success: false, error: err.message || "Failed to search users." });
+  }
+}
+
+async function notifications_send_handler(req: any, res: any) {
+  const supabase = getSupabase();
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, PATCH, DELETE");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With");
+  res.setHeader("Content-Type", "application/json");
+
+  if (req.method === "OPTIONS") {
+    return res.status(200).end();
+  }
+
+  if (req.method !== 'POST') {
+    return res.status(405).json({ success: false, error: 'Method Not Allowed' });
+  }
+
+  const auth = await verifyAdminServerSide(req, supabase);
+  if (!auth.isAdmin) {
+    return res.status(auth.status || 403).json({ success: false, error: auth.error });
+  }
+
+  try {
+    const { userId, channel, message } = req.body || {};
+
+    if (!userId || typeof userId !== 'string' || !userId.trim()) {
+      return res.status(400).json({ success: false, error: 'User ID is required.', code: 'INVALID_USER' });
+    }
+
+    if (!channel || (channel !== 'telegram' && channel !== 'email')) {
+      return res.status(400).json({ success: false, error: 'Channel must be either "telegram" or "email".', code: 'INVALID_CHANNEL' });
+    }
+
+    const trimmedMessage = typeof message === 'string' ? message.trim() : '';
+    if (!trimmedMessage) {
+      return res.status(400).json({ success: false, error: 'Notification message cannot be empty.', code: 'EMPTY_MESSAGE' });
+    }
+
+    if (trimmedMessage.length > 2000) {
+      return res.status(400).json({ success: false, error: 'Message exceeds maximum limit of 2000 characters.', code: 'MESSAGE_TOO_LONG' });
+    }
+
+    const { data: targetUser, error: targetErr } = await supabase
+      .from('profiles')
+      .select('id, email, full_name, telegram_connected')
+      .eq('id', userId.trim())
+      .maybeSingle();
+
+    if (targetErr || !targetUser) {
+      return res.status(404).json({ success: false, error: 'Target user not found.', code: 'USER_NOT_FOUND' });
+    }
+
+    if (channel === 'telegram') {
+      const { data: tc } = await supabase
+        .from('telegram_connections')
+        .select('*')
+        .eq('user_id', targetUser.id)
+        .maybeSingle();
+
+      const chatId = tc?.telegram_chat_id;
+      const isConnected = Boolean(tc?.connected && chatId);
+
+      if (!isConnected || !chatId) {
+        return res.status(422).json({
+          success: false,
+          error: 'Telegram is not connected for this user.',
+          code: 'TELEGRAM_UNAVAILABLE'
+        });
+      }
+
+      const adminFormattedText = `*Gaks AI Admin Notification*\n\n${trimmedMessage}`;
+      const sentSuccess = await sendTelegramMessage(chatId, adminFormattedText);
+
+      try {
+        await supabase.from('admin_notifications').insert({
+          admin_user_id: auth.userId,
+          target_user_id: targetUser.id,
+          channel: 'telegram',
+          message: trimmedMessage,
+          status: sentSuccess ? 'SENT' : 'FAILED',
+          provider_message_id: sentSuccess ? `tg_${Date.now()}` : null,
+          error_message: sentSuccess ? null : 'Telegram Bot API error',
+          sent_at: sentSuccess ? new Date().toISOString() : null
+        });
+      } catch (auditErr) {
+        console.warn('[Admin Notifications] Could not write audit log:', auditErr);
+      }
+
+      if (!sentSuccess) {
+        return res.status(502).json({
+          success: false,
+          error: 'Notification could not be delivered via Telegram provider.',
+          code: 'PROVIDER_FAILURE'
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: 'Notification sent successfully via Telegram.',
+        channel: 'telegram',
+        targetUserId: targetUser.id
+      });
+    }
+
+    if (channel === 'email') {
+      const recipientEmail = targetUser.email;
+      if (!recipientEmail || !recipientEmail.includes('@')) {
+        return res.status(422).json({
+          success: false,
+          error: 'No valid email address is available for this user.',
+          code: 'EMAIL_UNAVAILABLE'
+        });
+      }
+
+      const emailResult = await sendNotificationEmail(recipientEmail, trimmedMessage);
+
+      try {
+        await supabase.from('admin_notifications').insert({
+          admin_user_id: auth.userId,
+          target_user_id: targetUser.id,
+          channel: 'email',
+          message: trimmedMessage,
+          status: emailResult.success ? 'SENT' : 'FAILED',
+          provider_message_id: emailResult.messageId || null,
+          error_message: emailResult.error || null,
+          sent_at: emailResult.success ? new Date().toISOString() : null
+        });
+      } catch (auditErr) {
+        console.warn('[Admin Notifications] Could not write audit log:', auditErr);
+      }
+
+      if (!emailResult.success) {
+        return res.status(502).json({
+          success: false,
+          error: emailResult.error || 'Notification could not be delivered via Email provider.',
+          code: 'PROVIDER_FAILURE'
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: 'Notification sent successfully via Email.',
+        channel: 'email',
+        targetUserId: targetUser.id
+      });
+    }
+
+    return res.status(400).json({ success: false, error: 'Invalid channel specified.' });
+  } catch (err: any) {
+    console.error('[Admin Notification Send Error]:', err);
+    return res.status(500).json({
+      success: false,
+      error: 'Internal server error processing notification send.',
+      details: err.message || err.toString()
+    });
   }
 }
 
@@ -2611,6 +2909,12 @@ export default async function handler(req: any, res: any) {
     }
     if (pathname.endsWith('/explainability')) {
       return explainability_handler(req, res);
+    }
+    if (pathname.endsWith('/users/search')) {
+      return users_search_handler(req, res);
+    }
+    if (pathname.endsWith('/notifications/send')) {
+      return notifications_send_handler(req, res);
     }
     if (pathname.endsWith('/users/action')) {
       return users_action_handler(req, res);
