@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { createClient } from '@supabase/supabase-js';
+import { getSupabase } from '../lib/supabase-server.js';
 import { determineMarketBias, Candle } from '../src/lib/strategy-engine.js';
 import { toCanonicalSymbol, toDisplaySymbol } from '../lib/market-utils.js';
 
@@ -33,25 +33,6 @@ function convertSymbolForYahoo(sym: string): string {
   }
   return canonical;
 }
-
-/**
- * Self-contained Supabase client initialization.
- */
-const getSupabase = () => {
-  const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "";
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || "";
-  
-  if (!url || !key) {
-    throw new Error('Supabase configuration missing (SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required)');
-  }
-
-  return createClient(url, key, {
-    auth: {
-      persistSession: false,
-      autoRefreshToken: false
-    }
-  });
-};
 
 const DEFAULT_SYMBOLS = ['EURUSD', 'GBPUSD', 'XAUUSD', 'BTCUSD', 'NAS100', 'US30'];
 
