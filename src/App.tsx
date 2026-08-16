@@ -1381,7 +1381,14 @@ export default function App() {
     setGeminiTestResult(null);
     const trimmed = geminiKey.trim();
     if (!trimmed) {
-      const res = { status: 'invalid' as const, message: '✕ Invalid Gemini API key' };
+      const res: GeminiTestResult = {
+        success: false,
+        provider: 'gemini',
+        credentialType: 'unknown',
+        status: 'invalid',
+        code: 'CREDENTIAL_REQUIRED',
+        message: 'Credential required.'
+      };
       setGeminiTestResult(res);
       setGeminiStatus('invalid');
       return;
@@ -1389,16 +1396,23 @@ export default function App() {
 
     setIsGeminiKeyTesting(true);
     try {
-      const res = await testGeminiKey(trimmed);
+      const userEmail = session?.user?.email || undefined;
+      const res = await testGeminiKey(trimmed, userEmail);
       setGeminiTestResult(res);
       setGeminiStatus(res.status);
-      if (res.status === 'connected') {
-        triggerNotification("✓ Gemini API connected", "success");
+      if (res.success) {
+        triggerNotification("✓ Gemini credential verified", "success");
       } else {
         triggerNotification(res.message, "info");
       }
     } catch (err: any) {
-      const res = { status: 'connection_failed' as const, message: '⚠ Gemini connection failed' };
+      const res: GeminiTestResult = {
+        success: false,
+        provider: 'gemini',
+        credentialType: 'unknown',
+        status: 'connection_failed',
+        message: '⚠ Gemini connection failed.'
+      };
       setGeminiTestResult(res);
       setGeminiStatus('connection_failed');
       triggerNotification("⚠ Gemini connection failed", "info");
@@ -1413,20 +1427,23 @@ export default function App() {
     setGeminiTestResult(null);
     const trimmed = geminiKey.trim();
     if (!trimmed) {
-      setGeminiKeyError("API key cannot be empty.");
-      triggerNotification("API key cannot be empty.", "info");
+      setGeminiKeyError("Credential required.");
+      triggerNotification("Credential required.", "info");
       return;
     }
 
     setIsGeminiKeySaving(true);
     try {
       const result = await saveGeminiKey(trimmed);
+      if (result.testResult) {
+        setGeminiTestResult(result.testResult);
+      }
       if (result.success) {
         setGeminiKeyExists(true);
         setGeminiStatus(result.status || 'connected');
         setWatcherErrorMessage(null);
-        setGeminiKeySuccess(geminiKeyExists ? "Gemini API key updated successfully!" : "Gemini API key saved successfully!");
-        triggerNotification(geminiKeyExists ? "Gemini API key updated!" : "Gemini API key saved!", "success");
+        setGeminiKeySuccess(geminiKeyExists ? "Gemini credential updated successfully!" : "Gemini credential saved successfully!");
+        triggerNotification(geminiKeyExists ? "Gemini credential updated!" : "Gemini credential saved!", "success");
       } else {
         const errorMsg = result.error || "Could not save Gemini API key. Please try again.";
         setGeminiKeyError(errorMsg);

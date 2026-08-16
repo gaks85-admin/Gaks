@@ -15,7 +15,7 @@ import {
   AlertTriangle,
   XCircle
 } from 'lucide-react';
-import { GEMINI_API_KEY_URL, GeminiTestResult } from '../lib/apiKeys.js';
+import { GEMINI_API_KEY_URL, GeminiTestResult, classifyCredentialType } from '../lib/apiKeys.js';
 
 export interface SettingsTabProps {
   profileAvatarUrl: string;
@@ -252,13 +252,13 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
           </form>
         </div>
 
-        {/* AI Configuration / Gemini API Key Section */}
+        {/* AI Configuration / Gemini API Credential Section */}
         <div className="space-y-8">
           <div className="space-y-6">
             <div className="flex items-center justify-between px-1">
               <div className="flex items-center gap-2">
                 <Sparkles className="w-4 h-4 text-amber-500" />
-                <h3 className="text-xs font-bold text-zinc-900 dark:text-white uppercase tracking-widest">Gemini API Key</h3>
+                <h3 className="text-xs font-bold text-zinc-900 dark:text-white uppercase tracking-widest">Gemini API Credential</h3>
               </div>
               <div className="flex items-center gap-2">
                 <span className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-widest">Gemini:</span>
@@ -300,7 +300,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
             <div className="p-8 rounded-[32px] border border-zinc-100 dark:border-zinc-900 bg-zinc-50/50 dark:bg-[#0c0c0e]/60 space-y-6">
               <div className="space-y-3">
                 <p className="text-xs text-zinc-600 dark:text-zinc-300 leading-relaxed font-medium">
-                  Your Gemini API key allows Gaks AI to use Gemini when a market setup requires additional AI evaluation.
+                  Gaks AI supports current Gemini authorization keys (<code className="text-amber-600 dark:text-amber-400 font-mono">AQ...</code>) and standard Gemini API keys (<code className="text-amber-600 dark:text-amber-400 font-mono">AIza...</code>).
                 </p>
 
                 {/* Official Google AI Studio API Key URL */}
@@ -320,37 +320,47 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
               {/* 3-Step Guided Onboarding Helper */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-1">
                 <div className="p-3.5 rounded-2xl bg-white dark:bg-zinc-950/40 border border-zinc-200/80 dark:border-zinc-800/80 space-y-1">
-                  <div className="text-[10px] font-bold text-amber-600 dark:text-amber-400 uppercase tracking-widest">Step 1 — Get your key</div>
-                  <p className="text-[11px] text-zinc-600 dark:text-zinc-400 leading-snug">Open Google AI Studio and create a Gemini API key.</p>
+                  <div className="text-[10px] font-bold text-amber-600 dark:text-amber-400 uppercase tracking-widest">Step 1 — Get credential</div>
+                  <p className="text-[11px] text-zinc-600 dark:text-zinc-400 leading-snug">Open Google AI Studio and copy your Gemini API key or authorization credential.</p>
                 </div>
                 <div className="p-3.5 rounded-2xl bg-white dark:bg-zinc-950/40 border border-zinc-200/80 dark:border-zinc-800/80 space-y-1">
-                  <div className="text-[10px] font-bold text-amber-600 dark:text-amber-400 uppercase tracking-widest">Step 2 — Copy it</div>
-                  <p className="text-[11px] text-zinc-600 dark:text-zinc-400 leading-snug">Copy the generated API key.</p>
+                  <div className="text-[10px] font-bold text-amber-600 dark:text-amber-400 uppercase tracking-widest">Step 2 — Paste credential</div>
+                  <p className="text-[11px] text-zinc-600 dark:text-zinc-400 leading-snug">Paste your key below. Both standard and authorization formats are accepted.</p>
                 </div>
                 <div className="p-3.5 rounded-2xl bg-white dark:bg-zinc-950/40 border border-zinc-200/80 dark:border-zinc-800/80 space-y-1">
-                  <div className="text-[10px] font-bold text-amber-600 dark:text-amber-400 uppercase tracking-widest">Step 3 — Paste it here</div>
-                  <p className="text-[11px] text-zinc-600 dark:text-zinc-400 leading-snug">Return to Gaks AI, paste the key, test it, and save it.</p>
+                  <div className="text-[10px] font-bold text-amber-600 dark:text-amber-400 uppercase tracking-widest">Step 3 — Verify & Save</div>
+                  <p className="text-[11px] text-zinc-600 dark:text-zinc-400 leading-snug">Test the credential before saving. Only authenticated credentials can be saved.</p>
                 </div>
               </div>
 
               {/* Key Input & Actions */}
               <div className="space-y-4 pt-2">
-                <div className="relative rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950/40 focus-within:border-zinc-400 dark:focus-within:border-zinc-700 transition-all overflow-hidden flex items-center pr-2">
-                  <input
-                    type={showKeyText ? "text" : "password"}
-                    value={geminiKey}
-                    onChange={(e) => setGeminiKey(e.target.value)}
-                    placeholder="Paste your Gemini API key"
-                    className="w-full bg-transparent border-0 px-4 py-3.5 text-xs text-zinc-900 dark:text-white focus:outline-none focus:ring-0 font-mono placeholder:text-zinc-400 dark:placeholder:text-zinc-600"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowKeyText(!showKeyText)}
-                    className="p-2 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors cursor-pointer"
-                    title={showKeyText ? "Hide key" : "Show key"}
-                  >
-                    {showKeyText ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </button>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between px-1">
+                    <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">Gemini Credential</label>
+                    {geminiKey.trim() && (
+                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-zinc-200 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300">
+                        {classifyCredentialType(geminiKey) === 'authorization' ? 'Authorization Key (AQ...)' : classifyCredentialType(geminiKey) === 'standard' ? 'Standard API Key (AIza...)' : 'Custom Credential'}
+                      </span>
+                    )}
+                  </div>
+                  <div className="relative rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950/40 focus-within:border-zinc-400 dark:focus-within:border-zinc-700 transition-all overflow-hidden flex items-center pr-2">
+                    <input
+                      type={showKeyText ? "text" : "password"}
+                      value={geminiKey}
+                      onChange={(e) => setGeminiKey(e.target.value)}
+                      placeholder="Paste your Gemini API key or authorization credential"
+                      className="w-full bg-transparent border-0 px-4 py-3.5 text-xs text-zinc-900 dark:text-white focus:outline-none focus:ring-0 font-mono placeholder:text-zinc-400 dark:placeholder:text-zinc-600"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowKeyText(!showKeyText)}
+                      className="p-2 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors cursor-pointer"
+                      title={showKeyText ? "Hide key" : "Show key"}
+                    >
+                      {showKeyText ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
                 </div>
 
                 <div className="flex flex-col sm:flex-row items-center gap-3">
@@ -363,7 +373,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
                     {isGeminiKeyTesting ? (
                       <>
                         <div className="w-3.5 h-3.5 rounded-full border-2 border-zinc-900 dark:border-white border-t-transparent animate-spin"></div>
-                        <span>Testing Key...</span>
+                        <span>Testing Credential...</span>
                       </>
                     ) : (
                       <>
@@ -408,13 +418,17 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
                 {/* Feedback Badges */}
                 {geminiTestResult && (
                   <div className={`p-3.5 rounded-2xl border text-xs font-semibold flex items-center gap-2 ${
-                    geminiTestResult.status === 'connected'
+                    geminiTestResult.status === 'connected' || geminiTestResult.success
                       ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400'
                       : geminiTestResult.status === 'quota_exhausted'
                       ? 'bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-400'
                       : 'bg-rose-500/10 border-rose-500/30 text-rose-600 dark:text-rose-400'
                   }`}>
-                    <span>{geminiTestResult.message}</span>
+                    <span>
+                      {geminiTestResult.success
+                        ? `${geminiTestResult.message} (${geminiTestResult.credentialType === 'authorization' ? 'Authorization Key' : 'Standard Key'})`
+                        : geminiTestResult.message}
+                    </span>
                   </div>
                 )}
 

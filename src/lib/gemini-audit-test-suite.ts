@@ -1,5 +1,5 @@
 import { resolveUserGeminiKey, classifyAndRedactGeminiError, redactApiKeyInText } from './gemini-key-resolver.js';
-import { redactApiKey } from './apiKeys.js';
+import { redactApiKey, classifyCredentialType } from './apiKeys.js';
 
 export async function runGeminiAuditTestSuite(): Promise<{ passed: number; total: number; failed: number }> {
   console.log("==========================================");
@@ -150,6 +150,25 @@ export async function runGeminiAuditTestSuite(): Promise<{ passed: number; total
   assert(!redactedString.includes('UserA_Key_123456'), 'Test J1 - redactApiKey hides key middle payload');
   assert(!cleanedText.includes(rawKeySecret), 'Test J2 - redactApiKeyInText scrubs raw key from error message text');
   assert(cleanedText.includes('[REDACTED_GEMINI_KEY]'), 'Test J3 - Scrubbed key replaced with [REDACTED_GEMINI_KEY]');
+
+  // ==========================================
+  // TEST K: CREDENTIAL CLASSIFICATION
+  // ==========================================
+  console.log("\n--- TEST K: Credential classification ---");
+  assert(classifyCredentialType('AIzaSy1234567890') === 'standard', 'Test K1 - AIza key classified as standard');
+  assert(classifyCredentialType('AQ.12345678901234567890') === 'authorization', 'Test K2 - AQ key classified as authorization');
+  assert(classifyCredentialType('AQ12345678901234567890') === 'authorization', 'Test K3 - AQ key without dot classified as authorization');
+  assert(classifyCredentialType('XYZ1234567890') === 'unknown', 'Test K4 - Unrecognized key classified as unknown');
+
+  // ==========================================
+  // TEST L: AQ KEY REDACTION IN LOGS
+  // ==========================================
+  console.log("\n--- TEST L: AQ Key Redaction in Logs ---");
+  const aqSecret = 'AQ.1234567890abcdef1234567890abcdef';
+  const textWithAq = `Failed request with authorization key ${aqSecret} from user`;
+  const cleanedAqText = redactApiKeyInText(textWithAq);
+  assert(!cleanedAqText.includes(aqSecret), 'Test L1 - AQ key redacted from text');
+  assert(cleanedAqText.includes('[REDACTED_GEMINI_KEY]'), 'Test L2 - AQ key replaced with [REDACTED_GEMINI_KEY]');
 
   console.log(`\n==========================================`);
   console.log(`GEMINI AUDIT TESTS COMPLETED: ${passedCount}/${totalCount} PASSED`);

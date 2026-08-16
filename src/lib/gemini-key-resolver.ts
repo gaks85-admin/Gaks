@@ -11,11 +11,14 @@ export interface GeminiKeyResolutionResult {
 }
 
 /**
- * Redacts any embedded Gemini API key (e.g. AIzaSy...) inside arbitrary text or error messages.
+ * Redacts any embedded Gemini API key (e.g. AIzaSy... or AQ...) inside arbitrary text or error messages.
  */
 export function redactApiKeyInText(text: string | null | undefined): string {
   if (!text) return '';
-  return text.replace(/AIzaSy[A-Za-z0-9_-]{20,60}/g, '[REDACTED_GEMINI_KEY]');
+  return text
+    .replace(/AIzaSy[A-Za-z0-9_-]{20,60}/g, '[REDACTED_GEMINI_KEY]')
+    .replace(/AQ\.[A-Za-z0-9_-]{10,120}/g, '[REDACTED_GEMINI_KEY]')
+    .replace(/AQ[A-Za-z0-9_-]{10,120}/g, '[REDACTED_GEMINI_KEY]');
 }
 
 /**
@@ -102,6 +105,8 @@ export function classifyAndRedactGeminiError(error: any): GeminiErrorClassificat
     errStatus === 403 ||
     lowerMsg.includes('invalid api key') ||
     lowerMsg.includes('permission denied') ||
+    lowerMsg.includes('access_token_type_unsupported') ||
+    lowerMsg.includes('unauthenticated') ||
     lowerMsg.includes('invalid') ||
     lowerMsg.includes('unauthorized') ||
     lowerMsg.includes('api_key_invalid')
