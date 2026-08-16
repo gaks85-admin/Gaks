@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-import { WatcherLogContext, logWatcherEvent, logWatcherError, logWatcherWarn } from '../../src/lib/watcher-logger.js';
+import { WatcherLogContext, logWatcherEvent, logWatcherError, logWatcherWarn, resolveWatcherUserContext } from '../../src/lib/watcher-logger.js';
 import { GoogleGenAI, Type } from '@google/genai';
 import { analyzeMarket, Candle } from '../../src/lib/strategy-engine.js';
 import { ParsedStrategy } from '../../src/lib/strategy-parser.js';
@@ -693,23 +693,24 @@ export default async function handler(req: any, res: any) {
       }
 
       const userId = watcher.user_id;
-      const { data: userProfile } = await supabase
-        .from("profiles")
-        .select("email, gemini_status, gemini_last_error, gemini_last_checked")
-        .eq("id", userId)
-        .maybeSingle();
-
-      const userEmail = userProfile?.email || 'unknown';
+      const logCtx = await resolveWatcherUserContext(supabase, watcher);
+      const userEmail = logCtx.userEmail;
       const selectedPair = toCanonicalSymbol(watcher.selected_pair || "") || watcher.selected_pair || 'unknown';
       const symbol = selectedPair;
-      const selectedTimeframe = watcher.selected_timeframe || 'H1';
+      const selectedTimeframe = logCtx.timeframe;
 
-      const logCtx: WatcherLogContext = {
-        userEmail,
-        watcherId: watcher.id || 'unknown',
-        pair: selectedPair,
-        timeframe: selectedTimeframe
-      };
+      // Query user profile safely for gemini status
+      let userProfile: any = null;
+      try {
+        const { data: pData } = await supabase
+          .from("profiles")
+          .select("*")
+          .eq("id", userId)
+          .maybeSingle();
+        userProfile = pData || null;
+      } catch (err) {
+        // Safe profile query fallback
+      }
 
       logWatcherEvent('WATCHER START', logCtx, `Status: ${watcher.status}`);
 
@@ -2905,12 +2906,7 @@ Source: ${brokerQuote.source}`);
         results.push({ userId, symbol, tradeStatus: 'ACTIVE', signalsFound: 1, signalsSent: alertSent ? 1 : 0 });
 
       } catch (err: any) {
-        const fallbackCtx: WatcherLogContext = typeof logCtx !== 'undefined' ? logCtx : {
-          userEmail: userProfile?.email || 'unknown',
-          watcherId: watcher?.id || 'unknown',
-          pair: watcher?.selected_pair || 'unknown',
-          timeframe: watcher?.selected_timeframe || 'unknown'
-        };
+        const fallbackCtx: WatcherLogContext = typeof logCtx !== 'undefined' ? logCtx : await resolveWatcherUserContext(supabase, watcher);
         logWatcherError('WATCHER ERROR', fallbackCtx, err);
         
         errors.push({ userId, error: err.message || "Unknown error" });
