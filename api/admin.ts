@@ -7,7 +7,7 @@ import { timeframeToMinutes } from '../src/lib/timeframe.js';
 import { extractRiskPreferences, calculatePositionSize } from '../src/lib/risk-engine.js';
 import { resolveUserGeminiKey } from '../src/lib/gemini-key-resolver.js';
 import { defaultMarketDataService } from '../src/lib/market-data-service.js';
-import { sendNotificationEmail } from '../src/lib/email-service';
+import { sendNotificationEmail } from '../src/lib/email-service.js';
 
 // --- Inlined Gemini & Telegram Wrappers ---
 
