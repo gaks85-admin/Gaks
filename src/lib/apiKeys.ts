@@ -62,7 +62,7 @@ export function parseGeminiError(err: any): {
   reason?: string;
   message: string;
 } {
-  let status = err?.status || 0;
+  let status = err?.status || err?.statusCode || err?.response?.status || 0;
   let code = 'UNKNOWN_ERROR';
   let reason: string | undefined = undefined;
   let rawMessage = typeof err?.message === 'string' ? err.message : String(err || '');
@@ -86,10 +86,10 @@ export function parseGeminiError(err: any): {
   const lowerMsg = rawMessage.toLowerCase();
 
   if (!status) {
-    if (code === 'UNAUTHENTICATED' || lowerMsg.includes('unauthenticated')) status = 401;
+    if (code === 'UNAUTHENTICATED' || lowerMsg.includes('unauthenticated') || lowerMsg.includes('oauth') || lowerMsg.includes('credential')) status = 401;
     else if (code === 'PERMISSION_DENIED' || lowerMsg.includes('permission')) status = 403;
     else if (code === 'RESOURCE_EXHAUSTED' || lowerMsg.includes('quota') || lowerMsg.includes('rate limit')) status = 429;
-    else if (code === 'INVALID_ARGUMENT' || lowerMsg.includes('invalid')) status = 400;
+    else if (code === 'INVALID_ARGUMENT' || lowerMsg.includes('invalid') || lowerMsg.includes('api_key_invalid')) status = 400;
   }
 
   let message = rawMessage;
@@ -136,9 +136,16 @@ export async function testGeminiKey(key: string, userEmail?: string): Promise<Ge
   const redacted = redactApiKey(trimmedKey);
 
   try {
-    const ai = new GoogleGenAI({ apiKey: trimmedKey });
+    const ai = new GoogleGenAI({
+      apiKey: trimmedKey,
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build'
+        }
+      }
+    });
     await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3.6-flash',
       contents: 'ping'
     });
 
