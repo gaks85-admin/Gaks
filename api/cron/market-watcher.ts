@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { CronTimer } from '../../src/lib/cron-timer.js';
 import { WatcherLogContext, logWatcherEvent, logWatcherError, logWatcherWarn, resolveWatcherUserContext } from '../../src/lib/watcher-logger.js';
 import { GoogleGenAI, Type } from '@google/genai';
 import { analyzeMarket, Candle } from '../../src/lib/strategy-engine.js';
@@ -473,6 +474,7 @@ export default async function handler(req: any, res: any) {
   try {
     console.log("[CRON STEP 1] Handler entered");
     const startTime = Date.now();
+    const cronTimer = new CronTimer({ warningThresholdMs: 25000, timeLimitMs: 30000 });
 
     // 1. Load Environment Variables
     const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || '';
@@ -653,9 +655,11 @@ export default async function handler(req: any, res: any) {
 
     console.log("[CRON STEP 4]");
     console.log(`LOG: Active watchers found: ${watchers ? watchers.length : 0}`);
+    cronTimer.setDiscoveredCount(watchers ? watchers.length : 0);
     
     if (!watchers || watchers.length === 0) {
       console.log("LOG: Cron completed (No active watchers)");
+      cronTimer.printSummary();
       return res.status(200).json({
         success: true,
         processed: 0,
@@ -682,65 +686,79 @@ export default async function handler(req: any, res: any) {
 
     // Process each active watcher sequentially to respect Twelve Data free limits
     for (const watcher of watchers) {
+      let isWatcherSkipped = true;
       let geminiInvoked = false;
       let geminiSucceeded = false;
       let geminiDecision: 'BUY' | 'SELL' | 'NO_TRADE' | null = null;
-      if (!watcher || watcher.status !== 'active') {
-        console.log(`LOG: Watcher ${watcher?.id} skipped - Status is '${watcher?.status}' (not active)`);
-        skipped.push({ userId: watcher?.user_id || 'unknown', reason: `Watcher status is ${watcher?.status || 'stopped/deleted'}` });
-        watchersSkippedCount++;
-        continue;
-      }
 
-      const userId = watcher.user_id;
+      const userId = watcher?.user_id || 'unknown';
       const logCtx = await resolveWatcherUserContext(supabase, watcher);
       const userEmail = logCtx.userEmail;
-      const selectedPair = toCanonicalSymbol(watcher.selected_pair || "") || watcher.selected_pair || 'unknown';
+      const selectedPair = toCanonicalSymbol(watcher?.selected_pair || "") || watcher?.selected_pair || 'unknown';
       const symbol = selectedPair;
       const selectedTimeframe = logCtx.timeframe;
 
-      // Query user profile safely for gemini status
-      let userProfile: any = null;
+      cronTimer.startWatcher({
+        userEmail,
+        watcherId: watcher?.id || 'unknown',
+        pair: selectedPair,
+        timeframe: selectedTimeframe
+      });
+
       try {
-        const { data: pData } = await supabase
-          .from("profiles")
-          .select("*")
-          .eq("id", userId)
+        cronTimer.startStage("Context & Profile Verification");
+
+        if (!watcher || watcher.status !== 'active') {
+          console.log(`LOG: Watcher ${watcher?.id} skipped - Status is '${watcher?.status}' (not active)`);
+          skipped.push({ userId: watcher?.user_id || 'unknown', reason: `Watcher status is ${watcher?.status || 'stopped/deleted'}` });
+          watchersSkippedCount++;
+          continue;
+        }
+
+        // Query user profile safely for gemini status
+        let userProfile: any = null;
+        try {
+          const { data: pData } = await supabase
+            .from("profiles")
+            .select("*")
+            .eq("id", userId)
+            .maybeSingle();
+          userProfile = pData || null;
+        } catch (err) {
+          // Safe profile query fallback
+        }
+
+        logWatcherEvent('WATCHER START', logCtx, `Status: ${watcher.status}`);
+
+        const { data: telegramConn } = await supabase
+          .from("telegram_connections")
+          .select("telegram_chat_id, connected")
+          .eq("user_id", userId)
           .maybeSingle();
-        userProfile = pData || null;
-      } catch (err) {
-        // Safe profile query fallback
-      }
+        const telegramChatId = (telegramConn && telegramConn.connected) ? telegramConn.telegram_chat_id : (watcher.telegram_chat_id || null);
 
-      logWatcherEvent('WATCHER START', logCtx, `Status: ${watcher.status}`);
+        const geminiStatus = userProfile?.gemini_status || 'READY';
+        if (geminiStatus !== 'READY') {
+          logWatcherError('Gemini ERROR', logCtx, userProfile?.gemini_last_error || 'Gemini unavailable', {
+            'Gemini Status': geminiStatus,
+            'Action': 'Skipped'
+          });
 
-      const { data: telegramConn } = await supabase
-        .from("telegram_connections")
-        .select("telegram_chat_id, connected")
-        .eq("user_id", userId)
-        .maybeSingle();
-      const telegramChatId = (telegramConn && telegramConn.connected) ? telegramConn.telegram_chat_id : (watcher.telegram_chat_id || null);
+          skipped.push({ userId, reason: `Gemini unavailable (${geminiStatus}): ${userProfile?.gemini_last_error || 'N/A'}` });
+          watchersSkippedCount++;
+          continue;
+        }
+        watchersReadyCount++;
 
-      const geminiStatus = userProfile?.gemini_status || 'READY';
-      if (geminiStatus !== 'READY') {
-        logWatcherError('Gemini ERROR', logCtx, userProfile?.gemini_last_error || 'Gemini unavailable', {
-          'Gemini Status': geminiStatus,
-          'Action': 'Skipped'
-        });
+        // Ensure the endpoint finishes within 30 seconds by stopping early if needed
+        if (cronTimer.isApproachingLimit()) {
+          console.warn(`[CRON TIMING WARNING] Cron execution time (${cronTimer.getElapsedTimeMs()}ms) reached warning threshold (25000ms / 30000ms limit). Stopping early.`);
+          cronTimer.markEarlyExit();
+          break;
+        }
 
-        skipped.push({ userId, reason: `Gemini unavailable (${geminiStatus}): ${userProfile?.gemini_last_error || 'N/A'}` });
-        watchersSkippedCount++;
-        continue;
-      }
-      watchersReadyCount++;
-
-      // Ensure the endpoint finishes within 30 seconds by stopping early if needed
-      if (Date.now() - startTime > 25000) {
-        console.warn("LOG: Approaching 30s timeout limit. Stopping early.");
-        break;
-      }
-
-      let tradeStatus = (watcher.trade_status || 'WAITING').toUpperCase().trim();
+        cronTimer.startStage("Watcher Scheduling & Due Check");
+        let tradeStatus = (watcher.trade_status || 'WAITING').toUpperCase().trim();
       const now = new Date();
       const scanIntervalMinutes = getScanIntervalMinutes(watcher);
 
@@ -793,6 +811,7 @@ export default async function handler(req: any, res: any) {
       // =====================================================================
       // STAGE 5 IDEMPOTENCY LOCK: CAS update on last_scan_at
       // =====================================================================
+      cronTimer.startStage("CAS Idempotency Lock");
       const lockTime = now.toISOString();
       let lockQuery = supabase.from("watchers").update({ last_scan_at: lockTime }).eq("id", watcher.id);
       if (watcher.last_scan_at) {
@@ -814,6 +833,7 @@ export default async function handler(req: any, res: any) {
       // STATE 3 — COOLDOWN
       // =====================================================================
       if (tradeStatus === 'COOLDOWN') {
+        cronTimer.startStage("State 3 - Cooldown Check");
         const cooldownUntilDate = watcher.cooldown_until ? new Date(watcher.cooldown_until) : null;
         const isCooldownExpired = !cooldownUntilDate || (now.getTime() >= cooldownUntilDate.getTime());
 
@@ -829,6 +849,7 @@ export default async function handler(req: any, res: any) {
           });
 
           watchersProcessedCount++;
+          isWatcherSkipped = false;
           results.push({ userId, symbol, tradeStatus: 'COOLDOWN', result: 'In cooldown' });
           continue;
         }
@@ -859,6 +880,7 @@ export default async function handler(req: any, res: any) {
         }
 
         watchersProcessedCount++;
+        isWatcherSkipped = false;
         results.push({ userId, symbol, tradeStatus: 'COOLDOWN', result: 'Cooldown expired, reset to WAITING' });
         continue;
       }
@@ -868,6 +890,7 @@ export default async function handler(req: any, res: any) {
       // =====================================================================
       console.log(`ENTERING ACTIVE`);
       if (tradeStatus === 'ACTIVE') {
+        cronTimer.startStage("State 2 - Active Trade Monitoring");
         console.log(`[BRANCH EXECUTED] ACTIVE branch (Price Monitoring Only) for Watcher ID: ${watcher.id}`);
 
         const activeValidation = validateActiveTradeState(watcher);
@@ -1039,6 +1062,7 @@ Reason: ${activeValidation.reason}`);
         if (!isTP && !isSL) {
           console.log(`[STATE 2 - ACTIVE] Neither TP nor SL hit for Watcher ID: ${watcher.id} (${selectedPair}). Exiting immediately.`);
           watchersProcessedCount++;
+          isWatcherSkipped = false;
           results.push({ userId, symbol, tradeStatus: 'ACTIVE', result: 'Holding' });
           console.log(`ACTIVE branch exited.`);
           continue;
@@ -1125,6 +1149,7 @@ Reason: ${activeValidation.reason}`);
           }
 
           watchersProcessedCount++;
+          isWatcherSkipped = false;
           results.push({ userId, symbol, tradeStatus: 'COOLDOWN', result: 'Closed TP' });
           console.log(`ACTIVE branch exited.`);
           continue;
@@ -1211,6 +1236,7 @@ Reason: ${activeValidation.reason}`);
           }
 
           watchersProcessedCount++;
+          isWatcherSkipped = false;
           results.push({ userId, symbol, tradeStatus: 'COOLDOWN', result: 'Closed SL' });
           console.log(`ACTIVE branch exited.`);
           continue;
@@ -1229,6 +1255,7 @@ Reason: ${activeValidation.reason}`);
         continue;
       }
 
+      cronTimer.startStage("State 1 - Load Preferences & Strategy");
       console.log(`[BRANCH EXECUTED] WAITING branch for Watcher ID: ${watcher.id}`);
 
       let executionLogs: { time: string; message: string; type: 'info' | 'success' | 'error' | 'warning' }[] = [];
@@ -1439,6 +1466,7 @@ Reason: ${activeValidation.reason}`);
 
         // Extract market structure & compile strategy
         addLog("Strategy Compiled", "success");
+        cronTimer.startStage("Market Structure & Strategy Compilation");
         const compiledStrategy = compileStrategy(strategyText);
         const strategyCompilationConfidenceRecord = normalizeConfidence(
           compiledStrategy.overall_confidence ?? compiledStrategy.confidence,
@@ -1454,6 +1482,7 @@ Reason: ${activeValidation.reason}`);
         const pipSize = (cleanSymUpper.includes('JPY') || cleanSymUpper.includes('XAU') || cleanSymUpper.includes('GOLD')) ? 0.01 : 0.0001;
 
         // Run Weighted Decision Engine (Pass 1 to get matched rules)
+        cronTimer.startStage("Decision Engine Evaluation");
         (marketStructure as any).pair = selectedPair;
         (marketStructure as any).timeframe = selectedTimeframe;
         (marketStructure as any).lastClosedCandleTimestamp = candleData[candleData.length - 2]?.timestamp || '';
@@ -1569,6 +1598,7 @@ Reason: ${decisionResult.explanation || (requiresGemini ? 'Strategy configuratio
 `.trim());
 
           if (requiresGemini) {
+            cronTimer.startStage("Gemini AI Execution");
             addLog("Gemini Required", "success");
             addLog("Calling Gemini", "success");
             geminiInvoked = true;
@@ -1917,6 +1947,7 @@ Output ONLY valid JSON.
 
         console.log(`LOG: Signal result for ${selectedPair}: ${analysis.signal} (Confidence: ${analysis.confidence}%)`);
 
+        cronTimer.startStage("Quality Gate & Risk Governor");
         let qualityResult: any = null;
         let governorResult: any = null;
         let calibrationResult: any = null;
@@ -2214,9 +2245,11 @@ Reason: ${adaptiveReq.reason}
               .eq("id", watcher.id);
 
             watchersProcessedCount++;
+            isWatcherSkipped = false;
             continue;
         }
 
+        cronTimer.startStage("Position Sizing & Validation");
         const executedPrice = Number(candleData[candleData.length - 1]?.close) || Number(analysis.entryPrice) || 0;
         const posSizeResult = calculatePositionSize({
           accountSize: accountSize,
@@ -2480,6 +2513,7 @@ Source: ${brokerQuote.source}`);
         }
 
         // === STAGE 8: CRASH RECOVERY & IDEMPOTENCY ===
+        cronTimer.startStage("Broker Order & Signal Registration");
         const stableClientOrderId = `cl-${watcher.id}-${latestClosedCandleTime.replace(/[:.-]/g, '')}`;
         
         let brokerOrder: BrokerOrder | null = null;
@@ -2802,6 +2836,7 @@ Source: ${brokerQuote.source}`);
         }
 
         // Send ONE Telegram signal with Signal Deduplication Check
+        cronTimer.startStage("Telegram Alert & DB Persistence");
         let alertSent = false;
         let alertReason = "";
 
@@ -2903,6 +2938,7 @@ Source: ${brokerQuote.source}`);
         });
 
         watchersProcessedCount++;
+        isWatcherSkipped = false;
         results.push({ userId, symbol, tradeStatus: 'ACTIVE', signalsFound: 1, signalsSent: alertSent ? 1 : 0 });
 
       } catch (err: any) {
@@ -2911,6 +2947,9 @@ Source: ${brokerQuote.source}`);
         
         errors.push({ userId, error: err.message || "Unknown error" });
         watchersSkippedCount++;
+      }
+      } finally {
+        cronTimer.endWatcher(isWatcherSkipped);
       }
     }
 
@@ -2963,6 +3002,8 @@ Source: ${brokerQuote.source}`);
     } catch (e) {
       console.error("Failed to cleanup old logs:", e);
     }
+
+    cronTimer.printSummary();
 
     return res.status(200).json({
       success: true,
