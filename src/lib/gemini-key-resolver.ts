@@ -83,8 +83,11 @@ Status: ${status}`);
 
 export interface GeminiErrorClassification {
   profileStatus: 'INVALID_KEY' | 'QUOTA_EXHAUSTED' | 'TEMP_ERROR' | 'NEEDS_ATTENTION';
-  diagnosticStatus: 'INVALID_KEY' | 'QUOTA_EXHAUSTED' | 'TIMEOUT' | 'API_ERROR';
+  diagnosticStatus: 'INVALID_KEY' | 'QUOTA_EXHAUSTED' | 'TIMEOUT' | 'TEMPORARY_ERROR' | 'INVALID_REQUEST' | 'PERMISSION_ERROR' | 'API_ERROR';
   cleanErrorMessage: string;
+  is503: boolean;
+  isTimeout: boolean;
+  isQuota: boolean;
 }
 
 /**
@@ -94,44 +97,48 @@ export interface GeminiErrorClassification {
 export function classifyAndRedactGeminiError(error: any): GeminiErrorClassification {
   const rawMsg = error?.message || String(error);
   const cleanMsg = redactApiKeyInText(rawMsg);
-  const errStatus = error?.status || 0;
+  const errStatus = error?.status || error?.statusCode || (error?.code ? Number(error.code) : 0);
   const lowerMsg = cleanMsg.toLowerCase();
 
   let profileStatus: 'INVALID_KEY' | 'QUOTA_EXHAUSTED' | 'TEMP_ERROR' | 'NEEDS_ATTENTION' = 'NEEDS_ATTENTION';
-  let diagnosticStatus: 'INVALID_KEY' | 'QUOTA_EXHAUSTED' | 'TIMEOUT' | 'API_ERROR' = 'API_ERROR';
+  let diagnosticStatus: 'INVALID_KEY' | 'QUOTA_EXHAUSTED' | 'TIMEOUT' | 'TEMPORARY_ERROR' | 'INVALID_REQUEST' | 'PERMISSION_ERROR' | 'API_ERROR' = 'API_ERROR';
+
+  const isTimeout = lowerMsg.includes('timeout') || lowerMsg.includes('etimedout') || error?.name === 'TimeoutError' || error?.name === 'AbortError' || lowerMsg.includes('abort');
+  const is503 = errStatus === 503 || lowerMsg.includes('503') || lowerMsg.includes('unavailable') || lowerMsg.includes('high demand') || lowerMsg.includes('spikes in demand');
+  const isQuota = errStatus === 429 || lowerMsg.includes('429') || lowerMsg.includes('resource_exhausted') || lowerMsg.includes('quota exceeded') || lowerMsg.includes('rate limit') || lowerMsg.includes('retryinfo') || lowerMsg.includes('retrydelay');
 
   if (
     errStatus === 401 ||
-    errStatus === 403 ||
     lowerMsg.includes('invalid api key') ||
-    lowerMsg.includes('permission denied') ||
     lowerMsg.includes('access_token_type_unsupported') ||
     lowerMsg.includes('unauthenticated') ||
-    lowerMsg.includes('invalid') ||
-    lowerMsg.includes('unauthorized') ||
     lowerMsg.includes('api_key_invalid')
   ) {
     profileStatus = 'INVALID_KEY';
     diagnosticStatus = 'INVALID_KEY';
   } else if (
-    errStatus === 429 ||
-    lowerMsg.includes('resource_exhausted') ||
-    lowerMsg.includes('quota exceeded') ||
-    lowerMsg.includes('rate limit') ||
-    lowerMsg.includes('retryinfo') ||
-    lowerMsg.includes('retrydelay')
+    errStatus === 403 ||
+    lowerMsg.includes('permission denied') ||
+    lowerMsg.includes('forbidden')
   ) {
+    profileStatus = 'INVALID_KEY';
+    diagnosticStatus = 'PERMISSION_ERROR';
+  } else if (
+    errStatus === 400 ||
+    lowerMsg.includes('invalid argument') ||
+    lowerMsg.includes('bad request')
+  ) {
+    profileStatus = 'NEEDS_ATTENTION';
+    diagnosticStatus = 'INVALID_REQUEST';
+  } else if (isQuota) {
     profileStatus = 'QUOTA_EXHAUSTED';
     diagnosticStatus = 'QUOTA_EXHAUSTED';
-  } else if (
-    errStatus >= 500 ||
-    errStatus === 503 ||
-    lowerMsg.includes('timeout') ||
-    lowerMsg.includes('gateway') ||
-    lowerMsg.includes('network')
-  ) {
+  } else if (isTimeout) {
     profileStatus = 'TEMP_ERROR';
     diagnosticStatus = 'TIMEOUT';
+  } else if (is503 || errStatus >= 500 || lowerMsg.includes('gateway') || lowerMsg.includes('network')) {
+    profileStatus = 'TEMP_ERROR';
+    diagnosticStatus = 'TEMPORARY_ERROR';
   } else {
     profileStatus = 'NEEDS_ATTENTION';
     diagnosticStatus = 'API_ERROR';
@@ -140,6 +147,9 @@ export function classifyAndRedactGeminiError(error: any): GeminiErrorClassificat
   return {
     profileStatus,
     diagnosticStatus,
-    cleanErrorMessage: cleanMsg
+    cleanErrorMessage: cleanMsg,
+    is503,
+    isTimeout,
+    isQuota
   };
 }

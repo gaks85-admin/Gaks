@@ -37,6 +37,7 @@ import { normalizeConfidence } from '../../src/lib/confidence-engine.js';
 import { evaluateQualityGate, calculateAdaptiveQualityRequirement, calculateConsecutiveLossesForWatcher } from '../../src/lib/quality-gate.js';
 import { checkSignalDeduplication } from '../../src/lib/signal-deduplication.js';
 import { resolveUserGeminiKey, classifyAndRedactGeminiError } from '../../src/lib/gemini-key-resolver.js';
+import { executeBoundedGeminiCall } from '../../src/lib/geminiWrapper.js';
 import { validateActiveTradeState, isWatcherDue } from '../../src/lib/trade-validator.js';
 import { computeEquityAnalytics, deriveEquityState, fetchUserCompletedTrades } from '../../src/lib/equity-learning-engine.js';
 import { evaluateRiskGovernor } from '../../src/lib/risk-governor.js';
@@ -680,12 +681,22 @@ export default async function handler(req: any, res: any) {
     let tempErrorCount = 0;
     let skippedDueToQuotaCount = 0;
     let geminiCallsExecutedCount = 0;
+    let geminiCallsRetriedCount = 0;
+    let geminiTimeoutsCount = 0;
+    let geminiQuotaErrorsCount = 0;
     let geminiCallsSavedCount = 0;
 
     console.log("[CRON STEP 5]");
 
     // Process each active watcher sequentially to respect Twelve Data free limits
     for (const watcher of watchers) {
+      // Global Cron Execution Deadline Check (Target budget ~30s, processing deadline 25s)
+      if (cronTimer.getElapsedTimeMs() >= 25000) {
+        console.warn(`[CRON DEADLINE] Remaining watchers skipped safely. Reason: Insufficient execution budget. (Elapsed: ${cronTimer.getElapsedTimeMs()}ms, Limit: 25000ms)`);
+        cronTimer.markEarlyExit();
+        break;
+      }
+
       let isWatcherSkipped = true;
       let geminiInvoked = false;
       let geminiSucceeded = false;
@@ -1652,6 +1663,37 @@ Reason: ${decisionResult.explanation || (requiresGemini ? 'Strategy configuratio
             try {
               const geminiKey = keyRes.apiKey;
               if (geminiKey) {
+                if (cronTimer.getElapsedTimeMs() >= 25000) {
+                  console.warn(`[CRON DEADLINE] Skipped Gemini for Watcher ${watcher.id} (${selectedPair}). Reason: Insufficient execution budget.`);
+                  cronTimer.markEarlyExit();
+                  const scanDurationMs = Date.now() - scanStart;
+                  await recordEvaluation(supabase, {
+                    user_id: userId,
+                    watcher_id: watcher.id,
+                    pair: selectedPair,
+                    timeframe: selectedTimeframe,
+                    strategy_mode: compiledStrategy.strategy_mode,
+                    decision_score: decisionResult.decision_score,
+                    matched_weight: decisionResult.matched_weight,
+                    possible_weight: decisionResult.possible_weight,
+                    recommendation: decisionResult.recommendation,
+                    mandatory_rules_passed: decisionResult.mandatory_rules_passed,
+                    matched_rules: decisionResult.matched_rules,
+                    failed_rules: decisionResult.failed_rules,
+                    gemini_used: false,
+                    gemini_result: "Skipped due to cron safety deadline",
+                    trade_sent: false,
+                    trade_reason: "Cron execution safety deadline reached (25,000ms)",
+                    scan_duration_ms: scanDurationMs,
+                    gemini_duration_ms: null,
+                    decision_snapshot: decisionSnapshot
+                  });
+
+                  skipped.push({ userId, reason: "Cron safety deadline reached" });
+                  watchersSkippedCount++;
+                  continue;
+                }
+
                 logWatcherEvent('Gemini Analysis', logCtx, {
                   'Model': 'gemini-3.6-flash',
                   'Decision Score': decisionResult.decision_score,
@@ -1691,31 +1733,118 @@ AI Instructions:
 
 Output ONLY valid JSON.
 `;
-                const aiResponse = await ai.models.generateContent({
-                  model: "gemini-3.6-flash",
-                  contents: promptText,
-                  config: {
-                    responseMimeType: "application/json",
-                    responseSchema: {
-                      type: Type.OBJECT,
-                      properties: {
-                        satisfies: { type: Type.BOOLEAN },
-                        direction: { type: Type.STRING },
-                        confidenceScore: { type: Type.NUMBER },
-                        entryPrice: { type: Type.NUMBER },
-                        stopLoss: { type: Type.NUMBER },
-                        takeProfit: { type: Type.NUMBER },
-                        stopLossBasis: { type: Type.STRING },
-                        reasoning: { type: Type.STRING }
-                      },
-                      required: ["satisfies", "direction", "confidenceScore", "reasoning"]
-                    }
+                const geminiRes = await executeBoundedGeminiCall(
+                  ai,
+                  {
+                    model: "gemini-3.6-flash",
+                    contents: promptText,
+                    config: {
+                      responseMimeType: "application/json",
+                      responseSchema: {
+                        type: Type.OBJECT,
+                        properties: {
+                          satisfies: { type: Type.BOOLEAN },
+                          direction: { type: Type.STRING },
+                          confidenceScore: { type: Type.NUMBER },
+                          entryPrice: { type: Type.NUMBER },
+                          stopLoss: { type: Type.NUMBER },
+                          takeProfit: { type: Type.NUMBER },
+                          stopLossBasis: { type: Type.STRING },
+                          reasoning: { type: Type.STRING }
+                        },
+                        required: ["satisfies", "direction", "confidenceScore", "reasoning"]
+                      }
+                    },
+                    timeoutMs: 8000,
+                    maxRetriesFor503: 1,
+                    backoffMsFor503: 500
+                  },
+                  {
+                    userEmail: logCtx.userEmail,
+                    watcherId: watcher.id,
+                    pair: selectedPair
                   }
-                });
-                geminiCallsExecutedCount++;
-                geminiDuration = Date.now() - geminiStart;
-                geminiTextResult = aiResponse.text || "";
-                
+                );
+
+                geminiCallsExecutedCount += geminiRes.attemptsExecuted;
+                if (geminiRes.retried) {
+                  geminiCallsRetriedCount++;
+                }
+                geminiDuration = geminiRes.durationMs;
+
+                if (!geminiRes.success || !geminiRes.text) {
+                  const cleanErrMsg = geminiRes.cleanErrorMessage || "Gemini execution failed";
+                  if (geminiRes.errorType === 'TIMEOUT') {
+                    geminiTimeoutsCount++;
+                  } else if (geminiRes.errorType === 'QUOTA_EXHAUSTED') {
+                    geminiQuotaErrorsCount++;
+                    skippedDueToQuotaCount++;
+                  } else if (geminiRes.errorType === 'TEMPORARY_ERROR') {
+                    tempErrorCount++;
+                  } else if (geminiRes.errorType === 'INVALID_CREDENTIALS' || geminiRes.errorType === 'PERMISSION_ERROR') {
+                    invalidKeyCount++;
+                  }
+
+                  const profileStatus = geminiRes.errorType === 'QUOTA_EXHAUSTED' ? 'QUOTA_EXHAUSTED' :
+                                        (geminiRes.errorType === 'INVALID_CREDENTIALS' || geminiRes.errorType === 'PERMISSION_ERROR') ? 'INVALID_KEY' : 'TEMP_ERROR';
+
+                  logWatcherError('Gemini ERROR', logCtx, cleanErrMsg, {
+                    'Diagnostic Status': geminiRes.errorType || 'API_ERROR',
+                    'Clean Error': cleanErrMsg
+                  });
+
+                  logWatcherEvent('Gemini Decision', logCtx, {
+                    'Status': geminiRes.errorType || 'API_ERROR',
+                    'Direction': 'NO_TRADE',
+                    'Confidence': '0%',
+                    'Fallback': 'NO_TRADE'
+                  });
+
+                  await supabase.from("profiles").update({
+                    gemini_status: profileStatus,
+                    gemini_last_error: cleanErrMsg,
+                    gemini_last_checked: new Date().toISOString(),
+                    updated_at: new Date().toISOString()
+                  }).eq("id", userId);
+
+                  console.log(`========== AI STATUS ==========`);
+                  console.log(`User: ${userProfile?.email || userId}`);
+                  console.log(`Watcher: ${watcher.id} (${watcher.selected_pair})`);
+                  console.log(`Gemini Status: ${profileStatus}`);
+                  console.log(`Reason: ${cleanErrMsg}`);
+                  console.log(`Action: Skipped`);
+                  console.log(`===============================`);
+
+                  const scanDurationMs = Date.now() - scanStart;
+                  await recordEvaluation(supabase, {
+                    user_id: userId,
+                    watcher_id: watcher.id,
+                    pair: selectedPair,
+                    timeframe: selectedTimeframe,
+                    strategy_mode: compiledStrategy.strategy_mode,
+                    decision_score: decisionResult.decision_score,
+                    matched_weight: decisionResult.matched_weight,
+                    possible_weight: decisionResult.possible_weight,
+                    recommendation: decisionResult.recommendation,
+                    mandatory_rules_passed: decisionResult.mandatory_rules_passed,
+                    matched_rules: decisionResult.matched_rules,
+                    failed_rules: decisionResult.failed_rules,
+                    gemini_used: true,
+                    gemini_result: "Gemini execution failed: " + cleanErrMsg,
+                    trade_sent: false,
+                    trade_reason: "Gemini API call failed: " + cleanErrMsg,
+                    scan_duration_ms: scanDurationMs,
+                    gemini_duration_ms: geminiDuration,
+                    decision_snapshot: decisionSnapshot
+                  });
+
+                  skipped.push({ userId, reason: cleanErrMsg });
+                  watchersSkippedCount++;
+                  continue;
+                }
+
+                geminiTextResult = geminiRes.text;
+
                 if (watcher.gemini_status !== 'READY') {
                   if (watcher.gemini_status === 'QUOTA_EXHAUSTED' && !watcher.resume_notification_sent && telegramChatId) {
                     const resumeMsg = `⚠️ Gaks AI Notice\n\nYour Gemini API key quota has reset.\nMarket monitoring has resumed.`;
@@ -1735,7 +1864,43 @@ Output ONLY valid JSON.
                   watcher.resume_notification_sent = false;
                 }
 
-                parsedResult = JSON.parse(geminiTextResult);
+                try {
+                  parsedResult = JSON.parse(geminiTextResult);
+                  if (!parsedResult || typeof parsedResult !== 'object' || typeof parsedResult.satisfies !== 'boolean') {
+                    throw new Error('Invalid or missing trade direction or satisfies field');
+                  }
+                } catch (parseErr: any) {
+                  const errMsg = `Malformed AI JSON output: ${parseErr.message}`;
+                  console.error(`[GEMINI PARSE ERROR] User: ${logCtx.userEmail} | Watcher: ${watcher.id} | ${errMsg}`);
+
+                  const scanDurationMs = Date.now() - scanStart;
+                  await recordEvaluation(supabase, {
+                    user_id: userId,
+                    watcher_id: watcher.id,
+                    pair: selectedPair,
+                    timeframe: selectedTimeframe,
+                    strategy_mode: compiledStrategy.strategy_mode,
+                    decision_score: decisionResult.decision_score,
+                    matched_weight: decisionResult.matched_weight,
+                    possible_weight: decisionResult.possible_weight,
+                    recommendation: decisionResult.recommendation,
+                    mandatory_rules_passed: decisionResult.mandatory_rules_passed,
+                    matched_rules: decisionResult.matched_rules,
+                    failed_rules: decisionResult.failed_rules,
+                    gemini_used: true,
+                    gemini_result: "Malformed AI output: " + geminiTextResult.substring(0, 200),
+                    trade_sent: false,
+                    trade_reason: errMsg,
+                    scan_duration_ms: scanDurationMs,
+                    gemini_duration_ms: geminiDuration,
+                    decision_snapshot: decisionSnapshot
+                  });
+
+                  skipped.push({ userId, reason: errMsg });
+                  watchersSkippedCount++;
+                  continue;
+                }
+
                 addLog("Gemini Returned", "success");
                 addLog("Parsed Gemini Output", "success");
 
@@ -1790,6 +1955,8 @@ Output ONLY valid JSON.
                     reasoning: [parsedResult.reasoning || "Satisfies strategy rules and Gemini validation."]
                   };
                 } else {
+                  console.log(`[GEMINI NO_TRADE]\nUser: ${logCtx.userEmail || 'unknown'}\nWatcher: ${watcher.id}\nAction: SKIP_SIGNAL`);
+
                   logWatcherEvent('Gemini Decision', logCtx, {
                     'Status': 'REJECTED',
                     'Direction': 'NO_TRADE',
@@ -2961,15 +3128,18 @@ Source: ${brokerQuote.source}`);
     console.log(`Watchers skipped due to rate limiting: ${watchersSkippedDueToRateLimitCount}`);
     console.log(`==================================================\n`);
 
-    console.log(`\n========== GEMINI HEALTH ==========`);
+    console.log(`\n========== GEMINI HEALTH & DIAGNOSTICS ==========`);
     console.log(`Watchers Ready: ${watchersReadyCount}`);
     console.log(`Waiting For Quota: ${quotaWaitCount}`);
     console.log(`Invalid Keys: ${invalidKeyCount}`);
-    console.log(`Temporary Errors: ${tempErrorCount}`);
+    console.log(`Temporary Errors (503): ${tempErrorCount}`);
+    console.log(`Timeouts: ${geminiTimeoutsCount}`);
+    console.log(`Quota Errors (429): ${geminiQuotaErrorsCount}`);
     console.log(`Skipped Due To Quota: ${skippedDueToQuotaCount}`);
     console.log(`Gemini Calls Executed: ${geminiCallsExecutedCount}`);
+    console.log(`Gemini Calls Retried: ${geminiCallsRetriedCount}`);
     console.log(`Gemini Calls Saved: ${geminiCallsSavedCount}`);
-    console.log(`===================================\n`);
+    console.log(`=================================================\n`);
 
     console.log(`LOG: Cron completed (Processed: ${watchersProcessedCount}, Sent: ${telegramMessagesSentCount})`);
 
@@ -3019,8 +3189,11 @@ Source: ${brokerQuote.source}`);
         waitingForQuota: quotaWaitCount,
         invalidKeys: invalidKeyCount,
         temporaryErrors: tempErrorCount,
+        timeouts: geminiTimeoutsCount,
+        quotaErrors: geminiQuotaErrorsCount,
         skippedDueToQuota: skippedDueToQuotaCount,
         geminiCallsExecuted: geminiCallsExecutedCount,
+        geminiCallsRetried: geminiCallsRetriedCount,
         geminiCallsSaved: geminiCallsSavedCount
       },
       executionTimeMs: totalTime
