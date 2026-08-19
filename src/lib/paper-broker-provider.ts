@@ -10,7 +10,7 @@ import {
   BrokerQuote
 } from './broker-types.js';
 import { BrokerExecutionProvider } from './broker-execution-provider.js';
-import { MarketDataService } from './market-data-service.js';
+import { defaultMarketDataService } from './market-data-service.js';
 
 export class PaperBrokerProvider implements BrokerExecutionProvider {
   private orders: Map<string, BrokerOrder> = new Map();
@@ -49,9 +49,8 @@ export class PaperBrokerProvider implements BrokerExecutionProvider {
   }
 
   async getQuote(symbol: string): Promise<BrokerQuote> {
-    const marketData = new MarketDataService();
     try {
-      const price = await marketData.fetchCurrentPrice(symbol);
+      const price = await defaultMarketDataService.fetchCurrentPrice(symbol);
       if (price === null) throw new Error("Price not available");
       
       // Simulate realistic spread (variable)

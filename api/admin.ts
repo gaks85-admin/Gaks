@@ -6,7 +6,8 @@ import { dispatchTradeAlert } from '../src/lib/telegramWrapper.js';
 import { timeframeToMinutes } from '../src/lib/timeframe.js';
 import { extractRiskPreferences, calculatePositionSize } from '../src/lib/risk-engine.js';
 import { resolveUserGeminiKey } from '../src/lib/gemini-key-resolver.js';
-import { defaultMarketDataService } from '../src/lib/market-data-service.js';
+import { defaultMarketDataService, getMarketDataStats } from '../src/lib/market-data-service.js';
+import { marketDataGateway } from '../src/lib/market-data-gateway.js';
 import { sendNotificationEmail } from '../src/lib/email-service.js';
 
 // --- Inlined Gemini & Telegram Wrappers ---
@@ -525,14 +526,19 @@ async function health_handler(req: any, res: any) {
             waiting: 0,
             cooldown: 0,
             blocked: 0,
-            market_data_unavailable: 0,
+            market_data_unavailable: marketDataGateway.getHealth().watchersWaitingForRecovery,
             news_hard_pause: 0
           },
           marketData: {
-            cacheHits: 0,
-            cacheMisses: 0,
-            rateLimitEvents: 0,
-            requestsSaved: 0,
+            cacheHits: marketDataGateway.getHealth().cacheHits,
+            cacheMisses: Math.max(0, marketDataGateway.getHealth().totalRequests - marketDataGateway.getHealth().cacheHits),
+            rateLimitEvents: marketDataGateway.getHealth().quotaBlockedRequests,
+            requestsSaved: marketDataGateway.getHealth().requestsSaved,
+            creditsUsed: marketDataGateway.getHealth().creditsUsed ?? 0,
+            creditsRemaining: marketDataGateway.getHealth().creditsRemaining ?? 800,
+            currentMinuteUsage: marketDataGateway.getHealth().currentMinuteUsage,
+            dailyUsage: marketDataGateway.getHealth().dailyUsage,
+            providerStatus: marketDataGateway.getHealth().status,
             dataFreshnessAvgMs: 0
           },
           safetyGates: {

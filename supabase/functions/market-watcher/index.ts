@@ -12,7 +12,11 @@ serve(async (req) => {
   }
 
   try {
-    console.log("[Market Watcher Edge] Starting autonomous scan cycle...");
+    const WATCHER_CONCURRENCY = parseInt(Deno.env.get('WATCHER_CONCURRENCY') || '5', 10) || 5;
+    const GEMINI_TIMEOUT_MS = parseInt(Deno.env.get('GEMINI_TIMEOUT_MS') || '8000', 10) || 8000;
+    const GEMINI_MAX_RETRIES = parseInt(Deno.env.get('GEMINI_MAX_RETRIES') || '1', 10) ?? 1;
+
+    console.log(`[Market Watcher Edge] Starting scan cycle (Concurrency: ${WATCHER_CONCURRENCY}, Gemini Timeout: ${GEMINI_TIMEOUT_MS}ms, Max Retries: ${GEMINI_MAX_RETRIES})...`);
 
     // 2. Initialize Supabase Client with Service Role
     const supabaseUrl = Deno.env.get('SUPABASE_URL') || Deno.env.get('SUPABASE_DB_URL')
@@ -56,31 +60,24 @@ serve(async (req) => {
       }
     }
 
-    async function fetchWithRetry(url: string, options: RequestInit = {}, maxRetries = 3, baseDelayMs = 1000): Promise<Response> {
+    async function fetchWithRetry(url: string, options: RequestInit = {}, maxRetries = 2, baseDelayMs = 1000): Promise<Response> {
       let attempt = 0;
       while (attempt < maxRetries) {
         attempt++;
         try {
           const response = await fetch(url, options);
-          if (response.ok) {
-            return response;
-          }
+          if (response.ok) return response;
           if (response.status === 429) {
-            console.warn(`[Twelve Data Rate Limit] HTTP 429 rate limit received from ${url}. Never retrying 429.`);
+            console.warn(`[Twelve Data Rate Limit] HTTP 429 rate limit received. Never retrying 429.`);
             return response;
           }
-          if (response.status === 404 || response.status === 400) {
-            // Do not retry client errors (like 404 Not Found)
-            return response;
-          }
-          console.warn(`[Fetch Retry] Attempt ${attempt} returned status ${response.status}. Retrying in ${baseDelayMs * Math.pow(2, attempt - 1)}ms...`);
+          if (response.status === 404 || response.status === 400) return response;
+          console.warn(`[Fetch Retry] Attempt ${attempt} returned HTTP ${response.status}. Retrying...`);
         } catch (err: any) {
-          if (attempt >= maxRetries) {
-            throw err;
-          }
-          console.warn(`[Fetch Retry] Attempt ${attempt} threw network error: ${err.message || err}. Retrying in ${baseDelayMs * Math.pow(2, attempt - 1)}ms...`);
+          if (attempt >= maxRetries) throw err;
+          console.warn(`[Fetch Retry] Attempt ${attempt} network error: ${err.message || err}. Retrying...`);
         }
-        await new Promise(resolve => setTimeout(resolve, baseDelayMs * Math.pow(2, attempt - 1)));
+        await new Promise(resolve => setTimeout(resolve, baseDelayMs * attempt));
       }
       throw new Error(`Fetch failed after ${maxRetries} attempts`);
     }
@@ -89,15 +86,9 @@ serve(async (req) => {
       try {
         const searchUrl = `https://api.twelvedata.com/symbol_search?symbol=${encodeURIComponent(symbol)}&apikey=${apiKey}`;
         const response = await fetchWithRetry(searchUrl, {}, 2, 500);
-        if (!response.ok) {
-          console.warn(`[Symbol Search] API returned HTTP ${response.status} for search. Skipping search validation and proceeding.`);
-          return { isValid: true };
-        }
+        if (!response.ok) return { isValid: true };
         const data = await response.json();
-        if (data.status === "error") {
-          console.warn(`[Symbol Search] API returned error status: ${data.message}`);
-          return { isValid: true };
-        }
+        if (data.status === "error") return { isValid: true };
         if (data.data && Array.isArray(data.data) && data.data.length > 0) {
           const symbolUpper = symbol.toUpperCase().replace('/', '');
           const exactMatch = data.data.find((item: any) => 
@@ -108,8 +99,6 @@ serve(async (req) => {
           }
           return { isValid: true, matchedSymbol: data.data[0].symbol, instrumentType: data.data[0].instrument_type };
         }
-        // No matching symbols found in Twelve Data database - warn and proceed with original symbol as fallback
-        console.warn(`[Symbol Search] No matching symbols found in search results for "${symbol}". Proceeding with original symbol.`);
         return { isValid: true, matchedSymbol: symbol };
       } catch (err: any) {
         console.error(`[Symbol Search] Error validating symbol ${symbol}:`, err.message || err);
@@ -117,45 +106,131 @@ serve(async (req) => {
       }
     }
 
+    // Bounded Gemini API Call helper with timeout & retry
+    async function callGeminiWithTimeoutAndRetry(
+      apiKey: string,
+      promptText: string,
+      modelName: string = "gemini-3.6-flash",
+      timeoutMs: number = 30000,
+      maxRetries: number = 1
+    ): Promise<{ success: boolean; text?: string; errorType?: string; attempts: number; durationMs: number }> {
+      const startTime = Date.now();
+      const ai = new GoogleGenAI({ apiKey });
+      let attempt = 0;
+
+      while (attempt <= maxRetries) {
+        attempt++;
+        const attemptStart = Date.now();
+        let timer: any = null;
+
+        try {
+          const geminiPromise = ai.models.generateContent({
+            model: modelName,
+            contents: promptText,
+            config: {
+              responseMimeType: "application/json",
+              responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                  signals: {
+                    type: Type.ARRAY,
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        pair: { type: Type.STRING },
+                        direction: { type: Type.STRING },
+                        entryPrice: { type: Type.NUMBER },
+                        stopLoss: { type: Type.NUMBER },
+                        takeProfit: { type: Type.NUMBER },
+                        riskRewardRatio: { type: Type.STRING },
+                        confidenceScore: { type: Type.NUMBER },
+                        aiReasoning: { type: Type.STRING }
+                      },
+                      required: ["pair", "direction", "entryPrice", "stopLoss", "takeProfit", "riskRewardRatio", "confidenceScore", "aiReasoning"]
+                    }
+                  }
+                },
+                required: ["signals"]
+              }
+            }
+          });
+
+          const timeoutPromise = new Promise<never>((_, reject) => {
+            timer = setTimeout(() => {
+              const err: any = new Error(`Gemini request timed out after ${timeoutMs}ms`);
+              err.name = 'TimeoutError';
+              reject(err);
+            }, timeoutMs);
+          });
+
+          const response = await Promise.race([geminiPromise, timeoutPromise]);
+          if (timer) clearTimeout(timer);
+
+          const duration = Date.now() - attemptStart;
+          console.log(`[GEMINI SUCCESS] Attempt: ${attempt}, Duration: ${duration}ms`);
+
+          return {
+            success: true,
+            text: (response as any).text || '{"signals": []}',
+            attempts: attempt,
+            durationMs: Date.now() - startTime
+          };
+
+        } catch (err: any) {
+          if (timer) clearTimeout(timer);
+          const errMsg = err?.message || String(err);
+          const isTimeout = err?.name === 'TimeoutError' || errMsg.includes('timed out');
+          const isRateLimit = errMsg.includes('429') || errMsg.includes('RESOURCE_EXHAUSTED') || errMsg.includes('quota');
+          const isServerError = errMsg.includes('503') || errMsg.includes('UNAVAILABLE') || errMsg.includes('high demand');
+          const shouldRetry = isServerError && !isTimeout && !isRateLimit && attempt <= maxRetries;
+
+          console.warn(`[GEMINI ERROR] Attempt ${attempt}/${maxRetries + 1} failed (${isTimeout ? 'TIMEOUT' : isRateLimit ? 'QUOTA' : isServerError ? '503_UNAVAILABLE' : 'ERROR'}): ${errMsg}`);
+
+          if (shouldRetry) {
+            console.log(`[GEMINI RETRY] Retrying 503 UNAVAILABLE in 500ms...`);
+            await new Promise(r => setTimeout(r, 500));
+            continue;
+          }
+
+          return {
+            success: false,
+            errorType: isTimeout ? 'TIMEOUT' : isRateLimit ? 'QUOTA_EXHAUSTED' : isServerError ? 'TEMPORARY_ERROR' : 'UNKNOWN',
+            attempts: attempt,
+            durationMs: Date.now() - startTime
+          };
+        }
+      }
+
+      return {
+        success: false,
+        errorType: 'MAX_RETRIES_EXCEEDED',
+        attempts: attempt,
+        durationMs: Date.now() - startTime
+      };
+    }
+
     const DEFAULT_STRATEGY_TEXT = `# Gaks AI Default Strategy
 
 ## 1. Overview
-This is the default, institutional-grade multi-timeframe strategy designed for capturing consistent intraday trends in liquid assets (Forex, major Indices, and BTC). It relies on price action structures, key liquidity zones, and volume confirmation to filter out noise.
+Institutional-grade multi-timeframe strategy for intraday trend capture.
 
-## 2. Core Methodology & Rules
-- **Timeframe Alignment**: Primary analysis on the 1-Hour (H1) chart for structural trend direction, refined on the 15-Minute (M15) chart for precise execution triggers.
-- **Support & Resistance / Liquidity**: Identify major daily/weekly highs, lows, and key order blocks. Signals are only generated when price tests these key institutional zones.
-- **Momentum & Volume Confirmation**: A trade entry requires a strong candlestick rejection pattern (pin bar, engulfing) accompanied by volume expansion or a clear breakout of local structure (Break of Structure - BOS).
-- **Trend Following**: Always prioritize trading in the direction of the dominant H1 market trend. Counter-trend setups require exceptional rejection patterns at critical daily boundaries.
-
-## 3. Risk & Money Management (Strict 1% Rule)
-- **Risk Per Trade**: Maximum of 1.0% of total account capital per trade setup.
-- **Risk-to-Reward Ratio (R:R)**: Minimum target of 1:2. Trailing stops may be employed to secure profits once the first target (1:1) is achieved.
-- **Stop Loss Placement**: Always placed structurally beyond the swing high/low of the trigger candlestick or key institutional zone boundary.
-- **Daily Drawdown Cap**: If a user experiences 3 consecutive losses in a 24-hour cycle, trading must halt for that day to preserve capital and prevent emotional over-trading.`;
+## 2. Rules
+- Timeframe Alignment: H1 trend, M15 entry.
+- S&R / Liquidity: Major daily/weekly highs/lows.
+- Momentum & Volume: Engulfing / pinbar + volume breakout.
+- Risk Rule: Max 1% account risk per trade, min 1:2 R:R.`;
 
     function extractStrategyTextById(strategyTextRaw: string, strategyId?: string): string {
       if (!strategyTextRaw || !strategyTextRaw.trim()) return DEFAULT_STRATEGY_TEXT;
-      const defaultTemplate = `• Entry conditions\n• Confirmation indicators\n• Exit & stop-loss logic\n• Risk management rules`;
-      if (strategyTextRaw.trim() === defaultTemplate.trim()) return DEFAULT_STRATEGY_TEXT;
-
       try {
         const parsed = JSON.parse(strategyTextRaw);
         if (parsed && typeof parsed === 'object' && Array.isArray(parsed.strategies)) {
           const targetId = strategyId || parsed.activeId;
-          const active = parsed.strategies.find((s: any) => {
-            if (targetId === '00000000-0000-0000-0000-000000000000' || targetId === 'default') {
-              return s.id === '00000000-0000-0000-0000-000000000000' || s.id === 'default' || s.isDefault;
-            }
-            if (targetId === '11111111-1111-1111-1111-111111111111' || targetId === '11111111-1111-1111-1111-111111111111') {
-              return s.id === '11111111-1111-1111-1111-111111111111' || s.id === '11111111-1111-1111-1111-111111111111';
-            }
-            return s.id === targetId;
-          }) || parsed.strategies[0];
-          return active ? (active.text || DEFAULT_STRATEGY_TEXT) : DEFAULT_STRATEGY_TEXT;
+          const active = parsed.strategies.find((s: any) => s.id === targetId || s.isDefault) || parsed.strategies[0];
+          return active?.text || DEFAULT_STRATEGY_TEXT;
         }
       } catch (e) {
-        // Not JSON, return as-is
+        // Not JSON
       }
       return strategyTextRaw;
     }
@@ -164,30 +239,77 @@ This is the default, institutional-grade multi-timeframe strategy designed for c
     const { data: watchers, error: watchersError } = await supabase
       .from("watchers")
       .select("*")
-      .eq("status", "active")
+      .eq("status", "active");
 
-    if (watchersError) throw watchersError
+    if (watchersError) throw watchersError;
 
     if (!watchers || watchers.length === 0) {
-      console.log("[Market Watcher Edge] No active watchers found.")
-      return new Response(JSON.stringify({ success: true, message: "No active watchers." }), {
+      console.log("[Market Watcher Edge] No active watchers found.");
+      return new Response(JSON.stringify({ success: true, processed: 0, message: "No active watchers." }), {
         headers: { "Content-Type": "application/json" },
-      })
+      });
     }
 
-    const results = []
+    console.log(`[Market Watcher Edge] Found ${watchers.length} active watchers. Dispatching concurrency pool (Limit: ${WATCHER_CONCURRENCY})...`);
 
-    // 4. Process each active watcher
-    for (const watcher of watchers) {
-      if (!watcher || watcher.status !== 'active') {
-        console.log(`[Market Watcher Edge] Watcher ${watcher?.id} skipped - Status is '${watcher?.status}' (not active)`);
-        continue;
+    // Worker pool for concurrency control & fault isolation
+    async function processWithConcurrency<T, R>(
+      items: T[],
+      concurrencyLimit: number,
+      workerFn: (item: T, index: number) => Promise<R>
+    ): Promise<R[]> {
+      const limit = Math.max(1, concurrencyLimit);
+      const results: R[] = new Array(items.length);
+      let currentIndex = 0;
+
+      async function worker() {
+        while (currentIndex < items.length) {
+          const index = currentIndex++;
+          try {
+            results[index] = await workerFn(items[index], index);
+          } catch (err: any) {
+            results[index] = {
+              watcherId: items[index]?.id || 'unknown',
+              status: 'FAILED',
+              errorCategory: 'UNHANDLED_EXCEPTION',
+              error: err?.message || String(err)
+            } as unknown as R;
+          }
+        }
       }
-      const userId = watcher.user_id
-      const selectedPair = watcher.selected_pair
-      const selectedTimeframe = watcher.selected_timeframe || 'H1'
 
-      if (!selectedPair) continue;
+      const workers = Array.from({ length: Math.min(limit, items.length) }, () => worker());
+      await Promise.all(workers);
+      return results;
+    }
+
+    // Process all active watchers concurrently
+    const processedResults = await processWithConcurrency(watchers, WATCHER_CONCURRENCY, async (watcher) => {
+      const watcherStartTime = Date.now();
+      const userId = watcher.user_id;
+      const selectedPair = watcher.selected_pair;
+      const selectedTimeframe = watcher.selected_timeframe || 'H1';
+
+      console.log(`[WATCHER START] Watcher ID: ${watcher.id}, User: ${userId}, Pair: ${selectedPair}, Timeframe: ${selectedTimeframe}`);
+
+      if (!selectedPair) {
+        return { watcherId: watcher.id, status: 'SKIPPED', reason: 'NO_PAIR' };
+      }
+
+      // CRON OVERLAP PROTECTION: Atomic CAS lock on watchers.last_scan_at
+      const lockTime = new Date().toISOString();
+      let lockQuery = supabase.from("watchers").update({ last_scan_at: lockTime }).eq("id", watcher.id);
+      if (watcher.last_scan_at) {
+        lockQuery = lockQuery.eq("last_scan_at", watcher.last_scan_at);
+      } else {
+        lockQuery = lockQuery.is("last_scan_at", null);
+      }
+
+      const { data: locked, error: lockErr } = await lockQuery.select();
+      if (lockErr || !locked || locked.length === 0) {
+        console.log(`[CRON OVERLAP PREVENTED] Watcher ${watcher.id} already locked or processed by another run. Skipping.`);
+        return { watcherId: watcher.id, status: 'SKIPPED', reason: 'CRON_OVERLAP' };
+      }
 
       try {
         // Check Telegram connection
@@ -195,11 +317,11 @@ This is the default, institutional-grade multi-timeframe strategy designed for c
           .from("telegram_connections")
           .select("telegram_chat_id, connected")
           .eq("user_id", userId)
-          .maybeSingle()
+          .maybeSingle();
 
         if (!telegramConn || !telegramConn.connected || !telegramConn.telegram_chat_id) {
-          console.log(`[User ${userId}] Telegram not connected. Skipping.`);
-          continue;
+          console.log(`[WATCHER SKIPPED] Watcher: ${watcher.id}, User: ${userId} - Telegram not connected.`);
+          return { watcherId: watcher.id, status: 'SKIPPED', reason: 'TELEGRAM_NOT_CONNECTED' };
         }
 
         const telegramChatId = telegramConn.telegram_chat_id;
@@ -212,96 +334,34 @@ This is the default, institutional-grade multi-timeframe strategy designed for c
 
         const strategyText = extractStrategyTextById(prefsRecord?.strategy_text || '', watcher.strategy_id);
 
-        if (!strategyText.trim()) {
-          console.log(`[User ${userId}] Strategy text empty. Skipping.`);
-          continue;
-        }
-
         const rawCap = prefsRecord?.capital === 'Custom'
           ? (prefsRecord?.custom_capital || prefsRecord?.capital || "")
           : (prefsRecord?.capital || prefsRecord?.custom_capital || "");
         const cleanedCap = rawCap ? String(rawCap).replace(/[^0-9.]/g, "") : "";
-        const accountSize = cleanedCap ? parseFloat(cleanedCap) : (watcher.account_size || null);
+        const accountSize = cleanedCap ? parseFloat(cleanedCap) : (watcher.account_size || 1000);
 
         const rawRisk = prefsRecord?.preferred_risk || "";
         const cleanedRisk = rawRisk ? String(rawRisk).replace(/[^0-9.]/g, "") : "";
-        const riskPercentage = cleanedRisk ? parseFloat(cleanedRisk) : (watcher.risk_percentage || null);
+        const riskPercentage = cleanedRisk ? parseFloat(cleanedRisk) : (watcher.risk_percentage || 1.0);
 
         const riskRewardStr = prefsRecord?.risk_reward || '1:2';
-        const maxDailyRiskStr = (prefsRecord as any)?.max_daily_risk || (prefsRecord as any)?.max_daily_loss || '3 consecutive losses in 24h (Strategy Cap)';
-
-        console.log(`Trading Preferences Loaded\n`);
-        console.log(`Account Size: ${accountSize ? '$' + accountSize : 'N/A'}`);
-        console.log(`Risk %: ${riskPercentage ? riskPercentage + '%' : 'N/A'}`);
-        console.log(`Risk Reward: ${riskRewardStr}`);
-        console.log(`Max Daily Risk: ${maxDailyRiskStr}`);
-        console.log(`Strategy: ${strategyText ? strategyText.substring(0, 100) + '...' : 'N/A'}`);
-        console.log(`[DB Row Comparison] DB capital: "${prefsRecord?.capital || ''}", DB custom_capital: "${prefsRecord?.custom_capital || ''}", DB preferred_risk: "${prefsRecord?.preferred_risk || ''}", DB risk_reward: "${prefsRecord?.risk_reward || ''}"`);
-
-        if (!accountSize || !riskPercentage) {
-          console.log(`[User ${userId}] Account size or risk percentage not defined. Skipping.`);
-          continue;
-        }
+        const maxDailyRiskStr = (prefsRecord as any)?.max_daily_risk || '3 consecutive losses in 24h';
 
         if (!apiKeyRecord || !apiKeyRecord.api_key) {
-          console.log(`[User ${userId}] Gemini API Key missing. Skipping.`);
-          continue;
+          console.log(`[WATCHER SKIPPED] Watcher: ${watcher.id}, User: ${userId} - Gemini API Key missing.`);
+          return { watcherId: watcher.id, status: 'SKIPPED', reason: 'MISSING_GEMINI_KEY' };
         }
 
         // Fetch live market data from Twelve Data
         const convertSymbol = (sym: string): string => {
           if (!sym) return "";
           let mapped = sym.trim().toUpperCase().replace(/[-_\s/]/g, '');
-          
-          // Symbol mapping layer for Twelve Data compatibility on free plans
           const mappings: Record<string, string> = {
-            'EURUSD': 'EUR/USD',
-            'GBPUSD': 'GBP/USD',
-            'XAUUSD': 'XAU/USD',
-            'BTCUSD': 'BTC/USD',
-            'NAS100': 'QQQ',
-            'US30': 'DIA',
-            'SPX500': 'SPY',
-            'US500': 'SPY'
+            'EURUSD': 'EUR/USD', 'GBPUSD': 'GBP/USD', 'XAUUSD': 'XAU/USD', 'BTCUSD': 'BTC/USD',
+            'NAS100': 'QQQ', 'US30': 'DIA', 'SPX500': 'SPY', 'US500': 'SPY'
           };
-
-          if (mappings[mapped]) {
-            return mappings[mapped];
-          }
-          
-          // Forex standard 6 letters (e.g. EURUSD, GBPUSD, USDJPY, AUDCAD, etc.)
-          const commonCurrencies = ["EUR", "USD", "GBP", "JPY", "AUD", "CAD", "CHF", "NZD", "SGD", "HKD", "SEK", "NOK", "MXN", "CNH", "CNY", "ZAR", "TRY"];
-          if (mapped.length === 6 && /^[A-Z]{6}$/.test(mapped)) {
-            const firstHalf = mapped.slice(0, 3);
-            const secondHalf = mapped.slice(3);
-            if (commonCurrencies.includes(firstHalf) && commonCurrencies.includes(secondHalf)) {
-              return `${firstHalf}/${secondHalf}`;
-            }
-          }
-
-          // Cryptocurrencies (e.g., BTCUSD, ETHUSDT, SOLBTC, ETHBTC, etc.)
-          const commonCryptoCoins = ["BTC", "ETH", "SOL", "ADA", "XRP", "DOT", "DOGE", "LTC", "LINK", "AVAX", "XLM", "UNI", "BCH", "ATOM"];
-          const commonCryptoQuote = ["USD", "USDT", "BTC", "ETH", "EUR", "GBP", "FDUSD", "USDC"];
-          
-          // Check for cryptos like BTCUSDT
-          for (const coin of commonCryptoCoins) {
-            if (mapped.startsWith(coin)) {
-              const suffix = mapped.slice(coin.length);
-              if (commonCryptoQuote.includes(suffix)) {
-                return `${coin}/${suffix}`;
-              }
-            }
-          }
-          
-          if (mapped.length === 6 && /^[A-Z]{6}$/.test(mapped)) {
-            // General fallback split for any 6-letter alphabetic pairs
-            return `${mapped.slice(0, 3)}/${mapped.slice(3)}`;
-          }
-          
-          if (mapped.endsWith('USD') && mapped.length > 3) return mapped.slice(0, -3) + '/USD';
-          if (mapped.endsWith('JPY') && mapped.length > 3) return mapped.slice(0, -3) + '/JPY';
-          if (mapped.endsWith('EUR') && mapped.length > 3) return mapped.slice(0, -3) + '/EUR';
-          if (mapped.endsWith('GBP') && mapped.length > 3) return mapped.slice(0, -3) + '/GBP';
+          if (mappings[mapped]) return mappings[mapped];
+          if (mapped.length === 6 && /^[A-Z]{6}$/.test(mapped)) return `${mapped.slice(0, 3)}/${mapped.slice(3)}`;
           return mapped;
         };
 
@@ -312,86 +372,58 @@ This is the default, institutional-grade multi-timeframe strategy designed for c
           if (u === 'M15' || u === '15M') return '15min';
           if (u === 'M30' || u === '30M') return '30min';
           if (u === 'H1' || u === '1H') return '1h';
-          if (u === 'H2' || u === '2H') return '2h';
           if (u === 'H4' || u === '4H') return '4h';
-          if (u === 'D1' || u === 'D' || u === 'DAILY') return '1day';
-          if (u === 'W1' || u === 'W' || u === 'WEEKLY') return '1week';
+          if (u === 'D1' || u === 'DAILY') return '1day';
           return '1h';
         };
 
-        const symbol = selectedPair;
         const mappedSymbol = convertSymbol(selectedPair);
         const interval = mapTimeframeToInterval(selectedTimeframe);
 
-        // Validate symbol before making /time_series or /quote requests
-        console.log(`[Symbol Validation] Validating symbol: ${mappedSymbol} using Twelve Data Search...`);
         const validation = await validateSymbolWithTwelveData(mappedSymbol, twelveDataKey);
-        if (!validation.isValid) {
-          console.error(`[Twelve Data API] Symbol validation failed. Symbol ${mappedSymbol} is not recognized by Twelve Data.`);
-          throw new Error(`TwelveData HTTP Error: 404 (Symbol not found or invalid on Twelve Data)`);
-        }
-        
         const finalSymbol = validation.matchedSymbol || mappedSymbol;
-        console.log(`[Symbol Validation] Symbol is valid. Resolved to: ${finalSymbol} (Type: ${validation.instrumentType || 'Unknown'})`);
-        
-        let quoteData: any = null;
-        let finalEndpoint = "time_series";
-        const timeSeriesUrl = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(finalSymbol)}&interval=${interval}&outputsize=1&apikey=${twelveDataKey}`;
-        const maskedTimeSeriesUrl = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(finalSymbol)}&interval=${interval}&outputsize=1&apikey=HIDDEN`;
 
-        console.log(`[Twelve Data Request Details]:`);
-        console.log(`- Watcher ID: ${watcher.id}`);
-        console.log(`- Selected Pair: ${selectedPair}`);
-        console.log(`- Converted Symbol: ${finalSymbol}`);
-        console.log(`- Timeframe: ${selectedTimeframe}`);
-        console.log(`- Exact Endpoint: /time_series`);
-        console.log(`- Exact Symbol: ${finalSymbol}`);
-        console.log(`- Exact Interval: ${interval}`);
-        console.log(`- Request URL: ${maskedTimeSeriesUrl}`);
+        let quoteData: any = null;
+        let twelveDataStatus = 'SUCCESS';
+
+        const timeSeriesUrl = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(finalSymbol)}&interval=${interval}&outputsize=1&apikey=${twelveDataKey}`;
 
         try {
-          const tsRes = await fetchWithRetry(timeSeriesUrl, {}, 3, 1000);
+          const tsRes = await fetchWithRetry(timeSeriesUrl, {}, 2, 1000);
           if (tsRes.ok) {
             const tsData = await tsRes.json();
             if (tsData.status === "ok" && tsData.values && tsData.values.length > 0) {
               quoteData = tsData.values[0];
-              console.log(`[Twelve Data API] Successfully fetched candles from /time_series for ${finalSymbol}`);
-            } else {
-              console.warn(`[Twelve Data API] /time_series returned status: ${tsData.status || "error"}, message: ${tsData.message || "Unknown error"}. Falling back to /quote.`);
             }
-          } else {
-            console.warn(`[Twelve Data API] /time_series failed with HTTP ${tsRes.status}. Falling back to /quote.`);
           }
         } catch (tsErr: any) {
-          console.warn(`[Twelve Data API] /time_series error: ${tsErr.message || tsErr}. Falling back to /quote.`);
+          console.warn(`[TWELVE DATA] Watcher: ${watcher.id} time_series error: ${tsErr.message || tsErr}`);
         }
 
-        // Fallback to /quote if /time_series did not work
         if (!quoteData) {
-          finalEndpoint = "quote";
           const quoteUrl = `https://api.twelvedata.com/quote?symbol=${encodeURIComponent(finalSymbol)}&apikey=${twelveDataKey}`;
-          const maskedQuoteUrl = `https://api.twelvedata.com/quote?symbol=${encodeURIComponent(finalSymbol)}&apikey=HIDDEN`;
-          
-          console.log(`[Twelve Data Fallback Request Details]:`);
-          console.log(`- Watcher ID: ${watcher.id}`);
-          console.log(`- Selected Pair: ${selectedPair}`);
-          console.log(`- Converted Symbol: ${finalSymbol}`);
-          console.log(`- Timeframe: ${selectedTimeframe}`);
-          console.log(`- Exact Endpoint: /quote`);
-          console.log(`- Exact Symbol: ${finalSymbol}`);
-          console.log(`- Exact Interval: N/A (Daily Quote)`);
-          console.log(`- Request URL: ${maskedQuoteUrl}`);
-          
-          const qRes = await fetchWithRetry(quoteUrl, {}, 3, 1000);
-          if (!qRes.ok) {
-            throw new Error(`TwelveData HTTP Error: ${qRes.status}`);
+          const qRes = await fetchWithRetry(quoteUrl, {}, 2, 1000);
+          if (qRes.ok) {
+            const qData = await qRes.json();
+            if (qData.status !== "error") {
+              quoteData = qData;
+            } else if (qData.code === 429) {
+              twelveDataStatus = 'RATE_LIMITED';
+            }
           }
-          const qData = await qRes.json();
-          if (qData.status === "error") {
-            throw new Error(`TwelveData Error: ${qData.message}`);
-          }
-          quoteData = qData;
-          console.log(`[Twelve Data API] Successfully fetched quote from /quote for ${finalSymbol}`);
+        }
+
+        if (!quoteData) {
+          console.error(`[TWELVE DATA FAILED] Watcher: ${watcher.id}, Pair: ${finalSymbol}, Status: ${twelveDataStatus}`);
+          return {
+            watcherId: watcher.id,
+            userId,
+            pair: selectedPair,
+            timeframe: selectedTimeframe,
+            status: 'FAILED',
+            errorCategory: 'TWELVE_DATA_FETCH_ERROR',
+            durationMs: Date.now() - watcherStartTime
+          };
         }
 
         const currentPrice = parseFloat(quoteData.close || quoteData.price || "0");
@@ -408,94 +440,44 @@ This is the default, institutional-grade multi-timeframe strategy designed for c
           timeframe: selectedTimeframe
         };
 
-        // Analyze market data with Gemini
-        const ai = new GoogleGenAI({ apiKey: apiKeyRecord.api_key })
-        
-        const promptText = `
-You are an expert AI trading assistant.
-Analyze the following live market data against the user's trading strategy and configuration.
-Return a structured JSON list of trading signals. Only generate a signal if the setup strongly matches the strategy.
-If no valid setups are found, return an empty array for signals.
+        const promptText = `Analyze market data for ${selectedPair}:
+Strategy: ${strategyText}
+Account Size: $${accountSize}, Risk %: ${riskPercentage}%, R:R: ${riskRewardStr}
+Market Data: ${JSON.stringify(marketData)}`;
 
-User's Trading Strategy:
-${strategyText}
+        // Call Gemini with bounded timeout (30s) and retry logic
+        const geminiRes = await callGeminiWithTimeoutAndRetry(
+          apiKeyRecord.api_key,
+          promptText,
+          "gemini-3.6-flash",
+          GEMINI_TIMEOUT_MS,
+          GEMINI_MAX_RETRIES
+        );
 
-Trading Configuration:
-- Account Size: $${accountSize}
-- Risk Percentage per trade: ${riskPercentage}%
-- Risk-to-Reward Ratio: ${riskRewardStr}
-- Maximum Daily Risk: ${maxDailyRiskStr}
-- Preferred Timeframe: ${selectedTimeframe}
-- Preferred Instrument: ${selectedPair}
+        if (!geminiRes.success || !geminiRes.text) {
+          console.error(`[GEMINI FAILED] Watcher: ${watcher.id}, ErrorType: ${geminiRes.errorType}`);
+          return {
+            watcherId: watcher.id,
+            userId,
+            pair: selectedPair,
+            timeframe: selectedTimeframe,
+            status: 'FAILED',
+            errorCategory: geminiRes.errorType || 'GEMINI_EXECUTION_ERROR',
+            durationMs: Date.now() - watcherStartTime
+          };
+        }
 
-Live Market Data (Twelve Data):
-${JSON.stringify(marketData, null, 2)}
-`;
-
-        const aiResponse = await ai.models.generateContent({
-          model: "gemini-3.6-flash",
-          contents: promptText,
-          config: {
-            responseMimeType: "application/json",
-            responseSchema: {
-              type: Type.OBJECT,
-              properties: {
-                signals: {
-                  type: Type.ARRAY,
-                  items: {
-                    type: Type.OBJECT,
-                    properties: {
-                      pair: { type: Type.STRING },
-                      direction: { type: Type.STRING },
-                      entryPrice: { type: Type.NUMBER },
-                      stopLoss: { type: Type.NUMBER },
-                      takeProfit: { type: Type.NUMBER },
-                      riskRewardRatio: { type: Type.STRING },
-                      confidenceScore: { type: Type.NUMBER },
-                      aiReasoning: { type: Type.STRING }
-                    },
-                    required: ["pair", "direction", "entryPrice", "stopLoss", "takeProfit", "riskRewardRatio", "confidenceScore", "aiReasoning"]
-                  }
-                }
-              },
-              required: ["signals"]
-            }
-          }
-        });
-
-        const parsedResult = JSON.parse(aiResponse.text || '{"signals": []}');
+        const parsedResult = JSON.parse(geminiRes.text || '{"signals": []}');
         const signals = parsedResult.signals || [];
+        let telegramSent = false;
 
-        let signalsSent = 0;
-
-        // Send Telegram Message if valid signals found
         if (signals.length > 0) {
           for (const signal of signals) {
-            const riskAmount = accountSize * (riskPercentage / 100);
-            const slDistance = Math.abs(signal.entryPrice - signal.stopLoss);
-            let lotSize = 0;
-            if (slDistance > 0) {
-              const rawUnits = riskAmount / slDistance;
-              if (signal.entryPrice < 10 || /EUR|GBP|AUD|NZD|CAD|CHF|JPY/i.test(signal.pair)) {
-                lotSize = Number((rawUnits / 100000).toFixed(4));
-              } else {
-                lotSize = Number(rawUnits.toFixed(4));
-              }
-            }
-            console.log(`\nPosition Size Calculation\n`);
-            console.log(`Account Size: $${accountSize}`);
-            console.log(`Risk Amount: $${riskAmount.toFixed(2)} (${riskPercentage}%)`);
-            console.log(`Entry: ${signal.entryPrice}`);
-            console.log(`Stop Loss: ${signal.stopLoss}`);
-            console.log(`Calculated Lot Size: ${lotSize}\n`);
-
             if (signal.confidenceScore >= 70) {
-              
-              // Duplicate Signal Prevention
-              // Check if we already sent this exact signal recently
+              // Duplicate Signal Protection
               const signalHash = `${signal.pair}_${signal.direction}_${signal.entryPrice}`;
               if (watcher.last_signal_data === signalHash) {
-                console.log(`[User ${userId}] Duplicate signal detected for ${signal.pair}. Skipping alert.`);
+                console.log(`[DUPLICATE ALERT BLOCKED] Watcher: ${watcher.id}, Hash: ${signalHash}`);
                 continue;
               }
 
@@ -507,49 +489,64 @@ ${JSON.stringify(marketData, null, 2)}
                 `*Take Profit:* ${signal.takeProfit}\n` +
                 `*Risk/Reward:* ${signal.riskRewardRatio}\n` +
                 `*Confidence:* ${signal.confidenceScore}/100\n\n` +
-                `*AI Reasoning:* ${signal.aiReasoning}\n\n` +
-                `*Time:* ${new Date().toUTCString()}`;
+                `*AI Reasoning:* ${signal.aiReasoning}`;
 
               await sendTelegramMessage(telegramChatId, alertMessage);
               
-              // Store this signal to prevent immediate duplicates
               await supabase
                 .from("watchers")
                 .update({ last_signal_data: signalHash })
-                .eq("user_id", userId);
-                
-              signalsSent++;
+                .eq("id", watcher.id);
+
+              telegramSent = true;
             }
           }
         }
 
-        // Update watcher last scan timestamp
-        await supabase
-          .from("watchers")
-          .update({ 
-            last_scan_at: new Date().toISOString(),
-            updated_at: new Date().toISOString()
-          })
-          .eq("user_id", userId);
+        const totalWatcherDuration = Date.now() - watcherStartTime;
+        console.log(`[WATCHER COMPLETE] Watcher ID: ${watcher.id}, Pair: ${selectedPair}, Duration: ${totalWatcherDuration}ms, Status: SUCCESS, TelegramSent: ${telegramSent}`);
 
-        results.push({ userId, symbol, signalsFound: signals.length, signalsSent });
-        console.log(`[User ${userId}] Scan complete. Signals found: ${signals.length}, Sent: ${signalsSent}`);
+        return {
+          watcherId: watcher.id,
+          userId,
+          pair: selectedPair,
+          timeframe: selectedTimeframe,
+          status: 'SUCCESS',
+          telegramSent,
+          signalsCount: signals.length,
+          durationMs: totalWatcherDuration
+        };
 
-      } catch (err: any) {
-        console.error(`[User ${userId}] Error processing watcher:`, err.message || err);
+      } catch (watcherError: any) {
+        const totalWatcherDuration = Date.now() - watcherStartTime;
+        console.error(`[WATCHER ERROR] Watcher ID: ${watcher.id}, Error: ${watcherError.message || watcherError}`);
+        return {
+          watcherId: watcher.id,
+          userId,
+          pair: selectedPair,
+          timeframe: selectedTimeframe,
+          status: 'FAILED',
+          errorCategory: 'WATCHER_EXECUTION_EXCEPTION',
+          error: watcherError.message || String(watcherError),
+          durationMs: totalWatcherDuration
+        };
       }
-    }
+    });
 
-    console.log("[Market Watcher Edge] Cycle complete. Processed:", results.length);
-    return new Response(JSON.stringify({ success: true, processed: results.length, results }), {
+    console.log(`[Market Watcher Edge] Cycle completed. Processed ${processedResults.length} watchers concurrently.`);
+    return new Response(JSON.stringify({
+      success: true,
+      processed: processedResults.length,
+      results: processedResults
+    }), {
       headers: { "Content-Type": "application/json" },
-    })
+    });
 
   } catch (err: any) {
     console.error("[Market Watcher Edge] Fatal Error:", err.message || err);
     return new Response(JSON.stringify({ error: err.message || "Unknown error" }), {
       status: 500,
       headers: { "Content-Type": "application/json" }
-    })
+    });
   }
 })

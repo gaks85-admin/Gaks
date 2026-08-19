@@ -45,6 +45,8 @@ import { evaluateAdaptiveLearning, fetchCompletedTradesForAdaptiveLearning } fro
 import { evaluateAdaptiveExecution } from '../../src/lib/adaptive-execution-engine.js';
 import { evaluateClosedLoopCalibration } from '../../src/lib/closed-loop-calibration-engine.js';
 import { resolveAuthoritativeDecision, DecisionGateResult } from '../../src/lib/decision-attribution.js';
+import { processWithConcurrency } from '../../src/lib/concurrency.js';
+
 
 // --- Inlined Gemini Wrapper ---
 
@@ -675,6 +677,18 @@ export default async function handler(req: any, res: any) {
     
     let twelveDataExhausted = false;
 
+    const PROCESSING_DEADLINE_MS = 25000;
+    let watchersDiscoveredCount = watchers ? watchers.length : 0;
+    let watchersEligibleCount = 0;
+    let watchersSkippedByDeadlineCount = 0;
+    let watchersSkippedByGeminiTimeoutCount = 0;
+    let watchersSkippedByGemini429Count = 0;
+    let watchersSkippedByGemini503Count = 0;
+    let geminiCallsTimedOutCount = 0;
+    let geminiCallsQuotaExhaustedCount = 0;
+    let geminiCallsTemporarilyFailedCount = 0;
+    let successfulGeminiExecutionsCount = 0;
+
     let watchersReadyCount = 0;
     let quotaWaitCount = 0;
     let invalidKeyCount = 0;
@@ -688,15 +702,11 @@ export default async function handler(req: any, res: any) {
 
     console.log("[CRON STEP 5]");
 
-    // Process each active watcher sequentially to respect Twelve Data free limits
-    for (const watcher of watchers) {
-      // Global Cron Execution Deadline Check (Target budget ~30s, processing deadline 25s)
-      if (cronTimer.getElapsedTimeMs() >= 25000) {
-        console.warn(`[CRON DEADLINE] Remaining watchers skipped safely. Reason: Insufficient execution budget. (Elapsed: ${cronTimer.getElapsedTimeMs()}ms, Limit: 25000ms)`);
-        cronTimer.markEarlyExit();
-        break;
-      }
+    const WATCHER_CONCURRENCY = parseInt(process.env.WATCHER_CONCURRENCY || '5', 10) || 5;
+    console.log(`LOG: Dispatching concurrency pool for ${watchers.length} active watcher(s) (Concurrency: ${WATCHER_CONCURRENCY})...`);
 
+    // Process watchers concurrently with controlled worker pool
+    await processWithConcurrency(watchers, WATCHER_CONCURRENCY, async (watcher) => {
       let isWatcherSkipped = true;
       let geminiInvoked = false;
       let geminiSucceeded = false;
@@ -709,6 +719,18 @@ export default async function handler(req: any, res: any) {
       const symbol = selectedPair;
       const selectedTimeframe = logCtx.timeframe;
 
+      // 1. GLOBAL DEADLINE CHECK (PROCESSING_DEADLINE_MS = 25000)
+      const elapsedAtStart = Date.now() - startTime;
+      const remainingGlobalAtStart = PROCESSING_DEADLINE_MS - elapsedAtStart;
+      if (remainingGlobalAtStart <= 1000) {
+        console.warn(`[CRON DEADLINE] Watcher ${watcher?.id} (${selectedPair}) skipped safely. Reason: Insufficient global execution budget (${remainingGlobalAtStart}ms remaining / ${PROCESSING_DEADLINE_MS}ms limit).`);
+        cronTimer.markEarlyExit();
+        watchersSkippedByDeadlineCount++;
+        watchersSkippedCount++;
+        skipped.push({ userId, reason: `Insufficient global execution budget (CRON DEADLINE: ${remainingGlobalAtStart}ms remaining)` });
+        return;
+      }
+
       cronTimer.startWatcher({
         userEmail,
         watcherId: watcher?.id || 'unknown',
@@ -717,13 +739,13 @@ export default async function handler(req: any, res: any) {
       });
 
       try {
-        cronTimer.startStage("Context & Profile Verification");
+        cronTimer.startStage("Context & Profile Verification", watcher?.id);
 
         if (!watcher || watcher.status !== 'active') {
           console.log(`LOG: Watcher ${watcher?.id} skipped - Status is '${watcher?.status}' (not active)`);
           skipped.push({ userId: watcher?.user_id || 'unknown', reason: `Watcher status is ${watcher?.status || 'stopped/deleted'}` });
           watchersSkippedCount++;
-          continue;
+          return;
         }
 
         // Query user profile safely for gemini status
@@ -757,16 +779,9 @@ export default async function handler(req: any, res: any) {
 
           skipped.push({ userId, reason: `Gemini unavailable (${geminiStatus}): ${userProfile?.gemini_last_error || 'N/A'}` });
           watchersSkippedCount++;
-          continue;
+          return;
         }
         watchersReadyCount++;
-
-        // Ensure the endpoint finishes within 30 seconds by stopping early if needed
-        if (cronTimer.isApproachingLimit()) {
-          console.warn(`[CRON TIMING WARNING] Cron execution time (${cronTimer.getElapsedTimeMs()}ms) reached warning threshold (25000ms / 30000ms limit). Stopping early.`);
-          cronTimer.markEarlyExit();
-          break;
-        }
 
         cronTimer.startStage("Watcher Scheduling & Due Check");
         let tradeStatus = (watcher.trade_status || 'WAITING').toUpperCase().trim();
@@ -809,14 +824,14 @@ export default async function handler(req: any, res: any) {
         logWatcherEvent('SIGNAL SKIPPED', logCtx, `Not due yet (${dueReason})`);
         skipped.push({ userId, reason: `Not due yet (${dueReason})` });
         watchersSkippedCount++;
-        continue;
+        return;
       }
 
       if (!selectedPair || selectedPair === 'unknown') {
         logWatcherEvent('SIGNAL SKIPPED', logCtx, 'No selected pair');
         skipped.push({ userId, reason: "No selected pair" });
         watchersSkippedCount++;
-        continue;
+        return;
       }
 
       // =====================================================================
@@ -836,8 +851,10 @@ export default async function handler(req: any, res: any) {
         console.log(`[Idempotency] Watcher ${watcher.id} already being processed by another cron. Skipping.`);
         skipped.push({ userId, reason: "Duplicate execution protected" });
         watchersSkippedCount++;
-        continue;
+        return;
       }
+
+      watchersEligibleCount++;
 
 
       // =====================================================================
@@ -862,7 +879,7 @@ export default async function handler(req: any, res: any) {
           watchersProcessedCount++;
           isWatcherSkipped = false;
           results.push({ userId, symbol, tradeStatus: 'COOLDOWN', result: 'In cooldown' });
-          continue;
+          return;
         }
 
         // If TRUE (expired): Clear all previous trade fields and reset to WAITING
@@ -893,7 +910,7 @@ export default async function handler(req: any, res: any) {
         watchersProcessedCount++;
         isWatcherSkipped = false;
         results.push({ userId, symbol, tradeStatus: 'COOLDOWN', result: 'Cooldown expired, reset to WAITING' });
-        continue;
+        return;
       }
 
       // =====================================================================
@@ -945,7 +962,7 @@ Reason: ${activeValidation.reason}`);
           skipped.push({ userId, reason: `Invalid ACTIVE state: ${activeValidation.reason}` });
           watchersSkippedCount++;
           console.log(`ACTIVE branch exited due to invalid state.`);
-          continue;
+          return;
         }
 
         logWatcherEvent('TRADE RECONCILIATION', logCtx, `Monitoring active trade for ${selectedPair}`);
@@ -1005,7 +1022,7 @@ Reason: ${activeValidation.reason}`);
               await sendTelegramMessage(telegramChatId, `🔔 Broker Reconciliation\nTrade for ${selectedPair} was closed at broker. Database synchronized.`);
             }
 
-            continue;
+            return;
           } else {
             logWatcherEvent('TRADE RECONCILIATION', logCtx, `Trade confirmed at broker: ${watcher.active_trade_id}`);
           }
@@ -1020,7 +1037,7 @@ Reason: ${activeValidation.reason}`);
           skipped.push({ userId, reason: "TwelveData rate limit (429) exhausted" });
           watchersSkippedDueToRateLimitCount++;
           watchersSkippedCount++;
-          continue;
+          return;
         }
         try {
           currentPrice = await fetchCurrentPrice(selectedPair, twelveDataKey, tdStats);
@@ -1031,7 +1048,7 @@ Reason: ${activeValidation.reason}`);
             skipped.push({ userId, reason: "TwelveData rate limit (429) exhausted" });
             watchersSkippedDueToRateLimitCount++;
             watchersSkippedCount++;
-            continue;
+            return;
           }
           logWatcherError('LIVE RATES ERROR', logCtx, err);
         }
@@ -1040,7 +1057,7 @@ Reason: ${activeValidation.reason}`);
           logWatcherWarn('LIVE RATES', logCtx, 'Could not fetch current price for active trade check.');
           skipped.push({ userId, reason: "Failed to fetch current price for active trade" });
           watchersSkippedCount++;
-          continue;
+          return;
         }
 
         logWatcherEvent('LIVE RATES', logCtx, {
@@ -1076,7 +1093,7 @@ Reason: ${activeValidation.reason}`);
           isWatcherSkipped = false;
           results.push({ userId, symbol, tradeStatus: 'ACTIVE', result: 'Holding' });
           console.log(`ACTIVE branch exited.`);
-          continue;
+          return;
         }
 
         const lastScanMs = watcher.last_scan_at ? new Date(watcher.last_scan_at).getTime() : now.getTime();
@@ -1163,7 +1180,7 @@ Reason: ${activeValidation.reason}`);
           isWatcherSkipped = false;
           results.push({ userId, symbol, tradeStatus: 'COOLDOWN', result: 'Closed TP' });
           console.log(`ACTIVE branch exited.`);
-          continue;
+          return;
         }
 
         // Handle SL Reached
@@ -1250,11 +1267,11 @@ Reason: ${activeValidation.reason}`);
           isWatcherSkipped = false;
           results.push({ userId, symbol, tradeStatus: 'COOLDOWN', result: 'Closed SL' });
           console.log(`ACTIVE branch exited.`);
-          continue;
+          return;
         }
 
         console.log(`ACTIVE branch exited.`);
-        continue;
+        return;
       }
 
       // =====================================================================
@@ -1263,7 +1280,7 @@ Reason: ${activeValidation.reason}`);
       console.log(`ENTERING WAITING`);
       if (tradeStatus !== 'WAITING') {
         console.warn(`[STATE GUARD] Watcher ID: ${watcher.id} is in status '${tradeStatus}' (not WAITING). Bypassing signal generation.`);
-        continue;
+        return;
       }
 
       cronTimer.startStage("State 1 - Load Preferences & Strategy");
@@ -1295,7 +1312,7 @@ Reason: ${activeValidation.reason}`);
           console.log(`LOG: Watcher ${watcher.id} skipped - Strategy text missing for user ${userId}`);
           skipped.push({ userId, reason: `Strategy text missing for ${userId}` });
           watchersSkippedCount++;
-          continue;
+          return;
         }
 
         const strategyText = extractStrategyTextById(rawStrategyText, watcher.strategy_id);
@@ -1313,7 +1330,7 @@ Reason: ${activeValidation.reason}`);
           console.log(`LOG: Watcher ${watcher.id} skipped - Telegram not connected`);
           skipped.push({ userId, reason: "Telegram not connected" });
           watchersSkippedCount++;
-          continue;
+          return;
         }
         const telegramChatId = telegramConn.telegram_chat_id;
 
@@ -1335,7 +1352,7 @@ Reason: ${activeValidation.reason}`);
           console.log(`LOG: Watcher ${watcher.id} skipped - ${prefsErr.message}`);
           skipped.push({ userId, reason: prefsErr.message });
           watchersSkippedCount++;
-          continue;
+          return;
         }
 
         console.log(`Trading Preferences Loaded\n`);
@@ -1350,76 +1367,70 @@ Reason: ${activeValidation.reason}`);
           console.log(`LOG: Watcher ${watcher.id} skipped - Gemini API Key missing`);
           skipped.push({ userId, reason: "Gemini API Key missing" });
           watchersSkippedCount++;
-          continue;
+          return;
         }
 
-        // Candle Data Downloaded
+        // Candle Data Downloaded via MarketDataGateway
         const mappedSymbol = toDisplaySymbol(selectedPair);
-        const interval = mapTimeframeToInterval(selectedTimeframe);
 
         let quoteData: any = null;
         let candleData: Candle[] = [];
 
         if (twelveDataExhausted) {
-          console.warn(`[Twelve Data Rate Limit] Watcher ${watcher.id} skipped due to HTTP 429 rate limit. Deferring until next cron cycle.`);
-          skipped.push({ userId, reason: "TwelveData rate limit (429) exhausted" });
+          console.warn(`[Twelve Data Rate Limit] Watcher ${watcher.id} skipped due to quota exhaustion cooldown. Deferring until next cron cycle.`);
+          skipped.push({ userId, reason: "TwelveData rate limit / quota exhausted" });
           watchersSkippedDueToRateLimitCount++;
           watchersSkippedCount++;
-          continue;
+          return;
         }
 
-        const validation = await validateSymbolWithTwelveData(mappedSymbol, twelveDataKey, tdStats);
-        if (!validation.isValid) {
-          if (validation.reason?.includes("429")) {
-            twelveDataExhausted = true;
-            console.warn(`[Twelve Data Rate Limit] Watcher ${watcher.id} skipped due to HTTP 429 rate limit. Deferring until next cron cycle.`);
-            skipped.push({ userId, reason: "TwelveData rate limit (429) exhausted" });
-            watchersSkippedDueToRateLimitCount++;
-            watchersSkippedCount++;
-            continue;
-          } else {
-            console.log(`LOG: Watcher ${watcher.id} skipped - TwelveData validation failed: ${validation.reason}`);
-            continue;
-          }
-        }
-
-        const finalSymbol = validation.matchedSymbol || mappedSymbol;
-
-        const tsResult = await defaultMarketDataService.getMarketData({ symbol: finalSymbol, timeframe: selectedTimeframe, requiredCount: 20 });
+        const tsResult = await defaultMarketDataService.getMarketData({
+          symbol: mappedSymbol,
+          timeframe: selectedTimeframe,
+          requiredCount: 20,
+          watcherId: watcher.id,
+          userId: userId,
+          purpose: 'Cron Market Watcher Scan'
+        });
         
         const glob = getMarketDataStats();
         tdStats.requests = glob.requests;
         tdStats.cacheHits = glob.cacheHits;
 
         if (!tsResult.isValid) {
-          if (tsResult.reason?.includes("RATE_LIMITED") || tsResult.reason?.includes("429")) {
+          if (tsResult.errorType === 'QUOTA_EXHAUSTED' || tsResult.reason === 'MARKET_DATA_PROVIDER_QUOTA_EXHAUSTED' || tsResult.reason?.includes("RATE_LIMITED") || tsResult.reason?.includes("429")) {
             twelveDataExhausted = true;
+            console.warn(`[Twelve Data Rate Limit] Watcher ${watcher.id} skipped due to MARKET_DATA_PROVIDER_QUOTA_EXHAUSTED.`);
+            skipped.push({ userId, reason: "MARKET_DATA_PROVIDER_QUOTA_EXHAUSTED" });
+            watchersSkippedDueToRateLimitCount++;
+            watchersSkippedCount++;
+            return;
           } else {
-            console.warn(`[Twelve Data API] error for ${finalSymbol}: ${tsResult.reason}`);
+            console.warn(`[Twelve Data API] error for ${mappedSymbol}: ${tsResult.reason}`);
           }
         } else {
           addLog("Candle Downloaded", "success");
-          candleData = tsResult.candles;
+          candleData = tsResult.candles || [];
           if (candleData.length > 0) {
-            quoteData = candleData[candleData.length - 1]; // Or similar quote structure if needed
+            quoteData = candleData[candleData.length - 1];
           }
         }
 
         if (twelveDataExhausted) {
-          console.warn(`[Twelve Data Rate Limit] Watcher ${watcher.id} skipped due to HTTP 429 rate limit. Deferring until next cron cycle.`);
-          skipped.push({ userId, reason: "TwelveData rate limit (429) exhausted" });
+          console.warn(`[Twelve Data Rate Limit] Watcher ${watcher.id} skipped due to quota exhaustion. Deferring until next cron cycle.`);
+          skipped.push({ userId, reason: "MARKET_DATA_PROVIDER_QUOTA_EXHAUSTED" });
           watchersSkippedDueToRateLimitCount++;
           watchersSkippedCount++;
-          continue;
+          return;
         }
 
         if (candleData.length < 2) {
            console.log(`LOG: Watcher ${watcher.id} skipped - Candle data downloaded: NO (insufficient data)`);
            skipped.push({ userId, reason: "Insufficient market data." });
            watchersSkippedCount++;
-           continue;
+           return;
         }
-        console.log(`LOG: Candle data downloaded for ${selectedPair}: YES (${candleData.length} candles)`);
+        console.log(`LOG: Candle data downloaded for ${selectedPair}: YES (${candleData.length} candles${tsResult.fromCache ? ', fromCache: true' : ''})`);
 
         // Phase 2 & 3: Timeframe Logic & New Candle Check
         const latestClosedCandle = candleData[candleData.length - 2] || candleData[candleData.length - 1];
@@ -1431,7 +1442,7 @@ Reason: ${activeValidation.reason}`);
           console.log(`[Timeframe Logic] Watcher ${watcher.id} skipped - Same candle already analyzed (${latestClosedCandleTime}). Exiting.`);
           skipped.push({ userId, reason: "Same candle already analyzed (no new closed candle)" });
           watchersSkippedCount++;
-          continue;
+          return;
         }
 
         scanStart = Date.now();
@@ -1472,7 +1483,7 @@ Reason: ${activeValidation.reason}`);
             })
             .eq("id", watcher.id);
 
-          continue;
+          return;
         }
 
         // Extract market structure & compile strategy
@@ -1592,7 +1603,7 @@ Reason: ${activeValidation.reason}`);
             .eq("id", watcher.id);
 
           watchersProcessedCount++;
-          continue;
+          return;
         } else {
           // Check if we force Gemini for FAIL in HYBRID/AI_ONLY or if AMBIGUOUS/requires_gemini is true
           const forceGemini = (recommendation === 'FAIL' && (executionMode === 'HYBRID' || executionMode === 'AI_ONLY'));
@@ -1657,15 +1668,20 @@ Reason: ${decisionResult.explanation || (requiresGemini ? 'Strategy configuratio
 
               skipped.push({ userId, reason: "Missing Gemini API key" });
               watchersSkippedCount++;
-              continue;
+              return;
             }
 
             try {
               const geminiKey = keyRes.apiKey;
               if (geminiKey) {
-                if (cronTimer.getElapsedTimeMs() >= 25000) {
-                  console.warn(`[CRON DEADLINE] Skipped Gemini for Watcher ${watcher.id} (${selectedPair}). Reason: Insufficient execution budget.`);
+                const elapsedBeforeGemini = Date.now() - startTime;
+                const remainingBeforeGemini = PROCESSING_DEADLINE_MS - elapsedBeforeGemini;
+
+                if (remainingBeforeGemini < 8000) {
+                  console.warn(`[CRON DEADLINE] Skipped Gemini for Watcher ${watcher.id} (${selectedPair}). Reason: Insufficient execution budget (${remainingBeforeGemini}ms remaining < 8000ms needed).`);
                   cronTimer.markEarlyExit();
+                  watchersSkippedByDeadlineCount++;
+                  watchersSkippedCount++;
                   const scanDurationMs = Date.now() - scanStart;
                   await recordEvaluation(supabase, {
                     user_id: userId,
@@ -1683,15 +1699,14 @@ Reason: ${decisionResult.explanation || (requiresGemini ? 'Strategy configuratio
                     gemini_used: false,
                     gemini_result: "Skipped due to cron safety deadline",
                     trade_sent: false,
-                    trade_reason: "Cron execution safety deadline reached (25,000ms)",
+                    trade_reason: `Cron execution safety deadline reached (${remainingBeforeGemini}ms remaining / 25,000ms limit)`,
                     scan_duration_ms: scanDurationMs,
                     gemini_duration_ms: null,
                     decision_snapshot: decisionSnapshot
                   });
 
                   skipped.push({ userId, reason: "Cron safety deadline reached" });
-                  watchersSkippedCount++;
-                  continue;
+                  return;
                 }
 
                 logWatcherEvent('Gemini Analysis', logCtx, {
@@ -1757,7 +1772,8 @@ Output ONLY valid JSON.
                     },
                     timeoutMs: 8000,
                     maxRetriesFor503: 1,
-                    backoffMsFor503: 500
+                    backoffMsFor503: 500,
+                    remainingGlobalBudgetMs: remainingBeforeGemini
                   },
                   {
                     userEmail: logCtx.userEmail,
@@ -1776,11 +1792,17 @@ Output ONLY valid JSON.
                   const cleanErrMsg = geminiRes.cleanErrorMessage || "Gemini execution failed";
                   if (geminiRes.errorType === 'TIMEOUT') {
                     geminiTimeoutsCount++;
+                    geminiCallsTimedOutCount++;
+                    watchersSkippedByGeminiTimeoutCount++;
                   } else if (geminiRes.errorType === 'QUOTA_EXHAUSTED') {
                     geminiQuotaErrorsCount++;
+                    geminiCallsQuotaExhaustedCount++;
                     skippedDueToQuotaCount++;
+                    watchersSkippedByGemini429Count++;
                   } else if (geminiRes.errorType === 'TEMPORARY_ERROR') {
                     tempErrorCount++;
+                    geminiCallsTemporarilyFailedCount++;
+                    watchersSkippedByGemini503Count++;
                   } else if (geminiRes.errorType === 'INVALID_CREDENTIALS' || geminiRes.errorType === 'PERMISSION_ERROR') {
                     invalidKeyCount++;
                   }
@@ -1840,9 +1862,10 @@ Output ONLY valid JSON.
 
                   skipped.push({ userId, reason: cleanErrMsg });
                   watchersSkippedCount++;
-                  continue;
+                  return;
                 }
 
+                successfulGeminiExecutionsCount++;
                 geminiTextResult = geminiRes.text;
 
                 if (watcher.gemini_status !== 'READY') {
@@ -1898,7 +1921,7 @@ Output ONLY valid JSON.
 
                   skipped.push({ userId, reason: errMsg });
                   watchersSkippedCount++;
-                  continue;
+                  return;
                 }
 
                 addLog("Gemini Returned", "success");
@@ -2027,7 +2050,7 @@ Output ONLY valid JSON.
 
               skipped.push({ userId, reason: cleanErrorMessage });
               watchersSkippedCount++;
-              continue;
+              return;
             }
           } else {
             // Gemini NOT required! Fallback to local strategy engine (since recommendation is PASS)
@@ -2413,7 +2436,7 @@ Reason: ${adaptiveReq.reason}
 
             watchersProcessedCount++;
             isWatcherSkipped = false;
-            continue;
+            return;
         }
 
         cronTimer.startStage("Position Sizing & Validation");
@@ -2494,7 +2517,7 @@ ${analysis.stopLossBasis === 'ATR_FALLBACK' ? `ATR: ${marketStructure.volatility
             .eq("id", watcher.id);
 
           watchersProcessedCount++;
-          continue;
+          return;
         }
         // === STAGE 5 HARDENING: NEWS HARD-PAUSE GATE ===
         const newsGateResult = await defaultEconomicEventService.checkNewsHardPause(selectedPair);
@@ -2557,7 +2580,7 @@ ${analysis.stopLossBasis === 'ATR_FALLBACK' ? `ATR: ${marketStructure.volatility
                 gemini_duration_ms: geminiDuration,
                 decision_snapshot: decisionSnapshot
             });
-            continue;
+            return;
         }
 
         // === STAGE 7 HARDENING: BROKER QUOTE INTEGRATION & FRESHNESS ===
@@ -2643,7 +2666,7 @@ Source: ${brokerQuote.source}`);
                 execution_source: brokerExecutionMode,
                 decision_snapshot: decisionSnapshot
             });
-            continue;
+            return;
         }
 
         // === STAGE 8/17: SUPERVISED MICROLOT GOVERNOR ===
@@ -2676,7 +2699,7 @@ Source: ${brokerQuote.source}`);
                 execution_source: brokerExecutionMode,
                 decision_snapshot: decisionSnapshot
             });
-            continue;
+            return;
         }
 
         // === STAGE 8: CRASH RECOVERY & IDEMPOTENCY ===
@@ -2695,7 +2718,7 @@ Source: ${brokerQuote.source}`);
                 const existingPos = await brokerProvider.getPosition(selectedPair);
                 if (existingPos) {
                     console.log(`[Stage 8 Protection] Existing position found for ${selectedPair} at broker. Skipping duplicate execution.`);
-                    continue;
+                    return;
                 }
 
                 const orderParams = {
@@ -2754,7 +2777,7 @@ Source: ${brokerQuote.source}`);
                 execution_source: brokerExecutionMode,
                 decision_snapshot: decisionSnapshot
             });
-            continue;
+            return;
         }
         
         console.log(`[${brokerExecutionMode} BROKER] Order Placed: ${brokerOrder.orderId} (Status: ${brokerOrder.status})`);
@@ -2910,7 +2933,7 @@ Source: ${brokerQuote.source}`);
             .eq("id", watcher.id);
 
           watchersProcessedCount++;
-          continue;
+          return;
         }
 
         let signal: any = null;
@@ -2999,7 +3022,7 @@ Source: ${brokerQuote.source}`);
             decision_snapshot: decisionSnapshot
           });
 
-          continue;
+          return;
         }
 
         // Send ONE Telegram signal with Signal Deduplication Check
@@ -3116,11 +3139,34 @@ Source: ${brokerQuote.source}`);
         watchersSkippedCount++;
       }
       } finally {
-        cronTimer.endWatcher(isWatcherSkipped);
+        cronTimer.endWatcher(isWatcherSkipped, watcher?.id);
       }
-    }
+    });
 
     const totalTime = Date.now() - startTime;
+    const maxWatcherDuration = cronTimer.getMaxWatcherDurationMs();
+    const avgWatcherDuration = cronTimer.getAvgWatcherDurationMs();
+
+    console.log(`\n==================================================`);
+    console.log(`[CRON DIAGNOSTICS]`);
+    console.log(`Watchers Discovered: ${watchersDiscoveredCount}`);
+    console.log(`Watchers Eligible: ${watchersEligibleCount}`);
+    console.log(`Watchers Processed: ${watchersProcessedCount}`);
+    console.log(`Watchers Skipped: ${watchersSkippedCount}`);
+    console.log(`Watchers Skipped By Deadline: ${watchersSkippedByDeadlineCount}`);
+    console.log(`Watchers Skipped By Gemini Timeout: ${watchersSkippedByGeminiTimeoutCount}`);
+    console.log(`Watchers Skipped By Gemini 429: ${watchersSkippedByGemini429Count}`);
+    console.log(`Watchers Skipped By Gemini 503: ${watchersSkippedByGemini503Count}`);
+    console.log(`Gemini Calls Executed: ${geminiCallsExecutedCount}`);
+    console.log(`Gemini Calls Retried: ${geminiCallsRetriedCount}`);
+    console.log(`Gemini Calls Timed Out: ${geminiCallsTimedOutCount}`);
+    console.log(`Gemini Calls Quota Exhausted: ${geminiCallsQuotaExhaustedCount}`);
+    console.log(`Gemini Calls Temporarily Failed: ${geminiCallsTemporarilyFailedCount}`);
+    console.log(`Maximum Watcher Duration: ${maxWatcherDuration}ms`);
+    console.log(`Average Watcher Duration: ${avgWatcherDuration}ms`);
+    console.log(`Total Cron Duration: ${totalTime}ms`);
+    console.log(`==================================================\n`);
+
     console.log(`\n==================================================`);
     console.log(`[TWELVE DATA API USAGE AUDIT & METRICS]`);
     console.log(`Total Twelve Data requests per cron execution: ${totalTwelveDataRequests}`);
@@ -3179,10 +3225,33 @@ Source: ${brokerQuote.source}`);
       success: true,
       processed: watchersProcessedCount,
       signalsSent: telegramMessagesSentCount,
+      diagnostics: {
+        watchersDiscovered: watchersDiscoveredCount,
+        watchersEligible: watchersEligibleCount,
+        watchersProcessed: watchersProcessedCount,
+        watchersSkipped: watchersSkippedCount,
+        watchersSkippedByDeadline: watchersSkippedByDeadlineCount,
+        watchersSkippedByGeminiTimeout: watchersSkippedByGeminiTimeoutCount,
+        watchersSkippedByGemini429: watchersSkippedByGemini429Count,
+        watchersSkippedByGemini503: watchersSkippedByGemini503Count,
+        geminiCallsExecuted: geminiCallsExecutedCount,
+        geminiCallsRetried: geminiCallsRetriedCount,
+        geminiCallsTimedOut: geminiCallsTimedOutCount,
+        geminiCallsQuotaExhausted: geminiCallsQuotaExhaustedCount,
+        geminiCallsTemporarilyFailed: geminiCallsTemporarilyFailedCount,
+        maximumWatcherDurationMs: maxWatcherDuration,
+        averageWatcherDurationMs: avgWatcherDuration,
+        totalCronDurationMs: totalTime
+      },
       twelveDataMetrics: {
-        totalRequests: totalTwelveDataRequests,
-        savedThroughCaching: requestsSavedThroughCachingCount,
-        skippedDueToRateLimit: watchersSkippedDueToRateLimitCount
+        totalRequests: getMarketDataStats().requests,
+        cacheHits: getMarketDataStats().cacheHits,
+        savedThroughCaching: getMarketDataStats().requestsSaved,
+        skippedDueToRateLimit: watchersSkippedDueToRateLimitCount,
+        creditsUsed: getMarketDataStats().creditsUsed,
+        creditsRemaining: getMarketDataStats().creditsRemaining,
+        currentMinuteUsage: getMarketDataStats().currentMinuteUsage,
+        status: getMarketDataStats().status
       },
       geminiHealth: {
         watchersReady: watchersReadyCount,
@@ -3194,7 +3263,8 @@ Source: ${brokerQuote.source}`);
         skippedDueToQuota: skippedDueToQuotaCount,
         geminiCallsExecuted: geminiCallsExecutedCount,
         geminiCallsRetried: geminiCallsRetriedCount,
-        geminiCallsSaved: geminiCallsSavedCount
+        geminiCallsSaved: geminiCallsSavedCount,
+        successfulExecutions: successfulGeminiExecutionsCount
       },
       executionTimeMs: totalTime
     });

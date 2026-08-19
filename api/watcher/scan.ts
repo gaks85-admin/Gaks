@@ -520,11 +520,37 @@ export default async function handler(req: any, res: any) {
     const selectedTimeframe = watcher.selected_timeframe || 'H1';
     const interval = '1h'; // Simplified
 
-    const reqArgs = { symbol: mappedSymbol, timeframe: selectedTimeframe, requiredCount: 20 };
+    const reqArgs = {
+      symbol: mappedSymbol,
+      timeframe: selectedTimeframe,
+      requiredCount: 20,
+      watcherId: watcher.id,
+      userId: userId,
+      purpose: 'Manual Watcher Scan'
+    };
     const tsResult = await defaultMarketDataService.getMarketData(reqArgs);
     const candleData = tsResult.candles || [];
 
-    if (candleData.length < 2) throw new Error("Insufficient candle data.");
+    if (!tsResult.isValid || candleData.length < 2) {
+      const isQuota = tsResult.errorType === 'QUOTA_EXHAUSTED' || tsResult.reason === 'MARKET_DATA_PROVIDER_QUOTA_EXHAUSTED' || tsResult.reason?.includes('429');
+      const failReason = isQuota ? 'MARKET_DATA_PROVIDER_QUOTA_EXHAUSTED' : (tsResult.reason || 'Insufficient market candle data.');
+      
+      console.warn(`[MANUAL SCAN MARKET DATA] Watcher ${watcher.id} (${symbol}): ${failReason}`);
+      return res.json({
+        success: true,
+        data: {
+          watcher_id: watcher.id,
+          pair: symbol,
+          signal: 'NO_TRADE',
+          confidence: 0,
+          reasoning: [`Market Data Check: ${failReason}`],
+          reasonCode: isQuota ? 'MARKET_DATA_PROVIDER_QUOTA_EXHAUSTED' : 'MARKET_DATA_UNAVAILABLE',
+          marketDataUnavailable: true,
+          creditsUsed: tsResult.creditsUsed ?? null,
+          creditsRemaining: tsResult.creditsRemaining ?? null
+        }
+      });
+    }
 
     // Fix 1: Validate Market Data Temporal Integrity
     const integrity = validateMarketDataIntegrity(symbol, candleData);

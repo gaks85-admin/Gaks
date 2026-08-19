@@ -21,6 +21,14 @@ export interface CronTimerOptions {
   timeLimitMs?: number;        // default 30000ms
 }
 
+interface ActiveWatcherState {
+  context: WatcherTimingContext;
+  startTime: number;
+  stages: WatcherStageTiming[];
+  currentStageName: string | null;
+  currentStageStart: number;
+}
+
 export class CronTimer {
   private startTime: number;
   private warningThresholdMs: number;
@@ -34,11 +42,9 @@ export class CronTimer {
   private watcherRecords: SingleWatcherTimingRecord[] = [];
   private stageAggregateTimes: Record<string, number> = {};
 
-  private currentWatcherContext: WatcherTimingContext | null = null;
-  private currentWatcherStart: number = 0;
-  private currentWatcherStages: WatcherStageTiming[] = [];
-  private currentStageName: string | null = null;
-  private currentStageStart: number = 0;
+  // Concurrency-safe map for active watchers
+  private activeWatchers: Map<string, ActiveWatcherState> = new Map();
+  private lastActiveWatcherId: string | null = null;
 
   constructor(options?: CronTimerOptions) {
     this.startTime = performance.now();
@@ -63,48 +69,65 @@ export class CronTimer {
   }
 
   public startWatcher(context: WatcherTimingContext): void {
-    this.currentWatcherContext = context;
-    this.currentWatcherStart = performance.now();
-    this.currentWatcherStages = [];
-    this.currentStageName = null;
-    this.currentStageStart = 0;
+    const watcherId = context.watcherId || 'default';
+    this.lastActiveWatcherId = watcherId;
+    this.activeWatchers.set(watcherId, {
+      context,
+      startTime: performance.now(),
+      stages: [],
+      currentStageName: null,
+      currentStageStart: 0
+    });
   }
 
-  public startStage(stageName: string): void {
-    if (this.currentStageName && this.currentStageStart > 0) {
-      this.endStage();
+  public startStage(stageName: string, watcherId?: string): void {
+    const targetId = watcherId || this.lastActiveWatcherId;
+    if (!targetId) return;
+    const state = this.activeWatchers.get(targetId);
+    if (!state) return;
+
+    if (state.currentStageName && state.currentStageStart > 0) {
+      this.endStage(targetId);
     }
-    this.currentStageName = stageName;
-    this.currentStageStart = performance.now();
+    state.currentStageName = stageName;
+    state.currentStageStart = performance.now();
   }
 
-  public endStage(): void {
-    if (!this.currentStageName || this.currentStageStart === 0) return;
-    const duration = Math.round(performance.now() - this.currentStageStart);
-    const stageName = this.currentStageName;
+  public endStage(watcherId?: string): void {
+    const targetId = watcherId || this.lastActiveWatcherId;
+    if (!targetId) return;
+    const state = this.activeWatchers.get(targetId);
+    if (!state || !state.currentStageName || state.currentStageStart === 0) return;
 
-    this.currentWatcherStages.push({ stageName, durationMs: duration });
+    const duration = Math.round(performance.now() - state.currentStageStart);
+    const stageName = state.currentStageName;
+
+    state.stages.push({ stageName, durationMs: duration });
     this.stageAggregateTimes[stageName] = (this.stageAggregateTimes[stageName] || 0) + duration;
 
-    this.currentStageName = null;
-    this.currentStageStart = 0;
+    state.currentStageName = null;
+    state.currentStageStart = 0;
   }
 
-  public endWatcher(skipped: boolean = false): void {
-    if (this.currentStageName) {
-      this.endStage();
+  public endWatcher(skipped: boolean = false, watcherId?: string): void {
+    const targetId = watcherId || this.lastActiveWatcherId;
+    if (!targetId) return;
+    const state = this.activeWatchers.get(targetId);
+    if (!state) return;
+
+    if (state.currentStageName) {
+      this.endStage(targetId);
     }
 
-    if (!this.currentWatcherContext) return;
-
-    const totalMs = Math.round(performance.now() - this.currentWatcherStart);
+    const totalMs = Math.round(performance.now() - state.startTime);
     const record: SingleWatcherTimingRecord = {
-      context: { ...this.currentWatcherContext },
+      context: { ...state.context },
       totalMs,
-      stages: [...this.currentWatcherStages],
+      stages: [...state.stages],
     };
 
     this.watcherRecords.push(record);
+    this.activeWatchers.delete(targetId);
 
     if (skipped) {
       this.skippedWatchersCount++;
@@ -112,17 +135,24 @@ export class CronTimer {
       this.processedWatchersCount++;
     }
 
-    const { userEmail, watcherId, pair, timeframe } = this.currentWatcherContext;
-    console.log(`[CRON TIMING] Watcher Processed in ${totalMs}ms | User: ${userEmail} | Watcher: ${watcherId} | Pair: ${pair} | Timeframe: ${timeframe}`);
+    const { userEmail, pair, timeframe } = state.context;
+    console.log(`[CRON TIMING] Watcher Processed in ${totalMs}ms | User: ${userEmail} | Watcher: ${targetId} | Pair: ${pair} | Timeframe: ${timeframe}`);
 
     const elapsed = this.getElapsedTimeMs();
     if (elapsed >= this.warningThresholdMs) {
-      console.warn(`[CRON TIMING WARNING] Cron execution time (${elapsed}ms) reached warning threshold (${this.warningThresholdMs}ms / ${this.timeLimitMs}ms limit) after Watcher: ${watcherId} | Pair: ${pair}`);
+      console.warn(`[CRON TIMING WARNING] Cron execution time (${elapsed}ms) reached warning threshold (${this.warningThresholdMs}ms / ${this.timeLimitMs}ms limit) after Watcher: ${targetId} | Pair: ${pair}`);
     }
+  }
 
-    this.currentWatcherContext = null;
-    this.currentWatcherStart = 0;
-    this.currentWatcherStages = [];
+  public getMaxWatcherDurationMs(): number {
+    if (this.watcherRecords.length === 0) return 0;
+    return Math.max(...this.watcherRecords.map(r => r.totalMs));
+  }
+
+  public getAvgWatcherDurationMs(): number {
+    if (this.watcherRecords.length === 0) return 0;
+    const sum = this.watcherRecords.reduce((acc, r) => acc + r.totalMs, 0);
+    return Math.round(sum / this.watcherRecords.length);
   }
 
   public printSummary(): void {
@@ -153,6 +183,8 @@ export class CronTimer {
     console.log(`Watchers Discovered: ${this.discoveredWatchersCount}`);
     console.log(`Watchers Processed: ${this.processedWatchersCount}`);
     console.log(`Watchers Skipped: ${this.skippedWatchersCount}`);
+    console.log(`Maximum Watcher Duration: ${this.getMaxWatcherDurationMs()}ms`);
+    console.log(`Average Watcher Duration: ${this.getAvgWatcherDurationMs()}ms`);
 
     if (slowestWatcher) {
       const { userEmail, watcherId, pair, timeframe } = slowestWatcher.context;
