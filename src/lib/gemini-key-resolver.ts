@@ -104,13 +104,65 @@ Status: ${status}`);
   };
 }
 
+export interface GeminiQuotaDetails {
+  quotaType: 'QUOTA_RPM' | 'QUOTA_TPM' | 'QUOTA_RPD' | 'QUOTA_UNKNOWN';
+  quotaMetric?: string;
+  quotaId?: string;
+  retryDelaySeconds?: number;
+}
+
 export interface GeminiErrorClassification {
   profileStatus: 'INVALID_KEY' | 'QUOTA_EXHAUSTED' | 'TEMP_ERROR' | 'NEEDS_ATTENTION';
-  diagnosticStatus: 'INVALID_KEY' | 'QUOTA_EXHAUSTED' | 'TIMEOUT' | 'TEMPORARY_ERROR' | 'INVALID_REQUEST' | 'PERMISSION_ERROR' | 'API_ERROR';
+  diagnosticStatus: 'INVALID_KEY' | 'QUOTA_RPM' | 'QUOTA_TPM' | 'QUOTA_RPD' | 'QUOTA_UNKNOWN' | 'TIMEOUT' | 'TEMPORARY_ERROR' | 'INVALID_REQUEST' | 'PERMISSION_ERROR' | 'API_ERROR';
   cleanErrorMessage: string;
   is503: boolean;
   isTimeout: boolean;
   isQuota: boolean;
+  quotaDetails?: GeminiQuotaDetails;
+}
+
+/**
+ * Extracts structured quota violation details (metric, quotaId, retryDelay, quotaType) from error objects or raw message text.
+ */
+export function parseQuotaDetails(error: any, lowerMsg: string): GeminiQuotaDetails {
+  let quotaMetric: string | undefined;
+  let quotaId: string | undefined;
+  let retryDelaySeconds: number | undefined;
+
+  const metricMatch = lowerMsg.match(/quota metric ['"]?([a-z0-9_./-]+)['"]?/i) || lowerMsg.match(/metric:?\s*['"]?([a-z0-9_./-]+)['"]?/i);
+  if (metricMatch) {
+    quotaMetric = metricMatch[1];
+  }
+
+  const idMatch = lowerMsg.match(/quota id ['"]?([a-z0-9_./-]+)['"]?/i) || lowerMsg.match(/quotaid:?\s*['"]?([a-z0-9_./-]+)['"]?/i);
+  if (idMatch) {
+    quotaId = idMatch[1];
+  }
+
+  const retryMatch = lowerMsg.match(/retry after\s*(\d+)/i) || lowerMsg.match(/retrydelay:?\s*(\d+)/i) || lowerMsg.match(/retryin:?\s*(\d+)/i);
+  if (retryMatch) {
+    retryDelaySeconds = parseInt(retryMatch[1], 10);
+  }
+
+  const isPerDay = lowerMsg.includes('perday') || lowerMsg.includes('per_day') || lowerMsg.includes('daily') || (quotaId && quotaId.toLowerCase().includes('perday')) || (quotaMetric && quotaMetric.toLowerCase().includes('daily'));
+  const isTpm = lowerMsg.includes('token') || lowerMsg.includes('tpm') || (quotaMetric && quotaMetric.toLowerCase().includes('token'));
+  const isRpm = lowerMsg.includes('request') || lowerMsg.includes('rpm') || lowerMsg.includes('minute') || (quotaId && quotaId.toLowerCase().includes('minute')) || (quotaMetric && quotaMetric.toLowerCase().includes('request'));
+
+  let quotaType: 'QUOTA_RPM' | 'QUOTA_TPM' | 'QUOTA_RPD' | 'QUOTA_UNKNOWN' = 'QUOTA_UNKNOWN';
+  if (isPerDay) {
+    quotaType = 'QUOTA_RPD';
+  } else if (isTpm) {
+    quotaType = 'QUOTA_TPM';
+  } else if (isRpm) {
+    quotaType = 'QUOTA_RPM';
+  }
+
+  return {
+    quotaType,
+    quotaMetric,
+    quotaId,
+    retryDelaySeconds
+  };
 }
 
 /**
@@ -124,11 +176,13 @@ export function classifyAndRedactGeminiError(error: any): GeminiErrorClassificat
   const lowerMsg = cleanMsg.toLowerCase();
 
   let profileStatus: 'INVALID_KEY' | 'QUOTA_EXHAUSTED' | 'TEMP_ERROR' | 'NEEDS_ATTENTION' = 'NEEDS_ATTENTION';
-  let diagnosticStatus: 'INVALID_KEY' | 'QUOTA_EXHAUSTED' | 'TIMEOUT' | 'TEMPORARY_ERROR' | 'INVALID_REQUEST' | 'PERMISSION_ERROR' | 'API_ERROR' = 'API_ERROR';
+  let diagnosticStatus: 'INVALID_KEY' | 'QUOTA_RPM' | 'QUOTA_TPM' | 'QUOTA_RPD' | 'QUOTA_UNKNOWN' | 'TIMEOUT' | 'TEMPORARY_ERROR' | 'INVALID_REQUEST' | 'PERMISSION_ERROR' | 'API_ERROR' = 'API_ERROR';
 
   const isTimeout = lowerMsg.includes('timeout') || lowerMsg.includes('etimedout') || error?.name === 'TimeoutError' || error?.name === 'AbortError' || lowerMsg.includes('abort');
   const is503 = errStatus === 503 || lowerMsg.includes('503') || lowerMsg.includes('unavailable') || lowerMsg.includes('high demand') || lowerMsg.includes('spikes in demand');
   const isQuota = errStatus === 429 || lowerMsg.includes('429') || lowerMsg.includes('resource_exhausted') || lowerMsg.includes('quota exceeded') || lowerMsg.includes('rate limit') || lowerMsg.includes('retryinfo') || lowerMsg.includes('retrydelay');
+
+  let quotaDetails: GeminiQuotaDetails | undefined;
 
   if (
     errStatus === 401 ||
@@ -155,7 +209,8 @@ export function classifyAndRedactGeminiError(error: any): GeminiErrorClassificat
     diagnosticStatus = 'INVALID_REQUEST';
   } else if (isQuota) {
     profileStatus = 'QUOTA_EXHAUSTED';
-    diagnosticStatus = 'QUOTA_EXHAUSTED';
+    quotaDetails = parseQuotaDetails(error, lowerMsg);
+    diagnosticStatus = quotaDetails.quotaType;
   } else if (isTimeout) {
     profileStatus = 'TEMP_ERROR';
     diagnosticStatus = 'TIMEOUT';
@@ -173,6 +228,7 @@ export function classifyAndRedactGeminiError(error: any): GeminiErrorClassificat
     cleanErrorMessage: cleanMsg,
     is503,
     isTimeout,
-    isQuota
+    isQuota,
+    quotaDetails
   };
 }

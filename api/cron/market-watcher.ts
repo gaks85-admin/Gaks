@@ -677,28 +677,53 @@ export default async function handler(req: any, res: any) {
     
     let twelveDataExhausted = false;
 
+    const userLastGeminiExecutionMap = new Map<string, number>();
+    const activeUserGeminiPromises = new Map<string, Promise<void>>();
+    const cronAnalysisCache = new Map<string, { geminiRes: any; parsedResult: any }>();
+
     const PROCESSING_DEADLINE_MS = 25000;
     let watchersDiscoveredCount = watchers ? watchers.length : 0;
+    let watchersDueCount = 0;
     let watchersEligibleCount = 0;
     let watchersSkippedByDeadlineCount = 0;
     let watchersSkippedByGeminiTimeoutCount = 0;
     let watchersSkippedByGemini429Count = 0;
     let watchersSkippedByGemini503Count = 0;
+    let watchersSkippedByUserCooldownCount = 0;
+    let watchersSkippedBecauseNoNewCandleCount = 0;
+    let geminiCallsExecutedCount = 0;
+    let geminiCallsRetriedCount = 0;
     let geminiCallsTimedOutCount = 0;
     let geminiCallsQuotaExhaustedCount = 0;
     let geminiCallsTemporarilyFailedCount = 0;
+    let geminiCalls503Count = 0;
     let successfulGeminiExecutionsCount = 0;
+    let geminiCallsDeduplicatedCount = 0;
 
     let watchersReadyCount = 0;
     let quotaWaitCount = 0;
     let invalidKeyCount = 0;
     let tempErrorCount = 0;
     let skippedDueToQuotaCount = 0;
-    let geminiCallsExecutedCount = 0;
-    let geminiCallsRetriedCount = 0;
     let geminiTimeoutsCount = 0;
     let geminiQuotaErrorsCount = 0;
     let geminiCallsSavedCount = 0;
+    let signalsSuppressedAsDuplicatesCount = 0;
+    let signalsSuppressedByMinSeparationCount = 0;
+
+    // Prioritize watchers: 1) New/unanalyzed candles first, 2) Oldest last scan first
+    if (watchers && watchers.length > 0) {
+      watchers.sort((a, b) => {
+        const aCandle = a.last_analyzed_closed_candle_time || '';
+        const bCandle = b.last_analyzed_closed_candle_time || '';
+        if (!aCandle && bCandle) return -1;
+        if (aCandle && !bCandle) return 1;
+
+        const aScan = a.last_scan_at ? new Date(a.last_scan_at).getTime() : 0;
+        const bScan = b.last_scan_at ? new Date(b.last_scan_at).getTime() : 0;
+        return aScan - bScan;
+      });
+    }
 
     console.log("[CRON STEP 5]");
 
@@ -826,6 +851,7 @@ export default async function handler(req: any, res: any) {
         watchersSkippedCount++;
         return;
       }
+      watchersDueCount++;
 
       if (!selectedPair || selectedPair === 'unknown') {
         logWatcherEvent('SIGNAL SKIPPED', logCtx, 'No selected pair');
@@ -1441,6 +1467,7 @@ Reason: ${activeValidation.reason}`);
         if (!isNewCandle) {
           console.log(`[Timeframe Logic] Watcher ${watcher.id} skipped - Same candle already analyzed (${latestClosedCandleTime}). Exiting.`);
           skipped.push({ userId, reason: "Same candle already analyzed (no new closed candle)" });
+          watchersSkippedBecauseNoNewCandleCount++;
           watchersSkippedCount++;
           return;
         }
@@ -1621,59 +1648,95 @@ Reason: ${decisionResult.explanation || (requiresGemini ? 'Strategy configuratio
 
           if (requiresGemini) {
             cronTimer.startStage("Gemini AI Execution");
-            addLog("Gemini Required", "success");
-            addLog("Calling Gemini", "success");
-            geminiInvoked = true;
-            console.log("Gemini Invoked");
-            geminiCalled = true;
-            geminiStart = Date.now();
 
-            const keyRes = await resolveUserGeminiKey(supabase, userId, watcher.id, logCtx);
-
-            if (!keyRes.keyPresent || !keyRes.apiKey) {
-              logWatcherError('Gemini ERROR', logCtx, 'Missing Gemini API key', {
-                'Gemini Status': 'NOT_CONNECTED',
-                'Action': 'Skipped'
-              });
-
-              await supabase.from("profiles").update({
-                gemini_status: 'NOT_CONNECTED',
-                gemini_last_error: 'Missing Gemini API key',
-                gemini_last_checked: new Date().toISOString(),
-                updated_at: new Date().toISOString()
-              }).eq("id", userId);
-
-              const scanDurationMs = Date.now() - scanStart;
-              await recordEvaluation(supabase, {
-                user_id: userId,
-                watcher_id: watcher.id,
-                pair: selectedPair,
-                timeframe: selectedTimeframe,
-                strategy_mode: compiledStrategy.strategy_mode,
-                decision_score: decisionResult.decision_score,
-                matched_weight: decisionResult.matched_weight,
-                possible_weight: decisionResult.possible_weight,
-                recommendation: decisionResult.recommendation,
-                mandatory_rules_passed: decisionResult.mandatory_rules_passed,
-                matched_rules: decisionResult.matched_rules,
-                failed_rules: decisionResult.failed_rules,
-                gemini_used: true,
-                gemini_result: "Missing Gemini API key",
-                trade_sent: false,
-                trade_reason: "User has no Gemini API key configured",
-                scan_duration_ms: scanDurationMs,
-                gemini_duration_ms: Date.now() - geminiStart,
-                decision_snapshot: decisionSnapshot
-              });
-
-              skipped.push({ userId, reason: "Missing Gemini API key" });
+            // 1. Per-User AI Cooldown (30s minimum between AI calls per user)
+            const lastAiTime = userLastGeminiExecutionMap.get(userId) || 0;
+            const timeSinceLastAi = Date.now() - lastAiTime;
+            if (timeSinceLastAi < 30000) {
+              const remainingSec = Math.ceil((30000 - timeSinceLastAi) / 1000);
+              console.log(`[USER AI COOLDOWN] User ${userId} executed AI call ${Math.round(timeSinceLastAi/1000)}s ago (<30s threshold). Skipping Gemini (Remaining: ${remainingSec}s).`);
+              watchersSkippedByUserCooldownCount++;
               watchersSkippedCount++;
-              return;
+              skipped.push({ userId, reason: `User AI cooldown active (${remainingSec}s remaining)` });
+              return; // Fail-safe: exit without updating last_scan_at or last_analyzed_closed_candle_time
             }
 
-            try {
-              const geminiKey = keyRes.apiKey;
-              if (geminiKey) {
+            // 2. In-Cron Job Deduplication Cache Check
+            const jobKey = `${userId}:${selectedPair}:${selectedTimeframe}:${latestClosedCandleTime}`;
+            let cachedJob = cronAnalysisCache.get(jobKey);
+
+            if (cachedJob) {
+              console.log(`[GEMINI DEDUPLICATED] Job: ${jobKey} | Action: REUSE_CACHED_ANALYSIS`);
+              geminiCallsDeduplicatedCount++;
+              geminiCallsSavedCount++;
+              geminiSucceeded = true;
+              geminiCalled = false;
+            } else {
+              // 3. Per-User Concurrency Guard
+              const activeUserPromise = activeUserGeminiPromises.get(userId);
+              if (activeUserPromise) {
+                console.log(`[PER-USER CONCURRENCY GUARD] User ${userId} has active Gemini call in-flight. Waiting...`);
+                await activeUserPromise;
+              }
+
+              userLastGeminiExecutionMap.set(userId, Date.now());
+
+              let resolveMutex: () => void;
+              const userMutexPromise = new Promise<void>((res) => { resolveMutex = res; });
+              activeUserGeminiPromises.set(userId, userMutexPromise);
+
+              try {
+                addLog("Gemini Required", "success");
+                addLog("Calling Gemini", "success");
+                geminiInvoked = true;
+                console.log("Gemini Invoked");
+                geminiCalled = true;
+                geminiStart = Date.now();
+
+                const keyRes = await resolveUserGeminiKey(supabase, userId, watcher.id, logCtx);
+
+                if (!keyRes.keyPresent || !keyRes.apiKey) {
+                  logWatcherError('Gemini ERROR', logCtx, 'Missing Gemini API key', {
+                    'Gemini Status': 'NOT_CONNECTED',
+                    'Action': 'Skipped'
+                  });
+
+                  await supabase.from("profiles").update({
+                    gemini_status: 'NOT_CONNECTED',
+                    gemini_last_error: 'Missing Gemini API key',
+                    gemini_last_checked: new Date().toISOString(),
+                    updated_at: new Date().toISOString()
+                  }).eq("id", userId);
+
+                  const scanDurationMs = Date.now() - scanStart;
+                  await recordEvaluation(supabase, {
+                    user_id: userId,
+                    watcher_id: watcher.id,
+                    pair: selectedPair,
+                    timeframe: selectedTimeframe,
+                    strategy_mode: compiledStrategy.strategy_mode,
+                    decision_score: decisionResult.decision_score,
+                    matched_weight: decisionResult.matched_weight,
+                    possible_weight: decisionResult.possible_weight,
+                    recommendation: decisionResult.recommendation,
+                    mandatory_rules_passed: decisionResult.mandatory_rules_passed,
+                    matched_rules: decisionResult.matched_rules,
+                    failed_rules: decisionResult.failed_rules,
+                    gemini_used: true,
+                    gemini_result: "Missing Gemini API key",
+                    trade_sent: false,
+                    trade_reason: "User has no Gemini API key configured",
+                    scan_duration_ms: scanDurationMs,
+                    gemini_duration_ms: Date.now() - geminiStart,
+                    decision_snapshot: decisionSnapshot
+                  });
+
+                  skipped.push({ userId, reason: "Missing Gemini API key" });
+                  watchersSkippedCount++;
+                  return;
+                }
+
+                const geminiKey = keyRes.apiKey;
                 const elapsedBeforeGemini = Date.now() - startTime;
                 const remainingBeforeGemini = PROCESSING_DEADLINE_MS - elapsedBeforeGemini;
 
@@ -1772,12 +1835,13 @@ Output ONLY valid JSON.
                         required: ["satisfies", "direction", "confidenceScore", "reasoning"]
                       }
                     },
-                    timeoutMs: 8000,
+                    timeoutMs: Number(process.env.GEMINI_TIMEOUT_MS) || 8000,
                     maxRetriesFor503: 1,
                     backoffMsFor503: 500,
                     remainingGlobalBudgetMs: remainingBeforeGemini
                   },
                   {
+                    userId: userId,
                     userEmail: logCtx.userEmail,
                     watcherId: watcher.id,
                     pair: selectedPair
@@ -1803,6 +1867,7 @@ Output ONLY valid JSON.
                     watchersSkippedByGemini429Count++;
                   } else if (geminiRes.errorType === 'TEMPORARY_ERROR') {
                     tempErrorCount++;
+                    geminiCalls503Count++;
                     geminiCallsTemporarilyFailedCount++;
                     watchersSkippedByGemini503Count++;
                   } else if (geminiRes.errorType === 'INVALID_CREDENTIALS' || geminiRes.errorType === 'PERMISSION_ERROR') {
@@ -1868,6 +1933,7 @@ Output ONLY valid JSON.
                 }
 
                 successfulGeminiExecutionsCount++;
+                cronAnalysisCache.set(jobKey, { geminiRes, parsedResult: null }); // Store in cache
                 geminiTextResult = geminiRes.text;
 
                 if (watcher.gemini_status !== 'READY') {
@@ -1995,8 +2061,7 @@ Output ONLY valid JSON.
                     reasoning: [parsedResult?.reasoning || "Gemini evaluated setup as NO_TRADE or unsatisfied."]
                   };
                 }
-              }
-            } catch (gemErr: any) {
+              } catch (gemErr: any) {
               const { profileStatus, diagnosticStatus, cleanErrorMessage } = classifyAndRedactGeminiError(gemErr);
 
               logWatcherError('Gemini ERROR', logCtx, gemErr, {
@@ -2053,8 +2118,14 @@ Output ONLY valid JSON.
               skipped.push({ userId, reason: cleanErrorMessage });
               watchersSkippedCount++;
               return;
+            } finally {
+              resolveMutex!();
+              if (activeUserGeminiPromises.get(userId) === userMutexPromise) {
+                activeUserGeminiPromises.delete(userId);
+              }
             }
-          } else {
+        }
+      } else {
             // Gemini NOT required! Fallback to local strategy engine (since recommendation is PASS)
             console.log(`[Decision Engine] Recommendation is ${recommendation}. Skipping Gemini as requires_gemini is false.`);
 
@@ -2942,6 +3013,9 @@ Source: ${brokerQuote.source}`);
         let isRegistered = false;
 
         if (recommendation !== 'FAIL') {
+          if (analysis.signal === 'BUY' || analysis.signal === 'SELL') {
+            signalsGeneratedCount++;
+          }
           analysis.entryPrice = posSizeResult.entryPrice;
           analysis.stopLoss = posSizeResult.stopLoss;
           analysis.takeProfit = posSizeResult.takeProfit;
@@ -3045,6 +3119,11 @@ Source: ${brokerQuote.source}`);
 
         if (dedupCheck.suppressed) {
           alertReason = dedupCheck.reason || "Suppressed by Signal Deduplication";
+          if (alertReason.toLowerCase().includes('separation') || alertReason.toLowerCase().includes('15') || alertReason.toLowerCase().includes('time')) {
+            signalsSuppressedByMinSeparationCount++;
+          } else {
+            signalsSuppressedAsDuplicatesCount++;
+          }
           logWatcherEvent('Signal Deduplication', logCtx, `Suppressed Telegram alert: ${dedupCheck.reason}`);
         } else {
           const dispatchRes = await dispatchTradeAlert(telegramChatId, signal);
@@ -3229,6 +3308,7 @@ Source: ${brokerQuote.source}`);
       signalsSent: telegramMessagesSentCount,
       diagnostics: {
         watchersDiscovered: watchersDiscoveredCount,
+        watchersDue: watchersDueCount,
         watchersEligible: watchersEligibleCount,
         watchersProcessed: watchersProcessedCount,
         watchersSkipped: watchersSkippedCount,
@@ -3236,11 +3316,18 @@ Source: ${brokerQuote.source}`);
         watchersSkippedByGeminiTimeout: watchersSkippedByGeminiTimeoutCount,
         watchersSkippedByGemini429: watchersSkippedByGemini429Count,
         watchersSkippedByGemini503: watchersSkippedByGemini503Count,
+        watchersSkippedByUserCooldown: watchersSkippedByUserCooldownCount,
+        watchersSkippedBecauseNoNewCandle: watchersSkippedBecauseNoNewCandleCount,
         geminiCallsExecuted: geminiCallsExecutedCount,
-        geminiCallsRetried: geminiCallsRetriedCount,
+        successfulGeminiExecutions: successfulGeminiExecutionsCount,
         geminiCallsTimedOut: geminiCallsTimedOutCount,
-        geminiCallsQuotaExhausted: geminiCallsQuotaExhaustedCount,
-        geminiCallsTemporarilyFailed: geminiCallsTemporarilyFailedCount,
+        geminiCalls503: geminiCalls503Count,
+        geminiCallsRetried: geminiCallsRetriedCount,
+        geminiQuotaErrors: geminiQuotaErrorsCount,
+        geminiCallsDeduplicated: geminiCallsDeduplicatedCount,
+        signalsGenerated: signalsGeneratedCount,
+        signalsSuppressedAsDuplicates: signalsSuppressedAsDuplicatesCount,
+        signalsSuppressedByMinSeparation: signalsSuppressedByMinSeparationCount,
         maximumWatcherDurationMs: maxWatcherDuration,
         averageWatcherDurationMs: avgWatcherDuration,
         totalCronDurationMs: totalTime
