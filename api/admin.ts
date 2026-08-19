@@ -279,21 +279,13 @@ async function health_handler(req: any, res: any) {
     let geminiReturnedText = null;
     let geminiErrorMsg = null;
     
-    // Fetch first available Gemini API key from Supabase
-    const { data: apiKeyData, error: apiKeyError } = await supabase
-      .from('user_api_keys')
-      .select('api_key')
-      .eq('provider', 'gemini')
-      .limit(1)
-      .maybeSingle();
-      
-    const keyLoadedFromSupabase = !!(apiKeyData && apiKeyData.api_key);
-    const keyLength = apiKeyData?.api_key?.length || 0;
+    // Check system Gemini API key from environment for global system health diagnostics
+    const envGeminiKey = (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "").trim();
 
-    if (keyLoadedFromSupabase) {
+    if (envGeminiKey) {
       try {
         const startGemini = Date.now();
-        const ai = new GoogleGenAI({ apiKey: apiKeyData.api_key });
+        const ai = new GoogleGenAI({ apiKey: envGeminiKey });
         const geminiRes = await generateContentWithDiagnostics(ai, {
           model: "gemini-3.6-flash",
           contents: "Reply only with OK",
@@ -306,8 +298,8 @@ async function health_handler(req: any, res: any) {
         geminiErrorMsg = err.message || 'Gemini API call failed';
       }
     } else {
-        geminiStatus = 'ERROR';
-        geminiErrorMsg = 'Gemini API key missing or not found in Supabase';
+        geminiStatus = 'NOT_CONFIGURED';
+        geminiErrorMsg = 'System GEMINI_API_KEY environment variable not configured.';
     }
 
     // Fetch details of Telegram Bot
@@ -2658,16 +2650,7 @@ async function system_health_handler(req: any, res: any) {
     let gemini = "healthy";
     let gemini_latency_ms = 0;
 
-    const envGeminiKey = (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "").trim();
-    const { data: keyRecord } = await supabase
-      .from('user_api_keys')
-      .select('api_key, status, last_error')
-      .eq('provider', 'gemini')
-      .eq('status', 'active')
-      .limit(1)
-      .maybeSingle();
-
-    const activeGeminiKey = envGeminiKey || (keyRecord?.api_key ? keyRecord.api_key.trim() : "");
+    const activeGeminiKey = (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "").trim();
 
     if (!activeGeminiKey) {
       gemini = "missing_key";

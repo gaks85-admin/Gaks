@@ -1713,7 +1713,9 @@ Reason: ${decisionResult.explanation || (requiresGemini ? 'Strategy configuratio
                   'Model': 'gemini-3.6-flash',
                   'Decision Score': decisionResult.decision_score,
                   'Recommendation': recommendation,
-                  'Gemini Required': requiresGemini ? 'YES' : 'NO'
+                  'Gemini Required': requiresGemini ? 'YES' : 'NO',
+                  'Key Fingerprint': keyRes.keyFingerprint,
+                  'Key Source': keyRes.keySource
                 });
 
                 const ai = new GoogleGenAI({ apiKey: geminiKey });

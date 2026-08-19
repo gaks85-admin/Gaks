@@ -1,4 +1,5 @@
 import { redactApiKey } from './apiKeys.js';
+import { createHash } from 'crypto';
 
 export interface GeminiKeyResolutionResult {
   userId: string;
@@ -6,8 +7,24 @@ export interface GeminiKeyResolutionResult {
   keySource: 'user_api_keys' | 'NONE';
   keyPresent: boolean;
   keyRedacted: string;
+  keyFingerprint: string;
   apiKey: string | null;
   status: 'RESOLVED' | 'MISSING_KEY';
+}
+
+/**
+ * Computes a safe 8-character SHA-256 fingerprint of an API key for safe diagnostics.
+ * Never exposes any characters of the actual key.
+ */
+export function computeKeyFingerprint(key: string | null | undefined): string {
+  if (!key) return 'NONE';
+  const trimmed = key.trim();
+  if (!trimmed) return 'NONE';
+  try {
+    return createHash('sha256').update(trimmed).digest('hex').substring(0, 8);
+  } catch {
+    return 'HASH_ERR';
+  }
 }
 
 /**
@@ -41,6 +58,8 @@ export async function resolveUserGeminiKey(
         .select('api_key')
         .eq('user_id', userId)
         .eq('provider', 'gemini')
+        .order('created_at', { ascending: false })
+        .limit(1)
         .maybeSingle();
 
       if (!error && keyRecord && keyRecord.api_key) {
@@ -54,6 +73,7 @@ export async function resolveUserGeminiKey(
   const keyPresent = !!rawKey;
   const keySource = keyPresent ? 'user_api_keys' : 'NONE';
   const keyRedacted = redactApiKey(rawKey);
+  const keyFingerprint = computeKeyFingerprint(rawKey);
   const status = keyPresent ? 'RESOLVED' : 'MISSING_KEY';
 
   const userEmail = context?.userEmail || 'unknown';
@@ -61,11 +81,13 @@ export async function resolveUserGeminiKey(
   const timeframe = context?.timeframe || 'unknown';
 
   console.log(`[Gemini Key Resolution]
-User: ${userEmail}
+User ID: ${userId}
+User Email: ${userEmail}
 Watcher: ${watcherId}
 Pair: ${pair}
 Timeframe: ${timeframe}
 Key Source: ${keySource}
+Key Fingerprint: ${keyFingerprint}
 Key Present: ${keyPresent ? 'YES' : 'NO'}
 Key Redacted: ${keyRedacted}
 Status: ${status}`);
@@ -76,6 +98,7 @@ Status: ${status}`);
     keySource,
     keyPresent,
     keyRedacted,
+    keyFingerprint,
     apiKey: rawKey,
     status
   };
