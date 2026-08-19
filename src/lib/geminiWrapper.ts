@@ -75,28 +75,44 @@ export interface BoundedGeminiResult {
  * 503 single retry with backoff and global deadline check,
  * 429 quota handling without retry, fail closed, and structured logging.
  */
+export interface BoundedGeminiContext {
+  userId?: string;
+  userEmail?: string;
+  watcherId?: string;
+  pair?: string;
+  timeframe?: string;
+}
+
+/**
+ * Bounded execution layer for Gemini AI requests.
+ * Enforces per-user rate limiting,
+ * 503 single retry with backoff and global deadline check,
+ * 429 quota handling without retry, fail closed, and structured logging.
+ * (Note: The 8,000ms hard timeout has been temporarily disabled for diagnostic testing)
+ */
 export async function executeBoundedGeminiCall(
   ai: GoogleGenAI,
   options: BoundedGeminiOptions,
-  context: { userId?: string; userEmail?: string; watcherId?: string; pair?: string }
+  context: BoundedGeminiContext
 ): Promise<BoundedGeminiResult> {
   const model = options.model || 'gemini-3.6-flash';
-  const timeoutMs = options.timeoutMs ?? (Number(process.env.GEMINI_TIMEOUT_MS) || 8000);
   const maxRetriesFor503 = options.maxRetriesFor503 ?? 1;
   const backoffMs = options.backoffMsFor503 ?? 500;
 
-  const userStr = context.userEmail || context.userId || 'unknown';
+  const userStr = context.userId || context.userEmail || 'unknown';
   const watcherStr = context.watcherId || 'unknown';
   const pairStr = context.pair || 'unknown';
+  const timeframeStr = context.timeframe || 'unknown';
 
   // Check per-user rate limiter before executing
   if (context.userId) {
     const limitCheck = globalUserGeminiRateLimiter.canMakeRequest(context.userId);
     if (!limitCheck.allowed) {
       console.log(`[GEMINI RATE LIMIT SKIPPED]
-User: ${userStr}
-Watcher: ${watcherStr}
-Symbol: ${pairStr}
+User ID: ${userStr}
+Watcher ID: ${watcherStr}
+Pair: ${pairStr}
+Timeframe: ${timeframeStr}
 Model: ${model}
 Action: SKIPPED (Application Per-User Rate Limit Threshold Reached)
 Current RPM: ${limitCheck.currentRpm} / Max Allowed: ${limitCheck.maxRpm}`);
@@ -128,29 +144,22 @@ Current RPM: ${limitCheck.currentRpm} / Max Allowed: ${limitCheck.maxRpm}`);
       globalUserGeminiRateLimiter.recordRequest(context.userId);
     }
 
-    console.log(`[GEMINI REQUEST]\nUser: ${userStr}\nWatcher: ${watcherStr}\nSymbol: ${pairStr}\nModel: ${model}\nAttempt: ${attempt}\nTimeout: ${timeoutMs}ms`);
-
-    let timeoutTimer: NodeJS.Timeout | null = null;
-    const controller = new AbortController();
+    const requestStartIso = new Date(attemptStart).toISOString();
+    console.log(`[GEMINI REQUEST]
+User ID: ${userStr}
+Watcher ID: ${watcherStr}
+Pair: ${pairStr}
+Timeframe: ${timeframeStr}
+Model: ${model}
+Request Start Timestamp: ${requestStartIso}`);
 
     try {
-      const fetchPromise = ai.models.generateContent({
+      // NOTE: 8,000ms Promise.race timeout disabled for diagnostic test
+      const aiResponse = await ai.models.generateContent({
         model: model,
         contents: options.contents,
         config: options.config
       });
-
-      const timeoutPromise = new Promise<never>((_, reject) => {
-        timeoutTimer = setTimeout(() => {
-          controller.abort();
-          const err: any = new Error(`Gemini request timed out after ${timeoutMs}ms`);
-          err.name = 'TimeoutError';
-          reject(err);
-        }, timeoutMs);
-      });
-
-      const aiResponse = await Promise.race([fetchPromise, timeoutPromise]);
-      if (timeoutTimer) clearTimeout(timeoutTimer);
 
       const attemptDuration = Date.now() - attemptStart;
       const totalDuration = Date.now() - startTime;
@@ -164,7 +173,14 @@ Current RPM: ${limitCheck.currentRpm} / Max Allowed: ${limitCheck.maxRpm}`);
         rawText = (aiResponse as any)?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
       }
 
-      console.log(`[GEMINI SUCCESS]\nUser: ${userStr}\nWatcher: ${watcherStr}\nSymbol: ${pairStr}\nModel: ${model}\nAttempt: ${attempt}\nDuration: ${attemptDuration}ms\nDiagnostic: SUCCESS`);
+      console.log(`[GEMINI SUCCESS]
+User ID: ${userStr}
+Watcher ID: ${watcherStr}
+Pair: ${pairStr}
+Timeframe: ${timeframeStr}
+Model: ${model}
+Total Duration: ${totalDuration}ms
+503 Retry Required: ${retried ? 'YES' : 'NO'}`);
 
       return {
         success: true,
@@ -176,21 +192,26 @@ Current RPM: ${limitCheck.currentRpm} / Max Allowed: ${limitCheck.maxRpm}`);
       };
 
     } catch (err: any) {
-      if (timeoutTimer) clearTimeout(timeoutTimer);
-
       const attemptDuration = Date.now() - attemptStart;
       const totalDuration = Date.now() - startTime;
       const { diagnosticStatus, cleanErrorMessage, is503, isTimeout, isQuota, quotaDetails } = classifyAndRedactGeminiError(err);
 
-      // 1. TIMEOUT: Hard limit. DO NOT RETRY.
-      if (isTimeout || err?.name === 'TimeoutError' || diagnosticStatus === 'TIMEOUT') {
-        console.log(`[GEMINI TIMEOUT]\nUser: ${userStr}\nWatcher: ${watcherStr}\nSymbol: ${pairStr}\nModel: ${model}\nDuration: ${attemptDuration}ms\nDiagnostic: TIMEOUT\nAction: SKIP (No Retry)`);
+      console.log(`[GEMINI ERROR]
+User ID: ${userStr}
+Watcher ID: ${watcherStr}
+Pair: ${pairStr}
+Timeframe: ${timeframeStr}
+Duration: ${totalDuration}ms
+Diagnostic Status: ${diagnosticStatus}
+Error Classification: ${cleanErrorMessage || 'Unknown Error'}`);
 
+      // 1. TIMEOUT (If returned by network/SDK layer)
+      if (isTimeout || err?.name === 'TimeoutError' || diagnosticStatus === 'TIMEOUT') {
         return {
           success: false,
           errorType: 'TIMEOUT',
           diagnosticStatus: 'TIMEOUT',
-          cleanErrorMessage: cleanErrorMessage || `Gemini request timed out after ${timeoutMs}ms`,
+          cleanErrorMessage: cleanErrorMessage || 'Gemini request timed out from network/SDK layer',
           attemptsExecuted: attempt,
           durationMs: totalDuration,
           retried
@@ -199,8 +220,6 @@ Current RPM: ${limitCheck.currentRpm} / Max Allowed: ${limitCheck.maxRpm}`);
 
       // 2. 429 / QUOTA_EXHAUSTED: DO NOT RETRY IMMEDIATELY.
       if (isQuota || diagnosticStatus.startsWith('QUOTA_')) {
-        console.log(`[GEMINI 429]\n[GEMINI QUOTA]\nUser: ${userStr}\nWatcher: ${watcherStr}\nSymbol: ${pairStr}\nModel: ${model}\nDiagnostic Status: ${diagnosticStatus}\nQuota Metric: ${quotaDetails?.quotaMetric || 'N/A'}\nQuota ID: ${quotaDetails?.quotaId || 'N/A'}\nRetry Delay: ${quotaDetails?.retryDelaySeconds ?? 'N/A'}s\nDuration: ${attemptDuration}ms\nAction: SKIPPED (No Retry)`);
-
         return {
           success: false,
           errorType: 'QUOTA_EXHAUSTED',
@@ -219,8 +238,8 @@ Current RPM: ${limitCheck.currentRpm} / Max Allowed: ${limitCheck.maxRpm}`);
           if (options.remainingGlobalBudgetMs !== undefined) {
             const elapsedSoFar = Date.now() - startTime;
             const remainingBudget = options.remainingGlobalBudgetMs - elapsedSoFar;
-            if (remainingBudget < (timeoutMs + backoffMs)) {
-              console.log(`[GEMINI 503]\nUser: ${userStr}\nWatcher: ${watcherStr}\nSymbol: ${pairStr}\nModel: ${model}\nDiagnostic: TEMPORARY_503\nAction: SKIP RETRY (Insufficient global budget remaining: ${remainingBudget}ms < ${timeoutMs + backoffMs}ms needed)`);
+            if (remainingBudget < backoffMs) {
+              console.log(`[GEMINI 503] User ID: ${userStr}, Watcher ID: ${watcherStr}, Pair: ${pairStr}, Timeframe: ${timeframeStr}. Action: SKIP RETRY (Insufficient global budget remaining: ${remainingBudget}ms < ${backoffMs}ms needed)`);
 
               return {
                 success: false,
@@ -234,12 +253,10 @@ Current RPM: ${limitCheck.currentRpm} / Max Allowed: ${limitCheck.maxRpm}`);
             }
           }
 
-          console.log(`[GEMINI 503 RETRY]\nUser: ${userStr}\nWatcher: ${watcherStr}\nSymbol: ${pairStr}\nModel: ${model}\nAttempt: ${attempt}\nAction: Retrying in ${backoffMs}ms...`);
+          console.log(`[GEMINI 503 RETRY] User ID: ${userStr}, Watcher ID: ${watcherStr}, Pair: ${pairStr}, Timeframe: ${timeframeStr}. Action: Retrying in ${backoffMs}ms...`);
           await new Promise(resolve => setTimeout(resolve, backoffMs));
           continue;
         } else {
-          console.log(`[GEMINI 503 FAILED]\nUser: ${userStr}\nWatcher: ${watcherStr}\nSymbol: ${pairStr}\nModel: ${model}\nDiagnostic: TEMPORARY_503\nAttempt: ${attempt}\nAction: Skip after retry exhausted`);
-
           return {
             success: false,
             errorType: 'TEMPORARY_ERROR',
@@ -256,8 +273,6 @@ Current RPM: ${limitCheck.currentRpm} / Max Allowed: ${limitCheck.maxRpm}`);
       const finalErrorType = diagnosticStatus === 'INVALID_KEY' ? 'INVALID_CREDENTIALS' :
                              diagnosticStatus === 'PERMISSION_ERROR' ? 'PERMISSION_ERROR' :
                              diagnosticStatus === 'INVALID_REQUEST' ? 'INVALID_REQUEST' : 'UNKNOWN_ERROR';
-
-      console.log(`[GEMINI NO_TRADE]\nUser: ${userStr}\nWatcher: ${watcherStr}\nSymbol: ${pairStr}\nModel: ${model}\nDiagnostic: ${diagnosticStatus}\nClean Error: ${cleanErrorMessage}`);
 
       return {
         success: false,

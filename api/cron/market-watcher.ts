@@ -1740,8 +1740,8 @@ Reason: ${decisionResult.explanation || (requiresGemini ? 'Strategy configuratio
                 const elapsedBeforeGemini = Date.now() - startTime;
                 const remainingBeforeGemini = PROCESSING_DEADLINE_MS - elapsedBeforeGemini;
 
-                if (remainingBeforeGemini < 8000) {
-                  console.warn(`[CRON DEADLINE] Skipped Gemini for Watcher ${watcher.id} (${selectedPair}). Reason: Insufficient execution budget (${remainingBeforeGemini}ms remaining < 8000ms needed).`);
+                if (remainingBeforeGemini <= 0) {
+                  console.warn(`[CRON DEADLINE] Gemini request not started. User ID: ${userId}, Watcher ID: ${watcher.id}, Pair: ${selectedPair}, Timeframe: ${selectedTimeframe}. Reason: Global processing deadline reached (${elapsedBeforeGemini}ms elapsed >= 25,000ms limit).`);
                   cronTimer.markEarlyExit();
                   watchersSkippedByDeadlineCount++;
                   watchersSkippedCount++;
@@ -1835,7 +1835,6 @@ Output ONLY valid JSON.
                         required: ["satisfies", "direction", "confidenceScore", "reasoning"]
                       }
                     },
-                    timeoutMs: Number(process.env.GEMINI_TIMEOUT_MS) || 8000,
                     maxRetriesFor503: 1,
                     backoffMsFor503: 500,
                     remainingGlobalBudgetMs: remainingBeforeGemini
@@ -1844,7 +1843,8 @@ Output ONLY valid JSON.
                     userId: userId,
                     userEmail: logCtx.userEmail,
                     watcherId: watcher.id,
-                    pair: selectedPair
+                    pair: selectedPair,
+                    timeframe: selectedTimeframe
                   }
                 );
 
