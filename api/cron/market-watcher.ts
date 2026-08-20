@@ -679,7 +679,8 @@ export default async function handler(req: any, res: any) {
 
     const userLastGeminiExecutionMap = new Map<string, number>();
     const activeUserGeminiPromises = new Map<string, Promise<void>>();
-    const cronAnalysisCache = new Map<string, { geminiRes: any; parsedResult: any }>();
+    const cronAnalysisCache = new Map<string, { geminiRes: any; geminiTextResult: string; parsedResult: any; analysis: any }>();
+    const quotaExhaustedUsers = new Set<string>();
 
     const PROCESSING_DEADLINE_MS = 25000;
     let watchersDiscoveredCount = watchers ? watchers.length : 0;
@@ -1580,6 +1581,7 @@ Reason: ${activeValidation.reason}`);
           reasoning: []
         };
         let parsedResult: any = null;
+        let geminiRes: any = null;
         let geminiDirection = 'NO_TRADE';
         let geminiCalled = false;
         let geminiTextResult = "";
@@ -1649,6 +1651,54 @@ Reason: ${decisionResult.explanation || (requiresGemini ? 'Strategy configuratio
           if (requiresGemini) {
             cronTimer.startStage("Gemini AI Execution");
 
+            // 0. Check Per-User Quota Circuit Breaker (skip if user key already failed with 429 in current cron)
+            if (quotaExhaustedUsers.has(userId)) {
+              console.log(`[GEMINI QUOTA]
+User: ${userProfile?.email || userId}
+Watcher: ${watcher.id} (${selectedPair} ${selectedTimeframe})
+Status: QUOTA_EXHAUSTED
+Action: USER_QUOTA_CIRCUIT_OPEN`);
+
+              logWatcherEvent('Gemini Decision', logCtx, {
+                'Status': 'QUOTA_EXHAUSTED',
+                'Direction': 'NO_TRADE',
+                'Confidence': '0%',
+                'Fallback': 'NO_TRADE'
+              });
+
+              geminiQuotaErrorsCount++;
+              geminiCallsQuotaExhaustedCount++;
+              skippedDueToQuotaCount++;
+              watchersSkippedByGemini429Count++;
+              watchersSkippedCount++;
+
+              const scanDurationMs = Date.now() - scanStart;
+              await recordEvaluation(supabase, {
+                user_id: userId,
+                watcher_id: watcher.id,
+                pair: selectedPair,
+                timeframe: selectedTimeframe,
+                strategy_mode: compiledStrategy.strategy_mode,
+                decision_score: decisionResult.decision_score,
+                matched_weight: decisionResult.matched_weight,
+                possible_weight: decisionResult.possible_weight,
+                recommendation: decisionResult.recommendation,
+                mandatory_rules_passed: decisionResult.mandatory_rules_passed,
+                matched_rules: decisionResult.matched_rules,
+                failed_rules: decisionResult.failed_rules,
+                gemini_used: true,
+                gemini_result: "Skipped: User Gemini API quota exhausted in current cron run",
+                trade_sent: false,
+                trade_reason: "User Gemini quota exhausted (Circuit open)",
+                scan_duration_ms: scanDurationMs,
+                gemini_duration_ms: null,
+                decision_snapshot: decisionSnapshot
+              });
+
+              skipped.push({ userId, reason: "User Gemini quota exhausted (Circuit open)" });
+              return;
+            }
+
             // 1. Per-User AI Cooldown (30s minimum between AI calls per user)
             const lastAiTime = userLastGeminiExecutionMap.get(userId) || 0;
             const timeSinceLastAi = Date.now() - lastAiTime;
@@ -1662,7 +1712,7 @@ Reason: ${decisionResult.explanation || (requiresGemini ? 'Strategy configuratio
             }
 
             // 2. In-Cron Job Deduplication Cache Check
-            const jobKey = `${userId}:${selectedPair}:${selectedTimeframe}:${latestClosedCandleTime}`;
+            const jobKey = `${userId}:${selectedPair}:${selectedTimeframe}:${compiledStrategy.strategy_mode || 'HYBRID'}:${latestClosedCandleTime}`;
             let cachedJob = cronAnalysisCache.get(jobKey);
 
             if (cachedJob) {
@@ -1671,6 +1721,12 @@ Reason: ${decisionResult.explanation || (requiresGemini ? 'Strategy configuratio
               geminiCallsSavedCount++;
               geminiSucceeded = true;
               geminiCalled = false;
+              geminiRes = cachedJob.geminiRes;
+              geminiTextResult = cachedJob.geminiTextResult;
+              parsedResult = cachedJob.parsedResult;
+              if (cachedJob.analysis) {
+                analysis = JSON.parse(JSON.stringify(cachedJob.analysis));
+              }
             } else {
               // 3. Per-User Concurrency Guard
               const activeUserPromise = activeUserGeminiPromises.get(userId);
@@ -1861,6 +1917,7 @@ Output ONLY valid JSON.
                     geminiCallsTimedOutCount++;
                     watchersSkippedByGeminiTimeoutCount++;
                   } else if (geminiRes.errorType === 'QUOTA_EXHAUSTED') {
+                    quotaExhaustedUsers.add(userId);
                     geminiQuotaErrorsCount++;
                     geminiCallsQuotaExhaustedCount++;
                     skippedDueToQuotaCount++;
@@ -1933,7 +1990,6 @@ Output ONLY valid JSON.
                 }
 
                 successfulGeminiExecutionsCount++;
-                cronAnalysisCache.set(jobKey, { geminiRes, parsedResult: null }); // Store in cache
                 geminiTextResult = geminiRes.text;
 
                 if (watcher.gemini_status !== 'READY') {
@@ -2061,8 +2117,18 @@ Output ONLY valid JSON.
                     reasoning: [parsedResult?.reasoning || "Gemini evaluated setup as NO_TRADE or unsatisfied."]
                   };
                 }
+
+                cronAnalysisCache.set(jobKey, {
+                  geminiRes,
+                  geminiTextResult,
+                  parsedResult,
+                  analysis: JSON.parse(JSON.stringify(analysis))
+                });
               } catch (gemErr: any) {
               const { profileStatus, diagnosticStatus, cleanErrorMessage } = classifyAndRedactGeminiError(gemErr);
+              if (diagnosticStatus.startsWith('QUOTA_') || profileStatus === 'QUOTA_EXHAUSTED') {
+                quotaExhaustedUsers.add(userId);
+              }
 
               logWatcherError('Gemini ERROR', logCtx, gemErr, {
                 'Diagnostic Status': diagnosticStatus,

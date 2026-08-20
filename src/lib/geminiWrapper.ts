@@ -96,6 +96,7 @@ export async function executeBoundedGeminiCall(
   context: BoundedGeminiContext
 ): Promise<BoundedGeminiResult> {
   const model = options.model || 'gemini-3.6-flash';
+  const timeoutMs = options.timeoutMs ?? 8000;
   const maxRetriesFor503 = options.maxRetriesFor503 ?? 1;
   const backoffMs = options.backoffMsFor503 ?? 500;
 
@@ -144,24 +145,72 @@ Current RPM: ${limitCheck.currentRpm} / Max Allowed: ${limitCheck.maxRpm}`);
       globalUserGeminiRateLimiter.recordRequest(context.userId);
     }
 
+    // Pre-flight check: ensure remaining global cron budget is enough for request timeout
+    if (options.remainingGlobalBudgetMs !== undefined) {
+      const elapsedSoFar = Date.now() - startTime;
+      const remainingGlobalBudget = options.remainingGlobalBudgetMs - elapsedSoFar;
+      if (remainingGlobalBudget < timeoutMs) {
+        console.log(`[GEMINI SKIP]
+User ID: ${userStr}
+Watcher ID: ${watcherStr}
+Pair: ${pairStr}
+Timeframe: ${timeframeStr}
+Reason: Insufficient global cron budget remaining (${remainingGlobalBudget}ms < ${timeoutMs}ms required for request)`);
+
+        return {
+          success: false,
+          errorType: 'TIMEOUT',
+          diagnosticStatus: 'CRON_DEADLINE',
+          cleanErrorMessage: `Insufficient remaining global cron budget (${remainingGlobalBudget}ms) to safely execute Gemini request`,
+          attemptsExecuted: attempt - 1,
+          durationMs: Date.now() - startTime,
+          retried
+        };
+      }
+    }
+
     const requestStartIso = new Date(attemptStart).toISOString();
+    const remainingBudgetForLog = options.remainingGlobalBudgetMs
+      ? `${options.remainingGlobalBudgetMs - (Date.now() - startTime)}ms`
+      : 'unknown';
+
     console.log(`[GEMINI REQUEST]
 User ID: ${userStr}
 Watcher ID: ${watcherStr}
 Pair: ${pairStr}
 Timeframe: ${timeframeStr}
 Model: ${model}
+Remaining Cron Budget: ${remainingBudgetForLog}
 Request Start Timestamp: ${requestStartIso}`);
 
+    const controller = new AbortController();
+    let timeoutTimer: NodeJS.Timeout | null = null;
+
     try {
-      // NOTE: 8,000ms Promise.race timeout disabled for diagnostic test
-      const aiResponse = await ai.models.generateContent({
+      const mergedConfig = {
+        ...(options.config || {}),
+        abortSignal: controller.signal,
+        signal: controller.signal
+      };
+
+      const fetchPromise = ai.models.generateContent({
         model: model,
         contents: options.contents,
-        config: options.config
+        config: mergedConfig
       });
 
-      const attemptDuration = Date.now() - attemptStart;
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timeoutTimer = setTimeout(() => {
+          controller.abort();
+          const err = new Error(`Gemini request timed out after ${timeoutMs}ms`);
+          err.name = 'TimeoutError';
+          reject(err);
+        }, timeoutMs);
+      });
+
+      const aiResponse = await Promise.race([fetchPromise, timeoutPromise]);
+      if (timeoutTimer) clearTimeout(timeoutTimer);
+
       const totalDuration = Date.now() - startTime;
 
       let rawText = '';
@@ -179,7 +228,7 @@ Watcher ID: ${watcherStr}
 Pair: ${pairStr}
 Timeframe: ${timeframeStr}
 Model: ${model}
-Total Duration: ${totalDuration}ms
+Duration: ${totalDuration}ms
 503 Retry Required: ${retried ? 'YES' : 'NO'}`);
 
       return {
@@ -192,26 +241,27 @@ Total Duration: ${totalDuration}ms
       };
 
     } catch (err: any) {
-      const attemptDuration = Date.now() - attemptStart;
+      if (timeoutTimer) clearTimeout(timeoutTimer);
       const totalDuration = Date.now() - startTime;
       const { diagnosticStatus, cleanErrorMessage, is503, isTimeout, isQuota, quotaDetails } = classifyAndRedactGeminiError(err);
 
-      console.log(`[GEMINI ERROR]
+      // 1. TIMEOUT
+      if (isTimeout || err?.name === 'TimeoutError' || err?.name === 'AbortError' || diagnosticStatus === 'TIMEOUT') {
+        const remainingBudget = options.remainingGlobalBudgetMs
+          ? `${options.remainingGlobalBudgetMs - totalDuration}ms`
+          : 'unknown';
+
+        console.log(`[GEMINI TIMEOUT]
 User ID: ${userStr}
 Watcher ID: ${watcherStr}
-Pair: ${pairStr}
-Timeframe: ${timeframeStr}
-Duration: ${totalDuration}ms
-Diagnostic Status: ${diagnosticStatus}
-Error Classification: ${cleanErrorMessage || 'Unknown Error'}`);
+Timeout: ${timeoutMs}ms
+Remaining Cron Budget: ${remainingBudget}`);
 
-      // 1. TIMEOUT (If returned by network/SDK layer)
-      if (isTimeout || err?.name === 'TimeoutError' || diagnosticStatus === 'TIMEOUT') {
         return {
           success: false,
           errorType: 'TIMEOUT',
           diagnosticStatus: 'TIMEOUT',
-          cleanErrorMessage: cleanErrorMessage || 'Gemini request timed out from network/SDK layer',
+          cleanErrorMessage: cleanErrorMessage || `Gemini request timed out after ${timeoutMs}ms`,
           attemptsExecuted: attempt,
           durationMs: totalDuration,
           retried
@@ -220,6 +270,12 @@ Error Classification: ${cleanErrorMessage || 'Unknown Error'}`);
 
       // 2. 429 / QUOTA_EXHAUSTED: DO NOT RETRY IMMEDIATELY.
       if (isQuota || diagnosticStatus.startsWith('QUOTA_')) {
+        console.log(`[GEMINI QUOTA]
+User ID: ${userStr}
+Watcher ID: ${watcherStr}
+Status: ${diagnosticStatus}
+Action: USER_QUOTA_CIRCUIT_OPEN`);
+
         return {
           success: false,
           errorType: 'QUOTA_EXHAUSTED',
@@ -235,25 +291,26 @@ Error Classification: ${cleanErrorMessage || 'Unknown Error'}`);
       // 3. 503 / UNAVAILABLE / TEMPORARY_ERROR: At most 1 retry if global deadline permits
       if (is503 || diagnosticStatus === 'TEMPORARY_ERROR') {
         if (attempt <= maxRetriesFor503) {
-          if (options.remainingGlobalBudgetMs !== undefined) {
-            const elapsedSoFar = Date.now() - startTime;
-            const remainingBudget = options.remainingGlobalBudgetMs - elapsedSoFar;
-            if (remainingBudget < backoffMs) {
-              console.log(`[GEMINI 503] User ID: ${userStr}, Watcher ID: ${watcherStr}, Pair: ${pairStr}, Timeframe: ${timeframeStr}. Action: SKIP RETRY (Insufficient global budget remaining: ${remainingBudget}ms < ${backoffMs}ms needed)`);
+          const elapsedSoFar = Date.now() - startTime;
+          const remainingBudget = (options.remainingGlobalBudgetMs ?? 25000) - elapsedSoFar;
+          if (remainingBudget < (backoffMs + timeoutMs)) {
+            console.log(`[GEMINI 503] User ID: ${userStr}, Watcher ID: ${watcherStr}, Pair: ${pairStr}, Timeframe: ${timeframeStr}. Action: SKIP RETRY (Insufficient global budget remaining: ${remainingBudget}ms < ${backoffMs + timeoutMs}ms needed)`);
 
-              return {
-                success: false,
-                errorType: 'TEMPORARY_ERROR',
-                diagnosticStatus: 'TEMPORARY_503',
-                cleanErrorMessage: 'Gemini 503 retry skipped due to insufficient remaining global deadline budget',
-                attemptsExecuted: attempt,
-                durationMs: totalDuration,
-                retried
-              };
-            }
+            return {
+              success: false,
+              errorType: 'TEMPORARY_ERROR',
+              diagnosticStatus: 'TEMPORARY_503',
+              cleanErrorMessage: 'Gemini 503 retry skipped due to insufficient remaining global deadline budget',
+              attemptsExecuted: attempt,
+              durationMs: totalDuration,
+              retried
+            };
           }
 
-          console.log(`[GEMINI 503 RETRY] User ID: ${userStr}, Watcher ID: ${watcherStr}, Pair: ${pairStr}, Timeframe: ${timeframeStr}. Action: Retrying in ${backoffMs}ms...`);
+          console.log(`[GEMINI 503]
+User ID: ${userStr}
+Watcher ID: ${watcherStr}
+Retry: ATTEMPT_${attempt + 1}`);
           await new Promise(resolve => setTimeout(resolve, backoffMs));
           continue;
         } else {
