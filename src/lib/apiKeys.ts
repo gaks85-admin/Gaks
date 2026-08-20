@@ -145,7 +145,7 @@ export async function testGeminiKey(key: string, userEmail?: string): Promise<Ge
       }
     });
     await ai.models.generateContent({
-      model: 'gemini-3.6-flash',
+      model: 'gemini-3.5-flash-lite',
       contents: 'ping'
     });
 
@@ -154,14 +154,14 @@ User: ${userEmail || 'unknown'}
 Credential Type: ${credentialType}
 Result: SUCCESS
 Status: 200
-Model: gemini-3.6-flash`);
+Model: gemini-3.5-flash-lite`);
 
     return {
       success: true,
       provider: 'gemini',
       credentialType,
       status: 'connected',
-      model: 'gemini-3.6-flash',
+      model: 'gemini-3.5-flash-lite',
       message: '✓ Gemini credential verified'
     };
   } catch (err: any) {

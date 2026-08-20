@@ -890,7 +890,7 @@ const WatchersPage = ({ fetchWithAuth, showToast }: { fetchWithAuth: any; showTo
   const handleWatcherAction = async (watcherId: string, action: 'restart' | 'stop' | 'force_scan' | 'delete') => {
     if (action === 'force_scan') {
       setScanWatcherId(watcherId);
-      setScanningStatus("Initializing Twelve Data price feed and launching Gemini-2.5 model analysis...");
+      setScanningStatus("Initializing Twelve Data price feed and launching Gemini model analysis...");
       setFoundSignals(null);
       try {
         const res = await fetchWithAuth('/api/admin/watchers/action', {
@@ -1769,7 +1769,7 @@ const SystemHealthPage = ({ fetchWithAuth }: { fetchWithAuth: any }) => {
 const SettingsPage = ({ fetchWithAuth, showToast }: { fetchWithAuth: any; showToast: any }) => {
   const [settings, setSettings] = useState<any>({
     defaultStrategy: "",
-    defaultGeminiModel: "gemini-3.6-flash",
+    defaultGeminiModel: "gemini-3.5-flash-lite",
     scanInterval: 15,
     maintenanceMode: false
   });
@@ -1842,7 +1842,7 @@ const SettingsPage = ({ fetchWithAuth, showToast }: { fetchWithAuth: any; showTo
             onChange={e => setSettings((prev: any) => ({ ...prev, defaultGeminiModel: e.target.value }))}
             className="w-full bg-zinc-50 dark:bg-[#0c0c0e] border border-zinc-200 dark:border-zinc-900 text-xs font-semibold rounded-xl px-4 py-3 focus:outline-none focus:border-zinc-300 dark:focus:border-zinc-800 text-zinc-950 dark:text-zinc-300 shadow-sm"
           >
-            <option value="gemini-3.6-flash">Gemini 3.6 Flash (Default / High Speed)</option>
+            <option value="gemini-3.5-flash-lite">Gemini 3.5 Flash-Lite (Default / High Speed)</option>
             <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro (Deep Reasoning)</option>
             <option value="gemini-2.5-flash">Gemini 2.5 Flash (Legacy)</option>
           </select>

@@ -114,7 +114,7 @@ export async function runGeminiRequest(
     supabase: any,
     userId: string,
     prompt: string,
-    model: string = 'gemini-3.6-flash',
+    model: string = 'gemini-3.5-flash-lite',
     config?: any
 ) {
     const { data: apiKeyData, error: apiKeyError } = await supabase
@@ -1829,7 +1829,7 @@ Action: USER_QUOTA_CIRCUIT_OPEN`);
                 }
 
                 logWatcherEvent('Gemini Analysis', logCtx, {
-                  'Model': 'gemini-3.6-flash',
+                  'Model': 'gemini-3.5-flash-lite',
                   'Decision Score': decisionResult.decision_score,
                   'Recommendation': recommendation,
                   'Gemini Required': requiresGemini ? 'YES' : 'NO',
@@ -1872,7 +1872,7 @@ Output ONLY valid JSON.
                 const geminiRes = await executeBoundedGeminiCall(
                   ai,
                   {
-                    model: "gemini-3.6-flash",
+                    model: "gemini-3.5-flash-lite",
                     contents: promptText,
                     config: {
                       responseMimeType: "application/json",

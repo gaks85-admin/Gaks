@@ -69,7 +69,7 @@ export async function runGeminiRequest(
     supabase: any,
     userId: string,
     prompt: string,
-    model: string = 'gemini-3.6-flash',
+    model: string = 'gemini-3.5-flash-lite',
     config?: any
 ) {
     const { data: apiKeyData, error: apiKeyError } = await supabase
@@ -204,7 +204,7 @@ async function health_handler(req: any, res: any) {
     // CASE A: RUN GEMINI HEALTH TEST (POST REQUEST)
     // ----------------------------------------------------
     if (req.method === 'POST') {
-      const model = "gemini-3.6-flash";
+      const model = "gemini-3.5-flash-lite";
 
       try {
         const responseText = await runGeminiRequest(supabase, user.id, "Reply only with OK", model);
@@ -287,7 +287,7 @@ async function health_handler(req: any, res: any) {
         const startGemini = Date.now();
         const ai = new GoogleGenAI({ apiKey: envGeminiKey });
         const geminiRes = await generateContentWithDiagnostics(ai, {
-          model: "gemini-3.6-flash",
+          model: "gemini-3.5-flash-lite",
           contents: "Reply only with OK",
         });
         geminiLatency = Date.now() - startGemini;
@@ -799,7 +799,7 @@ function loadSettings() {
   }
   return {
     defaultStrategy: "Gaks AI Default Strategy",
-    defaultGeminiModel: "gemini-3.6-flash",
+    defaultGeminiModel: "gemini-3.5-flash-lite",
     scanInterval: 15,
     maintenanceMode: false
   };
@@ -2042,7 +2042,7 @@ ${JSON.stringify(collectedData, null, 2)}
 `;
 
       const aiResponse = await generateContentWithDiagnostics(ai, {
-        model: "gemini-3.6-flash",
+        model: "gemini-3.5-flash-lite",
         contents: promptText,
         config: {
           responseMimeType: "application/json",

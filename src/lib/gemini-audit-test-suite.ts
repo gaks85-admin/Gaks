@@ -100,7 +100,7 @@ export async function runGeminiAuditTestSuite(): Promise<{ passed: number; total
   // TEST F: QUOTA EXHAUSTED → NO_TRADE
   // ==========================================
   console.log("\n--- TEST F: Quota exhausted error classification & NO_TRADE ---");
-  const quotaErr = { status: 429, message: 'RESOURCE_EXHAUSTED: Quota exceeded for model gemini-3.6-flash' };
+  const quotaErr = { status: 429, message: 'RESOURCE_EXHAUSTED: Quota exceeded for model gemini-3.5-flash-lite' };
   const classF = classifyAndRedactGeminiError(quotaErr);
   assert(classF.diagnosticStatus.startsWith('QUOTA_'), 'Test F1 - Quota error classified as QUOTA_RPM/TPM/RPD/UNKNOWN');
   assert(classF.profileStatus === 'QUOTA_EXHAUSTED', 'Test F2 - Profile status set to QUOTA_EXHAUSTED');

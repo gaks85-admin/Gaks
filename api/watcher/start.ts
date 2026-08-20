@@ -601,7 +601,7 @@ export default async function handler(req: any, res: any) {
       risk_percentage: riskPercentage,
       selected_pair: selectedPair,
       selected_timeframe: finalTimeframe,
-      gemini_model: "gemini-3.6-flash",
+      gemini_model: "gemini-3.5-flash-lite",
       scan_interval_minutes: computedInterval,
       trade_status: "WAITING",
       entry_price: null,

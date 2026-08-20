@@ -106,7 +106,7 @@ If a parameter is not mentioned, omit it or set it to null/false depending on th
   };
 
   const response = await ai.models.generateContent({
-    model: 'gemini-3.6-flash',
+    model: 'gemini-3.5-flash-lite',
     contents: strategyText,
     config: {
       systemInstruction: systemInstruction,

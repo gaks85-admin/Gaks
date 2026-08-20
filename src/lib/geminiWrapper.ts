@@ -95,7 +95,7 @@ export async function executeBoundedGeminiCall(
   options: BoundedGeminiOptions,
   context: BoundedGeminiContext
 ): Promise<BoundedGeminiResult> {
-  const model = options.model || 'gemini-3.6-flash';
+  const model = options.model || 'gemini-3.5-flash-lite';
   const timeoutMs = options.timeoutMs ?? 8000;
   const maxRetriesFor503 = options.maxRetriesFor503 ?? 1;
   const backoffMs = options.backoffMsFor503 ?? 500;
@@ -358,7 +358,7 @@ export async function runGeminiRequest(
     supabase: any,
     userId: string,
     prompt: string,
-    model: string = 'gemini-3.6-flash',
+    model: string = 'gemini-3.5-flash-lite',
     config?: any
 ) {
     const keyRes = await resolveUserGeminiKey(supabase, userId, 'gemini-wrapper');
