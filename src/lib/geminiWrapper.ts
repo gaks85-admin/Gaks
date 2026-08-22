@@ -145,34 +145,33 @@ Current RPM: ${limitCheck.currentRpm} / Max Allowed: ${limitCheck.maxRpm}`);
       globalUserGeminiRateLimiter.recordRequest(context.userId);
     }
 
-    // Pre-flight check: ensure remaining global cron budget is enough for request timeout
-    if (options.remainingGlobalBudgetMs !== undefined) {
-      const elapsedSoFar = Date.now() - startTime;
-      const remainingGlobalBudget = options.remainingGlobalBudgetMs - elapsedSoFar;
-      if (remainingGlobalBudget < timeoutMs) {
-        console.log(`[GEMINI SKIP]
+    // Pre-flight check: ensure remaining global cron budget allows execution
+    const elapsedSoFar = Date.now() - startTime;
+    const remainingGlobalBudget = options.remainingGlobalBudgetMs !== undefined
+      ? options.remainingGlobalBudgetMs - elapsedSoFar
+      : 25000;
+
+    if (remainingGlobalBudget <= 250) {
+      console.log(`[GEMINI SKIP]
 User ID: ${userStr}
 Watcher ID: ${watcherStr}
 Pair: ${pairStr}
 Timeframe: ${timeframeStr}
-Reason: Insufficient global cron budget remaining (${remainingGlobalBudget}ms < ${timeoutMs}ms required for request)`);
+Reason: Insufficient global cron budget remaining (${remainingGlobalBudget}ms <= 250ms required threshold)`);
 
-        return {
-          success: false,
-          errorType: 'TIMEOUT',
-          diagnosticStatus: 'CRON_DEADLINE',
-          cleanErrorMessage: `Insufficient remaining global cron budget (${remainingGlobalBudget}ms) to safely execute Gemini request`,
-          attemptsExecuted: attempt - 1,
-          durationMs: Date.now() - startTime,
-          retried
-        };
-      }
+      return {
+        success: false,
+        errorType: 'TIMEOUT',
+        diagnosticStatus: 'CRON_DEADLINE',
+        cleanErrorMessage: `Insufficient remaining global cron budget (${remainingGlobalBudget}ms) to safely execute Gemini request`,
+        attemptsExecuted: Math.max(0, attempt - 1),
+        durationMs: Date.now() - startTime,
+        retried
+      };
     }
 
+    const effectiveTimeoutMs = Math.min(options.timeoutMs ?? 8000, remainingGlobalBudget - 250);
     const requestStartIso = new Date(attemptStart).toISOString();
-    const remainingBudgetForLog = options.remainingGlobalBudgetMs
-      ? `${options.remainingGlobalBudgetMs - (Date.now() - startTime)}ms`
-      : 'unknown';
 
     console.log(`[GEMINI REQUEST]
 User ID: ${userStr}
@@ -180,7 +179,8 @@ Watcher ID: ${watcherStr}
 Pair: ${pairStr}
 Timeframe: ${timeframeStr}
 Model: ${model}
-Remaining Cron Budget: ${remainingBudgetForLog}
+Effective Timeout: ${effectiveTimeoutMs}ms
+Remaining Cron Budget: ${remainingGlobalBudget}ms
 Request Start Timestamp: ${requestStartIso}`);
 
     const controller = new AbortController();
@@ -202,10 +202,10 @@ Request Start Timestamp: ${requestStartIso}`);
       const timeoutPromise = new Promise<never>((_, reject) => {
         timeoutTimer = setTimeout(() => {
           controller.abort();
-          const err = new Error(`Gemini request timed out after ${timeoutMs}ms`);
+          const err = new Error(`Gemini request timed out after ${effectiveTimeoutMs}ms`);
           err.name = 'TimeoutError';
           reject(err);
-        }, timeoutMs);
+        }, effectiveTimeoutMs);
       });
 
       const aiResponse = await Promise.race([fetchPromise, timeoutPromise]);
@@ -254,14 +254,14 @@ Duration: ${totalDuration}ms
         console.log(`[GEMINI TIMEOUT]
 User ID: ${userStr}
 Watcher ID: ${watcherStr}
-Timeout: ${timeoutMs}ms
+Timeout: ${effectiveTimeoutMs}ms
 Remaining Cron Budget: ${remainingBudget}`);
 
         return {
           success: false,
           errorType: 'TIMEOUT',
           diagnosticStatus: 'TIMEOUT',
-          cleanErrorMessage: cleanErrorMessage || `Gemini request timed out after ${timeoutMs}ms`,
+          cleanErrorMessage: cleanErrorMessage || `Gemini request timed out after ${effectiveTimeoutMs}ms`,
           attemptsExecuted: attempt,
           durationMs: totalDuration,
           retried

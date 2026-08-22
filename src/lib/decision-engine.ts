@@ -239,6 +239,23 @@ export function evaluateDecision(
 
   const explanation = no_trade_reason || `Market satisfies ${decision_score}% of strategy rules.`;
 
+  console.log(`
+[DECISION SCORE TRACE]
+Watcher ID: ${marketStructure?.watcherId || marketStructure?.watcher_id || 'N/A'}
+Pair: ${marketStructure?.pair || marketStructure?.symbol || 'N/A'}
+Timeframe: ${marketStructure?.timeframe || 'N/A'}
+Raw Score: ${matched_weight} / ${possible_weight}
+Matched Weight: ${matched_weight}
+Possible Weight: ${possible_weight}
+Score Percentage: ${decision_score}%
+Score Source: Deterministic Rule Engine
+Deterministic Decision: ${recommendation}
+Gemini Decision: N/A
+Final Decision: ${recommendation}
+Mandatory Rules Passed: ${mandatory_rules_passed}
+Failed Mandatory Rules: ${failedMandatory.length > 0 ? failedMandatory.map(r => r.name).join(', ') : 'None'}
+`.trim());
+
   return {
     decision_score,
     matched_weight,

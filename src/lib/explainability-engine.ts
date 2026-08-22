@@ -109,6 +109,21 @@ export async function recordEvaluation(
   const conf = record.confidence_level !== undefined ? record.confidence_level : (snap.confidence_level ?? 'N/A');
 
   console.log(`\n========== EXPLAINABILITY ==========`);
+  console.log(`[DECISION SCORE TRACE]`);
+  console.log(`Watcher ID: ${record.watcher_id}`);
+  console.log(`Pair: ${record.pair}`);
+  console.log(`Timeframe: ${record.timeframe}`);
+  console.log(`Raw Score: ${record.matched_weight} / ${record.possible_weight}`);
+  console.log(`Matched Weight: ${record.matched_weight}`);
+  console.log(`Possible Weight: ${record.possible_weight}`);
+  console.log(`Score Percentage: ${record.decision_score}%`);
+  console.log(`Score Source: Deterministic Rule Engine`);
+  console.log(`Deterministic Decision: ${record.recommendation}`);
+  console.log(`Gemini Decision: ${record.gemini_used ? (record.trade_sent ? 'APPROVED' : 'REJECTED/NO_TRADE') : 'N/A'}`);
+  console.log(`Final Decision: ${record.trade_sent ? 'TRADE_EXECUTED' : 'NO_TRADE'}`);
+  console.log(`Mandatory Rules Passed: ${record.mandatory_rules_passed}`);
+  console.log(`Failed Mandatory Rules: ${record.failed_rules && record.failed_rules.length > 0 ? record.failed_rules.join(', ') : 'None'}`);
+  console.log(`------------------------------------`);
   console.log(`Watcher:\n${record.watcher_id}`);
   console.log(`Pair:\n${record.pair}`);
   console.log(`Decision:\n${record.recommendation}`);

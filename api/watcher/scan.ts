@@ -501,18 +501,8 @@ export default async function handler(req: any, res: any) {
     const positionMode = riskPrefs.positionMode;
     const preferredLotSize = riskPrefs.preferredLotSize;
 
-    // 5. Parsed Strategy Loaded
-    let parsed_strategy: any = null;
-    if (watcher.strategy_id) {
-      const { data: strategyRecord } = await supabase
-        .from("strategies")
-        .select("parsed_strategy")
-        .eq("id", watcher.strategy_id)
-        .maybeSingle();
-      parsed_strategy = strategyRecord?.parsed_strategy;
-    }
-
-    if (!parsed_strategy) throw new Error("Parsed strategy missing.");
+    // 5. Compiled Strategy Loaded
+    const compiledStrategy = compileStrategy(strategyText);
 
     // 6. Candle Data Downloaded
     const symbol = watcher.selected_pair;
@@ -573,7 +563,6 @@ export default async function handler(req: any, res: any) {
 
     // 7. Extract Market Structure & Compile Strategy
     const marketStructure = extractMarketStructure(candleData);
-    const compiledStrategy = parsed_strategy || compileStrategy(strategyText);
     const strategyCompilationConfidenceRecord = normalizeConfidence(
       compiledStrategy.overall_confidence ?? compiledStrategy.confidence,
       'strategy_compilation',
@@ -860,7 +849,7 @@ Fallback: NO_TRADE`.trim());
         };
       } else {
         console.log(`[Decision Engine] Recommendation is ${recommendation}. Evaluating local strategy engine.`);
-        const localAnalysis = analyzeMarket(candleData, compiledStrategy);
+        const localAnalysis = analyzeMarket(candleData, compiledStrategy as any);
         if (localAnalysis && localAnalysis.signal !== 'NO_TRADE' && localAnalysis.entryPrice) {
           const slResult = calculateStructuralStopLoss(
             localAnalysis.signal as 'BUY' | 'SELL',

@@ -683,6 +683,52 @@ export default async function handler(req: any, res: any) {
     const quotaExhaustedUsers = new Set<string>();
 
     const PROCESSING_DEADLINE_MS = 25000;
+    const cronStartedAt = startTime;
+    const processingDeadline = cronStartedAt + PROCESSING_DEADLINE_MS;
+
+    function hasProcessingTimeRemaining(): boolean {
+      return Date.now() < processingDeadline;
+    }
+
+    function remainingProcessingMs(): number {
+      return Math.max(0, processingDeadline - Date.now());
+    }
+
+    let earlyExit = false;
+    let earlyExitReason = "";
+    let gemini503CountInCron = 0;
+    let geminiTemporarilyUnavailable = false;
+
+    const cronCandleCache = new Map<string, Promise<any>>();
+    const cronPriceCache = new Map<string, Promise<number | null>>();
+    let twelveDataRequestsInCron = 0;
+    let twelveDataCacheHitsInCron = 0;
+
+    async function fetchMarketDataForCron(reqArgs: any): Promise<any> {
+      const canonical = toCanonicalSymbol(reqArgs.symbol);
+      const cacheKey = `${canonical}:${reqArgs.timeframe}:${reqArgs.requiredCount}`;
+      if (cronCandleCache.has(cacheKey)) {
+        twelveDataCacheHitsInCron++;
+        return cronCandleCache.get(cacheKey)!;
+      }
+      twelveDataRequestsInCron++;
+      const promise = defaultMarketDataService.getMarketData(reqArgs);
+      cronCandleCache.set(cacheKey, promise);
+      return promise;
+    }
+
+    async function fetchCurrentPriceForCron(selectedPair: string, twelveDataKeyStr: string, stats?: any): Promise<number | null> {
+      const canonical = toCanonicalSymbol(selectedPair);
+      if (cronPriceCache.has(canonical)) {
+        twelveDataCacheHitsInCron++;
+        return cronPriceCache.get(canonical)!;
+      }
+      twelveDataRequestsInCron++;
+      const promise = fetchCurrentPrice(canonical, twelveDataKeyStr, stats);
+      cronPriceCache.set(canonical, promise);
+      return promise;
+    }
+
     let watchersDiscoveredCount = watchers ? watchers.length : 0;
     let watchersDueCount = 0;
     let watchersEligibleCount = 0;
@@ -728,11 +774,9 @@ export default async function handler(req: any, res: any) {
 
     console.log("[CRON STEP 5]");
 
-    const WATCHER_CONCURRENCY = parseInt(process.env.WATCHER_CONCURRENCY || '5', 10) || 5;
-    console.log(`LOG: Dispatching concurrency pool for ${watchers.length} active watcher(s) (Concurrency: ${WATCHER_CONCURRENCY})...`);
+    console.log(`LOG: Processing ${watchers.length} active watcher(s) sequentially with strict 25s global deadline...`);
 
-    // Process watchers concurrently with controlled worker pool
-    await processWithConcurrency(watchers, WATCHER_CONCURRENCY, async (watcher) => {
+    async function processSingleWatcher(watcher: any) {
       let isWatcherSkipped = true;
       let geminiInvoked = false;
       let geminiSucceeded = false;
@@ -952,7 +996,7 @@ export default async function handler(req: any, res: any) {
         if (!activeValidation.valid) {
           let currentPriceFetch: number | null = null;
           try {
-            currentPriceFetch = await fetchCurrentPrice(selectedPair, twelveDataKey, tdStats);
+            currentPriceFetch = await fetchCurrentPriceForCron(selectedPair, twelveDataKey, tdStats);
           } catch (e) {}
 
           console.error(`[ACTIVE STATE INVALID]
@@ -1067,7 +1111,7 @@ Reason: ${activeValidation.reason}`);
           return;
         }
         try {
-          currentPrice = await fetchCurrentPrice(selectedPair, twelveDataKey, tdStats);
+          currentPrice = await fetchCurrentPriceForCron(selectedPair, twelveDataKey, tdStats);
         } catch (err: any) {
           if (err.message && err.message.includes("429")) {
             twelveDataExhausted = true;
@@ -1411,7 +1455,7 @@ Reason: ${activeValidation.reason}`);
           return;
         }
 
-        const tsResult = await defaultMarketDataService.getMarketData({
+        const tsResult = await fetchMarketDataForCron({
           symbol: mappedSymbol,
           timeframe: selectedTimeframe,
           requiredCount: 20,
@@ -1547,6 +1591,11 @@ Reason: ${activeValidation.reason}`);
           initialResult.matched_rules,
           compiledStrategy.strategy_mode || 'HYBRID'
         );
+
+        // Attach watcher metadata for diagnostic logging
+        marketStructure.watcherId = watcher.id;
+        marketStructure.pair = selectedPair;
+        marketStructure.timeframe = selectedTimeframe;
 
         // Run Weighted Decision Engine (Pass 2 with historical context)
         const decisionResult = evaluateDecision(
@@ -1796,7 +1845,39 @@ Action: USER_QUOTA_CIRCUIT_OPEN`);
                 const elapsedBeforeGemini = Date.now() - startTime;
                 const remainingBeforeGemini = PROCESSING_DEADLINE_MS - elapsedBeforeGemini;
 
-                if (remainingBeforeGemini <= 0) {
+                if (geminiTemporarilyUnavailable) {
+                  console.warn(`[GEMINI CIRCUIT BREAKER] Skipping Gemini for Watcher ID: ${watcher.id} (${selectedPair}). Circuit breaker active (2x 503 errors encountered in this cron execution).`);
+                  tempErrorCount++;
+                  geminiCalls503Count++;
+                  watchersSkippedByGemini503Count++;
+                  watchersSkippedCount++;
+                  const scanDurationMs = Date.now() - scanStart;
+                  await recordEvaluation(supabase, {
+                    user_id: userId,
+                    watcher_id: watcher.id,
+                    pair: selectedPair,
+                    timeframe: selectedTimeframe,
+                    strategy_mode: compiledStrategy.strategy_mode,
+                    decision_score: decisionResult.decision_score,
+                    matched_weight: decisionResult.matched_weight,
+                    possible_weight: decisionResult.possible_weight,
+                    recommendation: decisionResult.recommendation,
+                    mandatory_rules_passed: decisionResult.mandatory_rules_passed,
+                    matched_rules: decisionResult.matched_rules,
+                    failed_rules: decisionResult.failed_rules,
+                    gemini_used: false,
+                    gemini_result: "Skipped: Gemini 503 Circuit Breaker Open",
+                    trade_sent: false,
+                    trade_reason: "Gemini API temporarily unavailable (503 circuit breaker active)",
+                    scan_duration_ms: scanDurationMs,
+                    gemini_duration_ms: null,
+                    decision_snapshot: decisionSnapshot
+                  });
+                  skipped.push({ userId, reason: "Gemini 503 circuit breaker active" });
+                  return;
+                }
+
+                if (remainingBeforeGemini <= 250 || !hasProcessingTimeRemaining()) {
                   console.warn(`[CRON DEADLINE] Gemini request not started. User ID: ${userId}, Watcher ID: ${watcher.id}, Pair: ${selectedPair}, Timeframe: ${selectedTimeframe}. Reason: Global processing deadline reached (${elapsedBeforeGemini}ms elapsed >= 25,000ms limit).`);
                   cronTimer.markEarlyExit();
                   watchersSkippedByDeadlineCount++;
@@ -1927,6 +2008,11 @@ Output ONLY valid JSON.
                     geminiCalls503Count++;
                     geminiCallsTemporarilyFailedCount++;
                     watchersSkippedByGemini503Count++;
+                    gemini503CountInCron++;
+                    if (gemini503CountInCron >= 2) {
+                      geminiTemporarilyUnavailable = true;
+                      console.warn('[GEMINI CIRCUIT BREAKER ACTIVATED] 2x 503 errors encountered in current cron invocation. Disabling Gemini for subsequent watchers.');
+                    }
                   } else if (geminiRes.errorType === 'INVALID_CREDENTIALS' || geminiRes.errorType === 'PERMISSION_ERROR') {
                     invalidKeyCount++;
                   }
@@ -3288,7 +3374,19 @@ Source: ${brokerQuote.source}`);
       } finally {
         cronTimer.endWatcher(isWatcherSkipped, watcher?.id);
       }
-    });
+    }
+
+    for (const watcher of watchers) {
+      if (!hasProcessingTimeRemaining()) {
+        console.warn(`[CRON DEADLINE] Global processing deadline reached (${Date.now() - cronStartedAt}ms elapsed / ${PROCESSING_DEADLINE_MS}ms budget). Halting watcher loop.`);
+        earlyExit = true;
+        earlyExitReason = "PROCESSING_DEADLINE";
+        cronTimer.markEarlyExit();
+        break;
+      }
+
+      await processSingleWatcher(watcher);
+    }
 
     const totalTime = Date.now() - startTime;
     const maxWatcherDuration = cronTimer.getMaxWatcherDurationMs();
@@ -3336,40 +3434,57 @@ Source: ${brokerQuote.source}`);
 
     console.log(`LOG: Cron completed (Processed: ${watchersProcessedCount}, Sent: ${telegramMessagesSentCount})`);
 
-    try {
-      await supabase.from('system_health_logs').insert({
-        service: 'Cron',
-        status: 'healthy',
-        latency_ms: Date.now() - startTime,
-        message: `Cron execution completed. Processed: ${watchersProcessedCount}`
-      });
-    } catch {
-      // ignore logging failure
+    if (hasProcessingTimeRemaining()) {
+      try {
+        await supabase.from('system_health_logs').insert({
+          service: 'Cron',
+          status: 'healthy',
+          latency_ms: Date.now() - startTime,
+          message: `Cron execution completed. Processed: ${watchersProcessedCount}`
+        });
+      } catch {
+        // ignore logging failure
+      }
     }
 
-    // Cleanup old logs (keep only last 500 runs)
-    try {
-      const { data: cutoffData } = await supabase
-        .from('execution_logs')
-        .select('run_time')
-        .order('run_time', { ascending: false })
-        .range(500, 500)
-        .maybeSingle();
-
-      if (cutoffData) {
-        await supabase
+    // Cleanup old logs (keep only last 500 runs) if time permits
+    if (hasProcessingTimeRemaining()) {
+      try {
+        const { data: cutoffData } = await supabase
           .from('execution_logs')
-          .delete()
-          .lt('run_time', cutoffData.run_time);
+          .select('run_time')
+          .order('run_time', { ascending: false })
+          .range(500, 500)
+          .maybeSingle();
+
+        if (cutoffData) {
+          await supabase
+            .from('execution_logs')
+            .delete()
+            .lt('run_time', cutoffData.run_time);
+        }
+      } catch (e) {
+        console.error("Failed to cleanup old logs:", e);
       }
-    } catch (e) {
-      console.error("Failed to cleanup old logs:", e);
     }
 
     cronTimer.printSummary();
 
     return res.status(200).json({
       success: true,
+      earlyExit,
+      reason: earlyExit ? (earlyExitReason || "PROCESSING_DEADLINE") : "COMPLETED",
+      watchersDiscovered: watchersDiscoveredCount,
+      watchersProcessed: watchersProcessedCount,
+      watchersSkipped: watchersSkippedCount,
+      geminiCallsExecuted: geminiCallsExecutedCount,
+      geminiTimeouts: geminiTimeoutsCount,
+      gemini503Errors: geminiCalls503Count,
+      geminiQuotaErrors: geminiQuotaErrorsCount,
+      geminiCircuitBreakerTriggered: geminiTemporarilyUnavailable,
+      twelveDataRequests: twelveDataRequestsInCron,
+      twelveDataCacheHits: twelveDataCacheHitsInCron,
+      durationMs: totalTime,
       processed: watchersProcessedCount,
       signalsSent: telegramMessagesSentCount,
       diagnostics: {
@@ -3391,6 +3506,7 @@ Source: ${brokerQuote.source}`);
         geminiCallsRetried: geminiCallsRetriedCount,
         geminiQuotaErrors: geminiQuotaErrorsCount,
         geminiCallsDeduplicated: geminiCallsDeduplicatedCount,
+        geminiCircuitBreakerActive: geminiTemporarilyUnavailable,
         signalsGenerated: signalsGeneratedCount,
         signalsSuppressedAsDuplicates: signalsSuppressedAsDuplicatesCount,
         signalsSuppressedByMinSeparation: signalsSuppressedByMinSeparationCount,
@@ -3399,9 +3515,12 @@ Source: ${brokerQuote.source}`);
         totalCronDurationMs: totalTime
       },
       twelveDataMetrics: {
-        totalRequests: getMarketDataStats().requests,
-        cacheHits: getMarketDataStats().cacheHits,
-        savedThroughCaching: getMarketDataStats().requestsSaved,
+        totalRequests: twelveDataRequestsInCron,
+        cacheHits: twelveDataCacheHitsInCron,
+        savedThroughCaching: twelveDataCacheHitsInCron,
+        globalTotalRequests: getMarketDataStats().requests,
+        globalCacheHits: getMarketDataStats().cacheHits,
+        globalSavedThroughCaching: getMarketDataStats().requestsSaved,
         skippedDueToRateLimit: watchersSkippedDueToRateLimitCount,
         creditsUsed: getMarketDataStats().creditsUsed,
         creditsRemaining: getMarketDataStats().creditsRemaining,
@@ -3419,7 +3538,8 @@ Source: ${brokerQuote.source}`);
         geminiCallsExecuted: geminiCallsExecutedCount,
         geminiCallsRetried: geminiCallsRetriedCount,
         geminiCallsSaved: geminiCallsSavedCount,
-        successfulExecutions: successfulGeminiExecutionsCount
+        successfulExecutions: successfulGeminiExecutionsCount,
+        circuitBreakerActive: geminiTemporarilyUnavailable
       },
       executionTimeMs: totalTime
     });

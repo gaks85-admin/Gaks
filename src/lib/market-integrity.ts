@@ -49,17 +49,9 @@ export function normalizeCandleTimestamp(symbol: string, rawTimestamp: string | 
   }
 
   const normalizedIso = isNaN(timestampMs) ? '' : dateObj.toISOString();
-  const deltaMs = isNaN(timestampMs) ? 0 : timestampMs - now.getTime();
-  const status = isNaN(timestampMs) ? 'INVALID' : 'NORMALIZED';
-
-  console.log(`[Market Data Timestamp Normalization]
-Symbol: ${symbol}
-Provider Timezone: ${providerTimezone}
-Raw Timestamp: ${rawTimestamp}
-Normalized UTC: ${normalizedIso}
-Server UTC: ${serverUtc}
-Timestamp Delta: ${deltaMs} ms
-Status: ${status}`);
+  if (isNaN(timestampMs)) {
+    console.warn(`[MARKET DATA TIMESTAMP WARNING] Symbol: ${symbol} | Unparseable raw timestamp: ${rawTimestamp}`);
+  }
 
   return { timestampMs, normalizedIso };
 }
@@ -184,12 +176,6 @@ Reason: ${res.reason}`.trim());
     lastClosedCandleUtc: lastClosedUtc,
     currentUtc
   };
-  console.log(`[Market Data Integrity]
-Symbol: ${symbol}
-Current UTC: ${currentUtc}
-Last Closed Candle UTC: ${lastClosedUtc}
-Status: VALID
-Action: PROCEED
-Reason: ${res.reason}`.trim());
+  console.log(`[MARKET DATA] ${symbol} | candles=${candleData.length} | latest=${lastClosedUtc} | normalized=true`);
   return res;
 }

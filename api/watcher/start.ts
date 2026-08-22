@@ -570,25 +570,6 @@ export default async function handler(req: any, res: any) {
     console.log(`Computed interval: ${computedInterval}`);
     console.log(`Database interval: ${computedInterval}`);
 
-    // Ensure the strategy exists in public.strategies table to satisfy foreign key constraint
-    console.log("[Watcher Start] Upserting strategy...");
-    const { error: stratError } = await supabase
-      .from("strategies")
-      .upsert({
-        id: strategyDetails.id,
-        user_id: strategyDetails.isDefault ? null : userId,
-        name: strategyDetails.name,
-        text: strategyDetails.text,
-        is_default: strategyDetails.isDefault,
-        updated_at: nowString
-      });
-
-    if (stratError) {
-      console.warn("[Watcher Start] Warning upserting into strategies table:", stratError.message);
-    } else {
-      console.log("[Watcher Start] Strategy upsert successful.");
-    }
-
     // Upsert the watcher record for this pair
     console.log("[Watcher Start] Upserting watcher record...");
     const watcherData = {

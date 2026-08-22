@@ -18,6 +18,9 @@ export interface FVG {
 }
 
 export interface MarketStructure {
+  watcherId?: string;
+  pair?: string;
+  timeframe?: string;
   trend: 'BULLISH' | 'BEARISH' | 'SIDEWAYS';
   swingHighs: SwingLevel[];
   swingLows: SwingLevel[];
