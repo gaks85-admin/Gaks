@@ -3,8 +3,8 @@ import { GoogleGenAI } from '@google/genai';
 import { sendTelegramMessage } from './telegramWrapper.js';
 import { resolveUserGeminiKey, classifyAndRedactGeminiError, GeminiQuotaDetails, redactApiKeyInText } from './gemini-key-resolver.js';
 
-export const GEMINI_API_DEADLINE_MS = 10_000;
-export const GEMINI_APPLICATION_TIMEOUT_MS = 10_500;
+export const GEMINI_API_DEADLINE_MS = 8_000;
+export const GEMINI_APPLICATION_TIMEOUT_MS = 8_000;
 
 // Simplified Error Classification
 export type GeminiErrorType = 'invalid_key' | 'quota_exceeded' | 'rate_limited' | 'temporary_failure' | 'unknown_error';
@@ -107,8 +107,8 @@ export async function executeBoundedGeminiCall(
   context: BoundedGeminiContext
 ): Promise<BoundedGeminiResult> {
   const model = options.model || 'gemini-3.6-flash';
-  const apiDeadlineMs = Math.max(GEMINI_API_DEADLINE_MS, options.apiDeadlineMs ?? GEMINI_API_DEADLINE_MS);
-  const appTimeoutMs = Math.max(apiDeadlineMs + 500, options.timeoutMs ?? GEMINI_APPLICATION_TIMEOUT_MS);
+  const appTimeoutMs = options.timeoutMs ?? GEMINI_APPLICATION_TIMEOUT_MS;
+  const apiDeadlineMs = options.apiDeadlineMs ?? options.timeoutMs ?? GEMINI_API_DEADLINE_MS;
   const maxRetriesFor503 = options.maxRetriesFor503 ?? 1;
   const backoffMs = options.backoffMsFor503 ?? 500;
 
@@ -267,7 +267,7 @@ Status: SUCCESS`);
       if (timeoutTimer) clearTimeout(timeoutTimer);
       const attemptDuration = Date.now() - attemptStart;
       const totalDuration = Date.now() - startTime;
-      const { diagnosticStatus, cleanErrorMessage, is503, isTimeout, isQuota, quotaDetails } = classifyAndRedactGeminiError(err);
+      const { diagnosticStatus, cleanErrorMessage, is503, is504, isTimeout, isQuota, quotaDetails } = classifyAndRedactGeminiError(err);
 
       console.log(`[GEMINI REQUEST END]
 User: ${userStr}
@@ -278,7 +278,7 @@ Model: ${model}
 DurationMs: ${attemptDuration}
 Status: ${diagnosticStatus}`);
 
-      // 1. TIMEOUT
+      // 1. LOCAL APPLICATION TIMEOUT
       if (isTimeout || err?.name === 'TimeoutError' || err?.name === 'AbortError' || diagnosticStatus === 'TIMEOUT') {
         console.log(`[GEMINI TIMEOUT] User: ${userStr} | Watcher: ${watcherStr} | Pair: ${pairStr} | TF: ${timeframeStr} | Model: ${model} | App Timeout: ${effectiveAppTimeoutMs}ms | API Deadline: ${effectiveApiDeadlineMs}ms
 DurationMs: ${attemptDuration}`);
@@ -294,7 +294,27 @@ DurationMs: ${attemptDuration}`);
         };
       }
 
-      // 2. 429 / QUOTA_EXHAUSTED: DO NOT RETRY IMMEDIATELY.
+      // 2. 504 / DEADLINE_EXCEEDED: Fail fast, DO NOT RETRY
+      if (is504) {
+        console.log(`[GEMINI 504]
+Gemini Status: TEMPORARY_ERROR
+HTTP Status: 504
+Provider Status: DEADLINE_EXCEEDED
+Retry: NO
+Action: SKIPPED`);
+
+        return {
+          success: false,
+          errorType: 'TEMPORARY_ERROR',
+          diagnosticStatus: 'TEMPORARY_504',
+          cleanErrorMessage: cleanErrorMessage || 'Deadline expired before operation could complete (504)',
+          attemptsExecuted: attempt,
+          durationMs: totalDuration,
+          retried: false
+        };
+      }
+
+      // 3. 429 / QUOTA_EXHAUSTED: DO NOT RETRY
       if (isQuota || diagnosticStatus.startsWith('QUOTA_')) {
         const reportedQuotaModel = extractQuotaModelFromError(err);
         console.log(`[GEMINI QUOTA EXHAUSTED TRACE]
@@ -323,8 +343,8 @@ Action: USER_QUOTA_CIRCUIT_OPEN`);
         };
       }
 
-      // 3. 503 / UNAVAILABLE / TEMPORARY_ERROR: At most 1 retry if global deadline permits
-      if (is503 || diagnosticStatus === 'TEMPORARY_ERROR') {
+      // 4. 503 / UNAVAILABLE: At most 1 retry if global deadline permits
+      if (is503) {
         if (attempt <= maxRetriesFor503) {
           const elapsedSoFar = Date.now() - startTime;
           const remainingBudget = (options.remainingGlobalBudgetMs ?? 25000) - elapsedSoFar;
@@ -361,7 +381,13 @@ Retry: ATTEMPT_${attempt + 1}`);
         }
       }
 
-      // 4. Other non-retryable errors (e.g. 400 INVALID_ARGUMENT -> INVALID_REQUEST)
+      // 5. Other non-retryable errors (400, 401, 403, etc.)
+      console.log(`[GEMINI FAILURE]
+User ID: ${userStr}
+Watcher ID: ${watcherStr}
+Status: ${diagnosticStatus}
+Clean Error: ${cleanErrorMessage}`);
+
       const finalErrorType = diagnosticStatus === 'INVALID_KEY' ? 'INVALID_CREDENTIALS' :
                              diagnosticStatus === 'PERMISSION_ERROR' ? 'PERMISSION_ERROR' :
                              diagnosticStatus === 'INVALID_REQUEST' ? 'INVALID_REQUEST' : 'UNKNOWN_ERROR';

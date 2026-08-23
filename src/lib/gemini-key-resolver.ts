@@ -116,6 +116,7 @@ export interface GeminiErrorClassification {
   diagnosticStatus: 'INVALID_KEY' | 'QUOTA_RPM' | 'QUOTA_TPM' | 'QUOTA_RPD' | 'QUOTA_UNKNOWN' | 'TIMEOUT' | 'TEMPORARY_ERROR' | 'INVALID_REQUEST' | 'PERMISSION_ERROR' | 'API_ERROR';
   cleanErrorMessage: string;
   is503: boolean;
+  is504: boolean;
   isTimeout: boolean;
   isQuota: boolean;
   quotaDetails?: GeminiQuotaDetails;
@@ -178,9 +179,10 @@ export function classifyAndRedactGeminiError(error: any): GeminiErrorClassificat
   let profileStatus: 'INVALID_KEY' | 'QUOTA_EXHAUSTED' | 'TEMP_ERROR' | 'NEEDS_ATTENTION' = 'NEEDS_ATTENTION';
   let diagnosticStatus: 'INVALID_KEY' | 'QUOTA_RPM' | 'QUOTA_TPM' | 'QUOTA_RPD' | 'QUOTA_UNKNOWN' | 'TIMEOUT' | 'TEMPORARY_ERROR' | 'INVALID_REQUEST' | 'PERMISSION_ERROR' | 'API_ERROR' = 'API_ERROR';
 
-  const isTimeout = lowerMsg.includes('timeout') || lowerMsg.includes('etimedout') || error?.name === 'TimeoutError' || error?.name === 'AbortError' || lowerMsg.includes('abort');
-  const is503 = errStatus === 503 || lowerMsg.includes('503') || lowerMsg.includes('unavailable') || lowerMsg.includes('high demand') || lowerMsg.includes('spikes in demand');
-  const isQuota = errStatus === 429 || lowerMsg.includes('429') || lowerMsg.includes('resource_exhausted') || lowerMsg.includes('quota exceeded') || lowerMsg.includes('rate limit') || lowerMsg.includes('retryinfo') || lowerMsg.includes('retrydelay');
+  const is504 = errStatus === 504 || lowerMsg.includes('504') || lowerMsg.includes('deadline_exceeded') || lowerMsg.includes('deadline expired') || lowerMsg.includes('deadline');
+  const is503 = (errStatus === 503 || lowerMsg.includes('503') || lowerMsg.includes('unavailable') || lowerMsg.includes('high demand') || lowerMsg.includes('spikes in demand')) && !is504;
+  const isTimeout = !is504 && (lowerMsg.includes('timeout') || lowerMsg.includes('etimedout') || error?.name === 'TimeoutError' || error?.name === 'AbortError' || lowerMsg.includes('abort'));
+  const isQuota = !is504 && !is503 && (errStatus === 429 || lowerMsg.includes('429') || lowerMsg.includes('resource_exhausted') || lowerMsg.includes('quota exceeded') || lowerMsg.includes('rate limit') || lowerMsg.includes('retryinfo') || lowerMsg.includes('retrydelay'));
 
   let quotaDetails: GeminiQuotaDetails | undefined;
 
@@ -211,6 +213,9 @@ export function classifyAndRedactGeminiError(error: any): GeminiErrorClassificat
     profileStatus = 'QUOTA_EXHAUSTED';
     quotaDetails = parseQuotaDetails(error, lowerMsg);
     diagnosticStatus = quotaDetails.quotaType;
+  } else if (is504) {
+    profileStatus = 'TEMP_ERROR';
+    diagnosticStatus = 'TEMPORARY_ERROR';
   } else if (isTimeout) {
     profileStatus = 'TEMP_ERROR';
     diagnosticStatus = 'TIMEOUT';
@@ -227,6 +232,7 @@ export function classifyAndRedactGeminiError(error: any): GeminiErrorClassificat
     diagnosticStatus,
     cleanErrorMessage: cleanMsg,
     is503,
+    is504,
     isTimeout,
     isQuota,
     quotaDetails
