@@ -1931,6 +1931,8 @@ Output ONLY valid JSON.
                         required: ["satisfies", "direction", "confidenceScore", "reasoning"]
                       }
                     },
+                    apiDeadlineMs: 10000,
+                    timeoutMs: 10500,
                     maxRetriesFor503: 1,
                     backoffMsFor503: 500,
                     remainingGlobalBudgetMs: remainingBeforeGemini
