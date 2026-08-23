@@ -1,4 +1,5 @@
 import { GoogleGenAI, Type, Schema } from '@google/genai';
+import { executeBoundedGeminiCall } from './geminiWrapper.js';
 
 export interface ParsedStrategy {
   indicators?: string[];
@@ -105,17 +106,23 @@ If a parameter is not mentioned, omit it or set it to null/false depending on th
     },
   };
 
-  const response = await ai.models.generateContent({
-    model: 'gemini-3.5-flash-lite',
-    contents: strategyText,
-    config: {
-      systemInstruction: systemInstruction,
-      responseMimeType: 'application/json',
-      responseSchema: responseSchema,
+  const parseRes = await executeBoundedGeminiCall(
+    ai,
+    {
+      model: 'gemini-3.5-flash-lite',
+      contents: strategyText,
+      config: {
+        systemInstruction: systemInstruction,
+        responseMimeType: 'application/json',
+        responseSchema: responseSchema,
+      },
+      timeoutMs: 12000,
+      maxRetriesFor503: 1
     },
-  });
+    { watcherId: 'strategy-parser', requestId: `req_parse_${Date.now()}` }
+  );
 
-  const responseText = response.text || "{}";
+  const responseText = parseRes.text || "{}";
 
   try {
     const parsed = JSON.parse(responseText);

@@ -1,5 +1,5 @@
 import { runGeminiRequest } from './geminiWrapper.js';
-import { GoogleGenAI } from '@google/genai';
+import { executeBoundedGeminiCall } from './geminiWrapper.js';
 import { sendTelegramMessage } from './telegramWrapper.js';
 
 async function getSupabase() {
@@ -144,10 +144,14 @@ export async function testGeminiKey(key: string, userEmail?: string): Promise<Ge
         }
       }
     });
-    await ai.models.generateContent({
-      model: 'gemini-3.5-flash-lite',
-      contents: 'ping'
-    });
+    const testRes = await executeBoundedGeminiCall(
+      ai,
+      { model: 'gemini-3.5-flash-lite', contents: 'ping', timeoutMs: 12000, maxRetriesFor503: 0 },
+      { userEmail, watcherId: 'credential-test', requestId: `req_key_test_${Date.now()}` }
+    );
+    if (!testRes.success) {
+      throw new Error(testRes.cleanErrorMessage || 'Credential test failed');
+    }
 
     console.log(`[Gemini Credential Test]
 User: ${userEmail || 'unknown'}

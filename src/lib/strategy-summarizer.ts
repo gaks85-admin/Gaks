@@ -1,4 +1,5 @@
 import { GoogleGenAI } from '@google/genai';
+import { executeBoundedGeminiCall } from './geminiWrapper.js';
 
 /**
  * Summarize strategy text using Gemini into a concise label (<= 4 words).
@@ -43,19 +44,18 @@ Strict Rules:
 Trading Strategy Text:
 ${strategyText.substring(0, 3000)}`;
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.5-flash-lite',
-      contents: prompt,
-    });
+    const sumRes = await executeBoundedGeminiCall(
+      ai,
+      {
+        model: 'gemini-3.5-flash-lite',
+        contents: prompt,
+        timeoutMs: 12000,
+        maxRetriesFor503: 1
+      },
+      { watcherId: 'strategy-summarizer', requestId: `req_sum_${Date.now()}` }
+    );
 
-    let rawText = '';
-    if (typeof response.text === 'string') {
-      rawText = response.text;
-    } else if (typeof response.text === 'function') {
-      rawText = await (response.text as any)();
-    } else {
-      rawText = (response as any).candidates?.[0]?.content?.parts?.[0]?.text || '';
-    }
+    const rawText = sumRes.text || '';
 
     let result = rawText.trim().replace(/^["'`]+|["'`]+$/g, '');
     

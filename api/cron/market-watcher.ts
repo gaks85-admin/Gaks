@@ -37,7 +37,7 @@ import { normalizeConfidence } from '../../src/lib/confidence-engine.js';
 import { evaluateQualityGate, calculateAdaptiveQualityRequirement, calculateConsecutiveLossesForWatcher } from '../../src/lib/quality-gate.js';
 import { checkSignalDeduplication } from '../../src/lib/signal-deduplication.js';
 import { resolveUserGeminiKey, classifyAndRedactGeminiError } from '../../src/lib/gemini-key-resolver.js';
-import { executeBoundedGeminiCall } from '../../src/lib/geminiWrapper.js';
+import { executeBoundedGeminiCall, runGeminiRequest as runGeminiWrapperRequest } from '../../src/lib/geminiWrapper.js';
 import { validateActiveTradeState, isWatcherDue } from '../../src/lib/trade-validator.js';
 import { computeEquityAnalytics, deriveEquityState, fetchUserCompletedTrades } from '../../src/lib/equity-learning-engine.js';
 import { evaluateRiskGovernor } from '../../src/lib/risk-governor.js';
@@ -117,48 +117,7 @@ export async function runGeminiRequest(
     model: string = 'gemini-3.5-flash-lite',
     config?: any
 ) {
-    const { data: apiKeyData, error: apiKeyError } = await supabase
-        .from('user_api_keys')
-        .select('api_key')
-        .eq('user_id', userId)
-        .eq('provider', 'gemini')
-        .maybeSingle();
-
-    if (apiKeyError || !apiKeyData || !apiKeyData.api_key) {
-        throw new Error('Gemini API key not found for user.');
-    }
-
-    const { data: watcher, error: watcherError } = await supabase
-        .from('watchers')
-        .select('status')
-        .eq('user_id', userId)
-        .eq('status', 'active')
-        .limit(1)
-        .maybeSingle();
-
-    if (!watcher) {
-        throw new Error('Watcher skipped because no active watcher found.');
-    }
-
-    const ai = new GoogleGenAI({ apiKey: apiKeyData.api_key });
-
-    try {
-        const geminiResponse = await ai.models.generateContent({
-            model: model,
-            contents: prompt,
-            config: config
-        });
-
-        if (typeof geminiResponse.text === 'function') {
-            return await (geminiResponse.text as any)();
-        } else if (typeof geminiResponse.text === 'string') {
-            return geminiResponse.text;
-        } else {
-            return (geminiResponse as any).candidates?.[0]?.content?.parts?.[0]?.text ?? "";
-        }
-    } catch (error: any) {
-        throw error;
-    }
+    return await runGeminiWrapperRequest(supabase, userId, prompt, model, config);
 }
 
 
@@ -1981,7 +1940,8 @@ Output ONLY valid JSON.
                     userEmail: logCtx.userEmail,
                     watcherId: watcher.id,
                     pair: selectedPair,
-                    timeframe: selectedTimeframe
+                    timeframe: selectedTimeframe,
+                    keySource: keyRes.keySource
                   }
                 );
 
@@ -2615,10 +2575,8 @@ Reason: ${adaptiveReq.reason}
           }
         }
 
-        // If there is NO setup: Update last_scan_at, last_analyzed_closed_candle_time, save evaluation and Exit.
-        const isWaiting = geminiInvoked 
-          ? (geminiSucceeded && geminiDecision === 'NO_TRADE')
-          : (analysis.signal === 'NO_TRADE' || analysis.confidence < 70);
+        // If there is NO setup or signal is NO_TRADE: Update last_scan_at, last_analyzed_closed_candle_time, save evaluation and Exit.
+        const isWaiting = (analysis.signal !== 'BUY' && analysis.signal !== 'SELL') || (analysis.confidence < 70);
 
         if (isWaiting) {
             logWatcherEvent('SIGNAL SKIPPED', logCtx, {

@@ -12,6 +12,7 @@ import { recordEvaluation } from "../../src/lib/explainability-engine.js";
 import { validateMarketDataIntegrity } from "../../src/lib/market-integrity.js";
 import { normalizeConfidence } from "../../src/lib/confidence-engine.js";
 import { resolveUserGeminiKey, classifyAndRedactGeminiError } from "../../src/lib/gemini-key-resolver.js";
+import { executeBoundedGeminiCall } from "../../src/lib/geminiWrapper.js";
 import { computeEquityAnalytics, deriveEquityState, fetchUserCompletedTrades } from "../../src/lib/equity-learning-engine.js";
 import { evaluateRiskGovernor } from "../../src/lib/risk-governor.js";
 import { evaluateAdaptiveLearning, fetchCompletedTradesForAdaptiveLearning } from "../../src/lib/adaptive-learning-engine.js";
@@ -694,29 +695,46 @@ AI Instructions:
 
 Answer with JSON matching schema.
 `;
-          const aiResponse = await ai.models.generateContent({
-            model: "gemini-3.5-flash-lite",
-            contents: promptText,
-            config: {
-              responseMimeType: "application/json",
-              responseSchema: {
-                type: Type.OBJECT,
-                properties: {
-                  satisfies: { type: Type.BOOLEAN },
-                  direction: { type: Type.STRING },
-                  confidenceScore: { type: Type.NUMBER },
-                  entryPrice: { type: Type.NUMBER },
-                  stopLoss: { type: Type.NUMBER },
-                  takeProfit: { type: Type.NUMBER },
-                  stopLossBasis: { type: Type.STRING },
-                  reasoning: { type: Type.STRING }
-                },
-                required: ["satisfies", "direction", "confidenceScore", "reasoning"]
-              }
+          const geminiRes = await executeBoundedGeminiCall(
+            ai,
+            {
+              model: "gemini-3.5-flash-lite",
+              contents: promptText,
+              config: {
+                responseMimeType: "application/json",
+                responseSchema: {
+                  type: Type.OBJECT,
+                  properties: {
+                    satisfies: { type: Type.BOOLEAN },
+                    direction: { type: Type.STRING },
+                    confidenceScore: { type: Type.NUMBER },
+                    entryPrice: { type: Type.NUMBER },
+                    stopLoss: { type: Type.NUMBER },
+                    takeProfit: { type: Type.NUMBER },
+                    stopLossBasis: { type: Type.STRING },
+                    reasoning: { type: Type.STRING }
+                  },
+                  required: ["satisfies", "direction", "confidenceScore", "reasoning"]
+                }
+              },
+              timeoutMs: 12000,
+              maxRetriesFor503: 1,
+              backoffMsFor503: 500
+            },
+            {
+              userId,
+              watcherId: watcherId || 'manual-scan',
+              pair,
+              timeframe,
+              keySource: keyRes.keySource,
+              requestId: `req_scan_${watcherId || 'manual'}_${Date.now()}`
             }
-          });
-          geminiDuration = Date.now() - geminiStart;
-          geminiTextResult = aiResponse.text || "";
+          );
+          geminiDuration = geminiRes.durationMs;
+          if (!geminiRes.success || !geminiRes.text) {
+            throw new Error(geminiRes.cleanErrorMessage || "Gemini execution failed");
+          }
+          geminiTextResult = geminiRes.text;
           const parsedResult = JSON.parse(geminiTextResult);
 
           if (parsedResult.satisfies && parsedResult.direction && parsedResult.direction !== 'NO_TRADE') {

@@ -1,5 +1,4 @@
 import { redactApiKey } from './apiKeys.js';
-import { createHash } from 'crypto';
 
 export interface GeminiKeyResolutionResult {
   userId: string;
@@ -20,11 +19,12 @@ export function computeKeyFingerprint(key: string | null | undefined): string {
   if (!key) return 'NONE';
   const trimmed = key.trim();
   if (!trimmed) return 'NONE';
-  try {
-    return createHash('sha256').update(trimmed).digest('hex').substring(0, 8);
-  } catch {
-    return 'HASH_ERR';
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < trimmed.length; i++) {
+    hash ^= trimmed.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
   }
+  return (hash >>> 0).toString(16).padStart(8, '0').substring(0, 8);
 }
 
 /**

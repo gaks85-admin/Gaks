@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { GoogleGenAI } from '@google/genai';
 import { sendTelegramMessage } from './telegramWrapper.js';
-import { resolveUserGeminiKey, classifyAndRedactGeminiError, GeminiQuotaDetails } from './gemini-key-resolver.js';
+import { resolveUserGeminiKey, classifyAndRedactGeminiError, GeminiQuotaDetails, redactApiKeyInText } from './gemini-key-resolver.js';
 
 // Simplified Error Classification
 export type GeminiErrorType = 'invalid_key' | 'quota_exceeded' | 'rate_limited' | 'temporary_failure' | 'unknown_error';
@@ -81,6 +81,14 @@ export interface BoundedGeminiContext {
   watcherId?: string;
   pair?: string;
   timeframe?: string;
+  keySource?: string;
+  requestId?: string;
+}
+
+function extractQuotaModelFromError(err: any): string {
+  const msg = err?.message || String(err);
+  const match = msg.match(/(?:models\/|model\s+)?(gemini-[a-zA-Z0-9_.-]+)/i);
+  return match ? match[1] : 'NOT_SPECIFIED_IN_ERROR_RESPONSE';
 }
 
 /**
@@ -88,7 +96,6 @@ export interface BoundedGeminiContext {
  * Enforces per-user rate limiting,
  * 503 single retry with backoff and global deadline check,
  * 429 quota handling without retry, fail closed, and structured logging.
- * (Note: The 8,000ms hard timeout has been temporarily disabled for diagnostic testing)
  */
 export async function executeBoundedGeminiCall(
   ai: GoogleGenAI,
@@ -96,7 +103,7 @@ export async function executeBoundedGeminiCall(
   context: BoundedGeminiContext
 ): Promise<BoundedGeminiResult> {
   const model = options.model || 'gemini-3.5-flash-lite';
-  const timeoutMs = options.timeoutMs ?? 8000;
+  const timeoutMs = options.timeoutMs ?? 12000;
   const maxRetriesFor503 = options.maxRetriesFor503 ?? 1;
   const backoffMs = options.backoffMsFor503 ?? 500;
 
@@ -104,6 +111,7 @@ export async function executeBoundedGeminiCall(
   const watcherStr = context.watcherId || 'unknown';
   const pairStr = context.pair || 'unknown';
   const timeframeStr = context.timeframe || 'unknown';
+  const keySourceStr = context.keySource || 'user_api_keys';
 
   // Check per-user rate limiter before executing
   if (context.userId) {
@@ -173,6 +181,8 @@ Reason: Insufficient global cron budget remaining (${remainingGlobalBudget}ms <=
     const effectiveTimeoutMs = Math.min(options.timeoutMs ?? 8000, remainingGlobalBudget - 250);
     const requestStartIso = new Date(attemptStart).toISOString();
 
+    console.log(`[GEMINI MODEL TRACE] model=${model} keySource=${keySourceStr} watcher=${watcherStr} user=${userStr} startTimestamp=${requestStartIso}`);
+
     console.log(`[GEMINI REQUEST]
 User ID: ${userStr}
 Watcher ID: ${watcherStr}
@@ -186,6 +196,7 @@ Request Start Timestamp: ${requestStartIso}`);
     const controller = new AbortController();
     let timeoutTimer: NodeJS.Timeout | null = null;
 
+    let fetchPromise: Promise<any>;
     try {
       const mergedConfig = {
         ...(options.config || {}),
@@ -193,7 +204,7 @@ Request Start Timestamp: ${requestStartIso}`);
         signal: controller.signal
       };
 
-      const fetchPromise = ai.models.generateContent({
+      fetchPromise = ai.models.generateContent({
         model: model,
         contents: options.contents,
         config: mergedConfig
@@ -250,12 +261,31 @@ Duration: ${totalDuration}ms
         const remainingBudget = options.remainingGlobalBudgetMs
           ? `${options.remainingGlobalBudgetMs - totalDuration}ms`
           : 'unknown';
+        const requestEndIso = new Date().toISOString();
+
+        console.log(`[GEMINI TIMEOUT TRACE]
+Requested model: ${model}
+Timeout duration: ${effectiveTimeoutMs}ms
+Request Start Time: ${requestStartIso}
+Request End Time: ${requestEndIso}
+Timeout Source: Application Promise.race timeout (${effectiveTimeoutMs}ms limit reached)`);
 
         console.log(`[GEMINI TIMEOUT]
 User ID: ${userStr}
 Watcher ID: ${watcherStr}
 Timeout: ${effectiveTimeoutMs}ms
 Remaining Cron Budget: ${remainingBudget}`);
+
+        if (fetchPromise!) {
+          fetchPromise
+            .then(() => {
+              console.log(`[GEMINI LATE RESOLUTION AFTER TIMEOUT] Requested model: ${model} | Watcher ID: ${watcherStr} | Resolved after application timeout (${Date.now() - attemptStart}ms)`);
+            })
+            .catch((lateErr: any) => {
+              const lateClean = redactApiKeyInText(lateErr?.message || String(lateErr));
+              console.log(`[GEMINI LATE REJECTION AFTER TIMEOUT] Requested model: ${model} | Watcher ID: ${watcherStr} | Late Error: ${lateClean} (${Date.now() - attemptStart}ms)`);
+            });
+        }
 
         return {
           success: false,
@@ -270,6 +300,15 @@ Remaining Cron Budget: ${remainingBudget}`);
 
       // 2. 429 / QUOTA_EXHAUSTED: DO NOT RETRY IMMEDIATELY.
       if (isQuota || diagnosticStatus.startsWith('QUOTA_')) {
+        const reportedQuotaModel = extractQuotaModelFromError(err);
+        console.log(`[GEMINI QUOTA EXHAUSTED TRACE]
+Requested model: ${model}
+Quota model: ${reportedQuotaModel}
+User ID: ${userStr}
+Watcher ID: ${watcherStr}
+Status: ${diagnosticStatus}
+Clean Error: ${cleanErrorMessage}`);
+
         console.log(`[GEMINI QUOTA]
 User ID: ${userStr}
 Watcher ID: ${watcherStr}

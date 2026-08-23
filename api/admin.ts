@@ -72,69 +72,29 @@ export async function runGeminiRequest(
     model: string = 'gemini-3.5-flash-lite',
     config?: any
 ) {
-    const { data: apiKeyData, error: apiKeyError } = await supabase
-        .from('user_api_keys')
-        .select('api_key, id, telegram_notified, status, total_requests, total_failures')
-        .eq('user_id', userId)
-        .eq('provider', 'gemini')
-        .eq('status', 'active')
-        .maybeSingle();
-
-    if (apiKeyError || !apiKeyData || !apiKeyData.api_key) {
-        throw new Error('Gemini API key not found or inactive for user.');
-    }
-
-
-    const { data: watcher, error: watcherError } = await supabase
-        .from('watchers')
-        .select('status')
-        .eq('user_id', userId)
-        .eq('status', 'active')
-        .limit(1)
-        .maybeSingle();
-
-    if (!watcher) {
-        throw new Error('Watcher skipped because no active watcher found.');
-    }
-
-    const ai = new GoogleGenAI({ apiKey: apiKeyData.api_key });
-
-    await supabase.from('user_api_keys').update({
-        total_requests: (apiKeyData.total_requests || 0) + 1,
-        last_tested_at: new Date().toISOString()
-    }).eq('id', apiKeyData.id);
-
-    try {
-        const response = await ai.models.generateContent({
-            model: model,
-            contents: prompt,
-            config: config
-        });
-
-        await supabase.from('user_api_keys').update({
-            status: 'active',
-            last_success_at: new Date().toISOString(),
-            last_error: null,
-            telegram_notified: false
-        }).eq('id', apiKeyData.id);
-
-        return response.text;
-    } catch (error: any) {
-        const errorType = classifyGeminiError(error);
-        
-        await supabase.from('user_api_keys').update({
-            total_failures: (apiKeyData.total_failures || 0) + 1,
-            last_error: errorType,
-            last_error_at: new Date().toISOString()
-        }).eq('id', apiKeyData.id);
-
-        throw error;
-    }
+    return await runGeminiWrapperRequest(supabase, userId, prompt, model, config);
 }
 
 
+import { executeBoundedGeminiCall, runGeminiRequest as runGeminiWrapperRequest } from '../src/lib/geminiWrapper.js';
+
 async function generateContentWithDiagnostics(ai: any, params: any) {
-  return await ai.models.generateContent(params);
+  const res = await executeBoundedGeminiCall(
+    ai,
+    {
+      model: params.model || "gemini-3.5-flash-lite",
+      contents: params.contents,
+      config: params.config,
+      timeoutMs: 12000,
+      maxRetriesFor503: 1,
+      backoffMsFor503: 500
+    },
+    { watcherId: 'admin-diagnostics' }
+  );
+  if (!res.success || !res.text) {
+    throw new Error(res.cleanErrorMessage || 'Gemini execution failed');
+  }
+  return { text: res.text };
 }
 
 import fs from 'fs';
