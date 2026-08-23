@@ -1841,7 +1841,7 @@ Action: USER_QUOTA_CIRCUIT_OPEN`);
                   return;
                 }
 
-                if (remainingBeforeGemini <= 8000 || !hasProcessingTimeRemaining()) {
+                if (remainingBeforeGemini < 9500 || !hasProcessingTimeRemaining()) {
                   console.log(`[CRON DEADLINE]
 User: ${logCtx.userEmail || userId}
 Watcher: ${watcher.id}
@@ -1849,7 +1849,7 @@ Pair: ${selectedPair}
 TF: ${selectedTimeframe}
 Status: SKIPPED
 Direction: NO_TRADE
-Reason: Insufficient remaining execution budget (${remainingBeforeGemini}ms remaining < 8000ms required)`);
+Reason: Insufficient remaining execution budget (${remainingBeforeGemini}ms remaining < 9500ms required)`);
                   cronTimer.markEarlyExit();
                   watchersSkippedByDeadlineCount++;
                   watchersSkippedCount++;
@@ -1943,8 +1943,8 @@ Output ONLY valid JSON.
                         required: ["satisfies", "direction", "confidenceScore", "reasoning"]
                       }
                     },
-                    apiDeadlineMs: 8000,
-                    timeoutMs: 8000,
+                    apiDeadlineMs: 10000,
+                    timeoutMs: 9500,
                     maxRetriesFor503: 1,
                     backoffMsFor503: 500,
                     remainingGlobalBudgetMs: remainingBeforeGemini

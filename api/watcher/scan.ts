@@ -717,7 +717,7 @@ Answer with JSON matching schema.
                   required: ["satisfies", "direction", "confidenceScore", "reasoning"]
                 }
               },
-              timeoutMs: 10500,
+              timeoutMs: 9500,
               apiDeadlineMs: 10000,
               maxRetriesFor503: 1,
               backoffMsFor503: 500

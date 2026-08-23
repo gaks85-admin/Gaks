@@ -3,8 +3,8 @@ import { GoogleGenAI } from '@google/genai';
 import { sendTelegramMessage } from './telegramWrapper.js';
 import { resolveUserGeminiKey, classifyAndRedactGeminiError, GeminiQuotaDetails, redactApiKeyInText } from './gemini-key-resolver.js';
 
-export const GEMINI_API_DEADLINE_MS = 8_000;
-export const GEMINI_APPLICATION_TIMEOUT_MS = 8_000;
+export const GEMINI_API_DEADLINE_MS = 10_000;
+export const GEMINI_APPLICATION_TIMEOUT_MS = 9_500;
 
 // Simplified Error Classification
 export type GeminiErrorType = 'invalid_key' | 'quota_exceeded' | 'rate_limited' | 'temporary_failure' | 'unknown_error';
@@ -107,8 +107,8 @@ export async function executeBoundedGeminiCall(
   context: BoundedGeminiContext
 ): Promise<BoundedGeminiResult> {
   const model = options.model || 'gemini-3.6-flash';
+  const apiDeadlineMs = Math.max(10_000, options.apiDeadlineMs ?? GEMINI_API_DEADLINE_MS);
   const appTimeoutMs = options.timeoutMs ?? GEMINI_APPLICATION_TIMEOUT_MS;
-  const apiDeadlineMs = options.apiDeadlineMs ?? options.timeoutMs ?? GEMINI_API_DEADLINE_MS;
   const maxRetriesFor503 = options.maxRetriesFor503 ?? 1;
   const backoffMs = options.backoffMsFor503 ?? 500;
 
@@ -294,6 +294,30 @@ DurationMs: ${attemptDuration}`);
         };
       }
 
+      // 2. 400 / INVALID_REQUEST (including minimum deadline errors)
+      if (diagnosticStatus === 'INVALID_REQUEST') {
+        console.log(`[GEMINI INVALID REQUEST] SDK timeout configuration rejected or invalid request:
+User: ${userStr}
+Watcher: ${watcherStr}
+Pair: ${pairStr}
+TF: ${timeframeStr}
+HTTP Status: ${err?.status || err?.statusCode || 400}
+Classified Status: INVALID_REQUEST
+Redacted Error Message: ${cleanErrorMessage}
+Configured SDK Timeout: ${effectiveApiDeadlineMs}ms
+Configured App Timeout: ${effectiveAppTimeoutMs}ms`);
+
+        return {
+          success: false,
+          errorType: 'INVALID_REQUEST',
+          diagnosticStatus: 'INVALID_REQUEST',
+          cleanErrorMessage: cleanErrorMessage || 'Invalid request configuration (400)',
+          attemptsExecuted: attempt,
+          durationMs: totalDuration,
+          retried: false
+        };
+      }
+
       // 2. 504 / DEADLINE_EXCEEDED: Fail fast, DO NOT RETRY
       if (is504) {
         console.log(`[GEMINI 504]
@@ -388,9 +412,9 @@ Watcher ID: ${watcherStr}
 Status: ${diagnosticStatus}
 Clean Error: ${cleanErrorMessage}`);
 
-      const finalErrorType = diagnosticStatus === 'INVALID_KEY' ? 'INVALID_CREDENTIALS' :
-                             diagnosticStatus === 'PERMISSION_ERROR' ? 'PERMISSION_ERROR' :
-                             diagnosticStatus === 'INVALID_REQUEST' ? 'INVALID_REQUEST' : 'UNKNOWN_ERROR';
+      const finalErrorType = (diagnosticStatus as string) === 'INVALID_KEY' ? 'INVALID_CREDENTIALS' :
+                             (diagnosticStatus as string) === 'PERMISSION_ERROR' ? 'PERMISSION_ERROR' :
+                             (diagnosticStatus as string) === 'INVALID_REQUEST' ? 'INVALID_REQUEST' : 'UNKNOWN_ERROR';
 
       return {
         success: false,

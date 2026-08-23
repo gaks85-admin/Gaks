@@ -147,7 +147,7 @@ export async function testGeminiKey(key: string, userEmail?: string): Promise<Ge
     });
     const testRes = await executeBoundedGeminiCall(
       ai,
-      { model: 'gemini-3.6-flash', contents: 'ping', timeoutMs: 10500, apiDeadlineMs: 10000, maxRetriesFor503: 0 },
+      { model: 'gemini-3.6-flash', contents: 'ping', timeoutMs: 9500, apiDeadlineMs: 10000, maxRetriesFor503: 0 },
       { userEmail, watcherId: 'credential-test', requestId: `req_key_test_${Date.now()}` }
     );
     if (!testRes.success) {
