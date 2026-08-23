@@ -1869,7 +1869,7 @@ Action: USER_QUOTA_CIRCUIT_OPEN`);
                 }
 
                 logWatcherEvent('Gemini Analysis', logCtx, {
-                  'Model': 'gemini-3.5-flash-lite',
+                  'Model': 'gemini-3.6-flash',
                   'Decision Score': decisionResult.decision_score,
                   'Recommendation': recommendation,
                   'Gemini Required': requiresGemini ? 'YES' : 'NO',
@@ -1912,7 +1912,7 @@ Output ONLY valid JSON.
                 const geminiRes = await executeBoundedGeminiCall(
                   ai,
                   {
-                    model: "gemini-3.5-flash-lite",
+                    model: "gemini-3.6-flash",
                     contents: promptText,
                     config: {
                       responseMimeType: "application/json",

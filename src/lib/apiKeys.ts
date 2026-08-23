@@ -1,3 +1,4 @@
+import { GoogleGenAI } from '@google/genai';
 import { runGeminiRequest } from './geminiWrapper.js';
 import { executeBoundedGeminiCall } from './geminiWrapper.js';
 import { sendTelegramMessage } from './telegramWrapper.js';
@@ -146,7 +147,7 @@ export async function testGeminiKey(key: string, userEmail?: string): Promise<Ge
     });
     const testRes = await executeBoundedGeminiCall(
       ai,
-      { model: 'gemini-3.5-flash-lite', contents: 'ping', timeoutMs: 12000, maxRetriesFor503: 0 },
+      { model: 'gemini-3.6-flash', contents: 'ping', timeoutMs: 8000, maxRetriesFor503: 0 },
       { userEmail, watcherId: 'credential-test', requestId: `req_key_test_${Date.now()}` }
     );
     if (!testRes.success) {

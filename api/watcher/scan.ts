@@ -698,7 +698,7 @@ Answer with JSON matching schema.
           const geminiRes = await executeBoundedGeminiCall(
             ai,
             {
-              model: "gemini-3.5-flash-lite",
+              model: "gemini-3.6-flash",
               contents: promptText,
               config: {
                 responseMimeType: "application/json",
@@ -717,17 +717,17 @@ Answer with JSON matching schema.
                   required: ["satisfies", "direction", "confidenceScore", "reasoning"]
                 }
               },
-              timeoutMs: 12000,
+              timeoutMs: 8000,
               maxRetriesFor503: 1,
               backoffMsFor503: 500
             },
             {
               userId,
-              watcherId: watcherId || 'manual-scan',
-              pair,
-              timeframe,
+              watcherId: watcher?.id || 'manual-scan',
+              pair: watcher?.pair || 'unknown',
+              timeframe: watcher?.timeframe || 'unknown',
               keySource: keyRes.keySource,
-              requestId: `req_scan_${watcherId || 'manual'}_${Date.now()}`
+              requestId: `req_scan_${watcher?.id || 'manual'}_${Date.now()}`
             }
           );
           geminiDuration = geminiRes.durationMs;
