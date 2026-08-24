@@ -1590,6 +1590,8 @@ Reason: ${activeValidation.reason}`);
         let geminiStart = 0;
         let geminiDuration = 0;
         let requiresGemini = false;
+        let usedFallback = false;
+        let fallbackReason = '';
 
         const recommendation = decisionResult.recommendation; // PASS, LIKELY_PASS, AMBIGUOUS, FAIL
         const executionMode = compiledStrategy.detector_validation?.execution_mode || 'HYBRID';
@@ -1679,98 +1681,42 @@ Reason: ${decisionResult.explanation || (requiresGemini ? 'Strategy configuratio
               }
 
               if (!allowProbationaryRetry) {
-                logWatcherError('Gemini ERROR', logCtx, userProfile?.gemini_last_error || 'Gemini unavailable', {
-                  'Gemini Status': geminiStatus,
-                  'Action': 'Skipped'
-                });
-
-                const scanDurationMs = Date.now() - scanStart;
-                await recordEvaluation(supabase, {
-                  user_id: userId,
-                  watcher_id: watcher.id,
-                  pair: selectedPair,
-                  timeframe: selectedTimeframe,
-                  strategy_mode: compiledStrategy.strategy_mode,
-                  decision_score: decisionResult.decision_score,
-                  matched_weight: decisionResult.matched_weight,
-                  possible_weight: decisionResult.possible_weight,
-                  recommendation: decisionResult.recommendation,
-                  mandatory_rules_passed: decisionResult.mandatory_rules_passed,
-                  matched_rules: decisionResult.matched_rules,
-                  failed_rules: decisionResult.failed_rules,
-                  gemini_used: false,
-                  gemini_result: `Skipped: User Gemini status is ${geminiStatus} (${userProfile?.gemini_last_error || 'Unavailable'})`,
-                  trade_sent: false,
-                  trade_reason: `Gemini unavailable (${geminiStatus}): ${userProfile?.gemini_last_error || 'N/A'}`,
-                  scan_duration_ms: scanDurationMs,
-                  gemini_duration_ms: null,
-                  decision_snapshot: decisionSnapshot
-                });
-
-                skipped.push({ userId, reason: `Gemini unavailable (${geminiStatus}): ${userProfile?.gemini_last_error || 'N/A'}` });
-                watchersSkippedCount++;
-                return;
+                usedFallback = true;
+                fallbackReason = geminiStatus === 'QUOTA_EXHAUSTED' ? 'QUOTA_EXHAUSTED' : (geminiStatus === 'TEMP_ERROR' ? 'TEMPORARY_ERROR' : 'UNAVAILABLE');
+                console.log(`[GEMINI FALLBACK] Reason: ${fallbackReason} | Source: RULE_ONLY`);
+                console.log(`[Gemini Isolation] Watcher ${watcher.id} using RULE_ONLY fallback due to user Gemini status (${geminiStatus})`);
               }
             }
 
-            // 0. Check Per-User Quota Circuit Breaker (skip if user key already failed with 429 in current cron)
-            if (quotaExhaustedUsers.has(userId)) {
+            // 0. Check Per-User Quota Circuit Breaker (fallback if user key already failed with 429 in current cron)
+            if (!usedFallback && quotaExhaustedUsers.has(userId)) {
               console.log(`[GEMINI QUOTA]
 User: ${userProfile?.email || userId}
 Watcher: ${watcher.id} (${selectedPair} ${selectedTimeframe})
 Status: QUOTA_EXHAUSTED
 Action: USER_QUOTA_CIRCUIT_OPEN`);
 
-              logWatcherEvent('Gemini Decision', logCtx, {
-                'Status': 'QUOTA_EXHAUSTED',
-                'Direction': 'NO_TRADE',
-                'Confidence': '0%',
-                'Fallback': 'NO_TRADE'
-              });
-
+              usedFallback = true;
+              fallbackReason = 'QUOTA_EXHAUSTED';
+              console.log(`[GEMINI FALLBACK] Reason: QUOTA_EXHAUSTED | Source: RULE_ONLY`);
               geminiQuotaErrorsCount++;
               geminiCallsQuotaExhaustedCount++;
               skippedDueToQuotaCount++;
               watchersSkippedByGemini429Count++;
-              watchersSkippedCount++;
-
-              const scanDurationMs = Date.now() - scanStart;
-              await recordEvaluation(supabase, {
-                user_id: userId,
-                watcher_id: watcher.id,
-                pair: selectedPair,
-                timeframe: selectedTimeframe,
-                strategy_mode: compiledStrategy.strategy_mode,
-                decision_score: decisionResult.decision_score,
-                matched_weight: decisionResult.matched_weight,
-                possible_weight: decisionResult.possible_weight,
-                recommendation: decisionResult.recommendation,
-                mandatory_rules_passed: decisionResult.mandatory_rules_passed,
-                matched_rules: decisionResult.matched_rules,
-                failed_rules: decisionResult.failed_rules,
-                gemini_used: true,
-                gemini_result: "Skipped: User Gemini API quota exhausted in current cron run",
-                trade_sent: false,
-                trade_reason: "User Gemini quota exhausted (Circuit open)",
-                scan_duration_ms: scanDurationMs,
-                gemini_duration_ms: null,
-                decision_snapshot: decisionSnapshot
-              });
-
-              skipped.push({ userId, reason: "User Gemini quota exhausted (Circuit open)" });
-              return;
             }
 
             // 1. Per-User AI Cooldown (30s minimum between AI calls per user)
-            const lastAiTime = userLastGeminiExecutionMap.get(userId) || 0;
-            const timeSinceLastAi = Date.now() - lastAiTime;
-            if (timeSinceLastAi < 30000) {
-              const remainingSec = Math.ceil((30000 - timeSinceLastAi) / 1000);
-              console.log(`[USER AI COOLDOWN] User ${userId} executed AI call ${Math.round(timeSinceLastAi/1000)}s ago (<30s threshold). Skipping Gemini (Remaining: ${remainingSec}s).`);
-              watchersSkippedByUserCooldownCount++;
-              watchersSkippedCount++;
-              skipped.push({ userId, reason: `User AI cooldown active (${remainingSec}s remaining)` });
-              return; // Fail-safe: exit without updating last_scan_at or last_analyzed_closed_candle_time
+            if (!usedFallback) {
+              const lastAiTime = userLastGeminiExecutionMap.get(userId) || 0;
+              const timeSinceLastAi = Date.now() - lastAiTime;
+              if (timeSinceLastAi < 30000) {
+                const remainingSec = Math.ceil((30000 - timeSinceLastAi) / 1000);
+                console.log(`[USER AI COOLDOWN] User ${userId} executed AI call ${Math.round(timeSinceLastAi/1000)}s ago (<30s threshold). Falling back to RULE_ONLY (Remaining: ${remainingSec}s).`);
+                watchersSkippedByUserCooldownCount++;
+                usedFallback = true;
+                fallbackReason = 'AI_COOLDOWN';
+                console.log(`[GEMINI FALLBACK] Reason: AI_COOLDOWN | Source: RULE_ONLY`);
+              }
             }
 
             // 2. In-Cron Job Deduplication Cache Check
@@ -1816,7 +1762,7 @@ Action: USER_QUOTA_CIRCUIT_OPEN`);
                 if (!keyRes.keyPresent || !keyRes.apiKey) {
                   logWatcherError('Gemini ERROR', logCtx, 'Missing Gemini API key', {
                     'Gemini Status': 'NOT_CONNECTED',
-                    'Action': 'Skipped'
+                    'Action': 'Fallback to RULE_ONLY'
                   });
 
                   await supabase.from("profiles").update({
@@ -1826,71 +1772,23 @@ Action: USER_QUOTA_CIRCUIT_OPEN`);
                     updated_at: new Date().toISOString()
                   }).eq("id", userId);
 
-                  const scanDurationMs = Date.now() - scanStart;
-                  await recordEvaluation(supabase, {
-                    user_id: userId,
-                    watcher_id: watcher.id,
-                    pair: selectedPair,
-                    timeframe: selectedTimeframe,
-                    strategy_mode: compiledStrategy.strategy_mode,
-                    decision_score: decisionResult.decision_score,
-                    matched_weight: decisionResult.matched_weight,
-                    possible_weight: decisionResult.possible_weight,
-                    recommendation: decisionResult.recommendation,
-                    mandatory_rules_passed: decisionResult.mandatory_rules_passed,
-                    matched_rules: decisionResult.matched_rules,
-                    failed_rules: decisionResult.failed_rules,
-                    gemini_used: true,
-                    gemini_result: "Missing Gemini API key",
-                    trade_sent: false,
-                    trade_reason: "User has no Gemini API key configured",
-                    scan_duration_ms: scanDurationMs,
-                    gemini_duration_ms: Date.now() - geminiStart,
-                    decision_snapshot: decisionSnapshot
-                  });
+                  usedFallback = true;
+                  fallbackReason = 'MISSING_KEY';
+                  console.log(`[GEMINI FALLBACK] Reason: MISSING_KEY | Source: RULE_ONLY`);
+                } else {
+                  const geminiKey = keyRes.apiKey;
+                  const elapsedBeforeGemini = Date.now() - startTime;
+                  const remainingBeforeGemini = PROCESSING_DEADLINE_MS - elapsedBeforeGemini;
 
-                  skipped.push({ userId, reason: "Missing Gemini API key" });
-                  watchersSkippedCount++;
-                  return;
-                }
-
-                const geminiKey = keyRes.apiKey;
-                const elapsedBeforeGemini = Date.now() - startTime;
-                const remainingBeforeGemini = PROCESSING_DEADLINE_MS - elapsedBeforeGemini;
-
-                if (geminiTemporarilyUnavailable) {
-                  console.warn(`[GEMINI CIRCUIT BREAKER] Skipping Gemini for Watcher ID: ${watcher.id} (${selectedPair}). Circuit breaker active (2x 503 errors encountered in this cron execution).`);
-                  tempErrorCount++;
-                  geminiCalls503Count++;
-                  watchersSkippedByGemini503Count++;
-                  watchersSkippedCount++;
-                  const scanDurationMs = Date.now() - scanStart;
-                  await recordEvaluation(supabase, {
-                    user_id: userId,
-                    watcher_id: watcher.id,
-                    pair: selectedPair,
-                    timeframe: selectedTimeframe,
-                    strategy_mode: compiledStrategy.strategy_mode,
-                    decision_score: decisionResult.decision_score,
-                    matched_weight: decisionResult.matched_weight,
-                    possible_weight: decisionResult.possible_weight,
-                    recommendation: decisionResult.recommendation,
-                    mandatory_rules_passed: decisionResult.mandatory_rules_passed,
-                    matched_rules: decisionResult.matched_rules,
-                    failed_rules: decisionResult.failed_rules,
-                    gemini_used: false,
-                    gemini_result: "Skipped: Gemini 503 Circuit Breaker Open",
-                    trade_sent: false,
-                    trade_reason: "Gemini API temporarily unavailable (503 circuit breaker active)",
-                    scan_duration_ms: scanDurationMs,
-                    gemini_duration_ms: null,
-                    decision_snapshot: decisionSnapshot
-                  });
-                  skipped.push({ userId, reason: "Gemini 503 circuit breaker active" });
-                  return;
-                }
-
-                if (remainingBeforeGemini < 9500 || !hasProcessingTimeRemaining()) {
+                  if (geminiTemporarilyUnavailable) {
+                    console.warn(`[GEMINI CIRCUIT BREAKER] Skipping Gemini for Watcher ID: ${watcher.id} (${selectedPair}). Circuit breaker active (2x 503 errors encountered in this cron execution).`);
+                    tempErrorCount++;
+                    geminiCalls503Count++;
+                    watchersSkippedByGemini503Count++;
+                    usedFallback = true;
+                    fallbackReason = 'TEMPORARY_ERROR';
+                    console.log(`[GEMINI FALLBACK] Reason: TEMPORARY_ERROR | Source: RULE_ONLY`);
+                  } else if (remainingBeforeGemini < 9500 || !hasProcessingTimeRemaining()) {
                   console.log(`[CRON DEADLINE]
 User: ${logCtx.userEmail || userId}
 Watcher: ${watcher.id}
@@ -1927,7 +1825,7 @@ Reason: Insufficient remaining execution budget (${remainingBeforeGemini}ms rema
 
                   skipped.push({ userId, reason: "Cron safety deadline reached" });
                   return;
-                }
+                } else {
 
                 logWatcherEvent('Gemini Analysis', logCtx, {
                   'Model': 'gemini-3.6-flash',
@@ -2016,16 +1914,19 @@ Output ONLY valid JSON.
 
                 if (!geminiRes.success || !geminiRes.text) {
                   const cleanErrMsg = geminiRes.cleanErrorMessage || "Gemini execution failed";
+                  let curReason = 'UNAVAILABLE';
                   if (geminiRes.errorType === 'TIMEOUT') {
                     geminiTimeoutsCount++;
                     geminiCallsTimedOutCount++;
                     watchersSkippedByGeminiTimeoutCount++;
+                    curReason = 'TIMEOUT';
                   } else if (geminiRes.errorType === 'QUOTA_EXHAUSTED') {
                     quotaExhaustedUsers.add(userId);
                     geminiQuotaErrorsCount++;
                     geminiCallsQuotaExhaustedCount++;
                     skippedDueToQuotaCount++;
                     watchersSkippedByGemini429Count++;
+                    curReason = 'QUOTA_EXHAUSTED';
                   } else if (geminiRes.errorType === 'TEMPORARY_ERROR') {
                     tempErrorCount++;
                     if (geminiRes.diagnosticStatus === 'TEMPORARY_504') {
@@ -2041,12 +1942,16 @@ Output ONLY valid JSON.
                       geminiTemporarilyUnavailable = true;
                       console.warn('[GEMINI CIRCUIT BREAKER ACTIVATED] 2x 503 errors encountered in current cron invocation. Disabling Gemini for subsequent watchers.');
                     }
+                    curReason = 'TEMPORARY_ERROR';
                   } else if (geminiRes.errorType === 'INVALID_CREDENTIALS') {
                     invalidKeyCount++;
+                    curReason = 'INVALID_KEY';
                   } else if (geminiRes.errorType === 'PERMISSION_ERROR') {
                     permissionErrorCount++;
+                    curReason = 'INVALID_KEY';
                   } else if (geminiRes.errorType === 'INVALID_REQUEST') {
                     invalidRequestCount++;
+                    curReason = 'UNAVAILABLE';
                   }
 
                   const profileStatus = geminiRes.errorType === 'QUOTA_EXHAUSTED' ? 'QUOTA_EXHAUSTED' :
@@ -2057,23 +1962,6 @@ Output ONLY valid JSON.
                     'Clean Error': cleanErrMsg
                   });
 
-                  logWatcherEvent('Gemini Decision', logCtx, {
-                    'Status': geminiRes.diagnosticStatus || geminiRes.errorType || 'API_ERROR',
-                    'Direction': 'NO_TRADE',
-                    'Confidence': '0%',
-                    'Fallback': 'NO_TRADE'
-                  });
-
-                  console.log(`[GEMINI NO_TRADE]
-User: ${logCtx.userEmail || userId}
-Watcher: ${watcher.id}
-Pair: ${selectedPair}
-TF: ${selectedTimeframe}
-Gemini Status: ${geminiRes.diagnosticStatus || geminiRes.errorType}
-Direction: NO_TRADE
-Signal Eligible: false
-Reason: Technical evaluation failure: ${cleanErrMsg}`);
-
                   await supabase.from("profiles").update({
                     gemini_status: profileStatus,
                     gemini_last_error: cleanErrMsg,
@@ -2081,42 +1969,10 @@ Reason: Technical evaluation failure: ${cleanErrMsg}`);
                     updated_at: new Date().toISOString()
                   }).eq("id", userId);
 
-                  console.log(`========== AI STATUS ==========`);
-                  console.log(`User: ${userProfile?.email || userId}`);
-                  console.log(`Watcher: ${watcher.id} (${watcher.selected_pair})`);
-                  console.log(`Gemini Status: ${profileStatus}`);
-                  console.log(`Reason: ${cleanErrMsg}`);
-                  console.log(`Action: Skipped`);
-                  console.log(`===============================`);
-
-                  const scanDurationMs = Date.now() - scanStart;
-                  await recordEvaluation(supabase, {
-                    user_id: userId,
-                    watcher_id: watcher.id,
-                    pair: selectedPair,
-                    timeframe: selectedTimeframe,
-                    strategy_mode: compiledStrategy.strategy_mode,
-                    decision_score: decisionResult.decision_score,
-                    matched_weight: decisionResult.matched_weight,
-                    possible_weight: decisionResult.possible_weight,
-                    recommendation: decisionResult.recommendation,
-                    mandatory_rules_passed: decisionResult.mandatory_rules_passed,
-                    matched_rules: decisionResult.matched_rules,
-                    failed_rules: decisionResult.failed_rules,
-                    gemini_used: true,
-                    gemini_result: "Gemini execution failed [" + (geminiRes.diagnosticStatus || geminiRes.errorType) + "]: " + cleanErrMsg,
-                    trade_sent: false,
-                    trade_reason: "Technical failure (Gemini call failed): " + cleanErrMsg,
-                    scan_duration_ms: scanDurationMs,
-                    gemini_duration_ms: geminiDuration,
-                    decision_snapshot: decisionSnapshot
-                  });
-
-                  watchersSkippedByGeminiFailureCount++;
-                  skipped.push({ userId, reason: cleanErrMsg });
-                  watchersSkippedCount++;
-                  return;
-                }
+                  usedFallback = true;
+                  fallbackReason = curReason;
+                  console.log(`[GEMINI FALLBACK] Reason: ${fallbackReason} | Source: RULE_ONLY`);
+                } else {
 
                 successfulGeminiExecutionsCount++;
                 geminiTextResult = geminiRes.text;
@@ -2149,32 +2005,9 @@ Reason: Technical evaluation failure: ${cleanErrMsg}`);
                   const errMsg = `Malformed AI JSON output: ${parseErr.message}`;
                   console.error(`[GEMINI PARSE ERROR] User: ${logCtx.userEmail} | Watcher: ${watcher.id} | ${errMsg}`);
 
-                  const scanDurationMs = Date.now() - scanStart;
-                  await recordEvaluation(supabase, {
-                    user_id: userId,
-                    watcher_id: watcher.id,
-                    pair: selectedPair,
-                    timeframe: selectedTimeframe,
-                    strategy_mode: compiledStrategy.strategy_mode,
-                    decision_score: decisionResult.decision_score,
-                    matched_weight: decisionResult.matched_weight,
-                    possible_weight: decisionResult.possible_weight,
-                    recommendation: decisionResult.recommendation,
-                    mandatory_rules_passed: decisionResult.mandatory_rules_passed,
-                    matched_rules: decisionResult.matched_rules,
-                    failed_rules: decisionResult.failed_rules,
-                    gemini_used: true,
-                    gemini_result: "Malformed AI output: " + geminiTextResult.substring(0, 200),
-                    trade_sent: false,
-                    trade_reason: errMsg,
-                    scan_duration_ms: scanDurationMs,
-                    gemini_duration_ms: geminiDuration,
-                    decision_snapshot: decisionSnapshot
-                  });
-
-                  skipped.push({ userId, reason: errMsg });
-                  watchersSkippedCount++;
-                  return;
+                  usedFallback = true;
+                  fallbackReason = 'INVALID_RESPONSE';
+                  console.log(`[GEMINI FALLBACK] Reason: INVALID_RESPONSE | Source: RULE_ONLY`);
                 }
 
                 addLog("Gemini Returned", "success");
@@ -2253,136 +2086,135 @@ Reason: Technical evaluation failure: ${cleanErrMsg}`);
                   parsedResult,
                   analysis: JSON.parse(JSON.stringify(analysis))
                 });
-              } catch (gemErr: any) {
-              const { profileStatus, diagnosticStatus, cleanErrorMessage } = classifyAndRedactGeminiError(gemErr);
-              if (diagnosticStatus.startsWith('QUOTA_') || profileStatus === 'QUOTA_EXHAUSTED') {
-                quotaExhaustedUsers.add(userId);
-              }
-
-              logWatcherError('Gemini ERROR', logCtx, gemErr, {
-                'Diagnostic Status': diagnosticStatus,
-                'Clean Error': cleanErrorMessage
-              });
-
-              logWatcherEvent('Gemini Decision', logCtx, {
-                'Status': diagnosticStatus,
-                'Direction': 'NO_TRADE',
-                'Confidence': '0%',
-                'Fallback': 'NO_TRADE'
-              });
-
-              await supabase.from("profiles").update({
-                gemini_status: profileStatus,
-                gemini_last_error: cleanErrorMessage,
-                gemini_last_checked: new Date().toISOString(),
-                updated_at: new Date().toISOString()
-              }).eq("id", userId);
-
-              console.log(`========== AI STATUS ==========`);
-              console.log(`User: ${userProfile?.email || userId}`);
-              console.log(`Watcher: ${watcher.id} (${watcher.selected_pair})`);
-              console.log(`Gemini Status: ${profileStatus}`);
-              console.log(`Reason: ${cleanErrorMessage}`);
-              console.log(`Action: Skipped`);
-              console.log(`===============================`);
-
-              // Update last_scan_at and last_analyzed_closed_candle_time and exit
-              const scanDurationMs = Date.now() - scanStart;
-              await recordEvaluation(supabase, {
-                user_id: userId,
-                watcher_id: watcher.id,
-                pair: selectedPair,
-                timeframe: selectedTimeframe,
-                strategy_mode: compiledStrategy.strategy_mode,
-                decision_score: decisionResult.decision_score,
-                matched_weight: decisionResult.matched_weight,
-                possible_weight: decisionResult.possible_weight,
-                recommendation: decisionResult.recommendation,
-                mandatory_rules_passed: decisionResult.mandatory_rules_passed,
-                matched_rules: decisionResult.matched_rules,
-                failed_rules: decisionResult.failed_rules,
-                gemini_used: true,
-                gemini_result: "Gemini execution failed: " + cleanErrorMessage,
-                trade_sent: false,
-                trade_reason: "Gemini API call failed: " + cleanErrorMessage,
-                scan_duration_ms: scanDurationMs,
-                gemini_duration_ms: Date.now() - geminiStart,
-                decision_snapshot: decisionSnapshot
-              });
-
-              skipped.push({ userId, reason: cleanErrorMessage });
-              watchersSkippedCount++;
-              return;
-            } finally {
-              resolveMutex!();
-              if (activeUserGeminiPromises.get(userId) === userMutexPromise) {
-                activeUserGeminiPromises.delete(userId);
               }
             }
+          }
+          } catch (gemErr: any) {
+            const { profileStatus, diagnosticStatus, cleanErrorMessage } = classifyAndRedactGeminiError(gemErr);
+            if (diagnosticStatus.startsWith('QUOTA_') || profileStatus === 'QUOTA_EXHAUSTED') {
+              quotaExhaustedUsers.add(userId);
+            }
+
+            logWatcherError('Gemini ERROR', logCtx, gemErr, {
+              'Diagnostic Status': diagnosticStatus,
+              'Clean Error': cleanErrorMessage
+            });
+
+            await supabase.from("profiles").update({
+              gemini_status: profileStatus,
+              gemini_last_error: cleanErrorMessage,
+              gemini_last_checked: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            }).eq("id", userId);
+
+            usedFallback = true;
+            fallbackReason = profileStatus === 'QUOTA_EXHAUSTED' ? 'QUOTA_EXHAUSTED' : (diagnosticStatus.includes('TIMEOUT') ? 'TIMEOUT' : 'TEMPORARY_ERROR');
+            console.log(`[GEMINI FALLBACK] Reason: ${fallbackReason} | Source: RULE_ONLY`);
+          } finally {
+            resolveMutex!();
+            if (activeUserGeminiPromises.get(userId) === userMutexPromise) {
+              activeUserGeminiPromises.delete(userId);
+            }
+          }
+        }
+
+        if (usedFallback) {
+          console.log(`[Gemini Fallback Execution] Running deterministic rule-only fallback engine due to Gemini ${fallbackReason}.`);
+          const mappedParsedStrategy: ParsedStrategy = {
+            indicators: [],
+            emaValues: compiledStrategy.compiled_rules.ema?.periods || [],
+            rsiThresholds: {
+              overbought: compiledStrategy.compiled_rules.rsi?.overbought,
+              oversold: compiledStrategy.compiled_rules.rsi?.oversold
+            },
+            bos: compiledStrategy.compiled_rules.bos,
+            choch: compiledStrategy.compiled_rules.choch,
+            liquiditySweep: compiledStrategy.compiled_rules.liquidity_sweep,
+            fairValueGap: compiledStrategy.compiled_rules.fair_value_gap,
+            session: compiledStrategy.compiled_rules.session?.[0],
+            timeframe: compiledStrategy.compiled_rules.timeframes?.[0],
+            minimumRiskReward: compiledStrategy.compiled_rules.risk_reward?.min_ratio
+          };
+          const localAnalysis = analyzeMarket(candleData, mappedParsedStrategy);
+          const localSignal = localAnalysis?.signal || 'NO_TRADE';
+          console.log(`[RULE_ONLY DECISION] Direction: ${localSignal}`);
+
+          if (localAnalysis && localAnalysis.signal !== 'NO_TRADE' && localAnalysis.entryPrice) {
+            const slResult = calculateStructuralStopLoss(
+              localAnalysis.signal as 'BUY' | 'SELL',
+              localAnalysis.entryPrice,
+              marketStructure
+            );
+            localAnalysis.stopLoss = slResult.stopLoss;
+            (localAnalysis as any).stopLossBasis = slResult.stopLossBasis;
+            (localAnalysis as any).structuralLevel = slResult.structuralLevel;
+
+            const riskDist = Math.abs(localAnalysis.entryPrice - slResult.stopLoss);
+            const rrRatio = parseRiskRewardRatio(riskRewardStr);
+            localAnalysis.takeProfit = localAnalysis.signal === 'BUY'
+              ? localAnalysis.entryPrice + (riskDist * rrRatio)
+              : localAnalysis.entryPrice - (riskDist * rrRatio);
+          }
+          analysis = localAnalysis || { signal: 'NO_TRADE', confidence: 0, reasoning: ['Rule-only engine produced no signal'] };
+        } else if (!geminiSucceeded || (analysis.signal !== 'BUY' && analysis.signal !== 'SELL')) {
+          console.log(`[Safety Invariant] Gemini required. Executed: ${geminiCalled ? 'YES' : 'NO'}, Result: ${parsedResult?.direction || (geminiSucceeded ? 'NO_TRADE' : 'ERROR/UNAVAILABLE')}`);
+          analysis = {
+            signal: 'NO_TRADE',
+            confidence: 0,
+            entryPrice: null,
+            stopLoss: null,
+            takeProfit: null,
+            riskReward: null,
+            reasoning: analysis.reasoning?.length ? analysis.reasoning : ['Gemini required but did not produce valid BUY or SELL decision.']
+          };
         }
       } else {
-            // Gemini NOT required! Fallback to local strategy engine (since recommendation is PASS)
-            console.log(`[Decision Engine] Recommendation is ${recommendation}. Skipping Gemini as requires_gemini is false.`);
+        // Gemini NOT required! Fallback to local strategy engine
+        console.log(`[Decision Engine] Recommendation is ${recommendation}. Skipping Gemini as requires_gemini is false.`);
 
-            if (recommendation === 'FAIL' || recommendation === 'AMBIGUOUS') {
-              console.log(`[Decision Engine] Recommendation is ${recommendation}. Forcing NO_TRADE without Gemini approval.`);
-              analysis = {
-                signal: 'NO_TRADE',
-                confidence: 0,
-                reasoning: [`Rejected by Decision Engine (${recommendation} without Gemini approval)`]
-              };
-            } else {
-              const mappedParsedStrategy: ParsedStrategy = {
-                indicators: [],
-                emaValues: compiledStrategy.compiled_rules.ema?.periods || [],
-                rsiThresholds: {
-                  overbought: compiledStrategy.compiled_rules.rsi?.overbought,
-                  oversold: compiledStrategy.compiled_rules.rsi?.oversold
-                },
-                bos: compiledStrategy.compiled_rules.bos,
-                choch: compiledStrategy.compiled_rules.choch,
-                liquiditySweep: compiledStrategy.compiled_rules.liquidity_sweep,
-                fairValueGap: compiledStrategy.compiled_rules.fair_value_gap,
-                session: compiledStrategy.compiled_rules.session?.[0],
-                timeframe: compiledStrategy.compiled_rules.timeframes?.[0],
-                minimumRiskReward: compiledStrategy.compiled_rules.risk_reward?.min_ratio
-              };
-              const localAnalysis = analyzeMarket(candleData, mappedParsedStrategy);
-              if (localAnalysis && localAnalysis.signal !== 'NO_TRADE' && localAnalysis.entryPrice) {
-                const slResult = calculateStructuralStopLoss(
-                  localAnalysis.signal as 'BUY' | 'SELL',
-                  localAnalysis.entryPrice,
-                  marketStructure
-                );
-                localAnalysis.stopLoss = slResult.stopLoss;
-                (localAnalysis as any).stopLossBasis = slResult.stopLossBasis;
-                (localAnalysis as any).structuralLevel = slResult.structuralLevel;
+        if (recommendation === 'FAIL' || recommendation === 'AMBIGUOUS') {
+          console.log(`[Decision Engine] Recommendation is ${recommendation}. Forcing NO_TRADE without Gemini approval.`);
+          analysis = {
+            signal: 'NO_TRADE',
+            confidence: 0,
+            reasoning: [`Rejected by Decision Engine (${recommendation} without Gemini approval)`]
+          };
+        } else {
+          const mappedParsedStrategy: ParsedStrategy = {
+            indicators: [],
+            emaValues: compiledStrategy.compiled_rules.ema?.periods || [],
+            rsiThresholds: {
+              overbought: compiledStrategy.compiled_rules.rsi?.overbought,
+              oversold: compiledStrategy.compiled_rules.rsi?.oversold
+            },
+            bos: compiledStrategy.compiled_rules.bos,
+            choch: compiledStrategy.compiled_rules.choch,
+            liquiditySweep: compiledStrategy.compiled_rules.liquidity_sweep,
+            fairValueGap: compiledStrategy.compiled_rules.fair_value_gap,
+            session: compiledStrategy.compiled_rules.session?.[0],
+            timeframe: compiledStrategy.compiled_rules.timeframes?.[0],
+            minimumRiskReward: compiledStrategy.compiled_rules.risk_reward?.min_ratio
+          };
+          const localAnalysis = analyzeMarket(candleData, mappedParsedStrategy);
+          if (localAnalysis && localAnalysis.signal !== 'NO_TRADE' && localAnalysis.entryPrice) {
+            const slResult = calculateStructuralStopLoss(
+              localAnalysis.signal as 'BUY' | 'SELL',
+              localAnalysis.entryPrice,
+              marketStructure
+            );
+            localAnalysis.stopLoss = slResult.stopLoss;
+            (localAnalysis as any).stopLossBasis = slResult.stopLossBasis;
+            (localAnalysis as any).structuralLevel = slResult.structuralLevel;
 
-                const riskDist = Math.abs(localAnalysis.entryPrice - slResult.stopLoss);
-                const rrRatio = parseRiskRewardRatio(riskRewardStr);
-                localAnalysis.takeProfit = localAnalysis.signal === 'BUY'
-                  ? localAnalysis.entryPrice + (riskDist * rrRatio)
-                  : localAnalysis.entryPrice - (riskDist * rrRatio);
-              }
-              analysis = localAnalysis;
-            }
+            const riskDist = Math.abs(localAnalysis.entryPrice - slResult.stopLoss);
+            const rrRatio = parseRiskRewardRatio(riskRewardStr);
+            localAnalysis.takeProfit = localAnalysis.signal === 'BUY'
+              ? localAnalysis.entryPrice + (riskDist * rrRatio)
+              : localAnalysis.entryPrice - (riskDist * rrRatio);
           }
+          analysis = localAnalysis;
         }
-
-        if (requiresGemini) {
-          if (!geminiSucceeded || (analysis.signal !== 'BUY' && analysis.signal !== 'SELL')) {
-            console.log(`[Safety Invariant] Gemini required. Executed: ${geminiCalled ? 'YES' : 'NO'}, Result: ${parsedResult?.direction || (geminiSucceeded ? 'NO_TRADE' : 'ERROR/UNAVAILABLE')}`);
-            analysis = {
-              signal: 'NO_TRADE',
-              confidence: 0,
-              entryPrice: null,
-              stopLoss: null,
-              takeProfit: null,
-              riskReward: null,
-              reasoning: analysis.reasoning?.length ? analysis.reasoning : ['Gemini required but did not produce valid BUY or SELL decision.']
-            };
-          }
-        }
+      }
 
         console.log("========== FINAL SIGNAL ==========");
         console.log("Decision Recommendation:", recommendation);
@@ -3404,7 +3236,7 @@ Source: ${brokerQuote.source}`);
         watchersProcessedCount++;
         isWatcherSkipped = false;
         results.push({ userId, symbol, tradeStatus: 'ACTIVE', signalsFound: 1, signalsSent: alertSent ? 1 : 0 });
-
+      }
       } catch (err: any) {
         const fallbackCtx: WatcherLogContext = typeof logCtx !== 'undefined' ? logCtx : await resolveWatcherUserContext(supabase, watcher);
         logWatcherError('WATCHER ERROR', fallbackCtx, err);
