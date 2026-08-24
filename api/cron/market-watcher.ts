@@ -804,32 +804,6 @@ export default async function handler(req: any, res: any) {
           .maybeSingle();
         const telegramChatId = (telegramConn && telegramConn.connected) ? telegramConn.telegram_chat_id : (watcher.telegram_chat_id || null);
 
-        const geminiStatus = userProfile?.gemini_status || 'READY';
-        if (geminiStatus !== 'READY') {
-          let allowProbationaryRetry = false;
-          if (geminiStatus === 'QUOTA_EXHAUSTED' || geminiStatus === 'TEMP_ERROR' || geminiStatus === 'NEEDS_ATTENTION') {
-            const lastChecked = userProfile?.gemini_last_checked ? new Date(userProfile.gemini_last_checked).getTime() : 0;
-            const updated = userProfile?.updated_at ? new Date(userProfile.updated_at).getTime() : 0;
-            const lastErrorTime = Math.max(lastChecked, updated);
-            const elapsedMs = Date.now() - lastErrorTime;
-            // Allow a probationary retry if more than 30 minutes have passed since last error check
-            if (elapsedMs > 30 * 60 * 1000) {
-              allowProbationaryRetry = true;
-              console.log(`[GEMINI PROBATIONARY RETRY] User ${userProfile?.email || userId} status is '${geminiStatus}', but ${Math.round(elapsedMs / 60000)}m have elapsed. Re-testing Gemini availability...`);
-            }
-          }
-
-          if (!allowProbationaryRetry) {
-            logWatcherError('Gemini ERROR', logCtx, userProfile?.gemini_last_error || 'Gemini unavailable', {
-              'Gemini Status': geminiStatus,
-              'Action': 'Skipped'
-            });
-
-            skipped.push({ userId, reason: `Gemini unavailable (${geminiStatus}): ${userProfile?.gemini_last_error || 'N/A'}` });
-            watchersSkippedCount++;
-            return;
-          }
-        }
         watchersReadyCount++;
 
         cronTimer.startStage("Watcher Scheduling & Due Check");
@@ -1666,6 +1640,15 @@ Reason: ${activeValidation.reason}`);
           const forceGemini = (recommendation === 'FAIL' && (executionMode === 'HYBRID' || executionMode === 'AI_ONLY'));
           requiresGemini = Boolean(decisionResult.requires_gemini || forceGemini || recommendation === 'AMBIGUOUS');
           
+          if (!requiresGemini) {
+            console.log(`[Gemini Routing] Watcher: ${watcher.id} | Strategy Mode: ${compiledStrategy.strategy_mode || 'RULE_ONLY'} | Gemini Required: NO | Gemini Check: SKIPPED`);
+            if (userProfile?.gemini_status && userProfile.gemini_status !== 'READY') {
+              console.log(`[Gemini Isolation] RULE_ONLY watcher bypassed user Gemini status gate`);
+            }
+          } else {
+            console.log(`[Gemini Routing] Watcher: ${watcher.id} | Strategy Mode: ${compiledStrategy.strategy_mode || 'HYBRID'} | Gemini Required: YES | Gemini Check: REQUIRED`);
+          }
+
           console.log(`
 [Decision Routing]
 Strategy Mode: ${compiledStrategy.strategy_mode || 'HYBRID'}
@@ -1678,6 +1661,57 @@ Reason: ${decisionResult.explanation || (requiresGemini ? 'Strategy configuratio
 
           if (requiresGemini) {
             cronTimer.startStage("Gemini AI Execution");
+
+            // User Gemini Status Gate Check (evaluated only when Gemini is required)
+            const geminiStatus = userProfile?.gemini_status || 'READY';
+            if (geminiStatus !== 'READY') {
+              let allowProbationaryRetry = false;
+              if (geminiStatus === 'QUOTA_EXHAUSTED' || geminiStatus === 'TEMP_ERROR' || geminiStatus === 'NEEDS_ATTENTION') {
+                const lastChecked = userProfile?.gemini_last_checked ? new Date(userProfile.gemini_last_checked).getTime() : 0;
+                const updated = userProfile?.updated_at ? new Date(userProfile.updated_at).getTime() : 0;
+                const lastErrorTime = Math.max(lastChecked, updated);
+                const elapsedMs = Date.now() - lastErrorTime;
+                // Allow a probationary retry if more than 30 minutes have passed since last error check
+                if (elapsedMs > 30 * 60 * 1000) {
+                  allowProbationaryRetry = true;
+                  console.log(`[GEMINI PROBATIONARY RETRY] User ${userProfile?.email || userId} status is '${geminiStatus}', but ${Math.round(elapsedMs / 60000)}m have elapsed. Re-testing Gemini availability...`);
+                }
+              }
+
+              if (!allowProbationaryRetry) {
+                logWatcherError('Gemini ERROR', logCtx, userProfile?.gemini_last_error || 'Gemini unavailable', {
+                  'Gemini Status': geminiStatus,
+                  'Action': 'Skipped'
+                });
+
+                const scanDurationMs = Date.now() - scanStart;
+                await recordEvaluation(supabase, {
+                  user_id: userId,
+                  watcher_id: watcher.id,
+                  pair: selectedPair,
+                  timeframe: selectedTimeframe,
+                  strategy_mode: compiledStrategy.strategy_mode,
+                  decision_score: decisionResult.decision_score,
+                  matched_weight: decisionResult.matched_weight,
+                  possible_weight: decisionResult.possible_weight,
+                  recommendation: decisionResult.recommendation,
+                  mandatory_rules_passed: decisionResult.mandatory_rules_passed,
+                  matched_rules: decisionResult.matched_rules,
+                  failed_rules: decisionResult.failed_rules,
+                  gemini_used: false,
+                  gemini_result: `Skipped: User Gemini status is ${geminiStatus} (${userProfile?.gemini_last_error || 'Unavailable'})`,
+                  trade_sent: false,
+                  trade_reason: `Gemini unavailable (${geminiStatus}): ${userProfile?.gemini_last_error || 'N/A'}`,
+                  scan_duration_ms: scanDurationMs,
+                  gemini_duration_ms: null,
+                  decision_snapshot: decisionSnapshot
+                });
+
+                skipped.push({ userId, reason: `Gemini unavailable (${geminiStatus}): ${userProfile?.gemini_last_error || 'N/A'}` });
+                watchersSkippedCount++;
+                return;
+              }
+            }
 
             // 0. Check Per-User Quota Circuit Breaker (skip if user key already failed with 429 in current cron)
             if (quotaExhaustedUsers.has(userId)) {
