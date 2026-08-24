@@ -806,14 +806,29 @@ export default async function handler(req: any, res: any) {
 
         const geminiStatus = userProfile?.gemini_status || 'READY';
         if (geminiStatus !== 'READY') {
-          logWatcherError('Gemini ERROR', logCtx, userProfile?.gemini_last_error || 'Gemini unavailable', {
-            'Gemini Status': geminiStatus,
-            'Action': 'Skipped'
-          });
+          let allowProbationaryRetry = false;
+          if (geminiStatus === 'QUOTA_EXHAUSTED' || geminiStatus === 'TEMP_ERROR' || geminiStatus === 'NEEDS_ATTENTION') {
+            const lastChecked = userProfile?.gemini_last_checked ? new Date(userProfile.gemini_last_checked).getTime() : 0;
+            const updated = userProfile?.updated_at ? new Date(userProfile.updated_at).getTime() : 0;
+            const lastErrorTime = Math.max(lastChecked, updated);
+            const elapsedMs = Date.now() - lastErrorTime;
+            // Allow a probationary retry if more than 30 minutes have passed since last error check
+            if (elapsedMs > 30 * 60 * 1000) {
+              allowProbationaryRetry = true;
+              console.log(`[GEMINI PROBATIONARY RETRY] User ${userProfile?.email || userId} status is '${geminiStatus}', but ${Math.round(elapsedMs / 60000)}m have elapsed. Re-testing Gemini availability...`);
+            }
+          }
 
-          skipped.push({ userId, reason: `Gemini unavailable (${geminiStatus}): ${userProfile?.gemini_last_error || 'N/A'}` });
-          watchersSkippedCount++;
-          return;
+          if (!allowProbationaryRetry) {
+            logWatcherError('Gemini ERROR', logCtx, userProfile?.gemini_last_error || 'Gemini unavailable', {
+              'Gemini Status': geminiStatus,
+              'Action': 'Skipped'
+            });
+
+            skipped.push({ userId, reason: `Gemini unavailable (${geminiStatus}): ${userProfile?.gemini_last_error || 'N/A'}` });
+            watchersSkippedCount++;
+            return;
+          }
         }
         watchersReadyCount++;
 

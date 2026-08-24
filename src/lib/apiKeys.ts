@@ -349,17 +349,25 @@ export async function saveGeminiKey(key: string): Promise<{
 
     console.log(`[Gemini Save] Successfully persisted credential (${redactedKey}) for user ${userEmail}`);
 
-    // Update profiles gemini_status safely if supported
+    // Update profiles gemini_status to READY on successful save/test
     try {
       await supabase.from('profiles').update({
+        gemini_status: 'READY',
+        gemini_last_error: null,
         updated_at: new Date().toISOString()
       }).eq('id', userId);
     } catch {
       // Profile timestamp update fallback
     }
 
-    // Resume all paused watchers
-    await supabase.from('watchers').update({ status: 'active', updated_at: new Date().toISOString() }).eq('user_id', userId).eq('status', 'paused');
+    // Resume all paused watchers and clear watcher gemini errors
+    await supabase.from('watchers').update({
+      status: 'active',
+      gemini_status: 'READY',
+      last_gemini_error: null,
+      next_gemini_retry_at: null,
+      updated_at: new Date().toISOString()
+    }).eq('user_id', userId);
 
     return {
       success: true,
