@@ -1,5 +1,7 @@
 // src/lib/quality-gate.ts
 
+import type { EvaluatedRuleDetail } from './decision-engine.js';
+
 export interface QualityGateInput {
   ruleScore: number; // 0-100 from decision engine
   marketStructure: any; // extracted market structure
@@ -13,6 +15,7 @@ export interface QualityGateInput {
   historicalProbability?: number; // 0-100 if available
   minQualityThreshold?: number; // Default 75
   consecutiveLosses?: number; // Optional consecutive losses from watcher history
+  ruleDetails?: EvaluatedRuleDetail[];
 }
 
 export interface QualityGateResult {
@@ -33,6 +36,7 @@ export interface QualityGateResult {
     geminiBonus: number;
     probBonus: number;
   };
+  ruleDetails?: EvaluatedRuleDetail[];
 }
 
 export interface AdaptiveQualityInput {
@@ -181,6 +185,14 @@ export function evaluateQualityGate(input: QualityGateInput): QualityGateResult 
     }
   }
 
+  const details = input.ruleDetails || [];
+  const rulesEvaluated = details.length;
+  const rulesPassed = details.filter(d => d.status === 'PASS').length;
+  const rulesFailed = details.filter(d => d.status === 'FAIL').length;
+  const rulesUnknown = details.filter(d => d.status === 'UNKNOWN').length;
+  const totalPoints = details.reduce((acc, d) => acc + (d.awarded || 0), 0);
+  const maxPoints = details.reduce((acc, d) => acc + (d.weight || 0), 0);
+
   const result: QualityGateResult = {
     passed,
     qualityScore: computedQuality,
@@ -198,19 +210,43 @@ export function evaluateQualityGate(input: QualityGateInput): QualityGateResult 
       volumeConfirmed,
       geminiBonus,
       probBonus
-    }
+    },
+    ruleDetails: details
   };
 
   // Structured Log Output
-  console.log(`
+  let logOutput = `
 [Signal Quality]
 Rule Score: ${ruleScore}%
 Quality Score: ${computedQuality}%
 Minimum Required: ${minRequired}%
 Quality Gate: ${passed ? 'PASSED' : 'FAILED'}
 Action: ${action}
-Reason: ${reason}
-`.trim());
+Reason: ${reason}`;
+
+  if (rulesEvaluated > 0) {
+    logOutput += `
+
+Rules Evaluated: ${rulesEvaluated}
+Rules Passed: ${rulesPassed}
+Rules Failed: ${rulesFailed}
+Rules Unknown: ${rulesUnknown}
+Total Points: ${totalPoints}
+Maximum Points: ${maxPoints}
+
+[Signal Quality Breakdown]`;
+    details.forEach(r => {
+      logOutput += `
+
+Rule: ${r.name}
+Result: ${r.status}
+Weight: ${r.weight}
+Awarded: ${r.awarded}
+Reason: ${r.reason}`;
+    });
+  }
+
+  console.log(logOutput.trim());
 
   return result;
 }

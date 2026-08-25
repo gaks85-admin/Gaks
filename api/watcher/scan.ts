@@ -917,7 +917,8 @@ Fallback: NO_TRADE`.trim());
         slValid: Boolean(analysis.stopLoss),
         tpValid: Boolean(analysis.takeProfit),
         rrValid: true,
-        historicalProbability: histResult?.historical_probability || 50
+        historicalProbability: histResult?.historical_probability || 50,
+        ruleDetails: decisionResult.rule_details
       });
 
       if (!qualityResult.passed) {

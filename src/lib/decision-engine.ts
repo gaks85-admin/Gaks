@@ -19,6 +19,17 @@ import {
   ConfirmationCandleEvaluator
 } from './decision-engine/index.js';
 
+export interface EvaluatedRuleDetail {
+  name: string;
+  canonicalName: string;
+  matched: boolean;
+  status: 'PASS' | 'FAIL' | 'UNKNOWN' | 'NOT_APPLICABLE';
+  weight: number;
+  awarded: number;
+  possible: number;
+  reason: string;
+}
+
 export interface DecisionResult {
   decision_score: number;
   matched_weight: number;
@@ -33,6 +44,7 @@ export interface DecisionResult {
   explanation: string;
   no_trade_reason?: string;
   trace: string[];
+  rule_details: EvaluatedRuleDetail[];
 }
 
 /**
@@ -69,26 +81,50 @@ export function evaluateDecision(
   const rrEval = new RiskRewardEvaluator();
   const ccEval = new ConfirmationCandleEvaluator();
 
-  const evaluatedRules: {
-    name: string;
-    canonicalName: string;
-    matched: boolean;
-    reason: string;
-    weight: number;
-  }[] = [];
+  const evaluatedRules: EvaluatedRuleDetail[] = [];
 
   // Rule Mapping Helper
   const processRule = (name: string, canonicalName: string, weightKey: keyof typeof RULE_WEIGHTS, evalFn: () => any) => {
-    const res = evalFn();
+    let res: any;
+    try {
+      res = evalFn();
+    } catch (err: any) {
+      res = { matched: false, reason: `Evaluation error: ${err.message || 'Unknown error'}` };
+    }
+
     const weight = weights[weightKey] ?? 0;
+    let status: 'PASS' | 'FAIL' | 'UNKNOWN' | 'NOT_APPLICABLE' = 'FAIL';
+
+    if (res.status) {
+      status = res.status;
+    } else if (res.matched === true) {
+      status = 'PASS';
+    } else if (res.reason && (
+      res.reason.toLowerCase().includes('missing') ||
+      res.reason.toLowerCase().includes('insufficient') ||
+      res.reason.toLowerCase().includes('n/a') ||
+      res.reason.toLowerCase().includes('unknown') ||
+      res.reason.toLowerCase().includes('not configured')
+    )) {
+      status = 'UNKNOWN';
+    } else {
+      status = 'FAIL';
+    }
+
+    const awarded = status === 'PASS' ? weight : 0;
+
     evaluatedRules.push({
       name,
       canonicalName,
-      matched: res.matched,
-      reason: res.reason,
-      weight
+      matched: status === 'PASS',
+      status,
+      weight,
+      awarded,
+      possible: weight,
+      reason: res.reason || (status === 'PASS' ? 'Rule condition satisfied' : 'Rule condition not satisfied')
     });
-    trace.push(`[RULE] ${name}: ${res.matched ? 'MATCHED' : 'FAILED'} - ${res.reason}`);
+
+    trace.push(`[RULE] ${name}: ${status} (${awarded}/${weight} pts) - ${res.reason}`);
   };
 
   // 1. Trendline Breakout
@@ -192,15 +228,19 @@ export function evaluateDecision(
 
   // Mandatory Rules check
   const mandatoryRulesList = compiledStrategy.mandatory_rules || [];
-  const failedMandatory = evaluatedRules.filter(r => mandatoryRulesList.includes(r.canonicalName) && !r.matched);
+  const failedMandatory = evaluatedRules.filter(r => (mandatoryRulesList.includes(r.canonicalName) || mandatoryRulesList.includes(r.name)) && !r.matched);
   const mandatory_rules_passed = failedMandatory.length === 0;
 
   // Calculate scores
   let matched_weight = 0;
   let possible_weight = 0;
   evaluatedRules.forEach(r => {
-    possible_weight += r.weight;
-    if (r.matched) matched_weight += r.weight;
+    if (r.status !== 'NOT_APPLICABLE') {
+      possible_weight += r.weight;
+      if (r.status === 'PASS') {
+        matched_weight += r.awarded;
+      }
+    }
   });
 
   const decision_score = possible_weight > 0 ? Math.round((matched_weight / possible_weight) * 100) : 100;
@@ -260,8 +300,8 @@ Failed Mandatory Rules: ${failedMandatory.length > 0 ? failedMandatory.map(r => 
     decision_score,
     matched_weight,
     possible_weight,
-    matched_rules: evaluatedRules.filter(r => r.matched).map(r => r.name),
-    failed_rules: evaluatedRules.filter(r => !r.matched).map(r => r.name),
+    matched_rules: evaluatedRules.filter(r => r.status === 'PASS').map(r => r.name),
+    failed_rules: evaluatedRules.filter(r => r.status === 'FAIL').map(r => r.name),
     deferred_rules,
     mandatory_rules_passed,
     failed_mandatory_rules: failedMandatory.map(r => r.name),
@@ -269,6 +309,7 @@ Failed Mandatory Rules: ${failedMandatory.length > 0 ? failedMandatory.map(r => 
     requires_gemini,
     explanation,
     no_trade_reason,
-    trace
+    trace,
+    rule_details: evaluatedRules
   };
 }

@@ -85,7 +85,8 @@ export function buildDecisionSnapshot(decisionResult: any, histResult: any, comp
     historical_sample_size: histResult?.sample_size ?? 0,
     confidence_level: histResult?.confidence_level || histResult?.confidence || 'LOW',
     strategy_mode: compiledStrategy?.strategy_mode || 'HYBRID',
-    rule_weights_used: RULE_WEIGHTS
+    rule_weights_used: RULE_WEIGHTS,
+    rule_details: decisionResult?.rule_details || []
   };
 }
 
@@ -2269,7 +2270,8 @@ Output ONLY valid JSON.
             tpValid: Boolean(analysis.takeProfit),
             rrValid: true,
             historicalProbability: histResult.historical_probability,
-            consecutiveLosses: consecutiveLosses
+            consecutiveLosses: consecutiveLosses,
+            ruleDetails: decisionResult.rule_details
           });
 
           if (!qualityResult.passed) {
