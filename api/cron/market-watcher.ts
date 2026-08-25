@@ -115,7 +115,7 @@ export async function runGeminiRequest(
     supabase: any,
     userId: string,
     prompt: string,
-    model: string = 'gemini-3.5-flash-lite',
+    model: string = 'gemini-2.5-flash',
     config?: any
 ) {
     return await runGeminiWrapperRequest(supabase, userId, prompt, model, config);
@@ -1639,8 +1639,8 @@ Reason: ${activeValidation.reason}`);
           watchersProcessedCount++;
           return;
         } else {
-          // Check if we force Gemini for FAIL in HYBRID/AI_ONLY or if AMBIGUOUS/requires_gemini is true
-          const forceGemini = (recommendation === 'FAIL' && (executionMode === 'HYBRID' || executionMode === 'AI_ONLY'));
+          // Check if we force Gemini for FAIL in AI_ONLY or if AMBIGUOUS/requires_gemini is true
+          const forceGemini = (recommendation === 'FAIL' && executionMode === 'AI_ONLY');
           requiresGemini = Boolean(decisionResult.requires_gemini || forceGemini || recommendation === 'AMBIGUOUS');
           
           if (!requiresGemini) {
@@ -1829,7 +1829,7 @@ Reason: Insufficient remaining execution budget (${remainingBeforeGemini}ms rema
                 } else {
 
                 logWatcherEvent('Gemini Analysis', logCtx, {
-                  'Model': 'gemini-3.6-flash',
+                  'Model': 'gemini-2.5-flash',
                   'Decision Score': decisionResult.decision_score,
                   'Recommendation': recommendation,
                   'Gemini Required': requiresGemini ? 'YES' : 'NO',
@@ -1872,7 +1872,7 @@ Output ONLY valid JSON.
                 const geminiRes = await executeBoundedGeminiCall(
                   ai,
                   {
-                    model: "gemini-3.6-flash",
+                    model: "gemini-2.5-flash",
                     contents: promptText,
                     config: {
                       responseMimeType: "application/json",

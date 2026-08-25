@@ -147,7 +147,7 @@ export async function testGeminiKey(key: string, userEmail?: string): Promise<Ge
     });
     const testRes = await executeBoundedGeminiCall(
       ai,
-      { model: 'gemini-3.6-flash', contents: 'ping', timeoutMs: 9500, apiDeadlineMs: 10000, maxRetriesFor503: 0 },
+      { model: 'gemini-2.5-flash', contents: 'ping', timeoutMs: 9500, apiDeadlineMs: 10000, maxRetriesFor503: 0 },
       { userEmail, watcherId: 'credential-test', requestId: `req_key_test_${Date.now()}` }
     );
     if (!testRes.success) {
@@ -159,14 +159,14 @@ User: ${userEmail || 'unknown'}
 Credential Type: ${credentialType}
 Result: SUCCESS
 Status: 200
-Model: gemini-3.5-flash-lite`);
+Model: gemini-2.5-flash`);
 
     return {
       success: true,
       provider: 'gemini',
       credentialType,
       status: 'connected',
-      model: 'gemini-3.5-flash-lite',
+      model: 'gemini-2.5-flash',
       message: '✓ Gemini credential verified'
     };
   } catch (err: any) {

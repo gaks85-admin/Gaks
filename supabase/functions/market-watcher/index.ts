@@ -110,7 +110,7 @@ serve(async (req) => {
     async function callGeminiWithTimeoutAndRetry(
       apiKey: string,
       promptText: string,
-      modelName: string = "gemini-3.6-flash",
+      modelName: string = "gemini-2.5-flash",
       timeoutMs: number = 30000,
       maxRetries: number = 1
     ): Promise<{ success: boolean; text?: string; errorType?: string; attempts: number; durationMs: number }> {
@@ -449,7 +449,7 @@ Market Data: ${JSON.stringify(marketData)}`;
         const geminiRes = await callGeminiWithTimeoutAndRetry(
           apiKeyRecord.api_key,
           promptText,
-          "gemini-3.6-flash",
+          "gemini-2.5-flash",
           GEMINI_TIMEOUT_MS,
           GEMINI_MAX_RETRIES
         );

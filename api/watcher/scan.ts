@@ -625,7 +625,7 @@ export default async function handler(req: any, res: any) {
 
     const recommendation = decisionResult.recommendation; // PASS, LIKELY_PASS, AMBIGUOUS, FAIL
     const executionMode = compiledStrategy.strategy_mode || 'HYBRID';
-    const forceGemini = (recommendation === 'FAIL' && (executionMode === 'HYBRID' || executionMode === 'AI_ONLY'));
+    const forceGemini = (recommendation === 'FAIL' && executionMode === 'AI_ONLY');
     const requiresGemini = Boolean(decisionResult.requires_gemini || forceGemini || recommendation === 'AMBIGUOUS');
 
     console.log(`
@@ -698,7 +698,7 @@ Answer with JSON matching schema.
           const geminiRes = await executeBoundedGeminiCall(
             ai,
             {
-              model: "gemini-3.6-flash",
+              model: "gemini-2.5-flash",
               contents: promptText,
               config: {
                 responseMimeType: "application/json",
