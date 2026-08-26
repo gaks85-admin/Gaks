@@ -17,6 +17,10 @@
       "destination": "/api/admin"
     },
     {
+      "source": "/api/watcher/:path*",
+      "destination": "/api/watcher"
+    },
+    {
       "source": "/api/telegram-webhook",
       "destination": "/api/telegram/webhook"
     },

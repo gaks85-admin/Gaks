@@ -1,4 +1,4 @@
-import { runWatcherDiagnosticReplay } from '../../src/lib/watcher-diagnostic-engine.js';
+import { runWatcherDiagnosticReplay } from '../watcher-diagnostic-engine.js';
 
 export default async function handler(req: any, res: any) {
   if (req.method !== 'POST' && req.method !== 'GET') {

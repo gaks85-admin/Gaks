@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
-import { recordCompletedTrade } from '../../src/lib/learning-engine.js';
-import { validateActiveTradeState } from '../../src/lib/trade-validator.js';
-import { calculateUnrealizedPnlR, evaluateActiveTradeExit } from '../../src/lib/active-trade-monitor.js';
+import { recordCompletedTrade } from '../learning-engine.js';
+import { validateActiveTradeState } from '../trade-validator.js';
+import { calculateUnrealizedPnlR, evaluateActiveTradeExit } from '../active-trade-monitor.js';
 
 const getSupabase = () => {
   const url = process.env.VITE_SUPABASE_URL || "https://wkujrqmxivljnuvumfau.supabase.co";

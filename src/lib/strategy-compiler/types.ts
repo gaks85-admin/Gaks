@@ -44,11 +44,27 @@ export interface CompiledRules {
   ai_only_elements?: string[];
 }
 
+export interface CanonicalRuleDef {
+  id: string;
+  name: string;
+  isMandatory: boolean;
+  weight: number;
+}
+
+export interface CanonicalRuleSet {
+  strategy_mode: 'RULE_ONLY' | 'HYBRID' | 'AI_ONLY';
+  execution_mode: string;
+  mandatory_rule_ids: string[];
+  optional_rule_ids: string[];
+  rules: CanonicalRuleDef[];
+}
+
 export interface CompilerOutput {
   strategy_mode: 'RULE_ONLY' | 'HYBRID' | 'AI_ONLY';
   compiled_rules: CompiledRules;
   mandatory_rules: string[];
   optional_rules: string[];
+  canonical_rule_set: CanonicalRuleSet;
   weighted_rules: { rule: string; weight: number }[];
   confidence: number;
   overall_confidence: number;

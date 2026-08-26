@@ -1,8 +1,8 @@
 import { createClient } from '@supabase/supabase-js';
 import { randomUUID } from 'crypto';
-import { generateStrategySummary } from '../../src/lib/strategy-summarizer.js';
-import { timeframeToMinutes } from '../../src/lib/timeframe.js';
-import { defaultMarketDataService } from '../../src/lib/market-data-service.js';
+import { generateStrategySummary } from '../strategy-summarizer.js';
+import { timeframeToMinutes } from '../timeframe.js';
+import { defaultMarketDataService } from '../market-data-service.js';
 
 /**
  * Self-contained Supabase client initialization.

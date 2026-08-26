@@ -1,4 +1,4 @@
-import { CompilerOutput, CompiledRules } from './strategy-compiler/types.js';
+import { CompilerOutput, CompiledRules, CanonicalRuleDef, CanonicalRuleSet } from './strategy-compiler/types.js';
 import { TrendlineParser } from './strategy-compiler/trendline.js';
 import { BosParser } from './strategy-compiler/bos.js';
 import { ChochParser } from './strategy-compiler/choch.js';
@@ -15,7 +15,7 @@ import { ConfirmationCandleParser } from './strategy-compiler/confirmation-candl
 import { RiskRewardParser } from './strategy-compiler/risk-reward.js';
 import { TimeframeParser } from './strategy-compiler/timeframe.js';
 import { ClassificationParser } from './strategy-compiler/classification.js';
-import { isMandatory } from './strategy-compiler/normalizer.js';
+import { isMandatory, normalizeRuleId } from './strategy-compiler/normalizer.js';
 import { validateDetectors } from './detector-capability-validator.js';
 
 export * from './strategy-compiler/types.js';
@@ -26,6 +26,14 @@ export * from './strategy-compiler/types.js';
  * This runs solely during strategy creation/edit actions and never during live scans.
  */
 export function compileStrategy(strategyText: string): CompilerOutput {
+  const emptyRuleSet: CanonicalRuleSet = {
+    strategy_mode: 'AI_ONLY',
+    execution_mode: 'AI_ONLY',
+    mandatory_rule_ids: [],
+    optional_rule_ids: [],
+    rules: []
+  };
+
   if (!strategyText || typeof strategyText !== 'string' || strategyText.trim().length === 0) {
     return {
       strategy_mode: 'AI_ONLY',
@@ -37,6 +45,7 @@ export function compileStrategy(strategyText: string): CompilerOutput {
       canonical_rules: [],
       mandatory_rules: [],
       optional_rules: [],
+      canonical_rule_set: emptyRuleSet,
       weighted_rules: [],
       status: 'AMBIGUOUS_STRATEGY'
     };
@@ -138,7 +147,7 @@ export function compileStrategy(strategyText: string): CompilerOutput {
     confidence = 0.90;
   }
 
-  // Build module specific confidences and matched phrases/canonical rules
+  // Build module specific confidences and matched phrases
   const modules = [
     { name: 'trendline', result: trendlineResult },
     { name: 'bos', result: bosResult },
@@ -160,54 +169,77 @@ export function compileStrategy(strategyText: string): CompilerOutput {
 
   const module_confidence: { [key: string]: number } = {};
   const matched_phrases: string[] = [];
-  const canonical_rules: string[] = [];
-  const mandatory_rules: string[] = [];
-  const optional_rules: string[] = [];
-  const weighted_rules: { rule: string; weight: number }[] = [];
-
   for (const m of modules) {
     if (m.result.supported) {
       module_confidence[m.name] = m.result.confidence;
       if (m.result.matchedPhrase) {
         matched_phrases.push(m.result.matchedPhrase);
       }
-      if (m.result.canonicalRule) {
-        if (m.name === 'support_resistance') {
-          // Special handling for SR sub-rules
-          const sr = m.result.parsedRule as any;
-          if (sr.support) {
-            canonical_rules.push('support');
-            if (isMandatory(strategyText, 'support')) mandatory_rules.push('support');
-            else optional_rules.push('support');
-          }
-          if (sr.resistance) {
-            canonical_rules.push('resistance');
-            if (isMandatory(strategyText, 'resistance')) mandatory_rules.push('resistance');
-            else optional_rules.push('resistance');
-          }
-          if (sr.support_rejection) {
-            canonical_rules.push('support_rejection');
-            if (isMandatory(strategyText, 'support rejection')) mandatory_rules.push('support_rejection');
-            else optional_rules.push('support_rejection');
-          }
-          if (sr.resistance_rejection) {
-            canonical_rules.push('resistance_rejection');
-            if (isMandatory(strategyText, 'resistance rejection')) mandatory_rules.push('resistance_rejection');
-            else optional_rules.push('resistance_rejection');
-          }
-        } else {
-          canonical_rules.push(m.result.canonicalRule);
-          
-          // Use isMandatory to classify
-          if (isMandatory(strategyText, m.result.matchedPhrase)) {
-            mandatory_rules.push(m.result.canonicalRule);
-          } else {
-            optional_rules.push(m.result.canonicalRule);
-          }
-        }
+    }
+  }
+
+  // Build complete Canonical Rule Set
+  const ruleCatalog: { id: string; name: string; phrase: string; weight: number; active: boolean }[] = [
+    { id: 'trendline_breakout', name: 'Trendline Breakout', phrase: 'trendline', weight: 25, active: !!compiled_rules.trendline_breakout },
+    { id: 'break_and_retest', name: 'Break and Retest', phrase: 'retest', weight: 20, active: !!compiled_rules.break_and_retest },
+    { id: 'bos', name: 'BOS', phrase: 'bos', weight: 20, active: !!compiled_rules.bos },
+    { id: 'choch', name: 'CHOCH', phrase: 'choch', weight: 15, active: !!compiled_rules.choch },
+    { id: 'confirmation_candle', name: 'Confirmation Candle', phrase: 'confirmation candle', weight: 15, active: !!compiled_rules.confirmation_candle },
+    { id: 'liquidity_sweep', name: 'Liquidity Sweep', phrase: 'liquidity', weight: 15, active: !!compiled_rules.liquidity_sweep },
+    { id: 'fair_value_gap', name: 'Fair Value Gap', phrase: 'fair value gap', weight: 12, active: !!compiled_rules.fair_value_gap },
+    { id: 'support', name: 'Support Zone', phrase: 'support', weight: 10, active: !!compiled_rules.support },
+    { id: 'resistance', name: 'Resistance Zone', phrase: 'resistance', weight: 10, active: !!compiled_rules.resistance },
+    { id: 'support_rejection', name: 'Support Rejection', phrase: 'support rejection', weight: 10, active: !!compiled_rules.support_rejection },
+    { id: 'resistance_rejection', name: 'Resistance Rejection', phrase: 'resistance rejection', weight: 10, active: !!compiled_rules.resistance_rejection },
+    { id: 'ema', name: 'EMA Alignment', phrase: 'ema', weight: 5, active: !!compiled_rules.ema?.enabled },
+    { id: 'rsi', name: 'RSI Filter', phrase: 'rsi', weight: 4, active: !!compiled_rules.rsi?.enabled },
+    { id: 'macd', name: 'MACD Filter', phrase: 'macd', weight: 4, active: !!compiled_rules.macd?.enabled },
+    { id: 'atr', name: 'ATR Volatility Filter', phrase: 'atr', weight: 6, active: !!compiled_rules.atr?.enabled },
+    { id: 'volume_confirmation', name: 'Volume Confirmation', phrase: 'volume', weight: 8, active: !!compiled_rules.volume_confirmation },
+    { id: 'session', name: 'Session Filter', phrase: 'session', weight: 10, active: !!(compiled_rules.session && compiled_rules.session.length > 0) },
+    { id: 'timeframes', name: 'Timeframe Filter', phrase: 'timeframe', weight: 8, active: !!(compiled_rules.timeframes && compiled_rules.timeframes.length > 0) },
+    { id: 'risk_reward', name: 'Risk Reward', phrase: 'risk reward', weight: 3, active: !!(compiled_rules.risk_reward && compiled_rules.risk_reward.min_ratio !== undefined) }
+  ];
+
+  const canonicalRuleDefs: CanonicalRuleDef[] = [];
+  const mandatory_rules: string[] = [];
+  const optional_rules: string[] = [];
+  const canonical_rules: string[] = [];
+  const weighted_rules: { rule: string; weight: number }[] = [];
+
+  for (const item of ruleCatalog) {
+    if (item.active) {
+      const isMand = isMandatory(strategyText, item.phrase);
+      canonicalRuleDefs.push({
+        id: item.id,
+        name: item.name,
+        isMandatory: isMand,
+        weight: item.weight
+      });
+      canonical_rules.push(item.id);
+      weighted_rules.push({ rule: item.id, weight: item.weight });
+      if (isMand) {
+        mandatory_rules.push(item.id);
+      } else {
+        optional_rules.push(item.id);
       }
     }
   }
+
+  mandatory_rules.sort();
+  optional_rules.sort();
+  canonical_rules.sort();
+
+  const detector_validation = validateDetectors(Object.keys(compiled_rules));
+  const execution_mode = detector_validation?.execution_mode || strategy_mode;
+
+  const canonical_rule_set: CanonicalRuleSet = {
+    strategy_mode,
+    execution_mode,
+    mandatory_rule_ids: mandatory_rules,
+    optional_rule_ids: optional_rules,
+    rules: canonicalRuleDefs
+  };
 
   // Handle ambiguous strategy
   let status: 'SUCCESS' | 'AMBIGUOUS_STRATEGY' | 'FAILURE' = 'SUCCESS';
@@ -218,23 +250,19 @@ export function compileStrategy(strategyText: string): CompilerOutput {
     error_message = "Strategy text is descriptive but no deterministic indicators were identified. Please mention specific rules like BOS, EMA, or FVG.";
   }
 
-  // Internal logging for developers as requested
-  console.log(`========== AI STATUS ==========`);
-  console.log(`Strategy: [${strategyText.slice(0, 40)}${strategyText.length > 40 ? '...' : ''}]`);
-  console.log(`Status: ${status === 'SUCCESS' ? 'COMPILATION_SUCCESS' : status}`);
-  console.log(`Mode: ${strategy_mode}`);
-  console.log(`Mandatory: ${mandatory_rules.join(', ')}`);
-  console.log(`Optional: ${optional_rules.join(', ')}`);
-  console.log(`Confidence: ${confidence}`);
-  console.log(`===============================`);
-
-  const detector_validation = validateDetectors(Object.keys(compiled_rules));
+  // Diagnostic Log 1: Canonical Rule Set Output
+  console.log(`\n[CANONICAL RULE SET]`);
+  console.log(`Mandatory: [${mandatory_rules.join(', ')}]`);
+  console.log(`Optional: [${optional_rules.join(', ')}]`);
+  console.log(`Strategy Mode: ${strategy_mode}`);
+  console.log(`Execution Mode: ${execution_mode}\n`);
 
   return {
     strategy_mode,
     compiled_rules,
     mandatory_rules,
     optional_rules,
+    canonical_rule_set,
     weighted_rules,
     confidence: Math.round(confidence <= 1.0 ? confidence * 100 : confidence),
     overall_confidence: Math.round(confidence <= 1.0 ? confidence * 100 : confidence),

@@ -125,3 +125,31 @@ export function isMandatory(originalText: string, matchedPhrase: string): boolea
 
   return true; // Default to mandatory if not specified
 }
+
+export function normalizeRuleId(rawRuleId: string): string {
+  if (!rawRuleId) return "";
+  const clean = rawRuleId.toLowerCase().trim().replace(/[\s\-_]+/g, '_');
+  
+  if (clean === 'trendline' || clean === 'trendline_breakout') return 'trendline_breakout';
+  if (clean === 'retest' || clean === 'break_and_retest') return 'break_and_retest';
+  if (clean === 'bos' || clean === 'break_of_structure') return 'bos';
+  if (clean === 'choch' || clean === 'change_of_character') return 'choch';
+  if (clean === 'confirmation_candle' || clean === 'confirmation') return 'confirmation_candle';
+  if (clean === 'liquidity_sweep' || clean === 'liquidity') return 'liquidity_sweep';
+  if (clean === 'fair_value_gap' || clean === 'fvg') return 'fair_value_gap';
+  if (clean === 'support' || clean === 'support_zone') return 'support';
+  if (clean === 'resistance' || clean === 'resistance_zone') return 'resistance';
+  if (clean === 'support_rejection') return 'support_rejection';
+  if (clean === 'resistance_rejection') return 'resistance_rejection';
+  if (clean === 'support_resistance' || clean === 's_r') return 'support';
+  if (clean === 'ema' || clean === 'ema_alignment') return 'ema';
+  if (clean === 'rsi' || clean === 'rsi_filter') return 'rsi';
+  if (clean === 'macd' || clean === 'macd_filter') return 'macd';
+  if (clean === 'atr' || clean === 'atr_volatility_filter') return 'atr';
+  if (clean === 'volume_confirmation' || clean === 'volume') return 'volume_confirmation';
+  if (clean === 'session' || clean === 'session_filter') return 'session';
+  if (clean === 'timeframes' || clean === 'timeframe' || clean === 'timeframe_filter') return 'timeframes';
+  if (clean === 'risk_reward' || clean === 'r_r') return 'risk_reward';
+
+  return clean;
+}

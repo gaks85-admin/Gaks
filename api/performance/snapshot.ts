@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { getUserPerformanceSnapshot } from '../../src/lib/performance-snapshot.js';
 import { getLearningStatus } from '../../src/lib/learning-status.js';
-import { verifyAdminAuth } from '../auth-admin.js';
+import { verifyAdminAuth } from '../../src/lib/auth-admin.js';
 
 const getSupabase = (token?: string) => {
   const url = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "https://wkujrqmxivljnuvumfau.supabase.co";

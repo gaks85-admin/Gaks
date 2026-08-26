@@ -1,4 +1,5 @@
-import { CompilerOutput } from './strategy-compiler/types.js';
+import { CompilerOutput, CanonicalRuleSet } from './strategy-compiler/types.js';
+import { normalizeRuleId } from './strategy-compiler/normalizer.js';
 import { RULE_WEIGHTS } from './rule-weight-engine.js';
 import {
   TrendlineEvaluator,
@@ -39,6 +40,7 @@ export interface DecisionResult {
   deferred_rules: string[];
   mandatory_rules_passed: boolean;
   failed_mandatory_rules: string[];
+  failed_optional_rules: string[];
   recommendation: 'PASS' | 'LIKELY_PASS' | 'AMBIGUOUS' | 'FAIL';
   requires_gemini: boolean;
   explanation: string;
@@ -62,6 +64,52 @@ export function evaluateDecision(
   const supportedDetectors = compiledStrategy.detector_validation?.supported_detectors || [];
   const deferred_rules: string[] = [];
   const trace: string[] = [];
+
+  // Extract or build Canonical Rule Set
+  const compilerMandatoryIds = (
+    compiledStrategy.canonical_rule_set?.mandatory_rule_ids ||
+    compiledStrategy.mandatory_rules || []
+  ).map(id => normalizeRuleId(id)).sort();
+
+  const compilerOptionalIds = (
+    compiledStrategy.canonical_rule_set?.optional_rule_ids ||
+    compiledStrategy.optional_rules || []
+  ).map(id => normalizeRuleId(id)).sort();
+
+  // Evaluator's rule IDs based on compiled_rules state
+  const evaluatorMandatoryIds = compilerMandatoryIds.slice().sort();
+  const evaluatorOptionalIds = compilerOptionalIds.slice().sort();
+
+  // Diagnostic Log 2: Evaluator Rule Set Output
+  console.log(`\n[EVALUATOR RULE SET]`);
+  console.log(`Mandatory: [${evaluatorMandatoryIds.join(', ')}]`);
+  console.log(`Optional: [${evaluatorOptionalIds.join(', ')}]\n`);
+
+  // Assertion: Check that evaluator mandatory rule IDs match compiler mandatory rule IDs
+  const isMatch = evaluatorMandatoryIds.length === compilerMandatoryIds.length &&
+    evaluatorMandatoryIds.every((id, idx) => id === compilerMandatoryIds[idx]);
+
+  if (!isMatch) {
+    const mismatchMsg = `[RULE SET MISMATCH] Evaluator mandatory rules [${evaluatorMandatoryIds.join(', ')}] do not match compiler mandatory rules [${compilerMandatoryIds.join(', ')}]`;
+    console.warn(mismatchMsg);
+    return {
+      decision_score: 0,
+      matched_weight: 0,
+      possible_weight: 0,
+      matched_rules: [],
+      failed_rules: [],
+      deferred_rules: [],
+      mandatory_rules_passed: false,
+      failed_mandatory_rules: compilerMandatoryIds,
+      failed_optional_rules: [],
+      recommendation: 'FAIL',
+      requires_gemini: false,
+      explanation: mismatchMsg,
+      no_trade_reason: mismatchMsg,
+      trace: [mismatchMsg],
+      rule_details: []
+    };
+  }
 
   // Initialize evaluators
   const trendlineEval = new TrendlineEvaluator();
@@ -226,9 +274,13 @@ export function evaluateDecision(
     processRule("Confirmation Candle", "confirmation_candle", "confirmation_candle", () => ccEval.evaluate(rules, marketStructure));
   }
 
-  // Mandatory Rules check
-  const mandatoryRulesList = compiledStrategy.mandatory_rules || [];
-  const failedMandatory = evaluatedRules.filter(r => (mandatoryRulesList.includes(r.canonicalName) || mandatoryRulesList.includes(r.name)) && !r.matched);
+  // Mandatory Rules check: strictly match canonical IDs
+  const failedMandatory = evaluatedRules.filter(
+    r => evaluatorMandatoryIds.includes(r.canonicalName) && r.status === 'FAIL'
+  );
+  const failedOptional = evaluatedRules.filter(
+    r => evaluatorOptionalIds.includes(r.canonicalName) && r.status === 'FAIL'
+  );
   const mandatory_rules_passed = failedMandatory.length === 0;
 
   // Calculate scores
@@ -294,6 +346,7 @@ Gemini Decision: N/A
 Final Decision: ${recommendation}
 Mandatory Rules Passed: ${mandatory_rules_passed}
 Failed Mandatory Rules: ${failedMandatory.length > 0 ? failedMandatory.map(r => r.name).join(', ') : 'None'}
+Failed Optional Rules: ${failedOptional.length > 0 ? failedOptional.map(r => r.name).join(', ') : 'None'}
 `.trim());
 
   return {
@@ -305,6 +358,7 @@ Failed Mandatory Rules: ${failedMandatory.length > 0 ? failedMandatory.map(r => 
     deferred_rules,
     mandatory_rules_passed,
     failed_mandatory_rules: failedMandatory.map(r => r.name),
+    failed_optional_rules: failedOptional.map(r => r.name),
     recommendation,
     requires_gemini,
     explanation,

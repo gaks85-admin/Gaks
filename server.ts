@@ -2,14 +2,9 @@ import express from "express";
 import adminHandler from "./api/admin";
 import path from "path";
 import marketWatcherCronHandler from "./api/cron/market-watcher";
-import testCronHandler from "./api/cron/test";
 import liveRatesHandler from "./api/live-rates";
 import telegramWebhookHandler from "./api/telegram/webhook";
-import watcherStartHandler from "./api/watcher/start";
-import watcherScanHandler from "./api/watcher/scan";
-import watcherStopHandler from "./api/watcher/stop";
-import watcherResolveTradeHandler from "./api/watcher/resolve-trade";
-import watcherReplayHandler from "./api/watcher/replay";
+import watcherHandler from "./api/watcher";
 import strategySummaryHandler from "./api/strategy/summary";
 import performanceSnapshotHandler from "./api/performance/snapshot";
 
@@ -95,13 +90,7 @@ async function startServer() {
   app.post("/api/performance/snapshot", performanceSnapshotHandler as any);
 
   // Watcher APIs
-  app.post("/api/watcher/start", watcherStartHandler as any);
-  app.post("/api/watcher/scan", watcherScanHandler as any);
-  app.post("/api/watcher/activate", watcherStartHandler as any);
-  app.post("/api/watcher/stop", watcherStopHandler as any);
-  app.delete("/api/watcher/stop", watcherStopHandler as any);
-  app.post("/api/watcher/resolve-trade", watcherResolveTradeHandler as any);
-  app.all("/api/watcher/replay", watcherReplayHandler as any);
+  app.all(["/api/watcher", "/api/watcher/*"], watcherHandler as any);
 
   // Live Rates
   app.get("/api/live-rates", liveRatesHandler as any);
@@ -112,7 +101,9 @@ async function startServer() {
 
   // Scheduled Cron execution for active market watchers
   app.post("/api/cron/market-watcher", marketWatcherCronHandler as any);
-  app.all("/api/cron/test", testCronHandler as any);
+  app.all("/api/cron/test", (req, res) => {
+    res.json({ success: true, message: "Cron endpoint reached" });
+  });
 
   app.post("/api/log-error", (req, res) => {
     require('fs').writeFileSync('client-error.log', JSON.stringify(req.body, null, 2) + '\n', { flag: 'a' });

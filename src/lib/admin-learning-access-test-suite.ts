@@ -1,4 +1,4 @@
-import { verifyAdminAuth, ADMIN_EMAIL } from '../../api/auth-admin.js';
+import { verifyAdminAuth, ADMIN_EMAIL } from './auth-admin.js';
 import performanceSnapshotHandler from '../../api/performance/snapshot.js';
 import { getUserPerformanceSnapshot } from './performance-snapshot.js';
 import { getLearningStatus } from './learning-status.js';

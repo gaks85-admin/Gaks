@@ -15,6 +15,8 @@ export interface EvaluationRecord {
   mandatory_rules_passed: boolean;
   matched_rules: string[];
   failed_rules: string[];
+  failed_mandatory_rules?: string[];
+  failed_optional_rules?: string[];
   gemini_used: boolean;
   gemini_result?: string;
   trade_sent: boolean;
@@ -108,6 +110,9 @@ export async function recordEvaluation(
   const ss = record.sample_size !== undefined ? record.sample_size : (snap.historical_sample_size ?? 'N/A');
   const conf = record.confidence_level !== undefined ? record.confidence_level : (snap.confidence_level ?? 'N/A');
 
+  const failedMandatoryList = record.failed_mandatory_rules || snap.failed_mandatory_rules || (record.mandatory_rules_passed ? [] : record.failed_rules) || [];
+  const failedOptionalList = record.failed_optional_rules || snap.failed_optional_rules || [];
+
   console.log(`\n========== EXPLAINABILITY ==========`);
   console.log(`[DECISION SCORE TRACE]`);
   console.log(`Watcher ID: ${record.watcher_id}`);
@@ -122,7 +127,8 @@ export async function recordEvaluation(
   console.log(`Gemini Decision: ${record.gemini_used ? (record.trade_sent ? 'APPROVED' : 'REJECTED/NO_TRADE') : 'N/A'}`);
   console.log(`Final Decision: ${record.trade_sent ? 'TRADE_EXECUTED' : 'NO_TRADE'}`);
   console.log(`Mandatory Rules Passed: ${record.mandatory_rules_passed}`);
-  console.log(`Failed Mandatory Rules: ${record.failed_rules && record.failed_rules.length > 0 ? record.failed_rules.join(', ') : 'None'}`);
+  console.log(`Failed Mandatory Rules: ${failedMandatoryList.length > 0 ? failedMandatoryList.join(', ') : 'None'}`);
+  console.log(`Failed Optional Rules: ${failedOptionalList.length > 0 ? failedOptionalList.join(', ') : 'None'}`);
   console.log(`------------------------------------`);
   console.log(`Watcher:\n${record.watcher_id}`);
   console.log(`Pair:\n${record.pair}`);
