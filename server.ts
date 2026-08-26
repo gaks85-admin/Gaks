@@ -9,6 +9,7 @@ import watcherStartHandler from "./api/watcher/start";
 import watcherScanHandler from "./api/watcher/scan";
 import watcherStopHandler from "./api/watcher/stop";
 import watcherResolveTradeHandler from "./api/watcher/resolve-trade";
+import watcherReplayHandler from "./api/watcher/replay";
 import strategySummaryHandler from "./api/strategy/summary";
 import performanceSnapshotHandler from "./api/performance/snapshot";
 
@@ -100,6 +101,7 @@ async function startServer() {
   app.post("/api/watcher/stop", watcherStopHandler as any);
   app.delete("/api/watcher/stop", watcherStopHandler as any);
   app.post("/api/watcher/resolve-trade", watcherResolveTradeHandler as any);
+  app.all("/api/watcher/replay", watcherReplayHandler as any);
 
   // Live Rates
   app.get("/api/live-rates", liveRatesHandler as any);
