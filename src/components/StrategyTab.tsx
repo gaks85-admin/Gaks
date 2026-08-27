@@ -153,7 +153,7 @@ export const StrategyTab: React.FC<StrategyTabProps> = ({
                 value={selectedStrat.text}
                 onChange={(e) => handleStrategyTextChange(e.target.value)}
                 placeholder="Describe your trading strategy in detail..."
-                className="w-full min-h-[400px] bg-white dark:bg-zinc-950/60 border border-zinc-200 dark:border-zinc-900 rounded-2xl p-6 text-[13px] text-zinc-800 dark:text-zinc-300 font-medium leading-relaxed resize-none font-sans focus:outline-none focus:border-zinc-400 dark:focus:border-zinc-700 transition-colors shadow-sm"
+                className="w-full h-[250px] sm:h-[320px] max-h-[380px] bg-white dark:bg-zinc-950/60 border border-zinc-200 dark:border-zinc-900 rounded-2xl p-4 sm:p-6 text-[13px] text-zinc-800 dark:text-zinc-300 font-medium leading-relaxed overflow-y-auto resize-y font-sans focus:outline-none focus:border-zinc-400 dark:focus:border-zinc-700 transition-colors shadow-sm"
               />
 
               {selectedStrat.text.trim().length === 0 && (

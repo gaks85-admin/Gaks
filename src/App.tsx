@@ -260,14 +260,8 @@ export default function App() {
   const strategyTextareaRef = useRef<HTMLTextAreaElement>(null);
   const prevSelectedId = useRef<string>('default');
 
-  // Auto-resize Strategy Editor
-  useEffect(() => {
-    if (activeTab === 'strategy' && strategyTextareaRef.current) {
-      const textarea = strategyTextareaRef.current;
-      textarea.style.height = 'auto';
-      textarea.style.height = `${Math.max(400, textarea.scrollHeight)}px`;
-    }
-  }, [activeTab, strategies, selectedStrategyId]);
+  // Strategy Editor ref
+  // (height controlled via fixed CSS viewport with overflow-y-auto)
 
   const [initialPrefs, setInitialPrefs] = useState<{
     capital: string;
