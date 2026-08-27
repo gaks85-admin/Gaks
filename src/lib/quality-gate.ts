@@ -52,40 +52,10 @@ export function calculateAdaptiveQualityRequirement(input: AdaptiveQualityInput)
   minRequired: number;
   reason: string;
 } {
-  const base = input.baseThreshold ?? 75;
-  const classification = (input.classification || 'INSUFFICIENT_DATA').toUpperCase();
-  const tier = (input.tier || 'INSUFFICIENT_DATA').toUpperCase();
-  const sampleSize = Number(input.sampleSize || 0);
-
-  if (tier === 'INSUFFICIENT_DATA' || sampleSize < 10) {
-    return {
-      minRequired: base,
-      reason: `Insufficient historical sample (${sampleSize} trades); using base threshold (${base}%).`
-    };
-  }
-
-  let adjusted = base;
-  let reason = `Historical performance neutral/healthy; using base threshold (${base}%).`;
-
-  if (classification === 'HEALTHY' || classification === 'NEUTRAL') {
-    adjusted = base;
-    reason = `Historical performance ${classification.toLowerCase()} (${input.expectancyR}R); maintaining baseline threshold (${base}%).`;
-  } else if (classification === 'DETERIORATING') {
-    adjusted = Math.min(100, base + 5); // 80%
-    reason = `Historical performance deteriorating (recent expectancy ${input.recentExpectancyR}R); elevated quality requirement (${adjusted}%).`;
-  } else if (classification === 'POOR') {
-    if (tier === 'STRONG_SAMPLE' && sampleSize >= 50) {
-      adjusted = Math.min(100, base + 15); // 90%
-    } else {
-      adjusted = Math.min(100, base + 10); // 85%
-    }
-    reason = `Historical performance poor (${input.expectancyR}R, sample ${sampleSize}); strict quality requirement (${adjusted}%).`;
-  }
-
-  const finalThreshold = Math.max(base, Math.min(100, adjusted));
+  // Signal Quality feature disabled temporarily per user request
   return {
-    minRequired: finalThreshold,
-    reason
+    minRequired: 0,
+    reason: 'Signal quality requirement disabled temporarily.'
   };
 }
 
@@ -159,7 +129,8 @@ export function evaluateQualityGate(input: QualityGateInput): QualityGateResult 
     computedQuality = Math.min(computedQuality, ruleScore);
   }
 
-  const passed = satisfiesGates && computedQuality >= minRequired;
+  // Signal quality threshold check temporarily bypassed per user request
+  const passed = satisfiesGates;
   const action: 'CONTINUE_TO_RISK' | 'NO_TRADE' = passed ? 'CONTINUE_TO_RISK' : 'NO_TRADE';
 
   let reason = 'Sufficient confluence';
@@ -175,14 +146,6 @@ export function evaluateQualityGate(input: QualityGateInput): QualityGateResult 
     reason = 'Minimum R:R not satisfied';
   } else if (input.geminiRequired && !input.geminiApproved) {
     reason = 'Gemini approval missing or rejected';
-  } else if (consecutiveLosses >= 4) {
-    reason = 'Loss streak protection: 4 consecutive losses. New trades rejected.';
-  } else if (computedQuality < minRequired) {
-    if (consecutiveLosses > 0) {
-      reason = `Insufficient confluence (Score ${computedQuality}% < required ${minRequired}% due to ${consecutiveLosses} consecutive losses)`;
-    } else {
-      reason = 'Insufficient confluence';
-    }
   }
 
   const details = input.ruleDetails || [];
