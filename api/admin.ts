@@ -6,7 +6,7 @@ import { dispatchTradeAlert } from '../src/lib/telegramWrapper.js';
 import { timeframeToMinutes } from '../src/lib/timeframe.js';
 import { extractRiskPreferences, calculatePositionSize } from '../src/lib/risk-engine.js';
 import { resolveUserGeminiKey } from '../src/lib/gemini-key-resolver.js';
-import { defaultMarketDataService, getMarketDataStats } from '../src/lib/market-data-service.js';
+import { defaultMarketDataService, getMarketDataStats, getRequiredCandleCountForTimeframe } from '../src/lib/market-data-service.js';
 import { marketDataGateway } from '../src/lib/market-data-gateway.js';
 import { sendNotificationEmail } from '../src/lib/email-service.js';
 
@@ -2244,7 +2244,8 @@ async function inspector_candles_handler(req: any, res: any) {
   try {
     const mappedSymbol = convertSymbolForTwelveData(symbol);
     
-    const tsResult = await defaultMarketDataService.getMarketData({ symbol: mappedSymbol, timeframe, requiredCount: 50 });
+    const requiredCount = getRequiredCandleCountForTimeframe(timeframe);
+    const tsResult = await defaultMarketDataService.getMarketData({ symbol: mappedSymbol, timeframe, requiredCount });
     
     if (!tsResult.isValid) {
       return res.status(400).json({ success: false, error: tsResult.reason || "Market Data error" });

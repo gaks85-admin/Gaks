@@ -70,6 +70,30 @@ export function getMarketDataStats() {
   };
 }
 
+/**
+ * Calculates optimal historical candle count for market structure analysis based on timeframe.
+ * Provides substantial historical context (100–200 candles) for technical structure, swing levels,
+ * trendlines, support/resistance, liquidity pools, and FVGs while keeping execution decisions
+ * based on the latest closed candle.
+ */
+export function getRequiredCandleCountForTimeframe(timeframe?: string): number {
+  if (!timeframe) return 120;
+  const tf = timeframe.toUpperCase().trim();
+  if (tf === 'M1' || tf === '1M' || tf === 'M5' || tf === '5M' || tf === '5') {
+    return 150; // M5: 100-200 range
+  }
+  if (tf === 'M15' || tf === '15M' || tf === '15' || tf === 'M30' || tf === '30M' || tf === '30') {
+    return 120; // M15: 100-150 range
+  }
+  if (tf === 'H1' || tf === '1H' || tf === '1' || tf === 'H4' || tf === '4H' || tf === '4') {
+    return 120; // H1: 100-150 range
+  }
+  if (tf === 'D1' || tf === '1D' || tf === 'D') {
+    return 100;
+  }
+  return 120;
+}
+
 export class TwelveDataProvider implements MarketDataProvider {
   private id: string;
   private apiKey: string;

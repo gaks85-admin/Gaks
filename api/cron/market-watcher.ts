@@ -18,7 +18,7 @@ import { revalidatePreExecution } from '../../src/lib/pre-execution-validator.js
 import { calculateStructuralStopLoss, validateAndResolveStopLoss } from '../../src/lib/structural-stop-loss.js';
 import { getBrokerProvider } from '../../src/lib/broker-factory.js';
 import { recordEvaluation } from '../../src/lib/explainability-engine.js';
-import { defaultMarketDataService, getMarketDataStats } from '../../src/lib/market-data-service.js';
+import { defaultMarketDataService, getMarketDataStats, getRequiredCandleCountForTimeframe } from '../../src/lib/market-data-service.js';
 import { calculateHistoricalProbability, recordCompletedTrade } from '../../src/lib/learning-engine.js';
 import { BrokerReconciliationService } from '../../src/lib/broker-reconciliation-service.js';
 import { SafetyGovernor, defaultSafetyLimits } from '../../src/lib/safety-governor.js';
@@ -1409,10 +1409,11 @@ Reason: ${activeValidation.reason}`);
           return;
         }
 
+        const requiredCandles = getRequiredCandleCountForTimeframe(selectedTimeframe);
         const tsResult = await fetchMarketDataForCron({
           symbol: mappedSymbol,
           timeframe: selectedTimeframe,
-          requiredCount: 20,
+          requiredCount: requiredCandles,
           watcherId: watcher.id,
           userId: userId,
           purpose: 'Cron Market Watcher Scan'

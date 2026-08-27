@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-import { defaultMarketDataService } from './market-data-service.js';
+import { defaultMarketDataService, getRequiredCandleCountForTimeframe } from './market-data-service.js';
 import { Candle, analyzeMarket } from './strategy-engine.js';
 import { compileStrategy } from './strategy-compiler.js';
 import { evaluateDecision } from './decision-engine.js';
@@ -240,7 +240,7 @@ export async function runWatcherDiagnosticReplay(options: ReplayOptions): Promis
   const selectedTimeframe = (options.timeframe || watcher.selected_timeframe || 'M5').trim().toUpperCase();
 
   // 2. Fetch Market Data via Twelve Data
-  const requiredCount = 100;
+  const requiredCount = getRequiredCandleCountForTimeframe(selectedTimeframe);
   const mdResult = await defaultMarketDataService.getMarketData({
     symbol: selectedPair,
     timeframe: selectedTimeframe,

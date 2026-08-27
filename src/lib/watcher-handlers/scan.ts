@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { GoogleGenAI, Type } from "@google/genai";
-import { defaultMarketDataService, getMarketDataStats } from '../market-data-service.js';
+import { defaultMarketDataService, getMarketDataStats, getRequiredCandleCountForTimeframe } from '../market-data-service.js';
 import { analyzeMarket, Candle } from "../strategy-engine.js";
 import { extractRiskPreferences, calculatePositionSize, parseRiskRewardRatio } from "../risk-engine.js";
 import { calculateStructuralStopLoss, validateAndResolveStopLoss } from "../structural-stop-loss.js";
@@ -511,10 +511,11 @@ export default async function handler(req: any, res: any) {
     const selectedTimeframe = watcher.selected_timeframe || 'H1';
     const interval = '1h'; // Simplified
 
+    const requiredCount = getRequiredCandleCountForTimeframe(selectedTimeframe);
     const reqArgs = {
       symbol: mappedSymbol,
       timeframe: selectedTimeframe,
-      requiredCount: 20,
+      requiredCount,
       watcherId: watcher.id,
       userId: userId,
       purpose: 'Manual Watcher Scan'
