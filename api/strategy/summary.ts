@@ -1,23 +1,59 @@
 import { Request, Response } from 'express';
 import { createClient } from '@supabase/supabase-js';
 import { generateStrategySummary } from '../../src/lib/strategy-summarizer.js';
+import { resolveUserGeminiKey } from '../../src/lib/gemini-key-resolver.js';
 
-const getSupabase = () => {
+const getSupabase = (token?: string) => {
   const url = process.env.VITE_SUPABASE_URL || "https://wkujrqmxivljnuvumfau.supabase.co";
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+  const headers: Record<string, string> = {};
+  if (token) headers['Authorization'] = `Bearer ${token}`;
   return createClient(url!, key!, {
-    auth: { persistSession: false, autoRefreshToken: false }
+    auth: { persistSession: false, autoRefreshToken: false },
+    global: { headers }
   });
 };
 
 export default async function strategySummaryHandler(req: Request, res: Response) {
   try {
-    const { strategyText, userId } = req.body;
+    const { strategyText, userId: bodyUserId } = req.body;
 
     if (!strategyText || typeof strategyText !== 'string') {
       return res.status(400).json({
         success: false,
         error: 'Missing strategyText in request body.'
+      });
+    }
+
+    const authHeader = req.headers.authorization || '';
+    const tokenHeader = authHeader.startsWith('Bearer ') ? authHeader.substring(7) : authHeader;
+    let userId = bodyUserId;
+    let supabase = getSupabase(tokenHeader);
+
+    if (tokenHeader) {
+      try {
+        const { data: { user } } = await supabase.auth.getUser(tokenHeader);
+        if (user) {
+          userId = user.id;
+          supabase = getSupabase(tokenHeader);
+        }
+      } catch (authErr) {
+        // Fall back to bodyUserId if provided
+      }
+    }
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        error: 'Authentication required. Please log in or configure your Gemini API key under Settings.'
+      });
+    }
+
+    const keyRes = await resolveUserGeminiKey(supabase, userId, 'strategy-summary');
+    if (!keyRes.keyPresent || !keyRes.apiKey) {
+      return res.status(400).json({
+        success: false,
+        error: 'Gemini API key is required to generate strategy summary. Please configure your Gemini API key under Settings.'
       });
     }
 
@@ -34,13 +70,18 @@ export default async function strategySummaryHandler(req: Request, res: Response
     }
 
     // 1. Generate summary label using Gemini (max 4 words)
-    const summary = await generateStrategySummary(activeText);
+    const summary = await generateStrategySummary(activeText, {
+      apiKey: keyRes.apiKey,
+      userId,
+      supabase,
+      keySource: keyRes.keySource,
+      watcherId: 'strategy-summary'
+    });
 
     // 2. Store summary in DB if userId is provided
     let updatedInDb = false;
     if (userId) {
       try {
-        const supabase = getSupabase();
         const { error } = await supabase
           .from('trading_preferences')
           .upsert({
@@ -67,9 +108,11 @@ export default async function strategySummaryHandler(req: Request, res: Response
     });
   } catch (err: any) {
     console.error('[Strategy Summary API] Error:', err.message);
-    return res.status(500).json({
+    const statusCode = err.errorType === 'QUOTA_EXHAUSTED' ? 429 : 400;
+    return res.status(statusCode).json({
       success: false,
-      error: err.message || 'Internal server error'
+      error: err.message || 'Internal server error',
+      errorType: err.errorType
     });
   }
 }

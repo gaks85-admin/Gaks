@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { randomUUID } from 'crypto';
 import { generateStrategySummary } from '../strategy-summarizer.js';
+import { resolveUserGeminiKey } from '../gemini-key-resolver.js';
 import { timeframeToMinutes } from '../timeframe.js';
 import { defaultMarketDataService } from '../market-data-service.js';
 
@@ -292,36 +293,23 @@ export default async function handler(req: any, res: any) {
       });
     }
 
-    // 4. Verify the user has saved a Gemini API key
-    const tableName = 'user_api_keys';
-    const providerFilter = 'gemini';
+    // 4. Verify the user has saved a Gemini API key using authoritative resolveUserGeminiKey
     console.log("[Watcher] Logged in user:", userId);
     console.log("[Watcher] userId:", userId);
     console.log("[Watcher] selectedPair:", selectedPair);
     console.log("[Watcher] selectedTimeframe:", selectedTimeframe);
 
-    const { data: apiKeyRecord, error: apiKeyError } = await supabase
-      .from(tableName)
-      .select("api_key, id")
-      .eq("user_id", userId)
-      .eq("provider", providerFilter)
-      .maybeSingle();
+    const keyRes = await resolveUserGeminiKey(supabase, userId, 'watcher-start', { pair: selectedPair, timeframe: selectedTimeframe });
 
-    console.log("[Watcher] apiKeyError:", apiKeyError);
-    console.log("[Watcher] apiKeyRecord:", apiKeyRecord);
-
-    if (apiKeyError || !apiKeyRecord || !apiKeyRecord.api_key) {
-      const errReason = apiKeyError 
-        ? `Supabase query error: ${apiKeyError.message}` 
-        : "Gemini API key is required to activate Market Watcher. Please configure your Gemini API key under Settings.";
+    if (!keyRes.keyPresent || !keyRes.apiKey) {
+      const errReason = "Gemini API key is required to activate Market Watcher. Please configure your Gemini API key under Settings.";
 
       console.log("[Watcher Start] Termination: Gemini API key lookup failed or key missing.");
 
       const failedStepLog = {
         step: 5,
         reason: errReason,
-        apiKeyError: apiKeyError || null,
-        apiKeyRecord: apiKeyRecord || null,
+        keyStatus: keyRes.status,
         user_id: userId,
         selected_pair: selectedPair,
         selected_timeframe: selectedTimeframe
@@ -331,7 +319,7 @@ export default async function handler(req: any, res: any) {
 
       await sendTelegramMessage(
         telegramChatId, 
-        `❌ *Market Watcher Activation Failed*\n\nStep 5 Error: ${errReason}\napiKeyError: ${JSON.stringify(apiKeyError)}\napiKeyRecord: ${JSON.stringify(apiKeyRecord)}`
+        `❌ *Market Watcher Activation Failed*\n\nStep 5 Error: ${errReason}`
       );
 
       return res.status(400).json({
@@ -339,13 +327,13 @@ export default async function handler(req: any, res: any) {
         error: errReason,
         step: 5,
         failedAtStep: "Step 5",
-        apiKeyError: apiKeyError || null,
-        apiKeyRecord: apiKeyRecord || null,
         user_id: userId,
         selected_pair: selectedPair,
         selected_timeframe: selectedTimeframe
       });
     }
+
+    const resolvedGeminiApiKey = keyRes.apiKey;
 
     // 5 & 6. Verify Strategy Playbook and Risk settings exist
     console.log("[Watcher Start] Fetching trading preferences...");
@@ -383,14 +371,28 @@ export default async function handler(req: any, res: any) {
     // Ensure strategy_summary is populated if missing
     if (!prefsRecord?.strategy_summary || !prefsRecord.strategy_summary.trim()) {
       try {
-        const summary = await generateStrategySummary(activeStrategyText);
+        const summary = await generateStrategySummary(activeStrategyText, {
+          apiKey: resolvedGeminiApiKey,
+          userId,
+          supabase,
+          keySource: keyRes.keySource,
+          watcherId: 'watcher-start'
+        });
         await supabase
           .from("trading_preferences")
           .update({ strategy_summary: summary, updated_at: new Date().toISOString() })
           .eq("user_id", userId);
         console.log("[Watcher Start] Populated strategy_summary:", summary);
       } catch (sumErr: any) {
-        console.warn("[Watcher Start] Failed to populate strategy_summary:", sumErr.message);
+        console.error("[Watcher Start] Failed to populate strategy_summary:", sumErr.message);
+        if (sumErr.errorType === 'INVALID_CREDENTIALS' || sumErr.errorType === 'QUOTA_EXHAUSTED' || sumErr.errorType === 'PERMISSION_ERROR') {
+          return res.status(400).json({
+            success: false,
+            error: `Gemini API Error (${sumErr.errorType}): ${sumErr.message}`,
+            errorType: sumErr.errorType,
+            failedAtStep: "Strategy Summarizer"
+          });
+        }
       }
     }
 
