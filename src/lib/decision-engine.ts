@@ -28,6 +28,7 @@ export interface EvaluatedRuleDetail {
   weight: number;
   awarded: number;
   possible: number;
+  scoreOutOf10: number;
   reason: string;
 }
 
@@ -61,20 +62,35 @@ export function evaluateDecision(
 ): DecisionResult {
   const rules = compiledStrategy.compiled_rules || {};
   const weights = customWeights || RULE_WEIGHTS;
+  const hasDetectorValidation = Boolean(compiledStrategy.detector_validation);
   const supportedDetectors = compiledStrategy.detector_validation?.supported_detectors || [];
+  const isSupportedDetector = (detectorName: string) => !hasDetectorValidation || supportedDetectors.includes(detectorName);
   const deferred_rules: string[] = [];
   const trace: string[] = [];
 
   // Extract or build Canonical Rule Set
-  const compilerMandatoryIds = (
-    compiledStrategy.canonical_rule_set?.mandatory_rule_ids ||
-    compiledStrategy.mandatory_rules || []
-  ).map(id => normalizeRuleId(id)).sort();
+  const explicitMandatory = compiledStrategy.canonical_rule_set?.mandatory_rule_ids ?? compiledStrategy.mandatory_rules;
+  const structuralRules = ['trendline_breakout', 'bos', 'choch'];
+  const activeKeys = Object.keys(compiledStrategy.compiled_rules || {});
+  const hasStructuralRule = activeKeys.some(k => structuralRules.includes(k));
 
-  const compilerOptionalIds = (
-    compiledStrategy.canonical_rule_set?.optional_rule_ids ||
-    compiledStrategy.optional_rules || []
-  ).map(id => normalizeRuleId(id)).sort();
+  let compilerMandatoryIds: string[] = [];
+  let isExplicitlyNoMandatory = false;
+
+  if (explicitMandatory !== undefined) {
+    compilerMandatoryIds = explicitMandatory.map(id => normalizeRuleId(id)).sort();
+    if (compilerMandatoryIds.length === 0 && activeKeys.length > 0) {
+      isExplicitlyNoMandatory = true;
+    }
+  } else if (activeKeys.length > 0 && !hasStructuralRule && compiledStrategy.strategy_mode !== 'AI_ONLY') {
+    isExplicitlyNoMandatory = true;
+  } else {
+    compilerMandatoryIds = [];
+    isExplicitlyNoMandatory = false;
+  }
+
+  const explicitOptional = compiledStrategy.canonical_rule_set?.optional_rule_ids ?? compiledStrategy.optional_rules;
+  const compilerOptionalIds = (explicitOptional || []).map(id => normalizeRuleId(id)).sort();
 
   // Evaluator's rule IDs based on compiled_rules state
   const evaluatorMandatoryIds = compilerMandatoryIds.slice().sort();
@@ -159,7 +175,33 @@ export function evaluateDecision(
       status = 'FAIL';
     }
 
-    const awarded = status === 'PASS' ? weight : 0;
+    // Determine 0 to 10 score for continuous confluence scoring
+    let scoreOutOf10 = 0;
+    if (typeof res.scoreOutOf10 === 'number') {
+      scoreOutOf10 = Math.min(10, Math.max(0, res.scoreOutOf10));
+    } else if (typeof res.score === 'number' && res.score > 0) {
+      if (res.score <= 1) {
+        scoreOutOf10 = Math.round(res.score * 10);
+      } else {
+        scoreOutOf10 = Math.min(10, Math.max(0, Math.round(res.score)));
+      }
+    } else if (res.matched === true || status === 'PASS') {
+      scoreOutOf10 = 10;
+    } else if (status === 'UNKNOWN') {
+      scoreOutOf10 = 5;
+    } else {
+      scoreOutOf10 = 0;
+    }
+
+    if (res.matched === true || scoreOutOf10 >= 6) {
+      status = 'PASS';
+    } else if (status === 'UNKNOWN') {
+      status = 'UNKNOWN';
+    } else {
+      status = 'FAIL';
+    }
+
+    const awarded = Math.round((scoreOutOf10 / 10) * weight * 10) / 10;
 
     evaluatedRules.push({
       name,
@@ -169,15 +211,16 @@ export function evaluateDecision(
       weight,
       awarded,
       possible: weight,
-      reason: res.reason || (status === 'PASS' ? 'Rule condition satisfied' : 'Rule condition not satisfied')
+      scoreOutOf10,
+      reason: res.reason || (status === 'PASS' ? `Rule condition satisfied (${scoreOutOf10}/10 pts)` : `Rule condition partial/failed (${scoreOutOf10}/10 pts)`)
     });
 
-    trace.push(`[RULE] ${name}: ${status} (${awarded}/${weight} pts) - ${res.reason}`);
+    trace.push(`[RULE] ${name}: ${status} (${scoreOutOf10}/10 pts -> ${awarded}/${weight} pts) - ${res.reason}`);
   };
 
   // 1. Trendline Breakout
   if (rules.trendline_breakout === true) {
-    if (supportedDetectors.includes('trendline_breakout')) {
+    if (isSupportedDetector('trendline_breakout')) {
       processRule("Trendline Breakout", "trendline_breakout", "trendline_breakout", () => trendlineEval.evaluateBreakout(rules, marketStructure));
     } else {
       deferred_rules.push("Trendline Breakout");
@@ -281,7 +324,7 @@ export function evaluateDecision(
   const failedOptional = evaluatedRules.filter(
     r => evaluatorOptionalIds.includes(r.canonicalName) && r.status === 'FAIL'
   );
-  const mandatory_rules_passed = failedMandatory.length === 0;
+  const mandatory_rules_passed = !isExplicitlyNoMandatory && failedMandatory.length === 0;
 
   // Calculate scores
   let matched_weight = 0;
@@ -289,9 +332,7 @@ export function evaluateDecision(
   evaluatedRules.forEach(r => {
     if (r.status !== 'NOT_APPLICABLE') {
       possible_weight += r.weight;
-      if (r.status === 'PASS') {
-        matched_weight += r.awarded;
-      }
+      matched_weight += r.awarded;
     }
   });
 

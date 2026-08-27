@@ -1029,7 +1029,8 @@ export const decisionTestCases: DecisionTestCase[] = [
         fair_value_gap: true,
         volume_confirmation: true,
         session: ["London"]
-      }
+      },
+      mandatory_rules: []
     },
     marketStructure: {
       fair_value_gap: true,
