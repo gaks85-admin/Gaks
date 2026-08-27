@@ -207,11 +207,34 @@ export function compileStrategy(strategyText: string): CompilerOutput {
   const canonical_rules: string[] = [];
   const weighted_rules: { rule: string; weight: number }[] = [];
 
+  const rulePhrases: Record<string, string[]> = {
+    trendline_breakout: ['trendline breakout', 'trendline', 'breakout'],
+    break_and_retest: ['break and retest', 'break & retest', 'retest'],
+    bos: ['break of structure', 'bos'],
+    choch: ['change of character', 'choch'],
+    confirmation_candle: ['confirmation candle', 'candle confirmation', 'confirmation'],
+    liquidity_sweep: ['liquidity sweep', 'liquidity'],
+    fair_value_gap: ['fair value gap', 'fvg'],
+    support: ['demand zone', 'demand', 'support zone', 'support'],
+    resistance: ['supply zone', 'supply', 'resistance zone', 'resistance'],
+    support_rejection: ['support rejection', 'bounce from support', 'demand rejection'],
+    resistance_rejection: ['resistance rejection', 'bounce from resistance', 'supply rejection'],
+    ema: ['ema alignment', 'ema'],
+    rsi: ['rsi filter', 'rsi'],
+    macd: ['macd filter', 'macd'],
+    atr: ['atr volatility filter', 'atr filter', 'atr'],
+    volume_confirmation: ['volume confirmation', 'volume'],
+    session: ['session filter', 'session'],
+    timeframes: ['timeframe filter', 'timeframe'],
+    risk_reward: ['risk & reward', 'risk reward', 'risk-to-reward', 'risk to reward', 'risk:reward', 'take profit', 'stop loss']
+  };
+
   for (const item of ruleCatalog) {
     if (item.active) {
       const moduleObj = modules.find(m => m.name === item.id || (m.name === 'support_resistance' && (item.id.includes('support') || item.id.includes('resistance'))));
-      const phraseToCheck = (moduleObj && moduleObj.result && moduleObj.result.matchedPhrase) ? moduleObj.result.matchedPhrase : item.phrase;
-      const isMand = isMandatory(strategyText, phraseToCheck);
+      const primaryPhrase = (moduleObj && moduleObj.result && moduleObj.result.matchedPhrase) ? moduleObj.result.matchedPhrase : item.phrase;
+      const phrasesToCheck = [primaryPhrase, ...(rulePhrases[item.id] || [item.phrase])];
+      const isMand = phrasesToCheck.some(p => isMandatory(strategyText, p));
       canonicalRuleDefs.push({
         id: item.id,
         name: item.name,

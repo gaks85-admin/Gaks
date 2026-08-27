@@ -7,7 +7,7 @@ export class BosEvaluator {
       return { matched: false, score: 0, reason: "BOS rule not active in strategy." };
     }
 
-    const isFlatMatched = market.bos === true;
+    const isFlatMatched = market.bos === true || market.bos?.matched === true;
     const isNestedMatched = market.BOS && Array.isArray(market.BOS) && 
       market.BOS.some((b: any) => b.type === 'BULLISH_BOS' || b.type === 'BEARISH_BOS');
 

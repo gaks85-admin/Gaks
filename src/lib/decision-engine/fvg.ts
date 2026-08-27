@@ -7,7 +7,7 @@ export class FvgEvaluator {
       return { matched: false, score: 0, reason: "Fair Value Gap (FVG) rule not active in strategy." };
     }
 
-    const isFlatMatched = market.fair_value_gap === true || market.fvg === true;
+    const isFlatMatched = market.fair_value_gap === true || market.fvg === true || market.fair_value_gap?.matched === true || market.fvg?.matched === true;
     const isNestedMatched = market.fairValueGaps && Array.isArray(market.fairValueGaps) && 
       market.fairValueGaps.length > 0;
 

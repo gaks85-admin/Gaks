@@ -7,7 +7,7 @@ export class VolumeEvaluator {
       return { matched: false, score: 0, scoreOutOf10: 0, reason: "Volume Confirmation rule not active in strategy." };
     }
 
-    const isFlatMatched = market.volume_confirmation === true || market.volume_spike === true;
+    const isFlatMatched = market.volume_confirmation === true || market.volume_spike === true || market.volume_confirmation?.matched === true;
     const volInfo = market.volumeInformation;
     const latestVol = volInfo?.latestVolume || market.latestVolume;
     const avgVol = volInfo?.averageVolume || market.averageVolume;

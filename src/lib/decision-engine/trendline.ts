@@ -8,7 +8,7 @@ export class TrendlineEvaluator {
     }
 
     // Support both flat representation (e.g. market.trendline_breakout = true) and nested (e.g. breakouts)
-    const isFlatMatched = market.trendline_breakout === true;
+    const isFlatMatched = market.trendline_breakout === true || market.trendline_breakout?.matched === true;
     const isNestedMatched = market.breakouts && Array.isArray(market.breakouts) && 
       market.breakouts.some((b: any) => b.type === 'UPPER_BREAKOUT' || b.type === 'LOWER_BREAKOUT');
     const isTrendlinePresent = market.trendlines && Array.isArray(market.trendlines) && market.trendlines.length > 0;
@@ -29,7 +29,7 @@ export class TrendlineEvaluator {
       return { matched: false, score: 0, reason: "Break and Retest rule not active in strategy." };
     }
 
-    const isFlatMatched = market.break_and_retest === true;
+    const isFlatMatched = market.break_and_retest === true || market.break_and_retest?.matched === true;
     const isNestedMatched = market.retests && Array.isArray(market.retests) && 
       market.retests.some((r: any) => r.confirmed === true);
 

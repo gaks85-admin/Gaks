@@ -7,7 +7,7 @@ export class ChochEvaluator {
       return { matched: false, score: 0, reason: "CHOCH rule not active in strategy." };
     }
 
-    const isFlatMatched = market.choch === true;
+    const isFlatMatched = market.choch === true || market.choch?.matched === true;
     const isNestedMatched = market.CHOCH && Array.isArray(market.CHOCH) && 
       market.CHOCH.some((c: any) => c.type === 'BULLISH_CHOCH' || c.type === 'BEARISH_CHOCH');
 

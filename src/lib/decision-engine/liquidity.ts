@@ -7,7 +7,7 @@ export class LiquidityEvaluator {
       return { matched: false, score: 0, reason: "Liquidity Sweep rule not active in strategy." };
     }
 
-    const isFlatMatched = market.liquidity_sweep === true || market.liquidity === true;
+    const isFlatMatched = market.liquidity_sweep === true || market.liquidity === true || market.liquidity_sweep?.matched === true || market.liquidity?.matched === true;
     const isNestedMatched = market.liquiditySweeps && Array.isArray(market.liquiditySweeps) && 
       market.liquiditySweeps.some((l: any) => l.type === 'HIGH_SWEEP' || l.type === 'LOW_SWEEP');
 

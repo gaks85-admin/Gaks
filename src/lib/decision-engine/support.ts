@@ -7,7 +7,7 @@ export class SupportEvaluator {
       return { matched: false, score: 0, scoreOutOf10: 0, reason: "Support Zone rule not active in strategy." };
     }
 
-    const isFlatMatched = market.support === true;
+    const isFlatMatched = market.support === true || market.support?.matched === true;
     const isNestedMatched = market.supportZones && Array.isArray(market.supportZones) && 
       market.supportZones.length > 0;
     const isSwingLowNear = market.swingLows && Array.isArray(market.swingLows) && market.swingLows.length > 0;
@@ -44,7 +44,7 @@ export class SupportEvaluator {
       return { matched: false, score: 0, scoreOutOf10: 0, reason: "Support Rejection rule not active in strategy." };
     }
 
-    const isFlatMatched = market.support_rejection === true;
+    const isFlatMatched = market.support_rejection === true || market.support_rejection?.matched === true;
     const isNestedMatched = market.retests && Array.isArray(market.retests) && market.retests.length > 0;
     
     // Check for bullish candle patterns (e.g., rejection pin bar, bullish engulfing)

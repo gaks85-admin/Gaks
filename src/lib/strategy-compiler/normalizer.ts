@@ -110,53 +110,85 @@ export function isMandatory(originalText: string, matchedPhrase: string): boolea
 
   const normalizedPhrase = normalizeText(matchedPhrase);
   
-  // 1. Identify clauses from original text preserving line breaks
-  const clauses = originalText.toLowerCase().split(/[\n,.;]|\band\b/);
-  
-  // Find clause using strict word boundaries
-  const targetClauseRaw = clauses.find(c => matchPhraseWithBoundaries(c, matchedPhrase)) || clauses.find(c => normalizeText(c).includes(normalizedPhrase));
-  
-  if (!targetClauseRaw) return false;
-  
-  if (isNegativeOrExclusionContext(targetClauseRaw, matchedPhrase)) {
-    return false;
-  }
-
-  const targetClause = normalizeText(targetClauseRaw);
-
   const mandatoryKeywords = ['must', 'required', 'mandatory', 'strictly'];
   const optionalKeywords = ['optional', 'confirmation', 'extra', 'additional', 'if possible', 'weighted', 'filter out', 'ignore', 'avoid'];
 
-  const isOptional = optionalKeywords.some(k => {
-    const regex = new RegExp(`\\b${escapeRegExp(k)}\\b`, 'i');
-    return regex.test(targetClause);
-  });
+  // 1. Identify clauses from original text preserving line breaks
+  // Do NOT split on \band\b because lists like "BOS and CHOCH" belong together in a mandatory clause
+  const clauses = originalText.toLowerCase().split(/[\n.;]|\b(?:whereas|however|although)\b/);
   
-  const isMandatoryExplicit = mandatoryKeywords.some(k => {
-    const regex = new RegExp(`\\b${escapeRegExp(k)}\\b`, 'i');
-    return regex.test(targetClause);
-  });
+  for (const clauseRaw of clauses) {
+    if (!matchPhraseWithBoundaries(clauseRaw, matchedPhrase) && !normalizeText(clauseRaw).includes(normalizedPhrase)) {
+      continue;
+    }
+    if (isNegativeOrExclusionContext(clauseRaw, matchedPhrase)) {
+      continue;
+    }
+    const targetClause = normalizeText(clauseRaw);
+    const isOptional = optionalKeywords.some(k => new RegExp(`\\b${escapeRegExp(k)}\\b`, 'i').test(targetClause));
+    const isMandatoryExplicit = mandatoryKeywords.some(k => new RegExp(`\\b${escapeRegExp(k)}\\b`, 'i').test(targetClause));
 
-  if (isOptional) return false;
-  if (isMandatoryExplicit) return true;
+    if (isOptional) continue;
+    if (isMandatoryExplicit) return true;
+  }
 
-  // Look backwards for immediate section header
+  // 2. Scan lines backwards for enclosing section headers
   const lines = originalText.split('\n');
-  const lineIdx = lines.findIndex(l => matchPhraseWithBoundaries(l, matchedPhrase));
-  if (lineIdx !== -1) {
+  for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
+    const currentLine = lines[lineIdx].trim().toLowerCase();
+    if (!matchPhraseWithBoundaries(currentLine, matchedPhrase) && !normalizeText(currentLine).includes(normalizedPhrase)) {
+      continue;
+    }
+    if (isNegativeOrExclusionContext(currentLine, matchedPhrase)) {
+      continue;
+    }
+
+    // Check if the current line has an alternative 'OR' pattern for this phrase
+    // e.g. "BOS or CHOCH", "support or resistance"
+    const orPattern = new RegExp(`\\b${escapeRegExp(matchedPhrase.toLowerCase())}\\b\\s+or\\b|\\bor\\s+\\b${escapeRegExp(matchedPhrase.toLowerCase())}\\b`, 'i');
+    if (orPattern.test(currentLine)) {
+      continue; // Alternatives are confluences, not hard mandatory rules
+    }
+
+    // Check if it's descriptive past context (e.g. "that created a Break of Structure", "after a BOS")
+    const pastContextPattern = new RegExp(`\\b(that created|which created|created a|forming a|after a|prior to)\\b.*\\b${escapeRegExp(matchedPhrase.toLowerCase())}\\b`, 'i');
+    if (pastContextPattern.test(currentLine)) {
+      continue;
+    }
+
+    const colonIdx = currentLine.indexOf(':');
+    const itemLabel = colonIdx !== -1 ? currentLine.slice(0, colonIdx) : currentLine;
+    const isLabelMatch = matchPhraseWithBoundaries(itemLabel, matchedPhrase) || normalizeText(itemLabel).includes(normalizedPhrase);
+
+    // Check if the line itself contains a mandatory indicator
+    const lineMandatory = mandatoryKeywords.some(k => new RegExp(`\\b${escapeRegExp(k)}\\b`, 'i').test(currentLine));
+    const lineOptional = optionalKeywords.some(k => new RegExp(`\\b${escapeRegExp(k)}\\b`, 'i').test(currentLine));
+    if (lineOptional) continue;
+    if (lineMandatory && (isLabelMatch || !colonIdx || colonIdx === -1)) return true;
+
+    // Scan backwards from this line for enclosing section header
     for (let i = lineIdx - 1; i >= 0; i--) {
       const prevLine = lines[i].trim().toLowerCase();
-      if (prevLine.endsWith(':') || prevLine.startsWith('#') || prevLine.startsWith('==')) {
+      // Recognized header formats: ends with colon, starts with #/==, or numbered section header (e.g. "1. ...")
+      if (prevLine.endsWith(':') || prevLine.startsWith('#') || prevLine.startsWith('==') || /^\d+\.\s+/.test(prevLine)) {
         const hasMandatoryHeader = mandatoryKeywords.some(k => new RegExp(`\\b${escapeRegExp(k)}\\b`, 'i').test(prevLine));
         const hasOptionalHeader = optionalKeywords.some(k => new RegExp(`\\b${escapeRegExp(k)}\\b`, 'i').test(prevLine));
-        if (hasMandatoryHeader) return true;
-        if (hasOptionalHeader) return false;
-        break;
+        if (hasOptionalHeader) break;
+        if (hasMandatoryHeader) {
+          // If the section header is mandatory, only mark mandatory if matchedPhrase is in the itemLabel or the header itself
+          if (isLabelMatch) {
+            return true;
+          }
+          if (matchPhraseWithBoundaries(prevLine, matchedPhrase) || normalizeText(prevLine).includes(normalizedPhrase)) {
+            return true;
+          }
+        }
+        break; // Stop at immediate enclosing header
       }
     }
   }
 
-  return true; // Default to mandatory if in entry rules
+  return false; // Rules are optional confluences by default
 }
 
 export function normalizeRuleId(rawRuleId: string): string {

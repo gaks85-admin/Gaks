@@ -7,7 +7,7 @@ export class ResistanceEvaluator {
       return { matched: false, score: 0, scoreOutOf10: 0, reason: "Resistance Zone rule not active in strategy." };
     }
 
-    const isFlatMatched = market.resistance === true;
+    const isFlatMatched = market.resistance === true || market.resistance?.matched === true;
     const isNestedMatched = market.resistanceZones && Array.isArray(market.resistanceZones) && 
       market.resistanceZones.length > 0;
     const isSwingHighNear = market.swingHighs && Array.isArray(market.swingHighs) && market.swingHighs.length > 0;
@@ -44,7 +44,7 @@ export class ResistanceEvaluator {
       return { matched: false, score: 0, scoreOutOf10: 0, reason: "Resistance Rejection rule not active in strategy." };
     }
 
-    const isFlatMatched = market.resistance_rejection === true;
+    const isFlatMatched = market.resistance_rejection === true || market.resistance_rejection?.matched === true;
     const isNestedMatched = market.retests && Array.isArray(market.retests) && market.retests.length > 0;
     
     // Check for bearish candle patterns (rejection)

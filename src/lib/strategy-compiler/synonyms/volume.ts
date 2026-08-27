@@ -6,5 +6,6 @@ export const volumeSynonyms = [
   "volume confirmation",
   "volume confirm",
   "volume breakout",
-  "increasing volume"
+  "increasing volume",
+  "volume"
 ];

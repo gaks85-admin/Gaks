@@ -79,8 +79,10 @@ export function evaluateDecision(
 
   if (explicitMandatory !== undefined) {
     compilerMandatoryIds = explicitMandatory.map(id => normalizeRuleId(id)).sort();
-    if (compilerMandatoryIds.length === 0 && activeKeys.length > 0) {
+    if (compilerMandatoryIds.length === 0 && activeKeys.length > 0 && !hasStructuralRule && compiledStrategy.strategy_mode !== 'AI_ONLY') {
       isExplicitlyNoMandatory = true;
+    } else {
+      isExplicitlyNoMandatory = false;
     }
   } else if (activeKeys.length > 0 && !hasStructuralRule && compiledStrategy.strategy_mode !== 'AI_ONLY') {
     isExplicitlyNoMandatory = true;
@@ -92,9 +94,15 @@ export function evaluateDecision(
   const explicitOptional = compiledStrategy.canonical_rule_set?.optional_rule_ids ?? compiledStrategy.optional_rules;
   const compilerOptionalIds = (explicitOptional || []).map(id => normalizeRuleId(id)).sort();
 
-  // Evaluator's rule IDs based on compiled_rules state
-  const evaluatorMandatoryIds = compilerMandatoryIds.slice().sort();
-  const evaluatorOptionalIds = compilerOptionalIds.slice().sort();
+  // Evaluator's rule IDs based on compiled_rules state and supported engine catalog
+  const knownRuleIds = [
+    'trendline_breakout', 'break_and_retest', 'confirmation_candle', 'bos', 'choch',
+    'liquidity_sweep', 'fair_value_gap', 'support', 'resistance', 'support_rejection',
+    'resistance_rejection', 'ema', 'rsi', 'macd', 'atr', 'volume_confirmation',
+    'session', 'timeframes', 'risk_reward'
+  ];
+  const evaluatorMandatoryIds = compilerMandatoryIds.filter(id => knownRuleIds.includes(id)).sort();
+  const evaluatorOptionalIds = compilerOptionalIds.filter(id => knownRuleIds.includes(id)).sort();
 
   // Diagnostic Log 2: Evaluator Rule Set Output
   console.log(`\n[EVALUATOR RULE SET]`);
@@ -315,6 +323,30 @@ export function evaluateDecision(
   // 19. Confirmation Candle
   if (rules.confirmation_candle === true) {
     processRule("Confirmation Candle", "confirmation_candle", "confirmation_candle", () => ccEval.evaluate(rules, marketStructure));
+  }
+
+  // Handle directional pairs: If both opposing directional rules (e.g. support & resistance)
+  // are mandatory, satisfying EITHER one satisfies the directional zone requirement
+  // for the active trade setup.
+  const directionalPairs: [string, string][] = [
+    ['support', 'resistance'],
+    ['support_rejection', 'resistance_rejection']
+  ];
+
+  for (const [pairA, pairB] of directionalPairs) {
+    if (evaluatorMandatoryIds.includes(pairA) && evaluatorMandatoryIds.includes(pairB)) {
+      const resA = evaluatedRules.find(r => r.canonicalName === pairA);
+      const resB = evaluatedRules.find(r => r.canonicalName === pairB);
+      if (resA && resB) {
+        if (resA.status === 'PASS' && resB.status === 'FAIL') {
+          resB.status = 'NOT_APPLICABLE';
+          resB.reason += ' (Opposing directional zone not applicable for active setup)';
+        } else if (resB.status === 'PASS' && resA.status === 'FAIL') {
+          resA.status = 'NOT_APPLICABLE';
+          resA.reason += ' (Opposing directional zone not applicable for active setup)';
+        }
+      }
+    }
   }
 
   // Mandatory Rules check: strictly match canonical IDs

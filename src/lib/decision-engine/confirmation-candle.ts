@@ -7,7 +7,7 @@ export class ConfirmationCandleEvaluator {
       return { matched: false, score: 0, reason: "Confirmation Candle rule not active in strategy." };
     }
 
-    const isFlatMatched = market.confirmation_candle === true || market.candle_confirmation === true;
+    const isFlatMatched = market.confirmation_candle === true || market.candle_confirmation === true || market.confirmation_candle?.matched === true || market.candle_confirmation?.matched === true;
     const isNestedMatched = market.candlePatterns && Array.isArray(market.candlePatterns) && 
       market.candlePatterns.length > 0;
 
