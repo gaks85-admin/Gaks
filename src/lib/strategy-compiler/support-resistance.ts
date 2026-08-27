@@ -1,6 +1,7 @@
 import { ParserResult, StrategyParserModule } from './types.js';
 import { supportResistanceSynonyms } from './synonyms/support-resistance.js';
-import { findSynonymMatch, normalizeText } from './normalizer.js';
+import { findSynonymMatch } from './normalizer.js';
+import { matchPhraseWithBoundaries, isNegativeOrExclusionContext } from './utils.js';
 
 export interface SupportResistanceRule {
   support: boolean;
@@ -13,10 +14,24 @@ export class SupportResistanceParser implements StrategyParserModule<SupportResi
   parse(text: string): ParserResult<SupportResistanceRule> {
     const match = findSynonymMatch(text, supportResistanceSynonyms, 'SUPPORT_RESISTANCE', 0.95);
     
-    const normalized = normalizeText(text);
+    let hasSupport = (
+      matchPhraseWithBoundaries(text, 'support') ||
+      matchPhraseWithBoundaries(text, 'demand') ||
+      matchPhraseWithBoundaries(text, 'demand zone') ||
+      matchPhraseWithBoundaries(text, 'key level')
+    ) && !isNegativeOrExclusionContext(text, 'support') && !isNegativeOrExclusionContext(text, 'demand');
     
-    let hasSupport = normalized.includes('support') || normalized.includes('s r');
-    let hasResistance = normalized.includes('resistance') || normalized.includes('s r');
+    let hasResistance = (
+      matchPhraseWithBoundaries(text, 'resistance') ||
+      matchPhraseWithBoundaries(text, 'supply') ||
+      matchPhraseWithBoundaries(text, 'supply zone') ||
+      matchPhraseWithBoundaries(text, 'key level')
+    ) && !isNegativeOrExclusionContext(text, 'resistance') && !isNegativeOrExclusionContext(text, 'supply');
+    
+    if (match.matched) {
+      hasSupport = true;
+      hasResistance = true;
+    }
     
     let support_rejection = false;
     let resistance_rejection = false;
@@ -32,20 +47,28 @@ export class SupportResistanceParser implements StrategyParserModule<SupportResi
     ];
     
     for (const syn of supportBounceSyns) {
-      if (normalized.includes(normalizeText(syn))) {
+      if (matchPhraseWithBoundaries(text, syn)) {
         support_rejection = true;
         hasSupport = true;
       }
     }
     
     for (const syn of resistanceBounceSyns) {
-      if (normalized.includes(normalizeText(syn))) {
+      if (matchPhraseWithBoundaries(text, syn)) {
         resistance_rejection = true;
         hasResistance = true;
       }
     }
     
     const supported = match.matched || hasSupport || hasResistance;
+    
+    const matchedPhrase = match.matched ? match.matchedPhrase : (
+      matchPhraseWithBoundaries(text, 'support') ? 'support' :
+      matchPhraseWithBoundaries(text, 'demand') ? 'demand' :
+      matchPhraseWithBoundaries(text, 'resistance') ? 'resistance' :
+      matchPhraseWithBoundaries(text, 'supply') ? 'supply' :
+      (hasSupport ? "demand" : (hasResistance ? "supply" : ""))
+    );
     
     return {
       supported,
@@ -56,7 +79,7 @@ export class SupportResistanceParser implements StrategyParserModule<SupportResi
         support_rejection,
         resistance_rejection
       },
-      matchedPhrase: match.matched ? match.matchedPhrase : (hasSupport ? "support" : (hasResistance ? "resistance" : "")),
+      matchedPhrase,
       canonicalRule: match.matched ? match.canonicalRule : "SUPPORT_RESISTANCE"
     };
   }

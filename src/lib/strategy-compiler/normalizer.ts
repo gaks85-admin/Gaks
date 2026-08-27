@@ -1,4 +1,5 @@
 import { emaSynonyms } from './synonyms/ema.js';
+import { isNegativeOrExclusionContext, matchPhraseWithBoundaries, escapeRegExp } from './utils.js';
 import { trendlineSynonyms } from './synonyms/trendline.js';
 import { supportResistanceSynonyms } from './synonyms/support-resistance.js';
 import { volumeSynonyms } from './synonyms/volume.js';
@@ -75,13 +76,13 @@ export function findSynonymMatch(
   originalText: string,
   synonyms: string[],
   canonicalRule: string,
-  defaultConfidence: number
+  defaultConfidence = 0.95
 ): SynonymMatch {
-  const normalizedInput = normalizeText(originalText);
-  
   for (const synonym of synonyms) {
-    const normalizedSynonym = normalizeText(synonym);
-    if (normalizedSynonym && normalizedInput.includes(normalizedSynonym)) {
+    if (matchPhraseWithBoundaries(originalText, synonym)) {
+      if (isNegativeOrExclusionContext(originalText, synonym)) {
+        continue;
+      }
       return {
         matched: true,
         matchedPhrase: synonym,
@@ -100,30 +101,62 @@ export function findSynonymMatch(
 }
 
 export function isMandatory(originalText: string, matchedPhrase: string): boolean {
+  if (!matchedPhrase || !matchedPhrase.trim()) return false;
+  
+  // Check if phrase is in a negative/exclusion context in the text
+  if (isNegativeOrExclusionContext(originalText, matchedPhrase)) {
+    return false;
+  }
+
   const normalizedPhrase = normalizeText(matchedPhrase);
   
-  // 1. Identify the clause containing the phrase from the original text (preserving punctuation for splitting)
-  const clauses = originalText.toLowerCase().split(/[,.;]|\band\b/);
-  const targetClauseRaw = clauses.find(c => normalizeText(c).includes(normalizedPhrase)) || originalText.toLowerCase();
+  // 1. Identify clauses from original text preserving line breaks
+  const clauses = originalText.toLowerCase().split(/[\n,.;]|\band\b/);
+  
+  // Find clause using strict word boundaries
+  const targetClauseRaw = clauses.find(c => matchPhraseWithBoundaries(c, matchedPhrase)) || clauses.find(c => normalizeText(c).includes(normalizedPhrase));
+  
+  if (!targetClauseRaw) return false;
+  
+  if (isNegativeOrExclusionContext(targetClauseRaw, matchedPhrase)) {
+    return false;
+  }
+
   const targetClause = normalizeText(targetClauseRaw);
 
-  const mandatoryKeywords = ['must', 'required', 'mandatory', 'only', 'essential', 'strictly'];
-  const optionalKeywords = ['optional', 'confirmation', 'extra', 'additional', 'if possible', 'weighted'];
+  const mandatoryKeywords = ['must', 'required', 'mandatory', 'strictly'];
+  const optionalKeywords = ['optional', 'confirmation', 'extra', 'additional', 'if possible', 'weighted', 'filter out', 'ignore', 'avoid'];
 
-  // Check for immediate word boundary matches within the same clause
   const isOptional = optionalKeywords.some(k => {
-    const regex = new RegExp(`\\b${k}\\b`);
+    const regex = new RegExp(`\\b${escapeRegExp(k)}\\b`, 'i');
     return regex.test(targetClause);
   });
+  
   const isMandatoryExplicit = mandatoryKeywords.some(k => {
-    const regex = new RegExp(`\\b${k}\\b`);
+    const regex = new RegExp(`\\b${escapeRegExp(k)}\\b`, 'i');
     return regex.test(targetClause);
   });
 
-  if (isMandatoryExplicit) return true;
   if (isOptional) return false;
+  if (isMandatoryExplicit) return true;
 
-  return true; // Default to mandatory if not specified
+  // Look backwards for immediate section header
+  const lines = originalText.split('\n');
+  const lineIdx = lines.findIndex(l => matchPhraseWithBoundaries(l, matchedPhrase));
+  if (lineIdx !== -1) {
+    for (let i = lineIdx - 1; i >= 0; i--) {
+      const prevLine = lines[i].trim().toLowerCase();
+      if (prevLine.endsWith(':') || prevLine.startsWith('#') || prevLine.startsWith('==')) {
+        const hasMandatoryHeader = mandatoryKeywords.some(k => new RegExp(`\\b${escapeRegExp(k)}\\b`, 'i').test(prevLine));
+        const hasOptionalHeader = optionalKeywords.some(k => new RegExp(`\\b${escapeRegExp(k)}\\b`, 'i').test(prevLine));
+        if (hasMandatoryHeader) return true;
+        if (hasOptionalHeader) return false;
+        break;
+      }
+    }
+  }
+
+  return true; // Default to mandatory if in entry rules
 }
 
 export function normalizeRuleId(rawRuleId: string): string {

@@ -1,6 +1,7 @@
 import { ParserResult, StrategyParserModule } from './types.js';
 import { emaSynonyms } from './synonyms/ema.js';
-import { findSynonymMatch, normalizeText } from './normalizer.js';
+import { findSynonymMatch } from './normalizer.js';
+import { matchPhraseWithBoundaries, isNegativeOrExclusionContext } from './utils.js';
 
 export interface EmaRule {
   enabled: boolean;
@@ -17,10 +18,11 @@ export class EmaParser implements StrategyParserModule<EmaRule> {
     let canonicalRule = match.canonicalRule;
     let confidence = match.confidence;
     
-    const normalizedInput = normalizeText(text);
-    if (!supported && (normalizedInput.includes('ema') || normalizedInput.includes('exponential moving average') || normalizedInput.includes('moving average'))) {
+    const hasEmaWord = matchPhraseWithBoundaries(text, 'ema') && !isNegativeOrExclusionContext(text, 'ema');
+    const hasEmaFull = matchPhraseWithBoundaries(text, 'exponential moving average') || matchPhraseWithBoundaries(text, 'moving average');
+    if (!supported && (hasEmaWord || hasEmaFull)) {
       supported = true;
-      matchedPhrase = normalizedInput.includes('ema') ? 'EMA' : 'moving average';
+      matchedPhrase = hasEmaWord ? 'EMA' : 'moving average';
       canonicalRule = 'ema';
       confidence = 0.90;
     }

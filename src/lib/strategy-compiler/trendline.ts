@@ -1,6 +1,7 @@
 import { ParserResult, StrategyParserModule } from './types.js';
 import { trendlineSynonyms } from './synonyms/trendline.js';
-import { findSynonymMatch, normalizeText } from './normalizer.js';
+import { findSynonymMatch } from './normalizer.js';
+import { matchPhraseWithBoundaries, isNegativeOrExclusionContext } from './utils.js';
 
 export interface TrendlineRule {
   trendline_breakout: boolean;
@@ -11,10 +12,17 @@ export class TrendlineParser implements StrategyParserModule<TrendlineRule> {
   parse(text: string): ParserResult<TrendlineRule> {
     const match = findSynonymMatch(text, trendlineSynonyms, 'TRENDLINE_BREAKOUT', 0.95);
     
-    const normalized = normalizeText(text);
+    const hasTrendline = match.matched || matchPhraseWithBoundaries(text, 'trendline breakout') || matchPhraseWithBoundaries(text, 'trendline break') || matchPhraseWithBoundaries(text, 'trendline violation');
     
-    const hasTrendline = match.matched || normalized.includes('trendline breakout') || normalized.includes('trendline break') || normalized.includes('trendline violation');
-    const hasRetest = normalized.includes('break retest') || normalized.includes('break and retest') || normalized.includes('retest');
+    let hasRetest = (
+      matchPhraseWithBoundaries(text, 'break retest') ||
+      matchPhraseWithBoundaries(text, 'break and retest') ||
+      matchPhraseWithBoundaries(text, 'retest')
+    );
+    
+    if (hasRetest && (isNegativeOrExclusionContext(text, 'retest') || isNegativeOrExclusionContext(text, 'retested') || isNegativeOrExclusionContext(text, 'break and retest'))) {
+      hasRetest = false;
+    }
     
     const supported = hasTrendline || hasRetest;
     
