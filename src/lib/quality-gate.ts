@@ -129,24 +129,36 @@ export function evaluateQualityGate(input: QualityGateInput): QualityGateResult 
     computedQuality = Math.min(computedQuality, ruleScore);
   }
 
-  // Signal quality threshold check temporarily bypassed per user request
-  const passed = satisfiesGates;
-  const action: 'CONTINUE_TO_RISK' | 'NO_TRADE' = passed ? 'CONTINUE_TO_RISK' : 'NO_TRADE';
-
+  let passed = satisfiesGates;
   let reason = 'Sufficient confluence';
+
   if (!input.mandatoryRulesPassed) {
     reason = 'Mandatory rules failed';
+    passed = false;
   } else if (!isValidDirection) {
     reason = 'Invalid trade direction';
+    passed = false;
   } else if (!input.slValid) {
     reason = 'Invalid stop-loss structure';
+    passed = false;
   } else if (!input.tpValid) {
     reason = 'Invalid take-profit structure';
+    passed = false;
   } else if (!input.rrValid) {
     reason = 'Minimum R:R not satisfied';
+    passed = false;
   } else if (input.geminiRequired && !input.geminiApproved) {
     reason = 'Gemini approval missing or rejected';
+    passed = false;
+  } else if (consecutiveLosses >= 4) {
+    passed = false;
+    reason = 'Trade rejected due to 4 consecutive losses on watcher';
+  } else if (consecutiveLosses >= 2 && computedQuality < minRequired) {
+    passed = false;
+    reason = `Insufficient quality (${computedQuality}%) under ${consecutiveLosses}-loss streak requirement (${minRequired}%)`;
   }
+
+  const action: 'CONTINUE_TO_RISK' | 'NO_TRADE' = passed ? 'CONTINUE_TO_RISK' : 'NO_TRADE';
 
   const details = input.ruleDetails || [];
   const rulesEvaluated = details.length;

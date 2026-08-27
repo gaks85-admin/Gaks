@@ -13,6 +13,7 @@ import {
   CheckCircle2,
   Trash2,
   AlertTriangle,
+  AlertCircle,
   XCircle
 } from 'lucide-react';
 import { GEMINI_API_KEY_URL, GeminiTestResult, classifyCredentialType } from '../lib/apiKeys.js';
@@ -275,7 +276,13 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
                       <span className="text-amber-600 dark:text-amber-400">Quota exhausted</span>
                     </>
                   )}
-                  {geminiStatus === 'invalid' && (
+                  {(geminiStatus === 'permission_denied' || geminiStatus === 'PERMISSION_ERROR') && (
+                    <>
+                      <span className="w-2 h-2 rounded-full bg-rose-500"></span>
+                      <span className="text-rose-600 dark:text-rose-400">Permission denied (403)</span>
+                    </>
+                  )}
+                  {(geminiStatus === 'invalid' || geminiStatus === 'INVALID_KEY') && (
                     <>
                       <span className="w-2 h-2 rounded-full bg-rose-500"></span>
                       <span className="text-rose-600 dark:text-rose-400">Invalid key</span>
@@ -332,6 +339,27 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
                   <p className="text-[11px] text-zinc-600 dark:text-zinc-400 leading-snug">Test the credential before saving. Only authenticated credentials can be saved.</p>
                 </div>
               </div>
+
+              {/* 403 Permission Denied Troubleshooting Alert */}
+              {(geminiStatus === 'permission_denied' || geminiStatus === 'PERMISSION_ERROR' || geminiTestResult?.status === 'permission_denied' || geminiSaveError?.includes('denied access')) && (
+                <div className="p-4 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-700 dark:text-rose-300 space-y-2 text-xs">
+                  <div className="flex items-center gap-2 font-bold text-rose-800 dark:text-rose-200">
+                    <AlertCircle className="w-4 h-4 text-rose-500 flex-shrink-0" />
+                    <span>Google Project Denied Access (403 Permission Denied)</span>
+                  </div>
+                  <p className="leading-relaxed text-zinc-700 dark:text-zinc-300">
+                    Google rejected your API key because its linked Google Cloud project was restricted or does not have Generative Language API access enabled.
+                  </p>
+                  <div className="pt-1 font-semibold text-rose-800 dark:text-rose-200">
+                    Recommended Fix:
+                  </div>
+                  <ol className="list-decimal pl-5 space-y-1 leading-relaxed text-zinc-700 dark:text-zinc-300">
+                    <li>Open <a href={GEMINI_API_KEY_URL} target="_blank" rel="noopener noreferrer" className="underline font-bold text-amber-600 dark:text-amber-400">Google AI Studio API Keys</a>.</li>
+                    <li>Click <strong>&quot;Create API key&quot;</strong> and select <strong>&quot;Create API key in new project&quot;</strong> (creating a new project bypasses restrictions on your previous project).</li>
+                    <li>Paste the new API key below and click <strong>&quot;Save &amp; Test&quot;</strong>.</li>
+                  </ol>
+                </div>
+              )}
 
               {/* Key Input & Actions */}
               <div className="space-y-4 pt-2">

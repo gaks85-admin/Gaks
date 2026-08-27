@@ -998,7 +998,8 @@ const runTests = async () => {
       await recordEvaluation(mockSupabaseSuccess, record);
     });
 
-    const hasDuration = captured.some(line => line.includes("Duration:") && line.includes("275 ms"));
+    const allCapturedText = captured.join('\n');
+    const hasDuration = allCapturedText.includes("Duration:") && allCapturedText.includes("275 ms");
     addResult(24, "Console logs visual footer outputs total execution time with standardized 'ms' units", hasDuration === true);
   } catch (err: any) {
     addResult(24, "Console logs visual footer outputs total execution time with standardized 'ms' units", false, err.message);

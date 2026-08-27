@@ -231,9 +231,17 @@ export function compileStrategy(strategyText: string): CompilerOutput {
 
   for (const item of ruleCatalog) {
     if (item.active) {
-      const moduleObj = modules.find(m => m.name === item.id || (m.name === 'support_resistance' && (item.id.includes('support') || item.id.includes('resistance'))));
+      const moduleObj = modules.find(m => m.name === item.id);
       const primaryPhrase = (moduleObj && moduleObj.result && moduleObj.result.matchedPhrase) ? moduleObj.result.matchedPhrase : item.phrase;
-      const phrasesToCheck = [primaryPhrase, ...(rulePhrases[item.id] || [item.phrase])];
+      const phrasesToCheck = [primaryPhrase, ...(rulePhrases[item.id] || [item.phrase])].filter(p => {
+        if (item.id.includes('support')) {
+          return !p.toLowerCase().includes('resistance') && !p.toLowerCase().includes('supply');
+        }
+        if (item.id.includes('resistance')) {
+          return !p.toLowerCase().includes('support') && !p.toLowerCase().includes('demand');
+        }
+        return true;
+      });
       const isMand = phrasesToCheck.some(p => isMandatory(strategyText, p));
       canonicalRuleDefs.push({
         id: item.id,

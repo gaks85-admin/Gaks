@@ -172,9 +172,29 @@ export function parseQuotaDetails(error: any, lowerMsg: string): GeminiQuotaDeta
  */
 export function classifyAndRedactGeminiError(error: any): GeminiErrorClassification {
   const rawMsg = error?.message || String(error);
-  const cleanMsg = redactApiKeyInText(rawMsg);
-  const errStatus = error?.status || error?.statusCode || (error?.code ? Number(error.code) : 0);
+  
+  // Safely unwrap JSON if error.message is an encoded JSON response from Google API
+  let extractedMessage = rawMsg;
+  let jsonStatus = 0;
+  let jsonRpcStatus = '';
+  const trimmed = rawMsg.trim();
+  if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (parsed?.error) {
+        if (parsed.error.code) jsonStatus = Number(parsed.error.code);
+        if (parsed.error.status) jsonRpcStatus = String(parsed.error.status);
+        if (parsed.error.message) extractedMessage = String(parsed.error.message);
+      }
+    } catch {
+      // ignore JSON parse failure
+    }
+  }
+
+  const cleanMsg = redactApiKeyInText(extractedMessage);
+  const errStatus = error?.status || error?.statusCode || (error?.code ? Number(error.code) : 0) || jsonStatus;
   const lowerMsg = cleanMsg.toLowerCase();
+  const rpcLower = jsonRpcStatus.toLowerCase();
 
   let profileStatus: 'INVALID_KEY' | 'QUOTA_EXHAUSTED' | 'TEMP_ERROR' | 'NEEDS_ATTENTION' = 'NEEDS_ATTENTION';
   let diagnosticStatus: 'INVALID_KEY' | 'QUOTA_RPM' | 'QUOTA_TPM' | 'QUOTA_RPD' | 'QUOTA_UNKNOWN' | 'TIMEOUT' | 'TEMPORARY_ERROR' | 'INVALID_REQUEST' | 'PERMISSION_ERROR' | 'API_ERROR' = 'API_ERROR';
@@ -182,14 +202,16 @@ export function classifyAndRedactGeminiError(error: any): GeminiErrorClassificat
   const isInvalidDeadline = lowerMsg.includes('manually set deadline') || lowerMsg.includes('minimum allowed deadline');
   const is400 = errStatus === 400 || lowerMsg.includes('invalid argument') || lowerMsg.includes('invalid_argument') || lowerMsg.includes('bad request') || isInvalidDeadline;
   const is401 = errStatus === 401 || lowerMsg.includes('invalid api key') || lowerMsg.includes('access_token_type_unsupported') || lowerMsg.includes('unauthenticated') || lowerMsg.includes('api_key_invalid');
-  const is403 = errStatus === 403 || lowerMsg.includes('permission denied') || lowerMsg.includes('forbidden');
+  const is403 = errStatus === 403 || rpcLower === 'permission_denied' || lowerMsg.includes('permission denied') || lowerMsg.includes('forbidden') || lowerMsg.includes('denied access');
 
-  const is504 = !is400 && !is401 && !is403 && (errStatus === 504 || lowerMsg.includes('504') || lowerMsg.includes('deadline_exceeded') || lowerMsg.includes('deadline expired'));
-  const is503 = !is400 && !is401 && !is403 && !is504 && (errStatus === 503 || lowerMsg.includes('503') || lowerMsg.includes('unavailable') || lowerMsg.includes('high demand') || lowerMsg.includes('spikes in demand'));
-  const isTimeout = !is400 && !is401 && !is403 && !is504 && !is503 && (lowerMsg.includes('timeout') || lowerMsg.includes('etimedout') || error?.name === 'TimeoutError' || error?.name === 'AbortError' || lowerMsg.includes('abort'));
-  const isQuota = !is400 && !is401 && !is403 && !is504 && !is503 && !isTimeout && (errStatus === 429 || lowerMsg.includes('429') || lowerMsg.includes('resource_exhausted') || lowerMsg.includes('quota exceeded') || lowerMsg.includes('rate limit') || lowerMsg.includes('retryinfo') || lowerMsg.includes('retrydelay'));
+  const isTimeout = !is400 && !is401 && !is403 && (lowerMsg.includes('timeout') || lowerMsg.includes('etimedout') || error?.name === 'TimeoutError' || error?.name === 'AbortError' || lowerMsg.includes('abort'));
+  const is504 = !is400 && !is401 && !is403 && !isTimeout && (errStatus === 504 || lowerMsg.includes('504') || lowerMsg.includes('deadline_exceeded') || lowerMsg.includes('deadline expired'));
+  const is503 = !is400 && !is401 && !is403 && !isTimeout && !is504 && (errStatus === 503 || lowerMsg.includes('503') || lowerMsg.includes('unavailable') || lowerMsg.includes('high demand') || lowerMsg.includes('spikes in demand'));
+  const isQuota = !is400 && !is401 && !is403 && !isTimeout && !is504 && !is503 && (errStatus === 429 || lowerMsg.includes('429') || lowerMsg.includes('resource_exhausted') || lowerMsg.includes('quota exceeded') || lowerMsg.includes('rate limit') || lowerMsg.includes('retryinfo') || lowerMsg.includes('retrydelay'));
 
   let quotaDetails: GeminiQuotaDetails | undefined;
+
+  let finalCleanMessage = cleanMsg;
 
   if (is401) {
     profileStatus = 'INVALID_KEY';
@@ -197,6 +219,11 @@ export function classifyAndRedactGeminiError(error: any): GeminiErrorClassificat
   } else if (is403) {
     profileStatus = 'INVALID_KEY';
     diagnosticStatus = 'PERMISSION_ERROR';
+    if (lowerMsg.includes('denied access') || lowerMsg.includes('project has been denied')) {
+      finalCleanMessage = 'Google project denied access: The Google Cloud project associated with this API key has been restricted or lacks Generative Language API access. Please generate a new key in Google AI Studio.';
+    } else {
+      finalCleanMessage = 'Gemini API permission denied (403). Please verify API key permissions or generate a new key in Google AI Studio.';
+    }
   } else if (is400) {
     profileStatus = 'NEEDS_ATTENTION';
     diagnosticStatus = 'INVALID_REQUEST';
@@ -221,7 +248,7 @@ export function classifyAndRedactGeminiError(error: any): GeminiErrorClassificat
   return {
     profileStatus,
     diagnosticStatus,
-    cleanErrorMessage: cleanMsg,
+    cleanErrorMessage: finalCleanMessage,
     is503,
     is504,
     isTimeout,

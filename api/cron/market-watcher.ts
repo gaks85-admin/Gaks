@@ -1971,6 +1971,14 @@ Output ONLY valid JSON.
                     updated_at: new Date().toISOString()
                   }).eq("id", userId);
 
+                  await supabase.from("watchers").update({
+                    gemini_status: profileStatus,
+                    last_gemini_error: cleanErrMsg,
+                    updated_at: new Date().toISOString()
+                  }).eq("id", watcher.id);
+                  watcher.gemini_status = profileStatus;
+                  watcher.last_gemini_error = cleanErrMsg;
+
                   usedFallback = true;
                   fallbackReason = curReason;
                   console.log(`[GEMINI FALLBACK] Reason: ${fallbackReason} | Source: RULE_ONLY`);
@@ -2109,8 +2117,18 @@ Output ONLY valid JSON.
               updated_at: new Date().toISOString()
             }).eq("id", userId);
 
+            await supabase.from("watchers").update({
+              gemini_status: profileStatus,
+              last_gemini_error: cleanErrorMessage,
+              updated_at: new Date().toISOString()
+            }).eq("id", watcher.id);
+            watcher.gemini_status = profileStatus;
+            watcher.last_gemini_error = cleanErrorMessage;
+
             usedFallback = true;
-            fallbackReason = profileStatus === 'QUOTA_EXHAUSTED' ? 'QUOTA_EXHAUSTED' : (diagnosticStatus.includes('TIMEOUT') ? 'TIMEOUT' : 'TEMPORARY_ERROR');
+            fallbackReason = profileStatus === 'QUOTA_EXHAUSTED' ? 'QUOTA_EXHAUSTED' :
+                             (profileStatus === 'INVALID_KEY' || diagnosticStatus === 'PERMISSION_ERROR' || diagnosticStatus === 'INVALID_KEY') ? 'INVALID_KEY' :
+                             (diagnosticStatus.includes('TIMEOUT') ? 'TIMEOUT' : 'TEMPORARY_ERROR');
             console.log(`[GEMINI FALLBACK] Reason: ${fallbackReason} | Source: RULE_ONLY`);
           } finally {
             resolveMutex!();

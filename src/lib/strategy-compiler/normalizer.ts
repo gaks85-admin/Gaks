@@ -114,8 +114,9 @@ export function isMandatory(originalText: string, matchedPhrase: string): boolea
   const optionalKeywords = ['optional', 'confirmation', 'extra', 'additional', 'if possible', 'weighted', 'filter out', 'ignore', 'avoid'];
 
   // 1. Identify clauses from original text preserving line breaks
-  // Do NOT split on \band\b because lists like "BOS and CHOCH" belong together in a mandatory clause
-  const clauses = originalText.toLowerCase().split(/[\n.;]|\b(?:whereas|however|although)\b/);
+  // Split on punctuation (. , ; \n), contrasting conjunctions (whereas, however, although, but),
+  // and 'and' when followed by another rule clause with its own qualifier (e.g. 'and FVG is optional')
+  const clauses = originalText.toLowerCase().split(/[\n.;,]|\b(?:whereas|however|although|while|but)\b|\b(?:and)\s+(?=[a-z0-9_\s]+\s+(?:is|are|must be)\s+(?:optional|mandatory|required|must))\b/i);
   
   for (const clauseRaw of clauses) {
     if (!matchPhraseWithBoundaries(clauseRaw, matchedPhrase) && !normalizeText(clauseRaw).includes(normalizedPhrase)) {

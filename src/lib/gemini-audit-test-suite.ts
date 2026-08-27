@@ -27,22 +27,38 @@ export async function runGeminiAuditTestSuite(): Promise<{ passed: number; total
 
   const createMockSupabase = () => ({
     from: (tableName: string) => ({
-      select: (fields: string) => ({
-        eq: (col1: string, val1: string) => ({
-          eq: (col2: string, val2: string) => ({
-            maybeSingle: async () => {
-              if (tableName === 'user_api_keys' && col1 === 'user_id' && col2 === 'provider' && val2 === 'gemini') {
-                const foundKey = mockUserKeysTable[val1];
-                if (foundKey) {
-                  return { data: { api_key: foundKey }, error: null };
-                }
-                return { data: null, error: null };
+      select: (_fields: string) => {
+        let savedCol1: string | undefined;
+        let savedVal1: string | undefined;
+        let savedCol2: string | undefined;
+        let savedVal2: string | undefined;
+
+        const builder: any = {
+          eq: (col: string, val: string) => {
+            if (!savedCol1) {
+              savedCol1 = col;
+              savedVal1 = val;
+            } else {
+              savedCol2 = col;
+              savedVal2 = val;
+            }
+            return builder;
+          },
+          order: (_col: string, _opts: any) => builder,
+          limit: (_n: number) => builder,
+          maybeSingle: async () => {
+            if (tableName === 'user_api_keys' && savedCol1 === 'user_id' && savedCol2 === 'provider' && savedVal2 === 'gemini') {
+              const foundKey = mockUserKeysTable[savedVal1!];
+              if (foundKey) {
+                return { data: { api_key: foundKey }, error: null };
               }
               return { data: null, error: null };
             }
-          })
-        })
-      })
+            return { data: null, error: null };
+          }
+        };
+        return builder;
+      }
     })
   });
 
@@ -95,6 +111,13 @@ export async function runGeminiAuditTestSuite(): Promise<{ passed: number; total
   const classE = classifyAndRedactGeminiError(invalidErr);
   assert(classE.diagnosticStatus === 'INVALID_KEY', 'Test E1 - Invalid key error classified as INVALID_KEY');
   assert(classE.profileStatus === 'INVALID_KEY', 'Test E2 - Profile status set to INVALID_KEY');
+
+  // Test 403 Permission Denied with Project Denied Access
+  const permissionDeniedErr = new Error('{"error":{"code":403,"message":"Your project has been denied access. Please contact support.","status":"PERMISSION_DENIED"}}');
+  const classE3 = classifyAndRedactGeminiError(permissionDeniedErr);
+  assert(classE3.diagnosticStatus === 'PERMISSION_ERROR', 'Test E3 - 403 error classified as PERMISSION_ERROR');
+  assert(classE3.profileStatus === 'INVALID_KEY', 'Test E4 - 403 error profile status set to INVALID_KEY');
+  assert(classE3.cleanErrorMessage.includes('Google project denied access'), 'Test E5 - 403 raw JSON parsed into clean actionable message');
 
   // ==========================================
   // TEST F: QUOTA EXHAUSTED → NO_TRADE

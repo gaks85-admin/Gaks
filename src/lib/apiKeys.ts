@@ -104,7 +104,11 @@ export function parseGeminiError(err: any): {
     message = 'Invalid Gemini API key.';
   } else if (status === 403) {
     code = code !== 'UNKNOWN_ERROR' ? code : 'PERMISSION_DENIED';
-    message = 'Gemini permission denied for this credential.';
+    if (lowerMsg.includes('denied access') || lowerMsg.includes('project has been denied')) {
+      message = 'Google project denied access (403): The project linked to this key has been restricted or lacks Generative Language API access. Please generate a new key in Google AI Studio.';
+    } else {
+      message = 'Gemini permission denied for this credential (403). Please verify permissions or generate a new key.';
+    }
   } else if (status === 429) {
     code = 'RESOURCE_EXHAUSTED';
     message = 'Gemini API quota has been exhausted.';
