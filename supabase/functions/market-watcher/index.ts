@@ -106,11 +106,13 @@ serve(async (req) => {
       }
     }
 
+    const GEMINI_MARKET_WATCHER_MODEL = "gemini-3.6-flash";
+
     // Bounded Gemini API Call helper with timeout & retry
     async function callGeminiWithTimeoutAndRetry(
       apiKey: string,
       promptText: string,
-      modelName: string = "gemini-2.5-flash",
+      modelName: string = GEMINI_MARKET_WATCHER_MODEL,
       timeoutMs: number = 30000,
       maxRetries: number = 1
     ): Promise<{ success: boolean; text?: string; errorType?: string; attempts: number; durationMs: number }> {
@@ -449,7 +451,7 @@ Market Data: ${JSON.stringify(marketData)}`;
         const geminiRes = await callGeminiWithTimeoutAndRetry(
           apiKeyRecord.api_key,
           promptText,
-          "gemini-2.5-flash",
+          GEMINI_MARKET_WATCHER_MODEL,
           GEMINI_TIMEOUT_MS,
           GEMINI_MAX_RETRIES
         );

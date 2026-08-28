@@ -12,7 +12,7 @@ import { recordEvaluation } from "../explainability-engine.js";
 import { validateMarketDataIntegrity } from "../market-integrity.js";
 import { normalizeConfidence } from "../confidence-engine.js";
 import { resolveUserGeminiKey, classifyAndRedactGeminiError } from "../gemini-key-resolver.js";
-import { executeBoundedGeminiCall } from "../geminiWrapper.js";
+import { executeBoundedGeminiCall, GEMINI_MARKET_WATCHER_MODEL } from "../geminiWrapper.js";
 import { computeEquityAnalytics, deriveEquityState, fetchUserCompletedTrades } from "../equity-learning-engine.js";
 import { evaluateRiskGovernor } from "../risk-governor.js";
 import { evaluateAdaptiveLearning, fetchCompletedTradesForAdaptiveLearning } from "../adaptive-learning-engine.js";
@@ -699,7 +699,7 @@ Answer with JSON matching schema.
           const geminiRes = await executeBoundedGeminiCall(
             ai,
             {
-              model: "gemini-2.5-flash",
+              model: GEMINI_MARKET_WATCHER_MODEL,
               contents: promptText,
               config: {
                 responseMimeType: "application/json",

@@ -6,7 +6,7 @@ import { evaluateDecision } from './decision-engine.js';
 import { extractMarketStructure } from './market-structure-engine.js';
 import { extractRiskPreferences, calculatePositionSize } from './risk-engine.js';
 import { resolveUserGeminiKey } from './gemini-key-resolver.js';
-import { executeBoundedGeminiCall } from './geminiWrapper.js';
+import { executeBoundedGeminiCall, GEMINI_MARKET_WATCHER_MODEL } from './geminiWrapper.js';
 import { evaluateQualityGate } from './quality-gate.js';
 import { resolveAuthoritativeDecision, DecisionGateResult, DecisionGateType, GateStatus } from './decision-attribution.js';
 import { checkSignalDeduplication } from './signal-deduplication.js';
@@ -402,7 +402,7 @@ export async function runWatcherDiagnosticReplay(options: ReplayOptions): Promis
       const aiResult = await executeBoundedGeminiCall(
         ai,
         {
-          model: 'gemini-2.5-flash',
+          model: GEMINI_MARKET_WATCHER_MODEL,
           contents: promptString,
           config: {
             responseMimeType: 'application/json',

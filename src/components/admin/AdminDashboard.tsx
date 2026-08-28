@@ -1844,7 +1844,7 @@ const SettingsPage = ({ fetchWithAuth, showToast }: { fetchWithAuth: any; showTo
           >
             <option value="gemini-3.5-flash-lite">Gemini 3.5 Flash-Lite (Default / High Speed)</option>
             <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro (Deep Reasoning)</option>
-            <option value="gemini-2.5-flash">Gemini 2.5 Flash (Legacy)</option>
+            <option value="gemini-3.6-flash">Gemini 3.6 Flash</option>
           </select>
         </div>
 

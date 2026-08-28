@@ -37,7 +37,7 @@ import { normalizeConfidence } from '../../src/lib/confidence-engine.js';
 import { evaluateQualityGate, calculateAdaptiveQualityRequirement, calculateConsecutiveLossesForWatcher } from '../../src/lib/quality-gate.js';
 import { checkSignalDeduplication } from '../../src/lib/signal-deduplication.js';
 import { resolveUserGeminiKey, classifyAndRedactGeminiError } from '../../src/lib/gemini-key-resolver.js';
-import { executeBoundedGeminiCall, runGeminiRequest as runGeminiWrapperRequest } from '../../src/lib/geminiWrapper.js';
+import { executeBoundedGeminiCall, runGeminiRequest as runGeminiWrapperRequest, GEMINI_MARKET_WATCHER_MODEL } from '../../src/lib/geminiWrapper.js';
 import { validateActiveTradeState, isWatcherDue } from '../../src/lib/trade-validator.js';
 import { computeEquityAnalytics, deriveEquityState, fetchUserCompletedTrades } from '../../src/lib/equity-learning-engine.js';
 import { evaluateRiskGovernor } from '../../src/lib/risk-governor.js';
@@ -115,7 +115,7 @@ export async function runGeminiRequest(
     supabase: any,
     userId: string,
     prompt: string,
-    model: string = 'gemini-2.5-flash',
+    model: string = GEMINI_MARKET_WATCHER_MODEL,
     config?: any
 ) {
     return await runGeminiWrapperRequest(supabase, userId, prompt, model, config);
@@ -1830,7 +1830,7 @@ Reason: Insufficient remaining execution budget (${remainingBeforeGemini}ms rema
                 } else {
 
                 logWatcherEvent('Gemini Analysis', logCtx, {
-                  'Model': 'gemini-2.5-flash',
+                  'Model': GEMINI_MARKET_WATCHER_MODEL,
                   'Decision Score': decisionResult.decision_score,
                   'Recommendation': recommendation,
                   'Gemini Required': requiresGemini ? 'YES' : 'NO',
@@ -1873,7 +1873,7 @@ Output ONLY valid JSON.
                 const geminiRes = await executeBoundedGeminiCall(
                   ai,
                   {
-                    model: "gemini-2.5-flash",
+                    model: GEMINI_MARKET_WATCHER_MODEL,
                     contents: promptText,
                     config: {
                       responseMimeType: "application/json",

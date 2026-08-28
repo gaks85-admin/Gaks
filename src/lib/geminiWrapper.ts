@@ -5,6 +5,7 @@ import { resolveUserGeminiKey, classifyAndRedactGeminiError, GeminiQuotaDetails,
 
 export const GEMINI_API_DEADLINE_MS = 10_000;
 export const GEMINI_APPLICATION_TIMEOUT_MS = 9_500;
+export const GEMINI_MARKET_WATCHER_MODEL = 'gemini-3.6-flash';
 
 // Simplified Error Classification
 export type GeminiErrorType = 'invalid_key' | 'quota_exceeded' | 'rate_limited' | 'temporary_failure' | 'unknown_error';
@@ -106,13 +107,13 @@ export async function executeBoundedGeminiCall(
   options: BoundedGeminiOptions,
   context: BoundedGeminiContext
 ): Promise<BoundedGeminiResult> {
-  const model = options.model || 'gemini-2.5-flash';
+  const model = options.model || GEMINI_MARKET_WATCHER_MODEL;
   const apiDeadlineMs = Math.max(10_000, options.apiDeadlineMs ?? GEMINI_API_DEADLINE_MS);
   const appTimeoutMs = options.timeoutMs ?? GEMINI_APPLICATION_TIMEOUT_MS;
   const maxRetriesFor503 = options.maxRetriesFor503 ?? 1;
   const backoffMs = options.backoffMsFor503 ?? 500;
 
-  const userStr = context.userId || context.userEmail || 'unknown';
+  const userStr = context.userEmail || context.userId || 'unknown';
   const watcherStr = context.watcherId || 'unknown';
   const pairStr = context.pair || 'unknown';
   const timeframeStr = context.timeframe || 'unknown';
@@ -214,6 +215,11 @@ Thinking Level: ${thinkingLevel}`);
         abortSignal: controller.signal,
         signal: controller.signal
       };
+
+      console.log(`[GEMINI REQUEST]
+Model: ${model}
+User: ${userStr}
+Watcher: ${watcherStr}`);
 
       const fetchPromise = ai.models.generateContent({
         model: model,
@@ -443,7 +449,7 @@ export async function runGeminiRequest(
     supabase: any,
     userId: string,
     prompt: string,
-    model: string = 'gemini-2.5-flash',
+    model: string = GEMINI_MARKET_WATCHER_MODEL,
     config?: any
 ) {
     const keyRes = await resolveUserGeminiKey(supabase, userId, 'gemini-wrapper');
