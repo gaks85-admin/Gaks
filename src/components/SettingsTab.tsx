@@ -75,35 +75,31 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
   const [showKeyText, setShowKeyText] = useState(false);
 
   return (
-    <div className="space-y-10 animate-fade-in pb-20">
+    <div className="space-y-8 sm:space-y-10 pb-28">
       
       {/* Premium Profile Header Card - Centered Design */}
-      <div className="relative p-10 rounded-[40px] border border-zinc-200 dark:border-zinc-800/50 bg-gradient-to-b from-zinc-50 to-white dark:from-[#121214] dark:to-[#08080a] overflow-hidden shadow-2xl">
-        {/* Subtle glow effect */}
-        <div className="absolute -top-20 -left-20 w-64 h-64 bg-zinc-500/5 blur-[100px] rounded-full"></div>
-        <div className="absolute -bottom-20 -right-20 w-64 h-64 bg-zinc-500/5 blur-[100px] rounded-full"></div>
-        
+      <div className="relative p-6 sm:p-10 rounded-3xl sm:rounded-[40px] border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-[#121214] shadow-sm sm:shadow-md">
         <div className="relative flex flex-col items-center text-center space-y-6">
           {/* Avatar Container */}
           <div className="relative group">
-            <div className="w-28 h-28 rounded-[32px] bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800/80 flex items-center justify-center text-zinc-900 dark:text-white text-4xl font-bold uppercase overflow-hidden shadow-2xl group-hover:border-zinc-300 dark:group-hover:border-zinc-700 transition-all duration-500">
+            <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-3xl bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 flex items-center justify-center text-zinc-900 dark:text-white text-3xl sm:text-4xl font-bold uppercase shadow-xs">
               {profileAvatarUrl ? (
-                <img src={profileAvatarUrl} alt="" className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110" referrerPolicy="no-referrer" />
+                <img src={profileAvatarUrl} alt="" className="w-full h-full object-cover rounded-3xl" referrerPolicy="no-referrer" />
               ) : (
-                <span className="bg-gradient-to-br from-zinc-950 to-zinc-600 dark:from-white dark:to-zinc-400 bg-clip-text text-transparent">
+                <span className="text-zinc-900 dark:text-zinc-100">
                   {profileFullName ? profileFullName.charAt(0) : 'U'}
                 </span>
               )}
             </div>
             {/* Status Ring */}
             <div className="absolute -bottom-1 -right-1 w-8 h-8 rounded-2xl bg-white dark:bg-[#0c0c0e] border border-zinc-200 dark:border-zinc-800 flex items-center justify-center">
-              <div className="w-3 h-3 rounded-full bg-white shadow-[0_0_12px_rgba(255,255,255,0.6)]"></div>
+              <div className="w-3 h-3 rounded-full bg-emerald-500"></div>
             </div>
           </div>
 
           <div className="space-y-3">
             <div className="flex flex-col items-center gap-2">
-              <h2 className="text-3xl font-semibold text-zinc-950 dark:text-white tracking-tighter font-display">{profileFullName || 'Gaks User'}</h2>
+              <h2 className="text-2xl sm:text-3xl font-semibold text-zinc-950 dark:text-white tracking-tighter font-display">{profileFullName || 'Gaks User'}</h2>
               <div className="flex items-center gap-2">
                 <span className="inline-flex px-3 py-1 rounded-full bg-zinc-200 dark:bg-zinc-800/50 border border-zinc-300 dark:border-zinc-700/50 text-zinc-800 dark:text-zinc-200 text-[10px] font-bold uppercase tracking-widest">
                   {profilePlan || 'Free'} Plan
@@ -114,7 +110,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
             </div>
             
             <div className="pt-2 flex items-center justify-center gap-3">
-              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-zinc-100/50 dark:bg-zinc-950/40 border border-zinc-200 dark:border-zinc-900/50">
+              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800">
                 <Shield className="w-3 h-3 text-zinc-400" />
                 <span className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-widest">Database Synced</span>
               </div>
@@ -133,11 +129,11 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
             <h3 className="text-xs font-bold text-zinc-900 dark:text-white uppercase tracking-widest">Profile Configuration</h3>
           </div>
           
-          <form onSubmit={handleUpdateProfile} className="p-8 rounded-[32px] border border-zinc-100 dark:border-zinc-900 bg-zinc-50/50 dark:bg-[#0c0c0e]/60 space-y-6">
+          <form onSubmit={handleUpdateProfile} className="p-5 sm:p-8 rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-[#0c0c0e] space-y-6">
             <div className="space-y-4">
               <div className="space-y-2">
                 <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-500 block ml-1">Full Name</label>
-                <div className="relative rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950/40 focus-within:border-zinc-400 dark:focus-within:border-zinc-700 transition-all overflow-hidden">
+                <div className="relative rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 focus-within:border-zinc-400 dark:focus-within:border-zinc-600 transition-colors">
                   <input
                     type="text"
                     value={profileFullName}
@@ -151,7 +147,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
 
               <div className="space-y-2">
                 <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-500 block ml-1">Profile Image URL</label>
-                <div className="relative rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950/40 focus-within:border-zinc-400 dark:focus-within:border-zinc-700 transition-all overflow-hidden">
+                <div className="relative rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 focus-within:border-zinc-400 dark:focus-within:border-zinc-600 transition-colors">
                   <input
                     type="url"
                     value={profileAvatarUrl}
@@ -178,10 +174,10 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
                     return (
                       <div
                         key={plan.id}
-                        className={`w-full text-left p-4 rounded-2xl border transition-all relative ${
+                        className={`w-full text-left p-4 rounded-2xl border transition-colors relative ${
                           isSelected
-                            ? 'bg-zinc-950 dark:bg-zinc-900/60 text-white border-zinc-950 dark:border-zinc-500 shadow-md'
-                            : 'bg-white dark:bg-zinc-950/20 border-zinc-200 dark:border-zinc-800/80 text-zinc-900 dark:text-zinc-300 opacity-90'
+                            ? 'bg-zinc-950 dark:bg-zinc-900 text-white border-zinc-950 dark:border-zinc-600 shadow-xs'
+                            : 'bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 text-zinc-900 dark:text-zinc-300'
                         }`}
                       >
                         <div className="flex items-center justify-between">
@@ -195,7 +191,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
                                   Current Plan
                                 </span>
                               ) : isPaid ? (
-                                <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-zinc-100 dark:bg-zinc-800/80 border border-zinc-200 dark:border-zinc-700/60 text-zinc-600 dark:text-zinc-400 text-[8px] font-bold uppercase tracking-widest">
+                                <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 text-[8px] font-bold uppercase tracking-widest">
                                   Stripe Required
                                 </span>
                               ) : null}
@@ -214,7 +210,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
                                 type="button"
                                 disabled
                                 title="Paid subscription via Stripe integration coming soon"
-                                className="mt-2 px-2.5 py-1 rounded-lg bg-zinc-100 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700/50 text-zinc-400 text-[9px] font-bold uppercase tracking-wider cursor-not-allowed opacity-60"
+                                className="mt-2 px-2.5 py-1 rounded-lg bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-400 text-[9px] font-bold uppercase tracking-wider cursor-not-allowed opacity-60"
                               >
                                 Upgrade Soon
                               </button>
@@ -223,7 +219,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
                         </div>
                         {isSelected && (
                           <div className="absolute top-2 right-2">
-                            <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,1)]"></div>
+                            <div className="w-1.5 h-1.5 rounded-full bg-emerald-400"></div>
                           </div>
                         )}
                       </div>
@@ -239,7 +235,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
             <button
               type="submit"
               disabled={isProfileUpdating}
-              className="w-full flex items-center justify-center gap-2 px-5 py-4 rounded-full bg-zinc-900 dark:bg-white text-xs font-bold text-white dark:text-black hover:bg-zinc-800 dark:hover:bg-zinc-200 transition-all cursor-pointer disabled:opacity-50"
+              className="w-full flex items-center justify-center gap-2 px-5 py-4 rounded-full bg-zinc-900 dark:bg-white text-xs font-bold text-white dark:text-black hover:bg-zinc-800 dark:hover:bg-zinc-200 transition-colors cursor-pointer disabled:opacity-50"
             >
               {isProfileUpdating ? (
                 <div className="w-4 h-4 rounded-full border-2 border-white dark:border-black border-t-transparent animate-spin"></div>
@@ -266,7 +262,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
                 <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-[11px] font-semibold">
                   {geminiStatus === 'connected' && (
                     <>
-                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                      <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
                       <span className="text-emerald-600 dark:text-emerald-400">Connected</span>
                     </>
                   )}
@@ -328,7 +324,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
               </div>
             </div>
             
-            <div className="p-8 rounded-[32px] border border-zinc-100 dark:border-zinc-900 bg-zinc-50/50 dark:bg-[#0c0c0e]/60 space-y-6">
+            <div className="p-5 sm:p-8 rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-[#0c0c0e] space-y-6">
               <div className="space-y-3">
                 <p className="text-xs text-zinc-600 dark:text-zinc-300 leading-relaxed font-medium">
                   Gaks AI supports current Gemini authorization keys (<code className="text-amber-600 dark:text-amber-400 font-mono">AQ...</code>) and standard Gemini API keys (<code className="text-amber-600 dark:text-amber-400 font-mono">AIza...</code>).
@@ -340,25 +336,25 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
                     href={GEMINI_API_KEY_URL}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-gradient-to-r from-amber-500/10 to-amber-600/10 hover:from-amber-500/20 hover:to-amber-600/20 border border-amber-500/30 text-amber-600 dark:text-amber-400 text-xs font-bold transition-all shadow-xs group cursor-pointer"
+                    className="inline-flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-600 dark:text-amber-400 text-xs font-bold transition-colors cursor-pointer"
                   >
                     <span>Get Gemini API Key →</span>
-                    <ExternalLink className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
+                    <ExternalLink className="w-3.5 h-3.5" />
                   </a>
                 </div>
               </div>
 
               {/* 3-Step Guided Onboarding Helper */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-1">
-                <div className="p-3.5 rounded-2xl bg-white dark:bg-zinc-950/40 border border-zinc-200/80 dark:border-zinc-800/80 space-y-1">
+                <div className="p-3.5 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 space-y-1">
                   <div className="text-[10px] font-bold text-amber-600 dark:text-amber-400 uppercase tracking-widest">Step 1 — Get credential</div>
                   <p className="text-[11px] text-zinc-600 dark:text-zinc-400 leading-snug">Open Google AI Studio and copy your Gemini API key or authorization credential.</p>
                 </div>
-                <div className="p-3.5 rounded-2xl bg-white dark:bg-zinc-950/40 border border-zinc-200/80 dark:border-zinc-800/80 space-y-1">
+                <div className="p-3.5 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 space-y-1">
                   <div className="text-[10px] font-bold text-amber-600 dark:text-amber-400 uppercase tracking-widest">Step 2 — Paste credential</div>
                   <p className="text-[11px] text-zinc-600 dark:text-zinc-400 leading-snug">Paste your key below. Both standard and authorization formats are accepted.</p>
                 </div>
-                <div className="p-3.5 rounded-2xl bg-white dark:bg-zinc-950/40 border border-zinc-200/80 dark:border-zinc-800/80 space-y-1">
+                <div className="p-3.5 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 space-y-1">
                   <div className="text-[10px] font-bold text-amber-600 dark:text-amber-400 uppercase tracking-widest">Step 3 — Verify & Save</div>
                   <p className="text-[11px] text-zinc-600 dark:text-zinc-400 leading-snug">Test the credential before saving. Only authenticated credentials can be saved.</p>
                 </div>
@@ -366,7 +362,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
 
               {/* 403 Permission Denied Troubleshooting Alert */}
               {(geminiStatus === 'permission_denied' || geminiStatus === 'PERMISSION_ERROR' || geminiTestResult?.status === 'permission_denied' || geminiSaveError?.includes('denied access')) && (
-                <div className="p-4 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-700 dark:text-rose-300 space-y-2 text-xs">
+                <div className="p-4 rounded-2xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-200 space-y-2 text-xs">
                   <div className="flex items-center gap-2 font-bold text-rose-800 dark:text-rose-200">
                     <AlertCircle className="w-4 h-4 text-rose-500 flex-shrink-0" />
                     <span>Google Project Denied Access (403 Permission Denied)</span>
@@ -396,7 +392,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
                       </span>
                     )}
                   </div>
-                  <div className="relative rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950/40 focus-within:border-zinc-400 dark:focus-within:border-zinc-700 transition-all overflow-hidden flex items-center pr-2">
+                  <div className="relative rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 focus-within:border-zinc-400 dark:focus-within:border-zinc-600 transition-colors flex items-center pr-2">
                     <input
                       type={showKeyText ? "text" : "password"}
                       value={geminiKey}
@@ -420,7 +416,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
                     type="button"
                     onClick={handleTestGeminiKey}
                     disabled={isGeminiKeyTesting || isGeminiKeySaving || !geminiKey.trim()}
-                    className="w-full sm:w-1/2 flex items-center justify-center gap-2 px-5 py-3 rounded-full bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-xs font-bold text-zinc-900 dark:text-white hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="w-full sm:w-1/2 flex items-center justify-center gap-2 px-5 py-3 rounded-full bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-xs font-bold text-zinc-900 dark:text-white hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     {isGeminiKeyTesting ? (
                       <>
@@ -439,7 +435,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
                     type="button"
                     onClick={handleSaveGeminiKey}
                     disabled={isGeminiKeySaving || isGeminiKeyTesting || !geminiKey.trim()}
-                    className="w-full sm:w-1/2 flex items-center justify-center gap-2 px-5 py-3 rounded-full bg-zinc-900 dark:bg-white text-xs font-bold text-white dark:text-black hover:bg-zinc-800 dark:hover:bg-zinc-200 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed shadow-sm"
+                    className="w-full sm:w-1/2 flex items-center justify-center gap-2 px-5 py-3 rounded-full bg-zinc-900 dark:bg-white text-xs font-bold text-white dark:text-black hover:bg-zinc-800 dark:hover:bg-zinc-200 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed shadow-xs"
                   >
                     {isGeminiKeySaving ? (
                       <>
@@ -471,10 +467,10 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
                 {geminiTestResult && (
                   <div className={`p-3.5 rounded-2xl border text-xs font-semibold flex items-center gap-2 ${
                     geminiTestResult.status === 'connected' || geminiTestResult.success
-                      ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400'
+                      ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300'
                       : geminiTestResult.status === 'quota_exhausted' || geminiTestResult.status === 'temporary_error' || geminiTestResult.status === 'timeout'
-                      ? 'bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-400'
-                      : 'bg-rose-500/10 border-rose-500/30 text-rose-600 dark:text-rose-400'
+                      ? 'bg-amber-50 dark:bg-amber-950/40 border-amber-300 dark:border-amber-800 text-amber-700 dark:text-amber-300'
+                      : 'bg-rose-50 dark:bg-rose-950/40 border-rose-300 dark:border-rose-800 text-rose-700 dark:text-rose-300'
                   }`}>
                     <span>
                       {geminiTestResult.success
@@ -485,13 +481,13 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
                 )}
 
                 {geminiSaveError && (
-                  <div className="p-3.5 rounded-2xl border border-rose-500/30 bg-rose-500/10 text-rose-600 dark:text-rose-400 text-xs font-medium">
+                  <div className="p-3.5 rounded-2xl border border-rose-300 dark:border-rose-800 bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 text-xs font-medium">
                     {geminiSaveError}
                   </div>
                 )}
 
                 {geminiSaveSuccess && (
-                  <div className="p-3.5 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs font-medium">
+                  <div className="p-3.5 rounded-2xl border border-emerald-300 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 text-xs font-medium">
                     {geminiSaveSuccess}
                   </div>
                 )}
@@ -506,7 +502,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
                   <h3 className="text-xs font-bold text-zinc-900 dark:text-white uppercase tracking-widest">Appearance</h3>
                 </div>
                 
-                <div className="p-6 rounded-[28px] border border-zinc-100 dark:border-zinc-900 bg-zinc-50/50 dark:bg-[#0c0c0e]/60 flex items-center justify-between">
+                <div className="p-5 sm:p-6 rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-[#0c0c0e] flex items-center justify-between">
                   <div className="space-y-1">
                     <div className="text-xs font-semibold text-zinc-900 dark:text-white">Interface Theme</div>
                     <div className="text-[11px] text-zinc-500">Currently set to {theme === 'dark' ? 'Dark Mode' : 'Light Mode'}</div>
@@ -515,7 +511,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
                   <button
                     type="button"
                     onClick={toggleTheme}
-                    className="px-4 py-2 rounded-xl bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-xs font-bold text-zinc-900 dark:text-white hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-all cursor-pointer flex items-center gap-2"
+                    className="px-4 py-2 rounded-xl bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-xs font-bold text-zinc-900 dark:text-white hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors cursor-pointer flex items-center gap-2"
                   >
                     {theme === 'dark' ? (
                       <>
@@ -540,15 +536,15 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
       <div className="flex flex-col md:flex-row items-center gap-4">
         <button
           onClick={handleLogout}
-          className="w-full md:w-auto px-8 py-4 rounded-full bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-xs font-bold text-zinc-700 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white hover:border-zinc-300 dark:hover:border-zinc-700 transition-all flex items-center justify-center gap-2 cursor-pointer shadow-xs"
+          className="w-full md:w-auto px-8 py-4 rounded-full bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-xs font-bold text-zinc-700 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white hover:border-zinc-300 dark:hover:border-zinc-700 transition-colors flex items-center justify-center gap-2 cursor-pointer shadow-xs"
         >
           <LogOut className="w-4 h-4" />
           <span>Sign Out of Session</span>
         </button>
         
-        <div className="flex-1 p-5 rounded-3xl border border-zinc-200 dark:border-zinc-900 bg-zinc-50 dark:bg-zinc-950/20 flex items-center gap-3">
+        <div className="flex-1 p-5 rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-[#0c0c0e] flex items-center gap-3">
           <Shield className="w-4 h-4 text-zinc-400 dark:text-zinc-600 shrink-0" />
-          <p className="text-[10px] text-zinc-500 dark:text-zinc-600 leading-relaxed">
+          <p className="text-[10px] text-zinc-500 dark:text-zinc-400 leading-relaxed">
             Identity managed by Supabase Auth. Data isolated via RLS policies.
           </p>
         </div>
