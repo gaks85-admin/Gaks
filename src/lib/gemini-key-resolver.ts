@@ -113,11 +113,12 @@ export interface GeminiQuotaDetails {
 
 export interface GeminiErrorClassification {
   profileStatus: 'INVALID_KEY' | 'QUOTA_EXHAUSTED' | 'TEMP_ERROR' | 'NEEDS_ATTENTION';
-  diagnosticStatus: 'INVALID_KEY' | 'QUOTA_RPM' | 'QUOTA_TPM' | 'QUOTA_RPD' | 'QUOTA_UNKNOWN' | 'TIMEOUT' | 'TEMPORARY_ERROR' | 'INVALID_REQUEST' | 'PERMISSION_ERROR' | 'API_ERROR';
+  diagnosticStatus: 'INVALID_KEY' | 'QUOTA_RPM' | 'QUOTA_TPM' | 'QUOTA_RPD' | 'QUOTA_UNKNOWN' | 'TIMEOUT' | 'TEMPORARY_ERROR' | 'INVALID_REQUEST' | 'PERMISSION_ERROR' | 'CANCELLED' | 'API_ERROR';
   cleanErrorMessage: string;
   is503: boolean;
   is504: boolean;
   isTimeout: boolean;
+  isCancelled: boolean;
   isQuota: boolean;
   quotaDetails?: GeminiQuotaDetails;
 }
@@ -197,17 +198,30 @@ export function classifyAndRedactGeminiError(error: any): GeminiErrorClassificat
   const rpcLower = jsonRpcStatus.toLowerCase();
 
   let profileStatus: 'INVALID_KEY' | 'QUOTA_EXHAUSTED' | 'TEMP_ERROR' | 'NEEDS_ATTENTION' = 'NEEDS_ATTENTION';
-  let diagnosticStatus: 'INVALID_KEY' | 'QUOTA_RPM' | 'QUOTA_TPM' | 'QUOTA_RPD' | 'QUOTA_UNKNOWN' | 'TIMEOUT' | 'TEMPORARY_ERROR' | 'INVALID_REQUEST' | 'PERMISSION_ERROR' | 'API_ERROR' = 'API_ERROR';
+  let diagnosticStatus: 'INVALID_KEY' | 'QUOTA_RPM' | 'QUOTA_TPM' | 'QUOTA_RPD' | 'QUOTA_UNKNOWN' | 'TIMEOUT' | 'TEMPORARY_ERROR' | 'INVALID_REQUEST' | 'PERMISSION_ERROR' | 'CANCELLED' | 'API_ERROR' = 'API_ERROR';
 
   const isInvalidDeadline = lowerMsg.includes('manually set deadline') || lowerMsg.includes('minimum allowed deadline');
   const is400 = errStatus === 400 || lowerMsg.includes('invalid argument') || lowerMsg.includes('invalid_argument') || lowerMsg.includes('bad request') || isInvalidDeadline;
   const is401 = errStatus === 401 || lowerMsg.includes('invalid api key') || lowerMsg.includes('access_token_type_unsupported') || lowerMsg.includes('unauthenticated') || lowerMsg.includes('api_key_invalid');
   const is403 = errStatus === 403 || rpcLower === 'permission_denied' || lowerMsg.includes('permission denied') || lowerMsg.includes('forbidden') || lowerMsg.includes('denied access');
 
-  const isTimeout = !is400 && !is401 && !is403 && (lowerMsg.includes('timeout') || lowerMsg.includes('etimedout') || error?.name === 'TimeoutError' || error?.name === 'AbortError' || lowerMsg.includes('abort'));
-  const is504 = !is400 && !is401 && !is403 && !isTimeout && (errStatus === 504 || lowerMsg.includes('504') || lowerMsg.includes('deadline_exceeded') || lowerMsg.includes('deadline expired'));
-  const is503 = !is400 && !is401 && !is403 && !isTimeout && !is504 && (errStatus === 503 || lowerMsg.includes('503') || lowerMsg.includes('unavailable') || lowerMsg.includes('high demand') || lowerMsg.includes('spikes in demand'));
-  const isQuota = !is400 && !is401 && !is403 && !isTimeout && !is504 && !is503 && (errStatus === 429 || lowerMsg.includes('429') || lowerMsg.includes('resource_exhausted') || lowerMsg.includes('quota exceeded') || lowerMsg.includes('rate limit') || lowerMsg.includes('retryinfo') || lowerMsg.includes('retrydelay'));
+  const isTimeout = !is400 && !is401 && !is403 && (lowerMsg.includes('timeout') || lowerMsg.includes('timed out') || lowerMsg.includes('etimedout') || error?.name === 'TimeoutError');
+  const isCancelled = !is400 && !is401 && !is403 && !isTimeout && (
+    errStatus === 499 ||
+    rpcLower === 'cancelled' ||
+    rpcLower === 'canceled' ||
+    lowerMsg.includes('operation was cancelled') ||
+    lowerMsg.includes('operation was canceled') ||
+    lowerMsg.includes('request was cancelled') ||
+    lowerMsg.includes('request was canceled') ||
+    lowerMsg.includes('context canceled') ||
+    lowerMsg.includes('context cancelled') ||
+    error?.name === 'AbortError' ||
+    error?.name === 'CanceledError'
+  );
+  const is504 = !is400 && !is401 && !is403 && !isTimeout && !isCancelled && (errStatus === 504 || lowerMsg.includes('504') || lowerMsg.includes('deadline_exceeded') || lowerMsg.includes('deadline expired'));
+  const is503 = !is400 && !is401 && !is403 && !isTimeout && !isCancelled && !is504 && (errStatus === 503 || lowerMsg.includes('503') || lowerMsg.includes('unavailable') || lowerMsg.includes('high demand') || lowerMsg.includes('spikes in demand'));
+  const isQuota = !is400 && !is401 && !is403 && !isTimeout && !isCancelled && !is504 && !is503 && (errStatus === 429 || lowerMsg.includes('429') || lowerMsg.includes('resource_exhausted') || lowerMsg.includes('quota exceeded') || lowerMsg.includes('rate limit') || lowerMsg.includes('retryinfo') || lowerMsg.includes('retrydelay'));
 
   let quotaDetails: GeminiQuotaDetails | undefined;
 
@@ -237,6 +251,10 @@ export function classifyAndRedactGeminiError(error: any): GeminiErrorClassificat
   } else if (isTimeout) {
     profileStatus = 'TEMP_ERROR';
     diagnosticStatus = 'TIMEOUT';
+  } else if (isCancelled) {
+    profileStatus = 'TEMP_ERROR';
+    diagnosticStatus = 'CANCELLED';
+    finalCleanMessage = 'The operation was cancelled';
   } else if (is503 || errStatus >= 500 || lowerMsg.includes('gateway') || lowerMsg.includes('network')) {
     profileStatus = 'TEMP_ERROR';
     diagnosticStatus = 'TEMPORARY_ERROR';
@@ -252,6 +270,7 @@ export function classifyAndRedactGeminiError(error: any): GeminiErrorClassificat
     is503,
     is504,
     isTimeout,
+    isCancelled,
     isQuota,
     quotaDetails
   };

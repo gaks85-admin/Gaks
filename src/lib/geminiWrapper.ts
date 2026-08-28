@@ -4,7 +4,7 @@ import { sendTelegramMessage } from './telegramWrapper.js';
 import { resolveUserGeminiKey, classifyAndRedactGeminiError, GeminiQuotaDetails, redactApiKeyInText } from './gemini-key-resolver.js';
 
 export const GEMINI_API_DEADLINE_MS = 10_000;
-export const GEMINI_APPLICATION_TIMEOUT_MS = 9_500;
+export const GEMINI_APPLICATION_TIMEOUT_MS = 8_000;
 export const GEMINI_MARKET_WATCHER_MODEL = 'gemini-3.6-flash';
 
 // Simplified Error Classification
@@ -47,7 +47,7 @@ export function classifyGeminiError(error: any): GeminiErrorType {
     const { diagnosticStatus } = classifyAndRedactGeminiError(error);
     if (diagnosticStatus === 'INVALID_KEY' || diagnosticStatus === 'PERMISSION_ERROR') return 'invalid_key';
     if (diagnosticStatus.startsWith('QUOTA_')) return 'quota_exceeded';
-    if (diagnosticStatus === 'TIMEOUT' || diagnosticStatus === 'TEMPORARY_ERROR') return 'temporary_failure';
+    if (diagnosticStatus === 'TIMEOUT' || diagnosticStatus === 'TEMPORARY_ERROR' || diagnosticStatus === 'CANCELLED') return 'temporary_failure';
     return 'unknown_error';
 }
 
@@ -55,7 +55,7 @@ export interface BoundedGeminiOptions {
   model?: string;
   contents: string;
   config?: any;
-  timeoutMs?: number; // Application-level timeout (default 10500ms)
+  timeoutMs?: number; // Application-level timeout (default 8000ms)
   apiDeadlineMs?: number; // Gemini API deadline (default 10000ms, MUST be >= 10000ms)
   maxRetriesFor503?: number; // default 1 (max 2 attempts total)
   backoffMsFor503?: number; // default 500ms
@@ -65,7 +65,7 @@ export interface BoundedGeminiOptions {
 export interface BoundedGeminiResult {
   success: boolean;
   text?: string;
-  errorType?: 'TIMEOUT' | 'TEMPORARY_ERROR' | 'QUOTA_EXHAUSTED' | 'INVALID_CREDENTIALS' | 'PERMISSION_ERROR' | 'INVALID_REQUEST' | 'UNKNOWN_ERROR';
+  errorType?: 'TIMEOUT' | 'TEMPORARY_ERROR' | 'QUOTA_EXHAUSTED' | 'INVALID_CREDENTIALS' | 'PERMISSION_ERROR' | 'INVALID_REQUEST' | 'CANCELLED' | 'UNKNOWN_ERROR';
   diagnosticStatus?: string;
   quotaDetails?: GeminiQuotaDetails;
   cleanErrorMessage?: string;
@@ -200,6 +200,7 @@ Thinking Level: ${thinkingLevel}`);
 
     const controller = new AbortController();
     let timeoutTimer: NodeJS.Timeout | null = null;
+    let didTimeout = false;
 
     try {
       const mergedConfig = {
@@ -227,8 +228,14 @@ Watcher: ${watcherStr}`);
         config: mergedConfig
       });
 
+      // Safely catch late rejections on the fetch promise to prevent unhandled promise rejections
+      fetchPromise.catch(() => {
+        // Handled silently to avoid polluting late rejection logs after timeout or cancellation
+      });
+
       const timeoutPromise = new Promise<never>((_, reject) => {
         timeoutTimer = setTimeout(() => {
+          didTimeout = true;
           controller.abort();
           const err = new Error(`Gemini request timed out after ${effectiveAppTimeoutMs}ms`);
           err.name = 'TimeoutError';
@@ -273,7 +280,16 @@ Status: SUCCESS`);
       if (timeoutTimer) clearTimeout(timeoutTimer);
       const attemptDuration = Date.now() - attemptStart;
       const totalDuration = Date.now() - startTime;
-      const { diagnosticStatus, cleanErrorMessage, is503, is504, isTimeout, isQuota, quotaDetails } = classifyAndRedactGeminiError(err);
+      const classification = classifyAndRedactGeminiError(err);
+      let { diagnosticStatus, cleanErrorMessage, is503, is504, isTimeout, isCancelled, isQuota, quotaDetails } = classification;
+
+      // If the cancellation was caused by our own timeout mechanism
+      if (didTimeout) {
+        isTimeout = true;
+        isCancelled = false;
+        diagnosticStatus = 'TIMEOUT';
+        cleanErrorMessage = `Gemini request timed out after ${effectiveAppTimeoutMs}ms`;
+      }
 
       console.log(`[GEMINI REQUEST END]
 User: ${userStr}
@@ -284,16 +300,32 @@ Model: ${model}
 DurationMs: ${attemptDuration}
 Status: ${diagnosticStatus}`);
 
-      // 1. LOCAL APPLICATION TIMEOUT
-      if (isTimeout || err?.name === 'TimeoutError' || err?.name === 'AbortError' || diagnosticStatus === 'TIMEOUT') {
-        console.log(`[GEMINI TIMEOUT] User: ${userStr} | Watcher: ${watcherStr} | Pair: ${pairStr} | TF: ${timeframeStr} | Model: ${model} | App Timeout: ${effectiveAppTimeoutMs}ms | API Deadline: ${effectiveApiDeadlineMs}ms
-DurationMs: ${attemptDuration}`);
+      // 1. LOCAL APPLICATION TIMEOUT (Our timeout mechanism fired or TimeoutError)
+      if (isTimeout || err?.name === 'TimeoutError' || diagnosticStatus === 'TIMEOUT') {
+        const timeoutMsg = `Gemini request timed out after ${effectiveAppTimeoutMs}ms`;
+        console.log(`[GEMINI TIMEOUT] User: ${userStr} | Watcher: ${watcherStr} | Attempt: ${attempt} | Timeout: ${effectiveAppTimeoutMs}ms`);
 
         return {
           success: false,
           errorType: 'TIMEOUT',
           diagnosticStatus: 'TIMEOUT',
-          cleanErrorMessage: cleanErrorMessage || `Gemini request timed out after ${effectiveAppTimeoutMs}ms`,
+          cleanErrorMessage: timeoutMsg,
+          attemptsExecuted: attempt,
+          durationMs: totalDuration,
+          retried
+        };
+      }
+
+      // 2. GENUINE EXTERNAL / CALLER / NETWORK CANCELLATION (didTimeout === false)
+      if (isCancelled || diagnosticStatus === 'CANCELLED') {
+        const cancelMsg = cleanErrorMessage || 'The operation was cancelled by caller or network';
+        console.log(`[GEMINI CANCELLED] User: ${userStr} | Watcher: ${watcherStr} | Attempt: ${attempt} | Reason: caller/network cancellation`);
+
+        return {
+          success: false,
+          errorType: 'CANCELLED',
+          diagnosticStatus: 'CANCELLED',
+          cleanErrorMessage: cancelMsg,
           attemptsExecuted: attempt,
           durationMs: totalDuration,
           retried

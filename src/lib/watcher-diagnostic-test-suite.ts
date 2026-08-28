@@ -154,6 +154,20 @@ export async function runDiagnosticTestSuite(): Promise<{ total: number; passed:
     results.push({ scenario: '7. Gemini 8s Timeout Classification', passed: false, details: err.message });
   }
 
+  // 8. Gemini Cancellation Classification
+  try {
+    const cancelErr = new Error('The operation was cancelled.');
+    const classified = classifyAndRedactGeminiError(cancelErr);
+    const pass = classified.isCancelled && classified.diagnosticStatus === 'CANCELLED';
+    results.push({
+      scenario: '8. Gemini Operation Cancelled Classification',
+      passed: pass,
+      details: pass ? 'Operation was cancelled correctly classified as CANCELLED' : `Got status ${classified.diagnosticStatus}`
+    });
+  } catch (err: any) {
+    results.push({ scenario: '8. Gemini Operation Cancelled Classification', passed: false, details: err.message });
+  }
+
   const passedCount = results.filter(r => r.passed).length;
   return {
     total: results.length,

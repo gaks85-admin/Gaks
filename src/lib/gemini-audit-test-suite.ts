@@ -129,13 +129,18 @@ export async function runGeminiAuditTestSuite(): Promise<{ passed: number; total
   assert(classF.profileStatus === 'QUOTA_EXHAUSTED', 'Test F2 - Profile status set to QUOTA_EXHAUSTED');
 
   // ==========================================
-  // TEST G: GEMINI API ERROR / TIMEOUT → NO_TRADE
+  // TEST G: GEMINI API ERROR / TIMEOUT / CANCELLATION → NO_TRADE
   // ==========================================
-  console.log("\n--- TEST G: Gemini API error / Timeout classification & NO_TRADE ---");
+  console.log("\n--- TEST G: Gemini API error / Timeout / Cancellation classification & NO_TRADE ---");
   const timeoutErr = { status: 503, message: 'Gateway Timeout connecting to Gemini upstream' };
   const classG = classifyAndRedactGeminiError(timeoutErr);
   assert(classG.diagnosticStatus === 'TIMEOUT', 'Test G1 - 503 Gateway Timeout classified as TIMEOUT');
   assert(classG.profileStatus === 'TEMP_ERROR', 'Test G2 - Profile status set to TEMP_ERROR');
+
+  const cancelErr = new Error('The operation was cancelled.');
+  const classCancel = classifyAndRedactGeminiError(cancelErr);
+  assert(classCancel.diagnosticStatus === 'CANCELLED', 'Test G3 - The operation was cancelled classified as CANCELLED');
+  assert(classCancel.profileStatus === 'TEMP_ERROR', 'Test G4 - Cancelled error profile status set to TEMP_ERROR');
 
   // ==========================================
   // TEST H: SUCCESSFUL GEMINI RESPONSE PROCEEDS

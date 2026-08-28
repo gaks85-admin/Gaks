@@ -1893,7 +1893,7 @@ Output ONLY valid JSON.
                       }
                     },
                     apiDeadlineMs: 10000,
-                    timeoutMs: 9500,
+                    timeoutMs: 8000,
                     maxRetriesFor503: 1,
                     backoffMsFor503: 500,
                     remainingGlobalBudgetMs: remainingBeforeGemini
@@ -1922,6 +1922,9 @@ Output ONLY valid JSON.
                     geminiCallsTimedOutCount++;
                     watchersSkippedByGeminiTimeoutCount++;
                     curReason = 'TIMEOUT';
+                  } else if (geminiRes.errorType === 'CANCELLED' || geminiRes.diagnosticStatus === 'CANCELLED') {
+                    tempErrorCount++;
+                    curReason = 'CANCELLED';
                   } else if (geminiRes.errorType === 'QUOTA_EXHAUSTED') {
                     quotaExhaustedUsers.add(userId);
                     geminiQuotaErrorsCount++;
