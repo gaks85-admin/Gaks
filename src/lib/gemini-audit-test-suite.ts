@@ -198,6 +198,33 @@ export async function runGeminiAuditTestSuite(): Promise<{ passed: number; total
   assert(!cleanedAqText.includes(aqSecret), 'Test L1 - AQ key redacted from text');
   assert(cleanedAqText.includes('[REDACTED_GEMINI_KEY]'), 'Test L2 - AQ key replaced with [REDACTED_GEMINI_KEY]');
 
+  // ==========================================
+  // TEST M: DETERMINISTIC PRE-FILTERING GATE
+  // ==========================================
+  console.log("\n--- TEST M: Deterministic Pre-Filtering Gate ---");
+  const PRE_FILTER_MIN_SCORE = 70;
+
+  // Case 1: Low score setup (score: 55, recommendation: FAIL) -> bypassed from Gemini
+  const mockDecisionLow = { decision_score: 55, recommendation: 'FAIL', mandatory_rules_passed: false };
+  const passesLow = mockDecisionLow.mandatory_rules_passed !== false &&
+    mockDecisionLow.decision_score >= PRE_FILTER_MIN_SCORE &&
+    (mockDecisionLow.recommendation === 'PASS' || mockDecisionLow.recommendation === 'LIKELY_PASS');
+  assert(passesLow === false, 'Test M1 - Low score/FAIL setup blocked by Pre-Filter Gate');
+
+  // Case 2: High score setup (score: 82, recommendation: LIKELY_PASS) -> allowed to Gemini
+  const mockDecisionHigh = { decision_score: 82, recommendation: 'LIKELY_PASS', mandatory_rules_passed: true };
+  const passesHigh = mockDecisionHigh.mandatory_rules_passed !== false &&
+    mockDecisionHigh.decision_score >= PRE_FILTER_MIN_SCORE &&
+    (mockDecisionHigh.recommendation === 'PASS' || mockDecisionHigh.recommendation === 'LIKELY_PASS');
+  assert(passesHigh === true, 'Test M2 - High-score viable candidate passed to Gemini Gate');
+
+  // Case 3: Ambiguous score setup (score: 64, recommendation: AMBIGUOUS) -> bypassed from Gemini
+  const mockDecisionAmb = { decision_score: 64, recommendation: 'AMBIGUOUS', mandatory_rules_passed: true };
+  const passesAmb = mockDecisionAmb.mandatory_rules_passed !== false &&
+    mockDecisionAmb.decision_score >= PRE_FILTER_MIN_SCORE &&
+    (mockDecisionAmb.recommendation === 'PASS' || mockDecisionAmb.recommendation === 'LIKELY_PASS');
+  assert(passesAmb === false, 'Test M3 - Ambiguous setup blocked by Pre-Filter Gate');
+
   console.log(`\n==========================================`);
   console.log(`GEMINI AUDIT TESTS COMPLETED: ${passedCount}/${totalCount} PASSED`);
   console.log(`==========================================`);

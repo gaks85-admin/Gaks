@@ -719,6 +719,8 @@ export default async function handler(req: any, res: any) {
     let geminiTimeoutsCount = 0;
     let geminiQuotaErrorsCount = 0;
     let geminiCallsSavedCount = 0;
+    let geminiCallsSavedByPreFilterCount = 0;
+    let watchersFilteredByDeterministicGateCount = 0;
     let watchersSkippedByGeminiFailureCount = 0;
     let signalsSuppressedAsDuplicatesCount = 0;
     let signalsSuppressedByMinSeparationCount = 0;
@@ -1596,16 +1598,52 @@ Reason: ${activeValidation.reason}`);
         let fallbackReason = '';
 
         const recommendation = decisionResult.recommendation; // PASS, LIKELY_PASS, AMBIGUOUS, FAIL
-        const executionMode = compiledStrategy.detector_validation?.execution_mode || 'HYBRID';
+        const executionMode = compiledStrategy.detector_validation?.execution_mode || compiledStrategy.strategy_mode || 'HYBRID';
 
-        if (recommendation === 'FAIL' && executionMode === 'RULE_ONLY') {
-          console.log(`Execution Mode: ${executionMode}`);
-          console.log(`Decision: ${recommendation}`);
-          console.log(`Stopping execution.`);
-          
-          analysis.reasoning = [decisionResult.explanation];
-          
-          // Store FAIL evaluation record
+        // =====================================================================
+        // DETERMINISTIC PRE-FILTERING GATE (STAGE 2)
+        // =====================================================================
+        // Only setups that satisfy mandatory rules, meet the quality score (>= 70%),
+        // and possess a viable deterministic recommendation (PASS or LIKELY_PASS)
+        // are allowed to invoke the Gemini AI Gate. All non-viable setups immediately
+        // resolve locally as NO_TRADE without calling the Gemini API.
+        // This preserves 100% of the Gemini free-tier RPM quota and cuts cron latency.
+        const PRE_FILTER_MIN_SCORE = 70;
+        const mandatoryPassed = decisionResult.mandatory_rules_passed !== false;
+        const meetsQualityThreshold = (decisionResult.decision_score ?? 0) >= PRE_FILTER_MIN_SCORE;
+        const isViableRecommendation = recommendation === 'PASS' || recommendation === 'LIKELY_PASS';
+        const isExplicitAiOnly = executionMode === 'AI_ONLY' && (decisionResult.decision_score ?? 0) >= 60;
+
+        const passesDeterministicGate = mandatoryPassed && (
+          (meetsQualityThreshold && isViableRecommendation) || isExplicitAiOnly
+        );
+
+        if (!passesDeterministicGate) {
+          console.log(`
+[DETERMINISTIC PRE-FILTER GATE: REJECTED (NO_TRADE)]
+Watcher ID: ${watcher.id}
+Pair: ${selectedPair}
+Timeframe: ${selectedTimeframe}
+Strategy Mode: ${compiledStrategy.strategy_mode || 'HYBRID'}
+Decision Score: ${decisionResult.decision_score.toFixed(1)}% (Threshold: >= ${PRE_FILTER_MIN_SCORE}%)
+Recommendation: ${recommendation}
+Mandatory Rules Passed: ${mandatoryPassed}
+Failed Mandatory: ${decisionResult.failed_mandatory_rules?.join(', ') || 'None'}
+Action: LOCAL_NO_TRADE (Gemini API Bypassed - Quota 100% Preserved)
+`.trim());
+
+          analysis.signal = 'NO_TRADE';
+          analysis.confidence = 0;
+          analysis.reasoning = [
+            decisionResult.no_trade_reason ||
+            decisionResult.explanation ||
+            `Deterministic pre-filter rejected setup: Score ${decisionResult.decision_score}% is below ${PRE_FILTER_MIN_SCORE}% threshold or recommendation is ${recommendation}.`
+          ];
+
+          geminiCallsSavedCount++;
+          geminiCallsSavedByPreFilterCount++;
+          watchersFilteredByDeterministicGateCount++;
+
           const scanDurationMs = Date.now() - scanStart;
           await recordEvaluation(supabase, {
             user_id: userId,
@@ -1616,18 +1654,17 @@ Reason: ${activeValidation.reason}`);
             decision_score: decisionResult.decision_score,
             matched_weight: decisionResult.matched_weight,
             possible_weight: decisionResult.possible_weight,
-            recommendation: 'FAIL',
+            recommendation: recommendation,
             mandatory_rules_passed: decisionResult.mandatory_rules_passed,
             matched_rules: decisionResult.matched_rules,
             failed_rules: decisionResult.failed_rules,
             gemini_used: false,
             trade_sent: false,
-            trade_reason: "Decision Engine recommendation is FAIL: " + decisionResult.explanation,
+            trade_reason: `Deterministic Pre-Filter Gate: Setup filtered out before Gemini (${decisionResult.explanation || 'Score below 70% threshold'})`,
             scan_duration_ms: scanDurationMs,
             decision_snapshot: decisionSnapshot
           });
 
-          // Update last_scan_at and last_analyzed_closed_candle_time and exit
           await supabase
             .from("watchers")
             .update({ 
@@ -1638,29 +1675,44 @@ Reason: ${activeValidation.reason}`);
             .eq("id", watcher.id);
 
           watchersProcessedCount++;
+          isWatcherSkipped = false;
+          results.push({ userId, symbol, tradeStatus: 'WAITING', result: 'Pre-filtered NO_TRADE' });
           return;
-        } else {
-          // Check if we force Gemini for FAIL in AI_ONLY or if AMBIGUOUS/requires_gemini is true
-          const forceGemini = (recommendation === 'FAIL' && executionMode === 'AI_ONLY');
-          requiresGemini = Boolean(decisionResult.requires_gemini || forceGemini || recommendation === 'AMBIGUOUS');
-          
-          if (!requiresGemini) {
-            console.log(`[Gemini Routing] Watcher: ${watcher.id} | Strategy Mode: ${compiledStrategy.strategy_mode || 'RULE_ONLY'} | Gemini Required: NO | Gemini Check: SKIPPED`);
-            if (userProfile?.gemini_status && userProfile.gemini_status !== 'READY') {
-              console.log(`[Gemini Isolation] RULE_ONLY watcher bypassed user Gemini status gate`);
-            }
-          } else {
-            console.log(`[Gemini Routing] Watcher: ${watcher.id} | Strategy Mode: ${compiledStrategy.strategy_mode || 'HYBRID'} | Gemini Required: YES | Gemini Check: REQUIRED`);
-          }
+        }
 
-          console.log(`
+        console.log(`
+[DETERMINISTIC PRE-FILTER GATE: PASSED]
+Watcher ID: ${watcher.id}
+Pair: ${selectedPair}
+Timeframe: ${selectedTimeframe}
+Strategy Mode: ${compiledStrategy.strategy_mode || 'HYBRID'}
+Decision Score: ${decisionResult.decision_score.toFixed(1)}%
+Recommendation: ${recommendation}
+Action: PROCEED_TO_EXECUTION_GATE
+`.trim());
+
+        // For setups passing deterministic pre-filter:
+        // RULE_ONLY mode executes local rule engine without Gemini.
+        // HYBRID or other AI modes proceed to the Gemini AI Gate.
+        requiresGemini = (executionMode !== 'RULE_ONLY');
+
+        if (!requiresGemini) {
+          console.log(`[Gemini Routing] Watcher: ${watcher.id} | Strategy Mode: ${compiledStrategy.strategy_mode || 'RULE_ONLY'} | Gemini Required: NO | Gemini Check: SKIPPED`);
+          if (userProfile?.gemini_status && userProfile.gemini_status !== 'READY') {
+            console.log(`[Gemini Isolation] RULE_ONLY watcher bypassed user Gemini status gate`);
+          }
+        } else {
+          console.log(`[Gemini Routing] Watcher: ${watcher.id} | Strategy Mode: ${compiledStrategy.strategy_mode || 'HYBRID'} | Gemini Required: YES | Gemini Check: REQUIRED`);
+        }
+
+        console.log(`
 [Decision Routing]
 Strategy Mode: ${compiledStrategy.strategy_mode || 'HYBRID'}
 Execution Mode: ${executionMode}
 Rule Score: ${decisionResult.decision_score}
 Rule Recommendation: ${recommendation}
 Requires Gemini: ${requiresGemini ? 'YES' : 'NO'}
-Reason: ${decisionResult.explanation || (requiresGemini ? 'Strategy configuration or score requires AI evaluation' : 'Rule evaluation sufficient')}
+Reason: ${decisionResult.explanation || (requiresGemini ? 'Passed deterministic pre-filter gate with high score; proceeding to Gemini AI validation' : 'Rule evaluation sufficient')}
 `.trim());
 
           if (requiresGemini) {
@@ -3260,7 +3312,6 @@ Source: ${brokerQuote.source}`);
         watchersProcessedCount++;
         isWatcherSkipped = false;
         results.push({ userId, symbol, tradeStatus: 'ACTIVE', signalsFound: 1, signalsSent: alertSent ? 1 : 0 });
-      }
       } catch (err: any) {
         const fallbackCtx: WatcherLogContext = typeof logCtx !== 'undefined' ? logCtx : await resolveWatcherUserContext(supabase, watcher);
         logWatcherError('WATCHER ERROR', fallbackCtx, err);
@@ -3324,9 +3375,11 @@ Source: ${brokerQuote.source}`);
     console.log(`Timeouts: ${geminiTimeoutsCount}`);
     console.log(`Quota Errors (429): ${geminiQuotaErrorsCount}`);
     console.log(`Skipped Due To Quota: ${skippedDueToQuotaCount}`);
+    console.log(`Filtered By Deterministic Pre-Filter: ${watchersFilteredByDeterministicGateCount}`);
     console.log(`Gemini Calls Executed: ${geminiCallsExecutedCount}`);
     console.log(`Gemini Calls Retried: ${geminiCallsRetriedCount}`);
     console.log(`Gemini Calls Saved: ${geminiCallsSavedCount}`);
+    console.log(`Gemini Calls Saved By Pre-Filter: ${geminiCallsSavedByPreFilterCount}`);
     console.log(`=================================================\n`);
 
     console.log(`LOG: Cron completed (Processed: ${watchersProcessedCount}, Sent: ${telegramMessagesSentCount})`);
@@ -3439,6 +3492,8 @@ Source: ${brokerQuote.source}`);
         geminiCallsExecuted: geminiCallsExecutedCount,
         geminiCallsRetried: geminiCallsRetriedCount,
         geminiCallsSaved: geminiCallsSavedCount,
+        geminiCallsSavedByPreFilter: geminiCallsSavedByPreFilterCount,
+        watchersFilteredByDeterministicGate: watchersFilteredByDeterministicGateCount,
         successfulExecutions: successfulGeminiExecutionsCount,
         watchersSkippedByGeminiFailure: watchersSkippedByGeminiFailureCount,
         circuitBreakerActive: geminiTemporarilyUnavailable

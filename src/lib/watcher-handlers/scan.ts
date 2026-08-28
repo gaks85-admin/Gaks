@@ -626,8 +626,19 @@ export default async function handler(req: any, res: any) {
 
     const recommendation = decisionResult.recommendation; // PASS, LIKELY_PASS, AMBIGUOUS, FAIL
     const executionMode = compiledStrategy.strategy_mode || 'HYBRID';
-    const forceGemini = (recommendation === 'FAIL' && executionMode === 'AI_ONLY');
-    const requiresGemini = Boolean(decisionResult.requires_gemini || forceGemini || recommendation === 'AMBIGUOUS');
+
+    // Deterministic Pre-Filtering Gate
+    const PRE_FILTER_MIN_SCORE = 70;
+    const mandatoryPassed = decisionResult.mandatory_rules_passed !== false;
+    const meetsQualityThreshold = (decisionResult.decision_score ?? 0) >= PRE_FILTER_MIN_SCORE;
+    const isViableRecommendation = recommendation === 'PASS' || recommendation === 'LIKELY_PASS';
+    const isExplicitAiOnly = executionMode === 'AI_ONLY' && (decisionResult.decision_score ?? 0) >= 60;
+
+    const passesDeterministicGate = mandatoryPassed && (
+      (meetsQualityThreshold && isViableRecommendation) || isExplicitAiOnly
+    );
+
+    const requiresGemini = passesDeterministicGate && (executionMode !== 'RULE_ONLY');
 
     console.log(`
 [Decision Routing]
@@ -635,8 +646,9 @@ Strategy Mode: ${compiledStrategy.strategy_mode || 'HYBRID'}
 Execution Mode: ${executionMode}
 Rule Score: ${decisionResult.decision_score}
 Rule Recommendation: ${recommendation}
+Passes Deterministic Gate: ${passesDeterministicGate ? 'YES' : 'NO'}
 Requires Gemini: ${requiresGemini ? 'YES' : 'NO'}
-Reason: ${decisionResult.explanation || (requiresGemini ? 'Strategy configuration or score requires AI evaluation' : 'Rule evaluation sufficient')}
+Reason: ${decisionResult.explanation || (requiresGemini ? 'Passed deterministic pre-filter gate with high score; proceeding to Gemini AI validation' : 'Rule evaluation sufficient or pre-filter filtered setup')}
 `.trim());
 
     if (requiresGemini) {
@@ -856,8 +868,8 @@ Fallback: NO_TRADE`.trim());
       }
     } else {
       // Gemini NOT required! Check recommendation
-      if (recommendation === 'FAIL' || recommendation === 'AMBIGUOUS') {
-        console.log(`[Decision Engine] Recommendation is ${recommendation}. Forcing NO_TRADE without Gemini approval.`);
+      if (recommendation === 'FAIL' || recommendation === 'AMBIGUOUS' || !passesDeterministicGate) {
+        console.log(`[Decision Engine] Recommendation is ${recommendation} (Passes Gate: ${passesDeterministicGate}). Forcing NO_TRADE without Gemini approval.`);
         analysis = {
           signal: 'NO_TRADE',
           confidence: 0,
@@ -865,7 +877,7 @@ Fallback: NO_TRADE`.trim());
           stopLoss: null,
           takeProfit: null,
           riskReward: null,
-          reasoning: [`Rejected by Decision Engine (${recommendation} without Gemini approval)`]
+          reasoning: [decisionResult.no_trade_reason || decisionResult.explanation || `Rejected by Deterministic Pre-Filter (${recommendation}, score: ${decisionResult.decision_score}%)`]
         };
       } else {
         console.log(`[Decision Engine] Recommendation is ${recommendation}. Evaluating local strategy engine.`);

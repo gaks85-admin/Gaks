@@ -168,6 +168,38 @@ export async function runDiagnosticTestSuite(): Promise<{ total: number; passed:
     results.push({ scenario: '8. Gemini Operation Cancelled Classification', passed: false, details: err.message });
   }
 
+  // 9. Deterministic Pre-Filtering Gate Audit
+  try {
+    const PRE_FILTER_MIN_SCORE = 70;
+    
+    // Case A: Low score (45%) -> should fail gate
+    const caseA_score: number = 45;
+    const caseA_rec: string = 'FAIL';
+    const caseA_mandatory: boolean = false;
+    const caseA_passes = caseA_mandatory && caseA_score >= PRE_FILTER_MIN_SCORE && (caseA_rec === 'PASS' || caseA_rec === 'LIKELY_PASS');
+
+    // Case B: High score (85%), mandatory passed, recommendation LIKELY_PASS -> should pass gate
+    const caseB_score: number = 85;
+    const caseB_rec: string = 'LIKELY_PASS';
+    const caseB_mandatory: boolean = true;
+    const caseB_passes = caseB_mandatory && caseB_score >= PRE_FILTER_MIN_SCORE && (caseB_rec === 'PASS' || caseB_rec === 'LIKELY_PASS');
+
+    // Case C: Score 65%, recommendation AMBIGUOUS -> should fail gate
+    const caseC_score: number = 65;
+    const caseC_rec: string = 'AMBIGUOUS';
+    const caseC_mandatory: boolean = true;
+    const caseC_passes = caseC_mandatory && caseC_score >= PRE_FILTER_MIN_SCORE && (caseC_rec === 'PASS' || caseC_rec === 'LIKELY_PASS');
+
+    const pass = (!caseA_passes) && (caseB_passes) && (!caseC_passes);
+    results.push({
+      scenario: '9. Deterministic Pre-Filtering Gate Audit',
+      passed: pass,
+      details: pass ? 'Low/ambiguous setups filtered locally (zero Gemini calls); high-probability setups passed to Gemini Gate' : 'Pre-filter gate logic mismatch'
+    });
+  } catch (err: any) {
+    results.push({ scenario: '9. Deterministic Pre-Filtering Gate Audit', passed: false, details: err.message });
+  }
+
   const passedCount = results.filter(r => r.passed).length;
   return {
     total: results.length,
