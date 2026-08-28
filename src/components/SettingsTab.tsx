@@ -288,6 +288,30 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
                       <span className="text-rose-600 dark:text-rose-400">Invalid key</span>
                     </>
                   )}
+                  {geminiStatus === 'temporary_error' && (
+                    <>
+                      <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+                      <span className="text-amber-600 dark:text-amber-400">Temporary Error (503)</span>
+                    </>
+                  )}
+                  {geminiStatus === 'timeout' && (
+                    <>
+                      <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+                      <span className="text-amber-600 dark:text-amber-400">Timeout</span>
+                    </>
+                  )}
+                  {geminiStatus === 'database_error' && (
+                    <>
+                      <span className="w-2 h-2 rounded-full bg-rose-500"></span>
+                      <span className="text-rose-600 dark:text-rose-400">Database Error</span>
+                    </>
+                  )}
+                  {geminiStatus === 'network_error' && (
+                    <>
+                      <span className="w-2 h-2 rounded-full bg-rose-500"></span>
+                      <span className="text-rose-600 dark:text-rose-400">Network Error</span>
+                    </>
+                  )}
                   {geminiStatus === 'connection_failed' && (
                     <>
                       <span className="w-2 h-2 rounded-full bg-rose-500"></span>
@@ -448,7 +472,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
                   <div className={`p-3.5 rounded-2xl border text-xs font-semibold flex items-center gap-2 ${
                     geminiTestResult.status === 'connected' || geminiTestResult.success
                       ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400'
-                      : geminiTestResult.status === 'quota_exhausted'
+                      : geminiTestResult.status === 'quota_exhausted' || geminiTestResult.status === 'temporary_error' || geminiTestResult.status === 'timeout'
                       ? 'bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-400'
                       : 'bg-rose-500/10 border-rose-500/30 text-rose-600 dark:text-rose-400'
                   }`}>
@@ -460,13 +484,13 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
                   </div>
                 )}
 
-                {geminiSaveError && !geminiTestResult && (
+                {geminiSaveError && (
                   <div className="p-3.5 rounded-2xl border border-rose-500/30 bg-rose-500/10 text-rose-600 dark:text-rose-400 text-xs font-medium">
                     {geminiSaveError}
                   </div>
                 )}
 
-                {geminiSaveSuccess && !geminiTestResult && (
+                {geminiSaveSuccess && (
                   <div className="p-3.5 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs font-medium">
                     {geminiSaveSuccess}
                   </div>

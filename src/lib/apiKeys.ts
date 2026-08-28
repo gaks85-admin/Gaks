@@ -2,6 +2,7 @@ import { GoogleGenAI } from '@google/genai';
 import { runGeminiRequest } from './geminiWrapper.js';
 import { executeBoundedGeminiCall } from './geminiWrapper.js';
 import { sendTelegramMessage } from './telegramWrapper.js';
+import { redactApiKeyInText } from './gemini-key-resolver.js';
 
 async function getSupabase() {
   const { supabase } = await import('../supabaseClient.js');
@@ -29,7 +30,16 @@ export function classifyCredentialType(key: string | null | undefined): Credenti
   return 'unknown';
 }
 
-export type GeminiTestStatus = 'connected' | 'invalid' | 'quota_exhausted' | 'connection_failed' | 'permission_denied';
+export type GeminiTestStatus =
+  | 'connected'
+  | 'invalid'
+  | 'quota_exhausted'
+  | 'connection_failed'
+  | 'permission_denied'
+  | 'timeout'
+  | 'temporary_error'
+  | 'database_error'
+  | 'network_error';
 
 export interface GeminiTestResult {
   success: boolean;
@@ -41,6 +51,7 @@ export interface GeminiTestResult {
   message: string;
   model?: string;
   errorType?: string;
+  httpStatus?: number;
 }
 
 /**
@@ -54,25 +65,43 @@ export function redactApiKey(key: string | null | undefined): string {
   return `${trimmed.slice(0, 4)}...${trimmed.slice(-4)}`;
 }
 
-/**
- * Safely parses Google Gemini API errors to extract http status, RPC error code, reason, and user message.
- */
-export function parseGeminiError(err: any): {
+export type ClassifiedErrorType =
+  | 'INVALID_REQUEST'
+  | 'INVALID_CREDENTIALS'
+  | 'PERMISSION_ERROR'
+  | 'QUOTA_EXHAUSTED'
+  | 'TEMPORARY_ERROR'
+  | 'TIMEOUT'
+  | 'DATABASE_ERROR'
+  | 'NETWORK_ERROR'
+  | 'UNKNOWN_ERROR';
+
+export interface ParsedGeminiError {
   status: number;
   code: string;
   reason?: string;
   message: string;
-} {
+  classifiedError: ClassifiedErrorType;
+  testStatus: GeminiTestStatus;
+}
+
+/**
+ * Safely parses Google Gemini API errors to extract http status, RPC error code, reason, and user message.
+ * Maps errors strictly to discrete classifications: 400, 401, 403, 429, 503, TIMEOUT, DATABASE_ERROR, NETWORK_ERROR.
+ */
+export function parseGeminiError(err: any): ParsedGeminiError {
   let status = err?.status || err?.statusCode || err?.response?.status || 0;
-  let code = 'UNKNOWN_ERROR';
+  let code = typeof err?.code === 'string' ? err.code : 'UNKNOWN_ERROR';
   let reason: string | undefined = undefined;
   let rawMessage = typeof err?.message === 'string' ? err.message : String(err || '');
 
-  if (rawMessage.trim().startsWith('{') && rawMessage.trim().endsWith('}')) {
+  // Safely unwrap JSON if error message contains serialized JSON response
+  const trimmedMsg = rawMessage.trim();
+  if (trimmedMsg.startsWith('{') && trimmedMsg.endsWith('}')) {
     try {
-      const parsed = JSON.parse(rawMessage.trim());
+      const parsed = JSON.parse(trimmedMsg);
       if (parsed?.error) {
-        if (parsed.error.code) status = parsed.error.code;
+        if (parsed.error.code) status = Number(parsed.error.code);
         if (parsed.error.status) code = String(parsed.error.status);
         if (parsed.error.message) rawMessage = String(parsed.error.message);
         if (Array.isArray(parsed.error.details) && parsed.error.details.length > 0) {
@@ -84,41 +113,98 @@ export function parseGeminiError(err: any): {
     }
   }
 
-  const lowerMsg = rawMessage.toLowerCase();
+  const cleanMsg = redactApiKeyInText(rawMessage);
+  const lowerMsg = cleanMsg.toLowerCase();
 
+  // Infer status code if not explicitly present
   if (!status) {
-    if (code === 'UNAUTHENTICATED' || lowerMsg.includes('unauthenticated') || lowerMsg.includes('oauth') || lowerMsg.includes('credential')) status = 401;
-    else if (code === 'PERMISSION_DENIED' || lowerMsg.includes('permission')) status = 403;
-    else if (code === 'RESOURCE_EXHAUSTED' || lowerMsg.includes('quota') || lowerMsg.includes('rate limit')) status = 429;
-    else if (code === 'INVALID_ARGUMENT' || lowerMsg.includes('invalid') || lowerMsg.includes('api_key_invalid')) status = 400;
+    if (code === 'UNAUTHENTICATED' || lowerMsg.includes('unauthenticated') || lowerMsg.includes('oauth') || lowerMsg.includes('access_token_type_unsupported')) {
+      status = 401;
+    } else if (code === 'PERMISSION_DENIED' || lowerMsg.includes('permission') || lowerMsg.includes('denied access') || lowerMsg.includes('project has been denied')) {
+      status = 403;
+    } else if (code === 'RESOURCE_EXHAUSTED' || lowerMsg.includes('quota') || lowerMsg.includes('rate limit') || lowerMsg.includes('resource_exhausted')) {
+      status = 429;
+    } else if (code === 'INVALID_ARGUMENT' || lowerMsg.includes('invalid argument') || lowerMsg.includes('bad request') || lowerMsg.includes('minimum allowed deadline')) {
+      status = 400;
+    } else if (code === 'UNAVAILABLE' || lowerMsg.includes('503') || lowerMsg.includes('unavailable') || lowerMsg.includes('high demand') || lowerMsg.includes('spikes in demand')) {
+      status = 503;
+    } else if (code === 'DEADLINE_EXCEEDED' || lowerMsg.includes('504') || lowerMsg.includes('deadline')) {
+      status = 504;
+    } else if (lowerMsg.includes('timeout') || lowerMsg.includes('timed out') || err?.name === 'TimeoutError' || err?.name === 'AbortError' || lowerMsg.includes('abort')) {
+      status = 408;
+    }
   }
 
-  let message = rawMessage;
-  if (status === 401) {
-    code = code !== 'UNKNOWN_ERROR' ? code : 'UNAUTHENTICATED';
+  let classifiedError: ClassifiedErrorType = 'UNKNOWN_ERROR';
+  let testStatus: GeminiTestStatus = 'connection_failed';
+  let message = cleanMsg;
+
+  if (status === 400 || lowerMsg.includes('invalid argument') || lowerMsg.includes('bad request') || lowerMsg.includes('minimum allowed deadline')) {
+    status = 400;
+    classifiedError = 'INVALID_REQUEST';
+    testStatus = 'invalid';
+    code = 'INVALID_REQUEST';
+    message = 'Invalid request configuration or model parameters (400).';
+  } else if (status === 401 || lowerMsg.includes('unauthenticated') || lowerMsg.includes('access_token_type_unsupported') || lowerMsg.includes('invalid api key') || lowerMsg.includes('api_key_invalid')) {
+    status = 401;
+    classifiedError = 'INVALID_CREDENTIALS';
+    testStatus = 'invalid';
+    code = 'INVALID_CREDENTIALS';
     reason = reason || 'ACCESS_TOKEN_TYPE_UNSUPPORTED';
-    message = 'Gemini rejected this authorization credential.';
-  } else if (status === 400 || lowerMsg.includes('invalid api key') || lowerMsg.includes('api_key_invalid')) {
-    code = 'INVALID_ARGUMENT';
-    reason = reason || 'API_KEY_INVALID';
-    message = 'Invalid Gemini API key.';
-  } else if (status === 403) {
-    code = code !== 'UNKNOWN_ERROR' ? code : 'PERMISSION_DENIED';
+    message = 'Invalid Gemini API key or credentials (401).';
+  } else if (status === 403 || lowerMsg.includes('permission') || lowerMsg.includes('denied access') || lowerMsg.includes('forbidden')) {
+    status = 403;
+    classifiedError = 'PERMISSION_ERROR';
+    testStatus = 'permission_denied';
+    code = 'PERMISSION_ERROR';
     if (lowerMsg.includes('denied access') || lowerMsg.includes('project has been denied')) {
       message = 'Google project denied access (403): The project linked to this key has been restricted or lacks Generative Language API access. Please generate a new key in Google AI Studio.';
     } else {
-      message = 'Gemini permission denied for this credential (403). Please verify permissions or generate a new key.';
+      message = 'Gemini permission denied for this credential (403). Please verify API key permissions.';
     }
-  } else if (status === 429) {
-    code = 'RESOURCE_EXHAUSTED';
-    message = 'Gemini API quota has been exhausted.';
+  } else if (status === 429 || lowerMsg.includes('quota') || lowerMsg.includes('resource_exhausted') || lowerMsg.includes('rate limit')) {
+    status = 429;
+    classifiedError = 'QUOTA_EXHAUSTED';
+    testStatus = 'quota_exhausted';
+    code = 'QUOTA_EXHAUSTED';
+    message = 'Gemini API quota has been exhausted (429). Please try again later or check your quota.';
+  } else if (status === 503 || status === 504 || lowerMsg.includes('503') || lowerMsg.includes('504') || lowerMsg.includes('unavailable') || lowerMsg.includes('high demand') || lowerMsg.includes('spikes in demand')) {
+    status = 503;
+    classifiedError = 'TEMPORARY_ERROR';
+    testStatus = 'temporary_error';
+    code = 'TEMPORARY_ERROR';
+    message = 'Gemini service is temporarily unavailable (503). Please retry in a few moments.';
+  } else if (status === 408 || lowerMsg.includes('timeout') || lowerMsg.includes('timed out') || err?.name === 'TimeoutError' || err?.name === 'AbortError') {
+    status = 408;
+    classifiedError = 'TIMEOUT';
+    testStatus = 'timeout';
+    code = 'TIMEOUT';
+    message = 'Gemini request timed out. Please check your network connection and retry.';
+  } else if (lowerMsg.includes('database') || lowerMsg.includes('db error') || lowerMsg.includes('persistence') || lowerMsg.includes('user_api_keys')) {
+    status = 500;
+    classifiedError = 'DATABASE_ERROR';
+    testStatus = 'database_error';
+    code = 'DATABASE_ERROR';
+    message = 'Database error: Failed to persist API key.';
+  } else if (lowerMsg.includes('fetch') || lowerMsg.includes('network') || lowerMsg.includes('enotfound') || lowerMsg.includes('econnrefused') || (err?.name === 'TypeError' && lowerMsg.includes('fetch'))) {
+    status = 0;
+    classifiedError = 'NETWORK_ERROR';
+    testStatus = 'network_error';
+    code = 'NETWORK_ERROR';
+    message = 'Network connection failed. Unable to reach Gemini API.';
+  } else {
+    classifiedError = 'UNKNOWN_ERROR';
+    testStatus = 'connection_failed';
+    code = code !== 'UNKNOWN_ERROR' ? code : 'CONNECTION_FAILED';
+    message = cleanMsg && cleanMsg.length > 5 && !cleanMsg.includes('failed') ? cleanMsg : 'Gemini connection failed. Please check network and try again.';
   }
 
-  return { status, code, reason, message };
+  return { status, code, reason, message, classifiedError, testStatus };
 }
 
 /**
  * Sends a minimal authenticated Gemini request to test key validity.
+ * Standardized to use gemini-3.6-flash.
  * Accepts standard (AIza...) and current authorization (AQ...) credentials.
  * Never logs complete keys. Does not fall back to process.env credentials.
  */
@@ -139,6 +225,7 @@ export async function testGeminiKey(key: string, userEmail?: string): Promise<Ge
   }
 
   const redacted = redactApiKey(trimmedKey);
+  const MODEL_NAME = 'gemini-3.6-flash';
 
   try {
     const ai = new GoogleGenAI({
@@ -149,13 +236,47 @@ export async function testGeminiKey(key: string, userEmail?: string): Promise<Ge
         }
       }
     });
+
     const testRes = await executeBoundedGeminiCall(
       ai,
-      { model: 'gemini-2.5-flash', contents: 'ping', timeoutMs: 9500, apiDeadlineMs: 10000, maxRetriesFor503: 0 },
+      { model: MODEL_NAME, contents: 'ping', timeoutMs: 9500, apiDeadlineMs: 10000, maxRetriesFor503: 0 },
       { userEmail, watcherId: 'credential-test', requestId: `req_key_test_${Date.now()}` }
     );
+
     if (!testRes.success) {
-      throw new Error(testRes.cleanErrorMessage || 'Credential test failed');
+      const statusCode = testRes.diagnosticStatus === 'TIMEOUT' ? 408 :
+                         testRes.diagnosticStatus === 'PERMISSION_ERROR' ? 403 :
+                         testRes.diagnosticStatus === 'INVALID_KEY' ? 401 :
+                         testRes.diagnosticStatus === 'INVALID_REQUEST' ? 400 :
+                         testRes.diagnosticStatus?.startsWith('QUOTA') ? 429 :
+                         testRes.diagnosticStatus?.startsWith('TEMPORARY') ? 503 : 0;
+      const parsed = parseGeminiError({
+        status: statusCode,
+        message: testRes.cleanErrorMessage || 'Credential test failed',
+        code: testRes.diagnosticStatus
+      });
+
+      console.log(`[Gemini Credential Test]
+User: ${userEmail || 'unknown'}
+Credential Type: ${credentialType}
+Result: FAILED
+Status: ${parsed.status}
+Code: ${parsed.code}
+Reason: ${parsed.reason || 'N/A'}
+Model: ${MODEL_NAME}`);
+
+      return {
+        success: false,
+        provider: 'gemini',
+        credentialType,
+        status: parsed.testStatus,
+        code: parsed.code,
+        reason: parsed.reason,
+        message: parsed.message,
+        model: MODEL_NAME,
+        errorType: parsed.classifiedError,
+        httpStatus: parsed.status
+      };
     }
 
     console.log(`[Gemini Credential Test]
@@ -163,15 +284,16 @@ User: ${userEmail || 'unknown'}
 Credential Type: ${credentialType}
 Result: SUCCESS
 Status: 200
-Model: gemini-2.5-flash`);
+Model: ${MODEL_NAME}`);
 
     return {
       success: true,
       provider: 'gemini',
       credentialType,
       status: 'connected',
-      model: 'gemini-2.5-flash',
-      message: '✓ Gemini credential verified'
+      model: MODEL_NAME,
+      message: '✓ Gemini credential verified',
+      httpStatus: 200
     };
   } catch (err: any) {
     const parsed = parseGeminiError(err);
@@ -182,53 +304,21 @@ Credential Type: ${credentialType}
 Result: FAILED
 Status: ${parsed.status}
 Code: ${parsed.code}
-Reason: ${parsed.reason || 'N/A'}`);
+Reason: ${parsed.reason || 'N/A'}
+Model: ${MODEL_NAME}`);
 
-    if (parsed.status === 401 || parsed.status === 400) {
-      return {
-        success: false,
-        provider: 'gemini',
-        credentialType,
-        status: 'invalid',
-        code: parsed.code,
-        reason: parsed.reason,
-        message: parsed.message,
-        errorType: 'invalid_key'
-      };
-    } else if (parsed.status === 403) {
-      return {
-        success: false,
-        provider: 'gemini',
-        credentialType,
-        status: 'permission_denied',
-        code: parsed.code,
-        reason: parsed.reason,
-        message: parsed.message,
-        errorType: 'permission_denied'
-      };
-    } else if (parsed.status === 429) {
-      return {
-        success: false,
-        provider: 'gemini',
-        credentialType,
-        status: 'quota_exhausted',
-        code: 'RESOURCE_EXHAUSTED',
-        reason: parsed.reason || 'RATE_LIMIT_EXCEEDED',
-        message: 'Gemini API quota has been exhausted.',
-        errorType: 'quota_exceeded'
-      };
-    } else {
-      return {
-        success: false,
-        provider: 'gemini',
-        credentialType,
-        status: 'connection_failed',
-        code: parsed.code,
-        reason: parsed.reason,
-        message: '⚠ Gemini connection failed.',
-        errorType: 'temporary_failure'
-      };
-    }
+    return {
+      success: false,
+      provider: 'gemini',
+      credentialType,
+      status: parsed.testStatus,
+      code: parsed.code,
+      reason: parsed.reason,
+      message: parsed.message,
+      model: MODEL_NAME,
+      errorType: parsed.classifiedError,
+      httpStatus: parsed.status
+    };
   }
 }
 
@@ -268,21 +358,40 @@ export async function getGeminiKey(): Promise<string | null> {
   }
 }
 
+export interface SaveGeminiKeyOptions {
+  isAlreadyVerified?: boolean;
+  verifiedResult?: GeminiTestResult;
+}
+
 /**
  * Saves a new Gemini API key to Supabase only if it passes authentication testing.
  * Blocks saving invalid or failing credentials.
+ * Avoids redundant Gemini verification when the credential was already verified in the UI.
+ * Standardizes to gemini-3.6-flash and logs structured diagnostics with safe metadata only.
  */
-export async function saveGeminiKey(key: string): Promise<{
+export async function saveGeminiKey(
+  key: string,
+  options?: SaveGeminiKeyOptions
+): Promise<{
   success: boolean;
   error?: string;
   status?: GeminiTestStatus;
   testResult?: GeminiTestResult;
+  classifiedError?: string;
 }> {
-  console.log("[Gemini Save] Function called");
   const trimmedKey = key ? key.trim() : '';
   if (!trimmedKey) {
     return { success: false, error: "Credential required." };
   }
+
+  const credentialType = classifyCredentialType(trimmedKey);
+  const keyPrefix = trimmedKey.startsWith('AQ') ? 'AQ...' : trimmedKey.startsWith('AIza') ? 'AIza...' : 'OTHER...';
+  const keyLength = trimmedKey.length;
+  const MODEL_NAME = 'gemini-3.6-flash';
+
+  let userId = 'unknown';
+  let userEmail = 'unknown';
+  let failureStage: 'START' | 'VERIFY' | 'DB' | 'POSTCHECK' | 'NONE' = 'START';
 
   try {
     const supabase = await getSupabase();
@@ -292,24 +401,64 @@ export async function saveGeminiKey(key: string): Promise<{
       return { success: false, error: "You must be logged in to save API keys." };
     }
 
-    const userId = session.user.id;
-    const userEmail = session.user.email || 'unknown';
+    userId = session.user.id;
+    userEmail = session.user.email || 'unknown';
     const redactedKey = redactApiKey(trimmedKey);
 
-    // Validate credential before saving
-    const testRes = await testGeminiKey(trimmedKey, userEmail);
+    const isAlreadyVerified = Boolean(
+      options?.isAlreadyVerified &&
+      options?.verifiedResult &&
+      options.verifiedResult.success
+    );
 
-    if (!testRes.success) {
-      console.warn(`[Gemini Save] Save blocked for user ${userId} (${userEmail}) due to failed verification: ${testRes.message}`);
-      return {
-        success: false,
-        error: `Save blocked: ${testRes.message}`,
-        status: testRes.status,
-        testResult: testRes
-      };
+    // [SAVE GEMINI START]
+    console.log(`[SAVE GEMINI START]
+- user ID: ${userId}
+- credential type: ${credentialType === 'authorization' ? 'AUTHORIZATION' : credentialType === 'standard' ? 'STANDARD' : 'UNKNOWN'}
+- key prefix only: ${keyPrefix}
+- key length: ${keyLength}
+- verification state: ${isAlreadyVerified ? 'ALREADY_VERIFIED' : 'UNVERIFIED'}`);
+
+    let testRes: GeminiTestResult;
+
+    if (isAlreadyVerified && options?.verifiedResult) {
+      testRes = options.verifiedResult;
+      // [SAVE GEMINI VERIFY]
+      console.log(`[SAVE GEMINI VERIFY]
+- model: ${MODEL_NAME}
+- verification result: SUCCESS (reused verified state)
+- HTTP status if available: 200
+- classified error if failed: NONE`);
+    } else {
+      // Validate credential before saving
+      failureStage = 'VERIFY';
+      testRes = await testGeminiKey(trimmedKey, userEmail);
+
+      // [SAVE GEMINI VERIFY]
+      console.log(`[SAVE GEMINI VERIFY]
+- model: ${MODEL_NAME}
+- verification result: ${testRes.success ? 'SUCCESS' : 'FAILED'}
+- HTTP status if available: ${testRes.httpStatus ?? (testRes.success ? 200 : 'N/A')}
+- classified error if failed: ${testRes.success ? 'NONE' : (testRes.errorType || testRes.code || 'UNKNOWN_ERROR')}`);
+
+      if (!testRes.success) {
+        failureStage = 'VERIFY';
+        console.log(`[SAVE GEMINI END]
+- SUCCESS or FAILURE: FAILURE
+- exact failure stage: VERIFY`);
+
+        return {
+          success: false,
+          error: `Save blocked: ${testRes.message}`,
+          status: testRes.status,
+          testResult: testRes,
+          classifiedError: testRes.errorType
+        };
+      }
     }
 
-    // Check if key already exists
+    // Database operation
+    failureStage = 'DB';
     const { data: existingKey, error: checkError } = await supabase
       .from('user_api_keys')
       .select('id')
@@ -321,12 +470,13 @@ export async function saveGeminiKey(key: string): Promise<{
       console.warn("Could not query existing key, attempting upsert anyway", checkError);
     }
 
-    let result;
+    const dbOpType = existingKey?.id ? 'UPDATE' : 'INSERT';
     const commonFields = {
       api_key: trimmedKey,
       updated_at: new Date().toISOString()
     };
 
+    let result;
     if (existingKey?.id) {
       result = await supabase
         .from('user_api_keys')
@@ -343,17 +493,42 @@ export async function saveGeminiKey(key: string): Promise<{
         });
     }
 
+    const dbSuccess = !result.error;
+    const redactedDbError = result.error ? redactApiKeyInText(result.error.message) : 'NONE';
+
+    // [SAVE GEMINI DB]
+    console.log(`[SAVE GEMINI DB]
+- database operation started: ${dbOpType} (user_api_keys)
+- database operation success/failure: ${dbSuccess ? 'SUCCESS' : 'FAILURE'}
+- database error code/message (redacted): ${redactedDbError}`);
+
     if (result.error) {
-      console.error("[Gemini Save] Persistence failed:", result.error.message);
+      failureStage = 'DB';
+      console.log(`[SAVE GEMINI END]
+- SUCCESS or FAILURE: FAILURE
+- exact failure stage: DB`);
+
+      const dbErrResult: GeminiTestResult = {
+        success: false,
+        provider: 'gemini',
+        credentialType,
+        status: 'database_error',
+        code: 'DATABASE_ERROR',
+        message: 'Database error: Failed to persist API key.'
+      };
+
       return {
         success: false,
-        error: "Could not save Gemini API key. Please try again."
+        error: 'Database error: Failed to persist API key.',
+        status: 'database_error',
+        testResult: dbErrResult,
+        classifiedError: 'DATABASE_ERROR'
       };
     }
 
     console.log(`[Gemini Save] Successfully persisted credential (${redactedKey}) for user ${userEmail}`);
 
-    // Update profiles gemini_status to READY on successful save/test
+    // Update profiles gemini_status to READY on successful save
     try {
       await supabase.from('profiles').update({
         gemini_status: 'READY',
@@ -373,14 +548,57 @@ export async function saveGeminiKey(key: string): Promise<{
       updated_at: new Date().toISOString()
     }).eq('user_id', userId);
 
+    // [SAVE GEMINI POSTCHECK]
+    // A verified key persisted to DB does not perform a redundant second Gemini round-trip
+    console.log(`[SAVE GEMINI POSTCHECK]
+- whether post-save verification occurs: NO (redundant check bypassed)
+- model used: N/A
+- result: N/A
+- classified error: NONE`);
+
+    failureStage = 'NONE';
+    // [SAVE GEMINI END]
+    console.log(`[SAVE GEMINI END]
+- SUCCESS or FAILURE: SUCCESS
+- exact failure stage: NONE`);
+
     return {
       success: true,
-      status: testRes.status,
-      testResult: testRes
+      status: 'connected',
+      testResult: {
+        success: true,
+        provider: 'gemini',
+        credentialType,
+        status: 'connected',
+        model: MODEL_NAME,
+        message: '✓ Gemini credential verified',
+        httpStatus: 200
+      }
     };
   } catch (err: any) {
-    console.error("Exception in saveGeminiKey:", err);
-    return { success: false, error: "Could not save Gemini API key. Please try again." };
+    const rawErrorMsg = err?.message || String(err);
+    const parsed = parseGeminiError(err);
+    console.error(`Exception in saveGeminiKey at stage ${failureStage}:`, redactApiKeyInText(rawErrorMsg));
+
+    // [SAVE GEMINI END]
+    console.log(`[SAVE GEMINI END]
+- SUCCESS or FAILURE: FAILURE
+- exact failure stage: ${failureStage}`);
+
+    return {
+      success: false,
+      error: parsed.message || "Could not save Gemini API key. Please try again.",
+      status: parsed.testStatus,
+      classifiedError: parsed.classifiedError,
+      testResult: {
+        success: false,
+        provider: 'gemini',
+        credentialType,
+        status: parsed.testStatus,
+        code: parsed.code,
+        message: parsed.message
+      }
+    };
   }
 }
 

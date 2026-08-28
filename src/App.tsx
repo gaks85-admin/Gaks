@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useLiveRates } from './hooks/useLiveRates';
 import { supabase } from './supabaseClient';
-import { getGeminiKey, saveGeminiKey, deleteGeminiKey, testGeminiKey, GeminiTestResult, GeminiTestStatus } from './lib/apiKeys';
+import { getGeminiKey, saveGeminiKey, deleteGeminiKey, testGeminiKey, GeminiTestResult, GeminiTestStatus, parseGeminiError, classifyCredentialType } from './lib/apiKeys';
 import { toCanonicalSymbol, toDisplaySymbol, normalizeSymbol } from '../lib/market-utils';
 import { parseUserStrategy } from "./lib/strategy-parser";
 import { compileStrategy } from './lib/strategy-compiler';
@@ -1400,16 +1400,20 @@ export default function App() {
         triggerNotification(res.message, "info");
       }
     } catch (err: any) {
+      const parsed = parseGeminiError(err);
       const res: GeminiTestResult = {
         success: false,
         provider: 'gemini',
-        credentialType: 'unknown',
-        status: 'connection_failed',
-        message: '⚠ Gemini connection failed.'
+        credentialType: classifyCredentialType(trimmed),
+        status: parsed.testStatus,
+        code: parsed.code,
+        message: parsed.message,
+        errorType: parsed.classifiedError,
+        httpStatus: parsed.status
       };
       setGeminiTestResult(res);
-      setGeminiStatus('connection_failed');
-      triggerNotification("⚠ Gemini connection failed", "info");
+      setGeminiStatus(parsed.testStatus);
+      triggerNotification(parsed.message, "info");
     } finally {
       setIsGeminiKeyTesting(false);
     }
@@ -1418,7 +1422,6 @@ export default function App() {
   const handleSaveGeminiKey = async () => {
     setGeminiKeySuccess(null);
     setGeminiKeyError(null);
-    setGeminiTestResult(null);
     const trimmed = geminiKey.trim();
     if (!trimmed) {
       setGeminiKeyError("Credential required.");
@@ -1426,9 +1429,18 @@ export default function App() {
       return;
     }
 
+    const isAlreadyVerified = Boolean(
+      geminiTestResult &&
+      geminiTestResult.success &&
+      geminiTestResult.status === 'connected'
+    );
+
     setIsGeminiKeySaving(true);
     try {
-      const result = await saveGeminiKey(trimmed);
+      const result = await saveGeminiKey(trimmed, {
+        isAlreadyVerified,
+        verifiedResult: isAlreadyVerified ? geminiTestResult! : undefined
+      });
       if (result.testResult) {
         setGeminiTestResult(result.testResult);
       }
@@ -1447,8 +1459,10 @@ export default function App() {
         triggerNotification(errorMsg, "info");
       }
     } catch (err: any) {
-      const errorMsg = "Could not save Gemini API key. Please try again.";
+      const parsed = parseGeminiError(err);
+      const errorMsg = parsed.message || "Could not save Gemini API key. Please try again.";
       setGeminiKeyError(errorMsg);
+      setGeminiStatus(parsed.testStatus);
       triggerNotification(errorMsg, "info");
     } finally {
       setIsGeminiKeySaving(false);

@@ -52,10 +52,41 @@ export function calculateAdaptiveQualityRequirement(input: AdaptiveQualityInput)
   minRequired: number;
   reason: string;
 } {
-  // Signal Quality feature disabled temporarily per user request
+  const baseThreshold = Math.max(0, Math.min(100, Number.isFinite(input.baseThreshold) ? (input.baseThreshold ?? 75) : 75));
+  const sampleSize = Number.isFinite(input.sampleSize) ? input.sampleSize : 0;
+  const classification = input.classification || 'INSUFFICIENT_DATA';
+  const tier = input.tier || 'INSUFFICIENT_DATA';
+
+  // If insufficient data or weak sample (< 10 completed trades), maintain base threshold
+  if (tier === 'INSUFFICIENT_DATA' || tier === 'WEAK_SAMPLE' || sampleSize < 10) {
+    return {
+      minRequired: baseThreshold,
+      reason: `Insufficient sample size (${sampleSize} trades). Maintaining baseline quality requirement (${baseThreshold}%).`
+    };
+  }
+
+  // Under poor performance history with adequate sample, raise threshold to protect capital
+  if (classification === 'POOR') {
+    const elevated = Math.min(100, Math.max(baseThreshold + 10, 85));
+    return {
+      minRequired: elevated,
+      reason: `Poor historical performance elevates required quality to ${elevated}%.`
+    };
+  }
+
+  // Under deteriorating performance, moderately increase quality requirement
+  if (classification === 'DETERIORATING') {
+    const elevated = Math.min(100, Math.max(baseThreshold + 5, 80));
+    return {
+      minRequired: elevated,
+      reason: `Deteriorating historical performance elevates required quality to ${elevated}%.`
+    };
+  }
+
+  // Under healthy or neutral conditions, adaptive threshold never falls below base threshold
   return {
-    minRequired: 0,
-    reason: 'Signal quality requirement disabled temporarily.'
+    minRequired: baseThreshold,
+    reason: `Performance history (${classification}) maintains standard baseline quality requirement (${baseThreshold}%).`
   };
 }
 
@@ -153,9 +184,13 @@ export function evaluateQualityGate(input: QualityGateInput): QualityGateResult 
   } else if (consecutiveLosses >= 4) {
     passed = false;
     reason = 'Trade rejected due to 4 consecutive losses on watcher';
-  } else if (consecutiveLosses >= 2 && computedQuality < minRequired) {
+  } else if (computedQuality < minRequired) {
     passed = false;
-    reason = `Insufficient quality (${computedQuality}%) under ${consecutiveLosses}-loss streak requirement (${minRequired}%)`;
+    if (consecutiveLosses >= 2) {
+      reason = `Insufficient quality (${computedQuality}%) under ${consecutiveLosses}-loss streak requirement (${minRequired}%)`;
+    } else {
+      reason = `Insufficient quality (${computedQuality}%) below minimum required threshold (${minRequired}%)`;
+    }
   }
 
   const action: 'CONTINUE_TO_RISK' | 'NO_TRADE' = passed ? 'CONTINUE_TO_RISK' : 'NO_TRADE';
