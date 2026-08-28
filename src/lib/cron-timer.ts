@@ -136,11 +136,13 @@ export class CronTimer {
     }
 
     const { userEmail, pair, timeframe } = state.context;
-    console.log(`[CRON TIMING] Watcher Processed in ${totalMs}ms | User: ${userEmail} | Watcher: ${targetId} | Pair: ${pair} | Timeframe: ${timeframe}`);
+    if (process.env.LOG_LEVEL === 'debug' || process.env.DEBUG === 'true') {
+      console.log(`[CRON TIMING] Watcher Processed in ${totalMs}ms | User: ${userEmail} | Watcher: ${targetId} | Pair: ${pair} | Timeframe: ${timeframe}`);
+    }
 
     const elapsed = this.getElapsedTimeMs();
     if (elapsed >= this.warningThresholdMs) {
-      console.warn(`[CRON TIMING WARNING] Cron execution time (${elapsed}ms) reached warning threshold (${this.warningThresholdMs}ms / ${this.timeLimitMs}ms limit) after Watcher: ${targetId} | Pair: ${pair}`);
+      console.warn(`[CRON] DEADLINE WARNING | elapsed=${elapsed}ms | limit=${this.warningThresholdMs}ms | watcher=${targetId.slice(0, 8)}... | pair=${pair}`);
     }
   }
 
@@ -156,6 +158,9 @@ export class CronTimer {
   }
 
   public printSummary(): void {
+    if (process.env.LOG_LEVEL !== 'debug' && process.env.DEBUG !== 'true') {
+      return;
+    }
     const totalDuration = this.getElapsedTimeMs();
 
     let slowestWatcher: SingleWatcherTimingRecord | null = null;

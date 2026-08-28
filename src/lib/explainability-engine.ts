@@ -104,44 +104,49 @@ export async function recordEvaluation(
     }
   }
 
-  // 3. Output standardized, high-visibility console log matching Gaks AI specs
-  const snap = record.decision_snapshot || {};
-  const hp = record.historical_probability !== undefined ? record.historical_probability : (snap.historical_probability ?? 'N/A');
-  const ss = record.sample_size !== undefined ? record.sample_size : (snap.historical_sample_size ?? 'N/A');
-  const conf = record.confidence_level !== undefined ? record.confidence_level : (snap.confidence_level ?? 'N/A');
+  // 3. Output standardized production log matching compact specs
+  const shortWatcher = record.watcher_id ? (record.watcher_id.length > 8 ? record.watcher_id.slice(0, 8) + '...' : record.watcher_id) : 'unknown';
+  console.log(`[EXPLAIN] saved | watcher=${shortWatcher} | decision=${record.recommendation || (record.trade_sent ? 'TRADE' : 'NO_TRADE')}`);
 
-  const failedMandatoryList = record.failed_mandatory_rules || snap.failed_mandatory_rules || (record.mandatory_rules_passed ? [] : record.failed_rules) || [];
-  const failedOptionalList = record.failed_optional_rules || snap.failed_optional_rules || [];
+  if (process.env.LOG_LEVEL === 'debug' || process.env.DEBUG === 'true') {
+    const snap = record.decision_snapshot || {};
+    const hp = record.historical_probability !== undefined ? record.historical_probability : (snap.historical_probability ?? 'N/A');
+    const ss = record.sample_size !== undefined ? record.sample_size : (snap.historical_sample_size ?? 'N/A');
+    const conf = record.confidence_level !== undefined ? record.confidence_level : (snap.confidence_level ?? 'N/A');
 
-  console.log(`\n========== EXPLAINABILITY ==========`);
-  console.log(`[DECISION SCORE TRACE]`);
-  console.log(`Watcher ID: ${record.watcher_id}`);
-  console.log(`Pair: ${record.pair}`);
-  console.log(`Timeframe: ${record.timeframe}`);
-  console.log(`Raw Score: ${record.matched_weight} / ${record.possible_weight}`);
-  console.log(`Matched Weight: ${record.matched_weight}`);
-  console.log(`Possible Weight: ${record.possible_weight}`);
-  console.log(`Score Percentage: ${record.decision_score}%`);
-  console.log(`Score Source: Deterministic Rule Engine`);
-  console.log(`Deterministic Decision: ${record.recommendation}`);
-  console.log(`Gemini Decision: ${record.gemini_used ? (record.trade_sent ? 'APPROVED' : 'REJECTED/NO_TRADE') : 'N/A'}`);
-  console.log(`Final Decision: ${record.trade_sent ? 'TRADE_EXECUTED' : 'NO_TRADE'}`);
-  console.log(`Mandatory Rules Passed: ${record.mandatory_rules_passed}`);
-  console.log(`Failed Mandatory Rules: ${failedMandatoryList.length > 0 ? failedMandatoryList.join(', ') : 'None'}`);
-  console.log(`Failed Optional Rules: ${failedOptionalList.length > 0 ? failedOptionalList.join(', ') : 'None'}`);
-  console.log(`------------------------------------`);
-  console.log(`Watcher:\n${record.watcher_id}`);
-  console.log(`Pair:\n${record.pair}`);
-  console.log(`Decision:\n${record.recommendation}`);
-  console.log(`Decision Score:\n${record.decision_score}%`);
-  console.log(`Gemini:\n${record.gemini_used ? 'YES' : 'NO'}`);
-  console.log(`Trade Sent:\n${record.trade_sent ? 'YES' : 'NO'}`);
-  console.log(`Historical Probability:\n${hp}%`);
-  console.log(`Sample Size:\n${ss}`);
-  console.log(`Confidence Level:\n${conf}`);
-  console.log(`Evaluation Stored:\n${storedSuccessfully ? 'YES' : 'NO'}`);
-  console.log(`Duration:\n${record.scan_duration_ms} ms`);
-  console.log(`====================================\n`);
+    const failedMandatoryList = record.failed_mandatory_rules || snap.failed_mandatory_rules || (record.mandatory_rules_passed ? [] : record.failed_rules) || [];
+    const failedOptionalList = record.failed_optional_rules || snap.failed_optional_rules || [];
+
+    console.log(`\n========== EXPLAINABILITY ==========`);
+    console.log(`[DECISION SCORE TRACE]`);
+    console.log(`Watcher ID: ${record.watcher_id}`);
+    console.log(`Pair: ${record.pair}`);
+    console.log(`Timeframe: ${record.timeframe}`);
+    console.log(`Raw Score: ${record.matched_weight} / ${record.possible_weight}`);
+    console.log(`Matched Weight: ${record.matched_weight}`);
+    console.log(`Possible Weight: ${record.possible_weight}`);
+    console.log(`Score Percentage: ${record.decision_score}%`);
+    console.log(`Score Source: Deterministic Rule Engine`);
+    console.log(`Deterministic Decision: ${record.recommendation}`);
+    console.log(`Gemini Decision: ${record.gemini_used ? (record.trade_sent ? 'APPROVED' : 'REJECTED/NO_TRADE') : 'N/A'}`);
+    console.log(`Final Decision: ${record.trade_sent ? 'TRADE_EXECUTED' : 'NO_TRADE'}`);
+    console.log(`Mandatory Rules Passed: ${record.mandatory_rules_passed}`);
+    console.log(`Failed Mandatory Rules: ${failedMandatoryList.length > 0 ? failedMandatoryList.join(', ') : 'None'}`);
+    console.log(`Failed Optional Rules: ${failedOptionalList.length > 0 ? failedOptionalList.join(', ') : 'None'}`);
+    console.log(`------------------------------------`);
+    console.log(`Watcher:\n${record.watcher_id}`);
+    console.log(`Pair:\n${record.pair}`);
+    console.log(`Decision:\n${record.recommendation}`);
+    console.log(`Decision Score:\n${record.decision_score}%`);
+    console.log(`Gemini:\n${record.gemini_used ? 'YES' : 'NO'}`);
+    console.log(`Trade Sent:\n${record.trade_sent ? 'YES' : 'NO'}`);
+    console.log(`Historical Probability:\n${hp}%`);
+    console.log(`Sample Size:\n${ss}`);
+    console.log(`Confidence Level:\n${conf}`);
+    console.log(`Evaluation Stored:\n${storedSuccessfully ? 'YES' : 'NO'}`);
+    console.log(`Duration:\n${record.scan_duration_ms} ms`);
+    console.log(`====================================\n`);
+  }
 
   return storedSuccessfully;
 }

@@ -158,18 +158,20 @@ export function logExecutionValidationAudit(
   expectedProfit: number,
   passed: boolean
 ): void {
-  console.log(`\n========== EXECUTION VALIDATION ==========`);
-  console.log(`Intended Entry: ${intendedEntry}`);
-  console.log(`Executed Entry: ${executedEntry}`);
-  console.log(`Difference: ${difference.toFixed(5)}`);
-  console.log(`SL Distance: ${slDistance.toFixed(5)}`);
-  console.log(`TP Distance: ${tpDistance.toFixed(5)}`);
-  console.log(`Configured RR: ${configuredRr}`);
-  console.log(`Actual RR: ${actualRr.toFixed(4)}`);
-  console.log(`Expected Loss: $${expectedLoss.toFixed(2)}`);
-  console.log(`Expected Profit: $${expectedProfit.toFixed(2)}`);
-  console.log(`PASS / FAIL: ${passed ? 'PASS' : 'FAIL'}`);
-  console.log(`==========================================\n`);
+  if (process.env.LOG_LEVEL === 'debug' || process.env.DEBUG === 'true') {
+    console.log(`\n========== EXECUTION VALIDATION ==========`);
+    console.log(`Intended Entry: ${intendedEntry}`);
+    console.log(`Executed Entry: ${executedEntry}`);
+    console.log(`Difference: ${difference.toFixed(5)}`);
+    console.log(`SL Distance: ${slDistance.toFixed(5)}`);
+    console.log(`TP Distance: ${tpDistance.toFixed(5)}`);
+    console.log(`Configured RR: ${configuredRr}`);
+    console.log(`Actual RR: ${actualRr.toFixed(4)}`);
+    console.log(`Expected Loss: $${expectedLoss.toFixed(2)}`);
+    console.log(`Expected Profit: $${expectedProfit.toFixed(2)}`);
+    console.log(`PASS / FAIL: ${passed ? 'PASS' : 'FAIL'}`);
+    console.log(`==========================================\n`);
+  }
 }
 
 export function classifyLotType(lotSize: number): string {
@@ -277,16 +279,18 @@ export function logRrValidationAudit(
   actualRr: number,
   validationPassed: boolean
 ): void {
-  console.log(`\n========== RR VALIDATION ==========`);
-  console.log(`Entry: ${entryPrice}`);
-  console.log(`SL: ${stopLoss}`);
-  console.log(`TP: ${takeProfit}`);
-  console.log(`Risk Distance: ${riskDistance.toFixed(5)}`);
-  console.log(`Reward Distance: ${rewardDistance.toFixed(5)}`);
-  console.log(`User RR: ${userRr}`);
-  console.log(`Actual RR: ${actualRr.toFixed(4)}`);
-  console.log(`Validation Passed: ${validationPassed ? 'YES' : 'NO'}`);
-  console.log(`==================================\n`);
+  if (process.env.LOG_LEVEL === 'debug' || process.env.DEBUG === 'true') {
+    console.log(`\n========== RR VALIDATION ==========`);
+    console.log(`Entry: ${entryPrice}`);
+    console.log(`SL: ${stopLoss}`);
+    console.log(`TP: ${takeProfit}`);
+    console.log(`Risk Distance: ${riskDistance.toFixed(5)}`);
+    console.log(`Reward Distance: ${rewardDistance.toFixed(5)}`);
+    console.log(`User RR: ${userRr}`);
+    console.log(`Actual RR: ${actualRr.toFixed(4)}`);
+    console.log(`Validation Passed: ${validationPassed ? 'YES' : 'NO'}`);
+    console.log(`==================================\n`);
+  }
 }
 
 export function logRiskValidationAudit(
@@ -301,18 +305,20 @@ export function logRiskValidationAudit(
   reason: string,
   executableLotDisplay: string = accepted ? requiredLot.toString() : 'NONE'
 ): void {
-  console.log(`\n========== RISK VALIDATION ==========`);
-  console.log(`Capital: $${accountSize.toFixed(2)}`);
-  console.log(`Risk %: ${riskPercentage}%`);
-  console.log(`Risk Amount: $${riskAmount.toFixed(2)}`);
-  console.log(`Required Lot: ${requiredLot.toFixed(4)}`);
-  console.log(`Minimum Lot: ${minLot}`);
-  console.log(`Executable Lot: ${executableLotDisplay}`);
-  console.log(`Theoretical Expected Loss: $${expectedLossAtRequiredLot.toFixed(2)}`);
-  console.log(`Minimum Lot Expected Loss: $${expectedLossAtMinLot.toFixed(2)}`);
-  console.log(`Trade Accepted: ${accepted ? 'YES' : 'NO'}`);
-  console.log(`Reason: ${reason}`);
-  console.log(`====================================\n`);
+  if (process.env.LOG_LEVEL === 'debug' || process.env.DEBUG === 'true') {
+    console.log(`\n========== RISK VALIDATION ==========`);
+    console.log(`Capital: $${accountSize.toFixed(2)}`);
+    console.log(`Risk %: ${riskPercentage}%`);
+    console.log(`Risk Amount: $${riskAmount.toFixed(2)}`);
+    console.log(`Required Lot: ${requiredLot.toFixed(4)}`);
+    console.log(`Minimum Lot: ${minLot}`);
+    console.log(`Executable Lot: ${executableLotDisplay}`);
+    console.log(`Theoretical Expected Loss: $${expectedLossAtRequiredLot.toFixed(2)}`);
+    console.log(`Minimum Lot Expected Loss: $${expectedLossAtMinLot.toFixed(2)}`);
+    console.log(`Trade Accepted: ${accepted ? 'YES' : 'NO'}`);
+    console.log(`Reason: ${reason}`);
+    console.log(`====================================\n`);
+  }
 }
 
 /**
@@ -943,7 +949,10 @@ ${accepted ? '' : `Reason: ${skipReason}`}
     accepted && rrValidationPassed
   );
 
-  console.log(`
+  console.log(`[RISK] ${accepted ? 'APPROVED' : 'REJECTED'} | lot=${accepted ? calculatedLotSize.toFixed(2) : 'NONE'} | sl=${executedSL} | tp=${executedTP} | rr=1:${actualRr.toFixed(1)}`);
+
+  if (process.env.LOG_LEVEL === 'debug' || process.env.DEBUG === 'true') {
+    console.log(`
 [Trade Risk]
 Direction: ${direction}
 Entry: ${executedEntry}
@@ -959,6 +968,7 @@ Minimum Lot Expected Loss: $${expectedLossAtMinLot.toFixed(2)}
 R:R: 1:${actualRr.toFixed(2)}
 Accepted: ${accepted ? 'YES' : 'NO'}
 `.trim());
+  }
 
   return {
     accountSize: config.accountSize,
@@ -999,30 +1009,32 @@ Accepted: ${accepted ? 'YES' : 'NO'}
  * Prints the verification audit log required by Task 5 and Task 6.
  */
 export function logPositionSizeAudit(result: PositionSizeResult, dbTimestamp: string): void {
-  console.log(`\n========== POSITION SIZE AUDIT ==========`);
-  console.log(`Account Size: $${result.accountSize.toFixed(2)}`);
-  console.log(`Risk %: ${result.riskPercentage}%`);
-  console.log(`Risk Amount: $${result.riskAmount.toFixed(2)}`);
-  console.log(`Entry: ${result.entryPrice}`);
-  console.log(`Stop Loss: ${result.stopLoss}`);
-  console.log(`Take Profit: ${result.takeProfit ?? 'N/A'}`);
-  console.log(`Stop Distance: ${result.stopDistance.toFixed(5)}`);
-  console.log(`Pip Value: $${result.pipValue.toFixed(2)}`);
-  console.log(`Contract Size: ${result.contractSize}`);
-  console.log(`Calculated Lot Size: ${result.calculatedLotSize}`);
-  console.log(`Expected Loss if SL hits: $${result.expectedLoss.toFixed(2)}`);
-  console.log(`Expected Profit if TP hits: $${result.expectedProfit.toFixed(2)}`);
-  console.log(`Trading Preferences Loaded From: Supabase (trading_preferences)`);
-  console.log(`Database Timestamp: ${dbTimestamp}`);
-  console.log(`========================================\n`);
+  if (process.env.LOG_LEVEL === 'debug' || process.env.DEBUG === 'true') {
+    console.log(`\n========== POSITION SIZE AUDIT ==========`);
+    console.log(`Account Size: $${result.accountSize.toFixed(2)}`);
+    console.log(`Risk %: ${result.riskPercentage}%`);
+    console.log(`Risk Amount: $${result.riskAmount.toFixed(2)}`);
+    console.log(`Entry: ${result.entryPrice}`);
+    console.log(`Stop Loss: ${result.stopLoss}`);
+    console.log(`Take Profit: ${result.takeProfit ?? 'N/A'}`);
+    console.log(`Stop Distance: ${result.stopDistance.toFixed(5)}`);
+    console.log(`Pip Value: $${result.pipValue.toFixed(2)}`);
+    console.log(`Contract Size: ${result.contractSize}`);
+    console.log(`Calculated Lot Size: ${result.calculatedLotSize}`);
+    console.log(`Expected Loss if SL hits: $${result.expectedLoss.toFixed(2)}`);
+    console.log(`Expected Profit if TP hits: $${result.expectedProfit.toFixed(2)}`);
+    console.log(`Trading Preferences Loaded From: Supabase (trading_preferences)`);
+    console.log(`Database Timestamp: ${dbTimestamp}`);
+    console.log(`========================================\n`);
 
-  console.log(`========== LOT NORMALIZATION AUDIT =========`);
-  console.log(`Asset: ${result.symbol || 'N/A'}`);
-  console.log(`Raw Lot: ${result.exactLotSize}`);
-  console.log(`Normalized Lot: ${result.normalizedLotSize}`);
-  console.log(`Lot Type: ${result.lotType}`);
-  console.log(`Lot Step: ${result.lotStep}`);
-  console.log(`Expected Loss: $${result.expectedLoss.toFixed(2)}`);
-  console.log(`Expected Profit: $${result.expectedProfit.toFixed(2)}`);
-  console.log(`============================================\n`);
+    console.log(`========== LOT NORMALIZATION AUDIT =========`);
+    console.log(`Asset: ${result.symbol || 'N/A'}`);
+    console.log(`Raw Lot: ${result.exactLotSize}`);
+    console.log(`Normalized Lot: ${result.normalizedLotSize}`);
+    console.log(`Lot Type: ${result.lotType}`);
+    console.log(`Lot Step: ${result.lotStep}`);
+    console.log(`Expected Loss: $${result.expectedLoss.toFixed(2)}`);
+    console.log(`Expected Profit: $${result.expectedProfit.toFixed(2)}`);
+    console.log(`============================================\n`);
+  }
 }

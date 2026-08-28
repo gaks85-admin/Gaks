@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { CronTimer } from '../../src/lib/cron-timer.js';
-import { WatcherLogContext, logWatcherEvent, logWatcherError, logWatcherWarn, resolveWatcherUserContext } from '../../src/lib/watcher-logger.js';
+import { WatcherLogContext, logWatcherEvent, logWatcherError, logWatcherWarn, resolveWatcherUserContext, logWatcherStart, logWatcherResult, isDebugMode } from '../../src/lib/watcher-logger.js';
 import { GoogleGenAI, Type } from '@google/genai';
 import { analyzeMarket, Candle } from '../../src/lib/strategy-engine.js';
 import { ParsedStrategy } from '../../src/lib/strategy-parser.js';
@@ -447,15 +447,17 @@ export default async function handler(req: any, res: any) {
     const telegramBotToken = process.env.TELEGRAM_BOT_TOKEN;
     const liveTradingEnabled = process.env.LIVE_TRADING_ENABLED === 'true';
 
-    // Safe Startup Validation (STEP 4)
-    console.log("DEBUG CONFIG:", {
-      SUPABASE_URL_PRESENT: !!supabaseUrl,
-      SUPABASE_KEY_PRESENT: !!supabaseKey,
-      TWELVE_DATA_KEY_PRESENT: !!twelveDataKey,
-      CRON_SECRET_PRESENT: !!cronSecretRaw,
-      TELEGRAM_BOT_TOKEN_PRESENT: !!telegramBotToken,
-      LIVE_TRADING_ENABLED: liveTradingEnabled
-    });
+    // Safe Startup Validation (Debug Only)
+    if (isDebugMode()) {
+      console.log("DEBUG CONFIG:", {
+        SUPABASE_URL_PRESENT: !!supabaseUrl,
+        SUPABASE_KEY_PRESENT: !!supabaseKey,
+        TWELVE_DATA_KEY_PRESENT: !!twelveDataKey,
+        CRON_SECRET_PRESENT: !!cronSecretRaw,
+        TELEGRAM_BOT_TOKEN_PRESENT: !!telegramBotToken,
+        LIVE_TRADING_ENABLED: liveTradingEnabled
+      });
+    }
 
     if (!supabaseUrl) {
       console.error("[CRON ERROR] SUPABASE_URL_MISSING: The Supabase URL (SUPABASE_URL or VITE_SUPABASE_URL) is not set.");
@@ -529,11 +531,12 @@ export default async function handler(req: any, res: any) {
     };
 
     // Debug logging immediately before the authorization check
-    console.log("DEBUG CRON AUTH:", {
-      method: req.method,
-      headers: req.headers,
-      authorization: req.headers.authorization || req.headers['authorization'] || null,
-    });
+    if (isDebugMode()) {
+      console.log("DEBUG CRON AUTH:", {
+        method: req.method,
+        authorization: req.headers.authorization || req.headers['authorization'] || null,
+      });
+    }
 
     // Protect the endpoint using a CRON_SECRET
     const authHeader = req.headers.authorization || req.headers['authorization'];
@@ -616,12 +619,11 @@ export default async function handler(req: any, res: any) {
       throw fetchError;
     }
 
-    console.log("[CRON STEP 4]");
-    console.log(`LOG: Active watchers found: ${watchers ? watchers.length : 0}`);
+    console.log(`[CRON] START | watchers=${watchers ? watchers.length : 0}`);
     cronTimer.setDiscoveredCount(watchers ? watchers.length : 0);
     
     if (!watchers || watchers.length === 0) {
-      console.log("LOG: Cron completed (No active watchers)");
+      console.log(`[CRON] END | duration=${Date.now() - startTime}ms | processed=0 | signals=0 | errors=0`);
       cronTimer.printSummary();
       return res.status(200).json({
         success: true,
@@ -739,9 +741,9 @@ export default async function handler(req: any, res: any) {
       });
     }
 
-    console.log("[CRON STEP 5]");
-
-    console.log(`LOG: Processing ${watchers.length} active watcher(s) sequentially with strict 25s global deadline...`);
+    if (isDebugMode()) {
+      console.log(`LOG: Processing ${watchers.length} active watcher(s) sequentially with strict 25s global deadline...`);
+    }
 
     async function processSingleWatcher(watcher: any) {
       let isWatcherSkipped = true;
@@ -3341,48 +3343,50 @@ Source: ${brokerQuote.source}`);
     const avgWatcherDuration = cronTimer.getAvgWatcherDurationMs();
 
     console.log(`\n==================================================`);
-    console.log(`[CRON DIAGNOSTICS]`);
-    console.log(`Watchers Discovered: ${watchersDiscoveredCount}`);
-    console.log(`Watchers Eligible: ${watchersEligibleCount}`);
-    console.log(`Watchers Processed: ${watchersProcessedCount}`);
-    console.log(`Watchers Skipped: ${watchersSkippedCount}`);
-    console.log(`Watchers Skipped By Deadline: ${watchersSkippedByDeadlineCount}`);
-    console.log(`Watchers Skipped By Gemini Timeout: ${watchersSkippedByGeminiTimeoutCount}`);
-    console.log(`Watchers Skipped By Gemini 429: ${watchersSkippedByGemini429Count}`);
-    console.log(`Watchers Skipped By Gemini 503: ${watchersSkippedByGemini503Count}`);
-    console.log(`Gemini Calls Executed: ${geminiCallsExecutedCount}`);
-    console.log(`Gemini Calls Retried: ${geminiCallsRetriedCount}`);
-    console.log(`Gemini Calls Timed Out: ${geminiCallsTimedOutCount}`);
-    console.log(`Gemini Calls Quota Exhausted: ${geminiCallsQuotaExhaustedCount}`);
-    console.log(`Gemini Calls Temporarily Failed: ${geminiCallsTemporarilyFailedCount}`);
-    console.log(`Maximum Watcher Duration: ${maxWatcherDuration}ms`);
-    console.log(`Average Watcher Duration: ${avgWatcherDuration}ms`);
-    console.log(`Total Cron Duration: ${totalTime}ms`);
-    console.log(`==================================================\n`);
+    if (isDebugMode()) {
+      console.log(`[CRON DIAGNOSTICS]`);
+      console.log(`Watchers Discovered: ${watchersDiscoveredCount}`);
+      console.log(`Watchers Eligible: ${watchersEligibleCount}`);
+      console.log(`Watchers Processed: ${watchersProcessedCount}`);
+      console.log(`Watchers Skipped: ${watchersSkippedCount}`);
+      console.log(`Watchers Skipped By Deadline: ${watchersSkippedByDeadlineCount}`);
+      console.log(`Watchers Skipped By Gemini Timeout: ${watchersSkippedByGeminiTimeoutCount}`);
+      console.log(`Watchers Skipped By Gemini 429: ${watchersSkippedByGemini429Count}`);
+      console.log(`Watchers Skipped By Gemini 503: ${watchersSkippedByGemini503Count}`);
+      console.log(`Gemini Calls Executed: ${geminiCallsExecutedCount}`);
+      console.log(`Gemini Calls Retried: ${geminiCallsRetriedCount}`);
+      console.log(`Gemini Calls Timed Out: ${geminiCallsTimedOutCount}`);
+      console.log(`Gemini Calls Quota Exhausted: ${geminiCallsQuotaExhaustedCount}`);
+      console.log(`Gemini Calls Temporarily Failed: ${geminiCallsTemporarilyFailedCount}`);
+      console.log(`Maximum Watcher Duration: ${maxWatcherDuration}ms`);
+      console.log(`Average Watcher Duration: ${avgWatcherDuration}ms`);
+      console.log(`Total Cron Duration: ${totalTime}ms`);
+      console.log(`==================================================\n`);
 
-    console.log(`\n==================================================`);
-    console.log(`[TWELVE DATA API USAGE AUDIT & METRICS]`);
-    console.log(`Total Twelve Data requests per cron execution: ${totalTwelveDataRequests}`);
-    console.log(`Requests saved through caching: ${requestsSavedThroughCachingCount}`);
-    console.log(`Watchers skipped due to rate limiting: ${watchersSkippedDueToRateLimitCount}`);
-    console.log(`==================================================\n`);
+      console.log(`\n==================================================`);
+      console.log(`[TWELVE DATA API USAGE AUDIT & METRICS]`);
+      console.log(`Total Twelve Data requests per cron execution: ${totalTwelveDataRequests}`);
+      console.log(`Requests saved through caching: ${requestsSavedThroughCachingCount}`);
+      console.log(`Watchers skipped due to rate limiting: ${watchersSkippedDueToRateLimitCount}`);
+      console.log(`==================================================\n`);
 
-    console.log(`\n========== GEMINI HEALTH & DIAGNOSTICS ==========`);
-    console.log(`Watchers Ready: ${watchersReadyCount}`);
-    console.log(`Waiting For Quota: ${quotaWaitCount}`);
-    console.log(`Invalid Keys: ${invalidKeyCount}`);
-    console.log(`Temporary Errors (503): ${tempErrorCount}`);
-    console.log(`Timeouts: ${geminiTimeoutsCount}`);
-    console.log(`Quota Errors (429): ${geminiQuotaErrorsCount}`);
-    console.log(`Skipped Due To Quota: ${skippedDueToQuotaCount}`);
-    console.log(`Filtered By Deterministic Pre-Filter: ${watchersFilteredByDeterministicGateCount}`);
-    console.log(`Gemini Calls Executed: ${geminiCallsExecutedCount}`);
-    console.log(`Gemini Calls Retried: ${geminiCallsRetriedCount}`);
-    console.log(`Gemini Calls Saved: ${geminiCallsSavedCount}`);
-    console.log(`Gemini Calls Saved By Pre-Filter: ${geminiCallsSavedByPreFilterCount}`);
-    console.log(`=================================================\n`);
+      console.log(`\n========== GEMINI HEALTH & DIAGNOSTICS ==========`);
+      console.log(`Watchers Ready: ${watchersReadyCount}`);
+      console.log(`Waiting For Quota: ${quotaWaitCount}`);
+      console.log(`Invalid Keys: ${invalidKeyCount}`);
+      console.log(`Temporary Errors (503): ${tempErrorCount}`);
+      console.log(`Timeouts: ${geminiTimeoutsCount}`);
+      console.log(`Quota Errors (429): ${geminiQuotaErrorsCount}`);
+      console.log(`Skipped Due To Quota: ${skippedDueToQuotaCount}`);
+      console.log(`Filtered By Deterministic Pre-Filter: ${watchersFilteredByDeterministicGateCount}`);
+      console.log(`Gemini Calls Executed: ${geminiCallsExecutedCount}`);
+      console.log(`Gemini Calls Retried: ${geminiCallsRetriedCount}`);
+      console.log(`Gemini Calls Saved: ${geminiCallsSavedCount}`);
+      console.log(`Gemini Calls Saved By Pre-Filter: ${geminiCallsSavedByPreFilterCount}`);
+      console.log(`=================================================\n`);
+    }
 
-    console.log(`LOG: Cron completed (Processed: ${watchersProcessedCount}, Sent: ${telegramMessagesSentCount})`);
+    console.log(`[CRON] END | duration=${totalTime}ms | processed=${watchersProcessedCount} | signals=${telegramMessagesSentCount} | errors=${errors.length}`);
 
     if (hasProcessingTimeRemaining()) {
       try {

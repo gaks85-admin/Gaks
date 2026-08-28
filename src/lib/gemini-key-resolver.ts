@@ -80,7 +80,8 @@ export async function resolveUserGeminiKey(
   const pair = context?.pair || 'unknown';
   const timeframe = context?.timeframe || 'unknown';
 
-  console.log(`[Gemini Key Resolution]
+  if (process.env.LOG_LEVEL === 'debug' || process.env.DEBUG === 'true') {
+    console.log(`[Gemini Key Resolution]
 User ID: ${userId}
 User Email: ${userEmail}
 Watcher: ${watcherId}
@@ -91,6 +92,7 @@ Key Fingerprint: ${keyFingerprint}
 Key Present: ${keyPresent ? 'YES' : 'NO'}
 Key Redacted: ${keyRedacted}
 Status: ${status}`);
+  }
 
   return {
     userId,
