@@ -170,7 +170,7 @@ export async function runDiagnosticTestSuite(): Promise<{ total: number; passed:
 
   // 9. Deterministic Pre-Filtering Gate Audit
   try {
-    const PRE_FILTER_MIN_SCORE = 70;
+    const PRE_FILTER_MIN_SCORE = 75;
     
     // Case A: Low score (45%) -> should fail gate
     const caseA_score: number = 45;

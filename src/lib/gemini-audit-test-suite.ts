@@ -202,7 +202,7 @@ export async function runGeminiAuditTestSuite(): Promise<{ passed: number; total
   // TEST M: DETERMINISTIC PRE-FILTERING GATE
   // ==========================================
   console.log("\n--- TEST M: Deterministic Pre-Filtering Gate ---");
-  const PRE_FILTER_MIN_SCORE = 70;
+  const PRE_FILTER_MIN_SCORE = 75;
 
   // Case 1: Low score setup (score: 55, recommendation: FAIL) -> bypassed from Gemini
   const mockDecisionLow = { decision_score: 55, recommendation: 'FAIL', mandatory_rules_passed: false };
