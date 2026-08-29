@@ -38,7 +38,7 @@ export const decisionTestCases: DecisionTestCase[] = [
   // --- 2. Simple Rules High/Medium/Low Match ---
   {
     id: 2,
-    description: "3 Rules - 2 Matched (75% AMBIGUOUS)",
+    description: "3 Rules - 2 Matched (75% LIKELY_PASS)",
     compiledStrategy: {
       strategy_mode: 'RULE_ONLY',
       compiled_rules: {
@@ -54,7 +54,7 @@ export const decisionTestCases: DecisionTestCase[] = [
     },
     // Weights: trendline (25) + bos (20) + cc (15) = 60. Matched: 45. 45/60 = 75%.
     expectedScore: 75,
-    expectedRecommendation: 'AMBIGUOUS',
+    expectedRecommendation: 'LIKELY_PASS',
     expectedRequiresGemini: true
   },
   {
@@ -243,7 +243,7 @@ export const decisionTestCases: DecisionTestCase[] = [
   },
   {
     id: 9,
-    description: "10 Rules - 5 Matched (75% AMBIGUOUS)",
+    description: "10 Rules - 5 Matched (75% LIKELY_PASS)",
     compiledStrategy: {
       strategy_mode: 'RULE_ONLY',
       compiled_rules: {
@@ -273,7 +273,7 @@ export const decisionTestCases: DecisionTestCase[] = [
     },
     // Total: 117. Failed: 29. Matched: 88. 88/117 = 75.21% -> 75%
     expectedScore: 75,
-    expectedRecommendation: 'AMBIGUOUS',
+    expectedRecommendation: 'LIKELY_PASS',
     expectedRequiresGemini: true
   },
 
@@ -947,10 +947,10 @@ export const decisionTestCases: DecisionTestCase[] = [
     expectedRequiresGemini: true
   },
 
-  // --- 19. Weighted Boundaries (AMBIGUOUS top limit) ---
+  // --- 19. Weighted Boundaries (LIKELY_PASS 79% boundary) ---
   {
     id: 44,
-    description: "2 Rules - exact 79% AMBIGUOUS boundary",
+    description: "2 Rules - exact 79% LIKELY_PASS boundary",
     compiledStrategy: {
       strategy_mode: 'RULE_ONLY',
       compiled_rules: {
@@ -964,7 +964,7 @@ export const decisionTestCases: DecisionTestCase[] = [
     },
     // Total: choch(15) + macd(4) = 19. Matched: 15. 15/19 = 78.94% -> 79%
     expectedScore: 79,
-    expectedRecommendation: 'AMBIGUOUS',
+    expectedRecommendation: 'LIKELY_PASS',
     expectedRequiresGemini: true
   },
 
@@ -1309,10 +1309,10 @@ export const decisionTestCases: DecisionTestCase[] = [
     expectedRequiresGemini: true
   },
 
-  // --- 28. Large Weighted Boundaries (AMBIGUOUS top limit) ---
+  // --- 28. Large Weighted Boundaries (LIKELY_PASS 79% boundary) ---
   {
     id: 54,
-    description: "All 19 rules active - exact 79% AMBIGUOUS boundary",
+    description: "All 19 rules active - exact 79% LIKELY_PASS boundary",
     compiledStrategy: {
       strategy_mode: 'RULE_ONLY',
       compiled_rules: {
@@ -1360,7 +1360,7 @@ export const decisionTestCases: DecisionTestCase[] = [
     },
     // Total: 210. Failed: retest(20) + bos(20) + macd(4) = 44. Matched: 166. 166/210 = 79.04% -> 79%
     expectedScore: 79,
-    expectedRecommendation: 'AMBIGUOUS',
+    expectedRecommendation: 'LIKELY_PASS',
     expectedRequiresGemini: true
   },
 

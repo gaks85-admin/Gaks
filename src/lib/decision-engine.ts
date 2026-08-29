@@ -387,7 +387,7 @@ export function evaluateDecision(
   } else {
     if (decision_score >= 90) {
       recommendation = 'PASS';
-    } else if (decision_score >= 80) {
+    } else if (decision_score >= 70) {
       recommendation = 'LIKELY_PASS';
       requires_gemini = true;
     } else {
