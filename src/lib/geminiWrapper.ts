@@ -13,29 +13,42 @@ export type GeminiErrorType = 'invalid_key' | 'quota_exceeded' | 'rate_limited' 
 export class UserGeminiRateLimiter {
   private requestsMap = new Map<string, number[]>();
   private maxRpm: number;
+  private maxRpd: number;
 
-  constructor(maxRpm: number = Number(process.env.MAX_GEMINI_RPM_PER_USER) || 10) {
+  constructor(
+    maxRpm: number = Number(process.env.MAX_GEMINI_RPM_PER_USER) || 10,
+    maxRpd: number = Number(process.env.MAX_GEMINI_RPD_PER_USER) || 18
+  ) {
     this.maxRpm = maxRpm;
+    this.maxRpd = maxRpd;
   }
 
-  public canMakeRequest(userId: string): { allowed: boolean; currentRpm: number; maxRpm: number } {
-    if (!userId) return { allowed: true, currentRpm: 0, maxRpm: this.maxRpm };
+  public canMakeRequest(userId: string): { allowed: boolean; currentRpm: number; maxRpm: number; currentRpd: number; maxRpd: number } {
+    if (!userId) return { allowed: true, currentRpm: 0, maxRpm: this.maxRpm, currentRpd: 0, maxRpd: this.maxRpd };
     const now = Date.now();
-    const windowStart = now - 60000;
-    const userTimestamps = (this.requestsMap.get(userId) || []).filter(ts => ts > windowStart);
+    const oneMinuteAgo = now - 60000;
+    const oneDayAgo = now - 86400000; // 24 hours rolling window
+
+    const userTimestamps = (this.requestsMap.get(userId) || []).filter(ts => ts > oneDayAgo);
     this.requestsMap.set(userId, userTimestamps);
 
-    if (userTimestamps.length >= this.maxRpm) {
-      return { allowed: false, currentRpm: userTimestamps.length, maxRpm: this.maxRpm };
+    const currentRpm = userTimestamps.filter(ts => ts > oneMinuteAgo).length;
+    const currentRpd = userTimestamps.length;
+
+    if (currentRpm >= this.maxRpm) {
+      return { allowed: false, currentRpm, maxRpm: this.maxRpm, currentRpd, maxRpd: this.maxRpd };
     }
-    return { allowed: true, currentRpm: userTimestamps.length, maxRpm: this.maxRpm };
+    if (currentRpd >= this.maxRpd) {
+      return { allowed: false, currentRpm, maxRpm: this.maxRpm, currentRpd, maxRpd: this.maxRpd };
+    }
+    return { allowed: true, currentRpm, maxRpm: this.maxRpm, currentRpd, maxRpd: this.maxRpd };
   }
 
   public recordRequest(userId: string): void {
     if (!userId) return;
     const now = Date.now();
-    const windowStart = now - 60000;
-    const userTimestamps = (this.requestsMap.get(userId) || []).filter(ts => ts > windowStart);
+    const oneDayAgo = now - 86400000;
+    const userTimestamps = (this.requestsMap.get(userId) || []).filter(ts => ts > oneDayAgo);
     userTimestamps.push(now);
     this.requestsMap.set(userId, userTimestamps);
   }
@@ -125,7 +138,9 @@ export async function executeBoundedGeminiCall(
   if (context.userId) {
     const limitCheck = globalUserGeminiRateLimiter.canMakeRequest(context.userId);
     if (!limitCheck.allowed) {
-      console.log(`[GEMINI] SKIP | reason=rate_limit_exceeded | current=${limitCheck.currentRpm}/${limitCheck.maxRpm}`);
+      const isDaily = limitCheck.currentRpd >= limitCheck.maxRpd;
+      const metricStr = isDaily ? `${limitCheck.currentRpd}/${limitCheck.maxRpd} RPD (daily budget)` : `${limitCheck.currentRpm}/${limitCheck.maxRpm} RPM`;
+      console.log(`[GEMINI] SKIP | reason=${isDaily ? 'daily_budget_reached' : 'rate_limit_exceeded'} | current=${metricStr}`);
       if (isDebug) {
         console.log(`[GEMINI RATE LIMIT SKIPPED] User: ${userStr} | Watcher: ${watcherStr} | Pair: ${pairStr} | TF: ${timeframeStr} | Model: ${model}`);
       }
@@ -133,8 +148,8 @@ export async function executeBoundedGeminiCall(
       return {
         success: false,
         errorType: 'QUOTA_EXHAUSTED',
-        diagnosticStatus: 'QUOTA_RPM',
-        cleanErrorMessage: `Application per-user Gemini rate limit safety threshold reached (${limitCheck.currentRpm}/${limitCheck.maxRpm} RPM)`,
+        diagnosticStatus: isDaily ? 'QUOTA_RPD' : 'QUOTA_RPM',
+        cleanErrorMessage: `Application per-user Gemini rate limit safety threshold reached (${metricStr})`,
         attemptsExecuted: 0,
         durationMs: 0,
         retried: false
