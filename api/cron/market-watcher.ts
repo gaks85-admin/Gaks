@@ -84,7 +84,7 @@ export function buildDecisionSnapshot(decisionResult: any, histResult: any, comp
     historical_probability: histResult?.historical_probability ?? 0,
     historical_sample_size: histResult?.sample_size ?? 0,
     confidence_level: histResult?.confidence_level || histResult?.confidence || 'LOW',
-    strategy_mode: compiledStrategy?.strategy_mode || 'HYBRID',
+    strategy_mode: compiledStrategy?.strategy_mode || 'RULE_ONLY',
     rule_weights_used: RULE_WEIGHTS,
     rule_details: decisionResult?.rule_details || []
   };
@@ -1600,7 +1600,7 @@ Reason: ${activeValidation.reason}`);
         let fallbackReason = '';
 
         const recommendation = decisionResult.recommendation; // PASS, LIKELY_PASS, AMBIGUOUS, FAIL
-        const executionMode = compiledStrategy.detector_validation?.execution_mode || compiledStrategy.strategy_mode || 'HYBRID';
+        const executionMode = watcher.strategy_mode || compiledStrategy.detector_validation?.execution_mode || compiledStrategy.strategy_mode || 'RULE_ONLY';
 
         // =====================================================================
         // DETERMINISTIC PRE-FILTERING GATE (STAGE 2)
@@ -2340,7 +2340,7 @@ Output ONLY valid JSON.
             marketStructure: marketStructure,
             mandatoryRulesPassed: decisionResult.mandatory_rules_passed ?? true,
             geminiApproved: geminiCalled ? geminiSucceeded : undefined,
-            geminiRequired: requiresGemini,
+            geminiRequired: requiresGemini && !usedFallback,
             direction: analysis.signal,
             slValid: Boolean(analysis.stopLoss),
             tpValid: Boolean(analysis.takeProfit),

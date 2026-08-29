@@ -625,7 +625,7 @@ export default async function handler(req: any, res: any) {
     let geminiDuration = 0;
 
     const recommendation = decisionResult.recommendation; // PASS, LIKELY_PASS, AMBIGUOUS, FAIL
-    const executionMode = compiledStrategy.strategy_mode || 'HYBRID';
+    const executionMode = watcher?.strategy_mode || compiledStrategy.strategy_mode || 'RULE_ONLY';
 
     // Deterministic Pre-Filtering Gate
     const PRE_FILTER_MIN_SCORE = 75;
