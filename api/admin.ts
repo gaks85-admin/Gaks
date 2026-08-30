@@ -99,7 +99,6 @@ async function generateContentWithDiagnostics(ai: any, params: any) {
 
 import fs from 'fs';
 import path from 'path';
-import url from 'url';
 
 import { getSupabase } from '../lib/supabase-server.js';
 
@@ -1308,8 +1307,8 @@ async function users_search_handler(req: any, res: any) {
 
   try {
     const matchedPath = req.headers['x-matched-path'] || req.headers['x-original-url'] || req.url || '';
-    const parsedUrl = url.parse(matchedPath, true);
-    const query = String(parsedUrl.query?.q || '').trim();
+    const parsedUrl = new URL(matchedPath, 'http://localhost');
+    const query = String(parsedUrl.searchParams.get('q') || req.query?.q || '').trim();
 
     if (!query) {
       return res.status(200).json({ success: true, users: [] });
@@ -2235,9 +2234,9 @@ function mapTimeframeToInterval(tf: string): string {
 
 async function inspector_candles_handler(req: any, res: any) {
   const supabase = getSupabase();
-  const urlParams = url.parse(req.url || '', true).query;
-  const symbol = urlParams.symbol as string;
-  const timeframe = urlParams.timeframe as string || 'H1';
+  const parsedUrl = new URL(req.url || '', 'http://localhost');
+  const symbol = (req.query?.symbol || parsedUrl.searchParams.get('symbol') || '') as string;
+  const timeframe = (req.query?.timeframe || parsedUrl.searchParams.get('timeframe') || 'H1') as string;
 
   if (!symbol) return res.status(400).json({ success: false, error: "Symbol is required" });
 
@@ -2262,8 +2261,8 @@ async function inspector_candles_handler(req: any, res: any) {
 
 async function inspector_watcher_details_handler(req: any, res: any) {
   const supabase = getSupabase();
-  const urlParams = url.parse(req.url || '', true).query;
-  const watcherId = urlParams.watcherId as string;
+  const parsedUrl = new URL(req.url || '', 'http://localhost');
+  const watcherId = (req.query?.watcherId || parsedUrl.searchParams.get('watcherId') || '') as string;
 
   if (!watcherId) return res.status(400).json({ success: false, error: "Watcher ID is required" });
 
@@ -2899,7 +2898,7 @@ async function logs_handler(req: any, res: any) {
 export default async function handler(req: any, res: any) {
   try {
     const matchedPath = req.headers['x-matched-path'] || req.headers['x-original-url'] || req.headers['x-forwarded-url'] || req.url || '';
-    const parsedUrl = url.parse(matchedPath, true);
+    const parsedUrl = new URL(matchedPath, 'http://localhost');
     const pathname = parsedUrl.pathname || '';
 
     if (pathname.endsWith('/logs')) {
