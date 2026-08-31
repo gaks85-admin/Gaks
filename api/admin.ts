@@ -403,27 +403,28 @@ async function health_handler(req: any, res: any) {
 
     let allProfiles: any[] = [];
     try {
-      const { data, error } = await supabase.from('profiles').select('id, gemini_status');
+      const { data, error } = await supabase.from('profiles').select('id');
       if (error) {
-        const { data: fallbackData } = await supabase.from('profiles').select('id');
-        allProfiles = (fallbackData || []).map((p: any) => ({ ...p, gemini_status: 'READY' }));
-      } else {
-        allProfiles = data || [];
+        console.warn("[DIAGNOSTIC] health_handler: profiles query error:", error);
       }
+      allProfiles = data || [];
     } catch (e) {
-      try {
-        const { data: fallbackData } = await supabase.from('profiles').select('id');
-        allProfiles = (fallbackData || []).map((p: any) => ({ ...p, gemini_status: 'READY' }));
-      } catch (e2) {}
+      allProfiles = [];
     }
+
+    let keysCount = 0;
+    try {
+      const { data: keys } = await supabase.from('user_api_keys').select('user_id').eq('provider', 'gemini');
+      keysCount = keys?.length || 0;
+    } catch (e) {}
 
     const aiHealth = {
       totalUsers: allProfiles?.length || 0,
-      ready: allProfiles?.filter(p => !p.gemini_status || p.gemini_status === 'READY').length || 0,
-      needsAttention: allProfiles?.filter(p => p.gemini_status === 'NEEDS_ATTENTION').length || 0,
-      invalidKey: allProfiles?.filter(p => p.gemini_status === 'INVALID_KEY').length || 0,
-      quotaExhausted: allProfiles?.filter(p => p.gemini_status === 'QUOTA_EXHAUSTED').length || 0,
-      billingRequired: allProfiles?.filter(p => p.gemini_status === 'BILLING_REQUIRED').length || 0
+      ready: keysCount,
+      needsAttention: 0,
+      invalidKey: 0,
+      quotaExhausted: 0,
+      billingRequired: 0
     };
 
     return res.status(200).json({
@@ -958,25 +959,15 @@ async function stats_handler(req: any, res: any) {
     // Fetch stats
     let profiles: any[] = [];
     try {
-      const { data, error } = await supabase.from('profiles').select('id, gemini_status');
+      const { data, error } = await supabase.from('profiles').select('id');
       if (error) {
         console.warn("[DIAGNOSTIC] stats_handler: profiles query error:", error);
-        const { data: fallbackData, error: fallbackError } = await supabase.from('profiles').select('id');
-        if (fallbackError) throw fallbackError;
-        profiles = (fallbackData || []).map((p: any) => ({ ...p, gemini_status: 'READY' }));
-      } else {
-        profiles = data || [];
       }
+      profiles = data || [];
     } catch (err) {
       console.error("[DIAGNOSTIC] stats_handler: Failed to fetch profiles:", err);
-      throw err;
+      profiles = [];
     }
-    
-    const readyCount = profiles?.filter(p => !p.gemini_status || p.gemini_status === 'READY').length || 0;
-    const needsAttentionCount = profiles?.filter(p => p.gemini_status === 'NEEDS_ATTENTION').length || 0;
-    const invalidKeyCount = profiles?.filter(p => p.gemini_status === 'INVALID_KEY').length || 0;
-    const quotaExhaustedCount = profiles?.filter(p => p.gemini_status === 'QUOTA_EXHAUSTED').length || 0;
-    const billingRequiredCount = profiles?.filter(p => p.gemini_status === 'BILLING_REQUIRED').length || 0;
 
     const { data: activeW, error: awErr } = await supabase.from('watchers').select('id').eq('status', 'active');
     if (awErr) throw awErr;
@@ -991,6 +982,11 @@ async function stats_handler(req: any, res: any) {
     const { data: keys, error: kErr } = await supabase.from('user_api_keys').select('user_id').eq('provider', 'gemini');
     const keysSet = new Set(keys?.map(k => k.user_id) || []);
     const missingKeyCount = (profiles || []).filter(u => !keysSet.has(u.id)).length;
+    const readyCount = (profiles || []).filter(u => keysSet.has(u.id)).length;
+    const needsAttentionCount = 0;
+    const invalidKeyCount = 0;
+    const quotaExhaustedCount = 0;
+    const billingRequiredCount = 0;
 
     const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
     let sigsCount = 0;
@@ -1230,7 +1226,7 @@ async function users_handler(req: any, res: any) {
         created_at: p.created_at,
         telegram_connected: p.telegram_connected,
         gemini_configured: !!hasKey,
-        gemini_status: p.gemini_status || 'READY',
+        gemini_status: p.gemini_status || (hasKey ? 'READY' : 'NOT_CONFIGURED'),
         gemini_last_error: p.gemini_last_error || null,
         gemini_last_checked: p.gemini_last_checked || null,
         watcher_status: watcher?.status || 'stopped',
@@ -2157,18 +2153,13 @@ async function watchers_handler(req: any, res: any) {
 
     let profiles: any[] = [];
     try {
-      const { data, error } = await supabase.from('profiles').select('id, email, gemini_status');
+      const { data, error } = await supabase.from('profiles').select('id, email');
       if (error) {
-        const { data: fallbackData } = await supabase.from('profiles').select('id, email');
-        profiles = (fallbackData || []).map((p: any) => ({ ...p, gemini_status: 'READY' }));
-      } else {
-        profiles = data || [];
+        console.warn("[DIAGNOSTIC] watchers_handler: profiles query error:", error);
       }
+      profiles = data || [];
     } catch (e) {
-      try {
-        const { data: fallbackData } = await supabase.from('profiles').select('id, email');
-        profiles = (fallbackData || []).map((p: any) => ({ ...p, gemini_status: 'READY' }));
-      } catch (e2) {}
+      profiles = [];
     }
 
     const assembledWatchers = (watchers || []).map(w => {
