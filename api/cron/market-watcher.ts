@@ -663,18 +663,54 @@ export default async function handler(req: any, res: any) {
 
     const cronCandleCache = new Map<string, Promise<any>>();
     const cronPriceCache = new Map<string, Promise<number | null>>();
+    const uniqueMarketDataKeysInCron = new Set<string>();
     let twelveDataRequestsInCron = 0;
     let twelveDataCacheHitsInCron = 0;
+    let twelveDataDeduplicationsInCron = 0;
+    let twelveDataTimeoutsInCron = 0;
+    let twelveDataInvalidResponsesInCron = 0;
+    let twelveDataStaleDataSkipsInCron = 0;
 
     async function fetchMarketDataForCron(reqArgs: any): Promise<any> {
       const canonical = toCanonicalSymbol(reqArgs.symbol);
-      const cacheKey = `${canonical}:${reqArgs.timeframe}:${reqArgs.requiredCount}`;
+      const cacheKey = `twelve-data:${canonical}:${reqArgs.timeframe}:${reqArgs.requiredCount}`;
+      uniqueMarketDataKeysInCron.add(cacheKey);
+
+      // Check cron processing deadline budget (5,000ms minimum)
+      const remainingMs = remainingProcessingMs();
+      if (remainingMs < 5000) {
+        console.warn(`[CRON DEADLINE]\nStage: TWELVE_DATA\nAction: SKIP_REQUEST\nRemaining: ${remainingMs}ms`);
+        return {
+          isValid: false,
+          candles: [],
+          reason: 'CRON_DEADLINE_EXCEEDED',
+          errorType: 'TEMPORARY_ERROR'
+        };
+      }
+
       if (cronCandleCache.has(cacheKey)) {
-        twelveDataCacheHitsInCron++;
+        twelveDataDeduplicationsInCron++;
+        requestsSavedThroughCachingCount++;
         return cronCandleCache.get(cacheKey)!;
       }
-      twelveDataRequestsInCron++;
-      const promise = defaultMarketDataService.getMarketData(reqArgs);
+
+      const promise = (async () => {
+        const res = await defaultMarketDataService.getMarketData(reqArgs);
+        if (res.fromCache) {
+          twelveDataCacheHitsInCron++;
+          requestsSavedThroughCachingCount++;
+        } else if (res.isValid) {
+          twelveDataRequestsInCron++;
+          totalTwelveDataRequests++;
+        } else {
+          if (res.reason === 'TWELVE_DATA_TIMEOUT') twelveDataTimeoutsInCron++;
+          if (res.reason === 'MARKET_DATA_INVALID' || res.reason === 'TWELVE_DATA_INVALID_RESPONSE') twelveDataInvalidResponsesInCron++;
+          if (res.reason === 'TWELVE_DATA_STALE') twelveDataStaleDataSkipsInCron++;
+          if (res.reason === 'TWELVE_DATA_RATE_LIMITED' || res.errorType === 'QUOTA_EXHAUSTED') watchersSkippedDueToRateLimitCount++;
+        }
+        return res;
+      })();
+
       cronCandleCache.set(cacheKey, promise);
       return promise;
     }
@@ -683,9 +719,11 @@ export default async function handler(req: any, res: any) {
       const canonical = toCanonicalSymbol(selectedPair);
       if (cronPriceCache.has(canonical)) {
         twelveDataCacheHitsInCron++;
+        requestsSavedThroughCachingCount++;
         return cronPriceCache.get(canonical)!;
       }
       twelveDataRequestsInCron++;
+      totalTwelveDataRequests++;
       const promise = fetchCurrentPrice(canonical, twelveDataKeyStr, stats);
       cronPriceCache.set(canonical, promise);
       return promise;
@@ -3365,9 +3403,15 @@ Source: ${brokerQuote.source}`);
 
       console.log(`\n==================================================`);
       console.log(`[TWELVE DATA API USAGE AUDIT & METRICS]`);
-      console.log(`Total Twelve Data requests per cron execution: ${totalTwelveDataRequests}`);
-      console.log(`Requests saved through caching: ${requestsSavedThroughCachingCount}`);
-      console.log(`Watchers skipped due to rate limiting: ${watchersSkippedDueToRateLimitCount}`);
+      console.log(`Total Requests: ${totalTwelveDataRequests}`);
+      console.log(`Unique Keys: ${uniqueMarketDataKeysInCron.size}`);
+      console.log(`Cache Hits: ${twelveDataCacheHitsInCron}`);
+      console.log(`Request Deduplications: ${twelveDataDeduplicationsInCron}`);
+      console.log(`Requests Saved: ${requestsSavedThroughCachingCount}`);
+      console.log(`Rate Limited: ${watchersSkippedDueToRateLimitCount}`);
+      console.log(`Timeouts: ${twelveDataTimeoutsInCron}`);
+      console.log(`Invalid Responses: ${twelveDataInvalidResponsesInCron}`);
+      console.log(`Stale Data Skips: ${twelveDataStaleDataSkipsInCron}`);
       console.log(`==================================================\n`);
 
       console.log(`\n========== GEMINI HEALTH & DIAGNOSTICS ==========`);

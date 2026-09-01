@@ -52,22 +52,36 @@ export const MARKET_DATA_PROVIDER_LIMITS = {
   minuteCredits: 8,           // Twelve Data Free/Basic tier limit: 8 credits / minute
   dailyCredits: 800,          // Twelve Data Free/Basic tier limit: 800 credits / day
   safetyReserve: 1,           // Keep at least 1 credit safety buffer before hitting hard 429
-  requestTimeoutMs: 6500,     // 6.5s hard timeout per HTTP request
-  maxRetries: 2,              // Max retries for transient non-429 failures
+  requestTimeoutMs: 5000,     // 5,000 ms hard timeout per HTTP request
+  maxRetries: 1,              // At most 1 retry for transient 5xx/network errors
   baseDelayMs: 500,
 
-  // Conservative freshness TTLs by timeframe (ms)
+  // Timeframe-aware cache TTLs (ms) matching specification
   timeframeTtlMs: {
-    'M1': 25 * 1000,          // 25 seconds
-    'M5': 60 * 1000,          // 1 minute
-    'M15': 120 * 1000,        // 2 minutes
-    'M30': 240 * 1000,        // 4 minutes
-    'H1': 360 * 1000,         // 6 minutes
+    'M1': 45 * 1000,          // 30-60s
+    'M5': 90 * 1000,          // 60-120s
+    'M15': 150 * 1000,        // 120-180s
+    'M30': 240 * 1000,        // 180-300s
+    'H1': 450 * 1000,         // 300-600s
     'H2': 600 * 1000,         // 10 minutes
-    'H4': 900 * 1000,         // 15 minutes
-    'D1': 3600 * 1000,        // 1 hour
+    'H4': 1200 * 1000,        // 600-1800s (20m)
+    'D1': 2700 * 1000,        // 1800-3600s (45m)
     'W1': 14400 * 1000,       // 4 hours
     'MN1': 86400 * 1000       // 24 hours
+  } as Record<string, number>,
+
+  // Maximum acceptable data age thresholds (ms) matching specification
+  maxAcceptableAgeMs: {
+    'M1': 5 * 60 * 1000,       // 5 min
+    'M5': 10 * 60 * 1000,      // 10 min
+    'M15': 30 * 60 * 1000,     // 30 min
+    'M30': 60 * 60 * 1000,     // 60 min
+    'H1': 2 * 3600 * 1000,     // 2 hours
+    'H2': 4 * 3600 * 1000,     // 4 hours
+    'H4': 8 * 3600 * 1000,     // 8 hours
+    'D1': 48 * 3600 * 1000,    // 48 hours
+    'W1': 7 * 86400 * 1000,    // 7 days
+    'MN1': 30 * 86400 * 1000   // 30 days
   } as Record<string, number>,
 
   priceTtlMs: 30 * 1000       // 30 seconds for spot price
@@ -566,21 +580,25 @@ export class MarketDataGateway {
 
   /**
    * Primary Authoritative Entry Point: Fetch Candles & Market Data with Deduplication,
-   * Multi-Timeframe TTL Caching, Rate Governor, and Fail-Closed Safety.
+   * Multi-Timeframe TTL Caching, Rate Governor, Hard Timeout, and Fail-Closed Safety.
    */
   public async getMarketData(req: MarketDataRequest, apiKeyOverride?: string): Promise<MarketDataResult> {
     const canonical = toCanonicalSymbol(req.symbol);
     const display = toDisplaySymbol(req.symbol);
     const interval = mapTimeframeToInterval(req.timeframe);
     const cacheTtlMs = MARKET_DATA_PROVIDER_LIMITS.timeframeTtlMs[req.timeframe] || 60000;
-    const cacheKey = `${canonical}_${interval}_${req.requiredCount}`;
+    const cacheKey = `twelve-data:${canonical}:${interval}:${req.requiredCount}`;
     const now = Date.now();
 
     // 1. Check Server-Side Multi-Timeframe Cache
     const cached = this.candleCache.get(cacheKey);
     if (cached && (now - cached.cachedAt < cacheTtlMs)) {
+      const cacheAgeMs = now - cached.cachedAt;
       this.healthState.cacheHits++;
       this.healthState.requestsSaved++;
+
+      console.log(`[TWELVE DATA CACHE HIT]\nSymbol: ${canonical}\nTimeframe: ${req.timeframe}\nAge: ${cacheAgeMs}ms`);
+
       this.logRequest({
         watcherId: req.watcherId,
         userId: req.userId,
@@ -599,16 +617,19 @@ export class MarketDataGateway {
       return {
         ...cached.result,
         fromCache: true,
-        cacheAgeMs: now - cached.cachedAt,
+        cacheAgeMs,
         creditsUsed: this.healthState.creditsUsed,
         creditsRemaining: this.healthState.creditsRemaining
       };
     }
 
-    // 2. Check In-Flight Request Deduplication
+    // 2. Check In-Flight Request Deduplication (Simultaneous identical requests share Promise)
     if (this.inFlightCandleRequests.has(cacheKey)) {
       this.healthState.deduplicatedRequests++;
       this.healthState.requestsSaved++;
+
+      console.log(`[TWELVE DATA REQUEST DEDUP]\nSymbol: ${canonical}\nTimeframe: ${req.timeframe}`);
+
       this.logRequest({
         watcherId: req.watcherId,
         userId: req.userId,
@@ -627,7 +648,7 @@ export class MarketDataGateway {
       return this.inFlightCandleRequests.get(cacheKey)!;
     }
 
-    // 3. Check Quota Budget & Provider Cooldown
+    // 3. Check Quota Budget & Provider Cooldown (Action: CACHE_ONLY on 429/quota exhaustion)
     const quotaCheck = this.checkQuotaBudget({
       watcherId: req.watcherId,
       userId: req.userId,
@@ -635,6 +656,9 @@ export class MarketDataGateway {
     });
 
     if (!quotaCheck.allowed) {
+      this.healthState.quotaBlockedRequests++;
+      console.warn(`[TWELVE DATA RATE LIMIT]\nSymbol: ${canonical}\nTimeframe: ${req.timeframe}\nAction: CACHE_ONLY`);
+
       this.logRequest({
         watcherId: req.watcherId,
         userId: req.userId,
@@ -650,12 +674,10 @@ export class MarketDataGateway {
         dedupStatus: 'BLOCKED_QUOTA'
       });
 
-      // If we have a slightly older cached result that is still temporally acceptable, we DO NOT serve stale data for trade execution;
-      // we fail-closed with structured quota exhausted status so the watcher safely evaluates NO_TRADE.
       return {
         isValid: false,
         candles: [],
-        reason: 'MARKET_DATA_PROVIDER_QUOTA_EXHAUSTED',
+        reason: 'TWELVE_DATA_RATE_LIMITED',
         errorType: 'QUOTA_EXHAUSTED',
         creditsUsed: this.healthState.creditsUsed,
         creditsRemaining: this.healthState.creditsRemaining
@@ -667,13 +689,17 @@ export class MarketDataGateway {
       return {
         isValid: false,
         candles: [],
-        reason: 'Twelve Data API key not configured',
+        reason: 'TWELVE_DATA_AUTH_ERROR',
         errorType: 'INVALID_CREDENTIAL'
       };
     }
 
-    // 4. Execute Network Request with Bounded Exponential Backoff (for transient non-429 errors)
+    // 4. Execute Network Request with 5,000ms Timeout and Strict Error Classification
     const promise = (async (): Promise<MarketDataResult> => {
+      const reqStart = Date.now();
+      console.log(`[TWELVE DATA REQUEST]\nSymbol: ${canonical}\nTimeframe: ${req.timeframe}\nOutputSize: ${req.requiredCount}`);
+      this.healthState.totalRequests++;
+
       const timeSeriesUrl = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(display)}&interval=${interval}&outputsize=${req.requiredCount}&timezone=UTC&apikey=${key}`;
 
       let attempt = 0;
@@ -684,29 +710,34 @@ export class MarketDataGateway {
         try {
           const response = await fetch(timeSeriesUrl, { signal: AbortSignal.timeout(MARKET_DATA_PROVIDER_LIMITS.requestTimeoutMs) });
 
-          // Handle 429 immediately without retry
+          // Inspect headers for quota monitoring without making auxiliary requests
+          this.inspectQuotaHeaders(response.headers);
+          if (this.healthState.creditsUsed !== null || this.healthState.creditsRemaining !== null) {
+            console.log(`[TWELVE DATA USAGE]\nCredits Used: ${this.healthState.creditsUsed ?? 'N/A'}\nCredits Left: ${this.healthState.creditsRemaining ?? 'N/A'}`);
+          }
+
+          // Handle 429 immediately without retries
           if (response.status === 429) {
             this.recordRequestFailure(429, 'Rate limit', response.headers);
-            this.logRequest({
-              watcherId: req.watcherId,
-              userId: req.userId,
-              symbol: display,
-              timeframe: req.timeframe,
-              endpoint: '/time_series',
-              purpose: req.purpose || 'Market Watcher Scan',
-              creditsUsed: this.healthState.creditsUsed,
-              creditsRemaining: this.healthState.creditsRemaining,
-              httpStatus: 429,
-              quotaStatus: 'QUOTA_EXHAUSTED',
-              retryCount: attempt - 1,
-              dedupStatus: 'FRESH_NETWORK'
-            });
+            console.warn(`[TWELVE DATA RATE LIMIT]\nSymbol: ${canonical}\nTimeframe: ${req.timeframe}\nAction: CACHE_ONLY`);
 
             return {
               isValid: false,
               candles: [],
-              reason: 'MARKET_DATA_PROVIDER_QUOTA_EXHAUSTED',
+              reason: 'TWELVE_DATA_RATE_LIMITED',
               errorType: 'QUOTA_EXHAUSTED',
+              creditsUsed: this.healthState.creditsUsed,
+              creditsRemaining: this.healthState.creditsRemaining
+            };
+          }
+
+          if (response.status === 401 || response.status === 403) {
+            this.recordRequestFailure(response.status, 'Authentication Error', response.headers);
+            return {
+              isValid: false,
+              candles: [],
+              reason: 'TWELVE_DATA_AUTH_ERROR',
+              errorType: 'INVALID_CREDENTIAL',
               creditsUsed: this.healthState.creditsUsed,
               creditsRemaining: this.healthState.creditsRemaining
             };
@@ -716,28 +747,29 @@ export class MarketDataGateway {
 
           // Check error status in body
           if (data.status === 'error') {
-            if (data.code === 429 || String(data.message).includes('limit') || String(data.message).includes('credits')) {
+            const rawMsg = String(data.message || '');
+            const lowerMsg = rawMsg.toLowerCase();
+
+            if (data.code === 429 || lowerMsg.includes('limit') || lowerMsg.includes('credits') || lowerMsg.includes('quota')) {
               this.recordRequestFailure(429, data.message, response.headers);
-              this.logRequest({
-                watcherId: req.watcherId,
-                userId: req.userId,
-                symbol: display,
-                timeframe: req.timeframe,
-                endpoint: '/time_series',
-                purpose: req.purpose || 'Market Watcher Scan',
-                creditsUsed: this.healthState.creditsUsed,
-                creditsRemaining: this.healthState.creditsRemaining,
-                httpStatus: 429,
-                quotaStatus: 'QUOTA_EXHAUSTED',
-                retryCount: attempt - 1,
-                dedupStatus: 'FRESH_NETWORK'
-              });
+              console.warn(`[TWELVE DATA RATE LIMIT]\nSymbol: ${canonical}\nTimeframe: ${req.timeframe}\nAction: CACHE_ONLY`);
 
               return {
                 isValid: false,
                 candles: [],
-                reason: 'MARKET_DATA_PROVIDER_QUOTA_EXHAUSTED',
+                reason: 'TWELVE_DATA_RATE_LIMITED',
                 errorType: 'QUOTA_EXHAUSTED',
+                creditsUsed: this.healthState.creditsUsed,
+                creditsRemaining: this.healthState.creditsRemaining
+              };
+            }
+
+            if (data.code === 400 || lowerMsg.includes('not found') || lowerMsg.includes('invalid')) {
+              this.recordRequestFailure(404, data.message, response.headers);
+              return {
+                isValid: false,
+                candles: [],
+                reason: 'TWELVE_DATA_NOT_FOUND',
                 creditsUsed: this.healthState.creditsUsed,
                 creditsRemaining: this.healthState.creditsRemaining
               };
@@ -748,7 +780,7 @@ export class MarketDataGateway {
               return {
                 isValid: false,
                 candles: [],
-                reason: 'INVALID_CREDENTIAL',
+                reason: 'TWELVE_DATA_AUTH_ERROR',
                 errorType: 'INVALID_CREDENTIAL',
                 creditsUsed: this.healthState.creditsUsed,
                 creditsRemaining: this.healthState.creditsRemaining
@@ -759,25 +791,90 @@ export class MarketDataGateway {
             return {
               isValid: false,
               candles: [],
-              reason: data.message || 'Market data error',
+              reason: 'TWELVE_DATA_UNKNOWN_ERROR',
               creditsUsed: this.healthState.creditsUsed,
               creditsRemaining: this.healthState.creditsRemaining
             };
           }
 
-          if (response.ok && data.status === 'ok' && data.values && data.values.length > 0) {
+          if (response.ok && data.status === 'ok' && data.values && Array.isArray(data.values) && data.values.length > 0) {
             this.recordRequestSuccess(response.headers);
 
-            const candleData: Candle[] = data.values.map((v: any) => ({
-              timestamp: v.datetime,
-              open: parseFloat(v.open),
-              high: parseFloat(v.high),
-              low: parseFloat(v.low),
-              close: parseFloat(v.close),
-              volume: v.volume ? parseFloat(v.volume) : undefined
-            })).reverse();
+            // Strict Timestamp Normalization & OHLC Validation inside Gateway
+            const candleData: Candle[] = [];
+            for (let i = data.values.length - 1; i >= 0; i--) {
+              const v = data.values[i];
+              const o = parseFloat(v.open);
+              const h = parseFloat(v.high);
+              const l = parseFloat(v.low);
+              const c = parseFloat(v.close);
+              const vol = v.volume ? parseFloat(v.volume) : undefined;
 
-            const currentPrice = candleData[candleData.length - 1]?.close;
+              if (isNaN(o) || isNaN(h) || isNaN(l) || isNaN(c) || !isFinite(o) || !isFinite(h) || !isFinite(l) || !isFinite(c)) {
+                return {
+                  isValid: false,
+                  candles: [],
+                  reason: 'MARKET_DATA_INVALID',
+                  errorType: 'TEMPORARY_ERROR'
+                };
+              }
+
+              if (h < l || h < Math.max(o, c) || l > Math.min(o, c)) {
+                return {
+                  isValid: false,
+                  candles: [],
+                  reason: 'MARKET_DATA_INVALID',
+                  errorType: 'TEMPORARY_ERROR'
+                };
+              }
+
+              let dtStr = String(v.datetime || '');
+              if (dtStr.includes(' ') && !dtStr.includes('T')) {
+                dtStr = dtStr.replace(' ', 'T');
+              }
+              if (!dtStr.endsWith('Z') && !dtStr.includes('+')) {
+                dtStr += 'Z';
+              }
+
+              candleData.push({
+                timestamp: dtStr,
+                open: o,
+                high: h,
+                low: l,
+                close: c,
+                volume: vol
+              });
+            }
+
+            if (candleData.length < 5) {
+              return {
+                isValid: false,
+                candles: [],
+                reason: 'MARKET_DATA_INVALID',
+                errorType: 'TEMPORARY_ERROR'
+              };
+            }
+
+            // Freshness / Staleness Validation
+            const latestCandle = candleData[candleData.length - 1];
+            const latestCandleMs = new Date(latestCandle.timestamp).getTime();
+            const candleAgeMs = Math.max(0, now - latestCandleMs);
+            const isCrypto = canonical.includes('BTC') || canonical.includes('ETH') || canonical.includes('SOL') || canonical.includes('XRP');
+            const maxAgeMs = MARKET_DATA_PROVIDER_LIMITS.maxAcceptableAgeMs[req.timeframe] || (isCrypto ? 2 * 3600 * 1000 : 4 * 3600 * 1000);
+
+            if (candleAgeMs > maxAgeMs) {
+              console.warn(`[TWELVE DATA STALE]\nSymbol: ${canonical}\nTimeframe: ${req.timeframe}\nLatest Candle: ${latestCandle.timestamp}\nAge: ${candleAgeMs}ms\nAction: SKIP`);
+              return {
+                isValid: false,
+                candles: [],
+                reason: 'TWELVE_DATA_STALE',
+                errorType: 'UNAVAILABLE'
+              };
+            }
+
+            const currentPrice = latestCandle.close;
+            const durationMs = Date.now() - reqStart;
+            console.log(`[TWELVE DATA SUCCESS]\nSymbol: ${canonical}\nTimeframe: ${req.timeframe}\nDuration: ${durationMs}ms`);
 
             const finalRes: MarketDataResult = {
               isValid: true,
@@ -788,49 +885,52 @@ export class MarketDataGateway {
               creditsRemaining: this.healthState.creditsRemaining
             };
 
-            // Store in server-side cache
+            // Store in server-side cache (stores only validated normalized data)
             this.candleCache.set(cacheKey, { timestamp: now, result: finalRes, cachedAt: now });
             if (currentPrice) {
               this.priceCache.set(canonical, { timestamp: now, price: currentPrice });
             }
 
-            this.logRequest({
-              watcherId: req.watcherId,
-              userId: req.userId,
-              symbol: display,
-              timeframe: req.timeframe,
-              endpoint: '/time_series',
-              purpose: req.purpose || 'Market Watcher Scan',
-              creditsUsed: this.healthState.creditsUsed,
-              creditsRemaining: this.healthState.creditsRemaining,
-              httpStatus: 200,
-              quotaStatus: 'HEALTHY',
-              retryCount: attempt - 1,
-              dedupStatus: 'FRESH_NETWORK'
-            });
-
             return finalRes;
           }
 
           this.recordRequestFailure(response.status, 'Unexpected provider payload', response.headers);
+          return {
+            isValid: false,
+            candles: [],
+            reason: 'TWELVE_DATA_INVALID_RESPONSE',
+            errorType: 'TEMPORARY_ERROR'
+          };
         } catch (err: any) {
+          const durationMs = Date.now() - reqStart;
+          if (err.name === 'TimeoutError' || err.name === 'AbortError' || err.message?.includes('timeout') || err.message?.includes('aborted')) {
+            this.recordRequestFailure(null, 'TWELVE_DATA_TIMEOUT');
+            console.warn(`[TWELVE DATA TIMEOUT]\nSymbol: ${canonical}\nTimeframe: ${req.timeframe}\nDuration: ${durationMs}ms`);
+            return {
+              isValid: false,
+              candles: [],
+              reason: 'TWELVE_DATA_TIMEOUT',
+              errorType: 'NETWORK_TIMEOUT'
+            };
+          }
+
           if (attempt >= maxRetries) {
             this.recordRequestFailure(null, err.message);
             return {
               isValid: false,
               candles: [],
-              reason: err.message || 'NETWORK_TIMEOUT',
+              reason: 'TWELVE_DATA_TEMPORARY_ERROR',
               errorType: 'NETWORK_TIMEOUT'
             };
           }
-          await new Promise(resolve => setTimeout(resolve, MARKET_DATA_PROVIDER_LIMITS.baseDelayMs * Math.pow(2, attempt - 1)));
+          await new Promise(resolve => setTimeout(resolve, MARKET_DATA_PROVIDER_LIMITS.baseDelayMs));
         }
       }
 
       return {
         isValid: false,
         candles: [],
-        reason: 'MARKET_DATA_UNAVAILABLE',
+        reason: 'TWELVE_DATA_TEMPORARY_ERROR',
         errorType: 'UNAVAILABLE'
       };
     })();
