@@ -343,6 +343,7 @@ export default function App() {
   const [watcherTradeStatus, setWatcherTradeStatus] = useState<string>('WAITING');
   const [watcherLastScanAt, setWatcherLastScanAt] = useState<string>('');
   const [watcherLastCandle, setWatcherLastCandle] = useState<string>('');
+  const [watcherZone, setWatcherZone] = useState<any>(null);
   const [activeTrade, setActiveTrade] = useState<ActiveTradeData | null>(null);
   const [isResolvingTrade, setIsResolvingTrade] = useState<boolean>(false);
 
@@ -1183,7 +1184,7 @@ export default function App() {
     try {
       const { data, error } = await supabase
         .from('watchers')
-        .select('id, status, selected_pair, selected_timeframe, trade_status, active_trade_id, direction, entry_price, stop_loss, take_profit, opened_at, cooldown_until, last_scan_at, last_analyzed_closed_candle_time, last_signal_data')
+        .select('id, status, selected_pair, selected_timeframe, trade_status, active_trade_id, direction, entry_price, stop_loss, take_profit, opened_at, cooldown_until, last_scan_at, last_analyzed_closed_candle_time, last_signal_data, zone_data, zone_status, zone_high, zone_low, zone_type, zone_invalidation_level')
         .eq('user_id', userId);
       console.log(`[WATCHER LIFECYCLE] WATCHER FETCHED (loadWatcherStatus): ${JSON.stringify(data)}`);
         
@@ -1223,6 +1224,15 @@ export default function App() {
         if (activeOne.trade_status) setWatcherTradeStatus(activeOne.trade_status);
         if (activeOne.last_scan_at) setWatcherLastScanAt(activeOne.last_scan_at);
         if (activeOne.last_analyzed_closed_candle_time) setWatcherLastCandle(activeOne.last_analyzed_closed_candle_time);
+        if (activeOne.zone_data) {
+          try {
+            setWatcherZone(typeof activeOne.zone_data === 'string' ? JSON.parse(activeOne.zone_data) : activeOne.zone_data);
+          } catch (e) {
+            setWatcherZone(null);
+          }
+        } else {
+          setWatcherZone(null);
+        }
 
         if (activeOne.trade_status === 'ACTIVE' && activeOne.entry_price && activeOne.stop_loss && activeOne.take_profit) {
           const matchingRate = liveRates.find(r => normalizeSymbol(r.symbol) === normalizeSymbol(activeOne.selected_pair));
@@ -2403,6 +2413,7 @@ export default function App() {
               geminiKeyExists={geminiKeyExists}
               onGoToSettings={() => setActiveTab('settings')}
               activeTrade={activeTrade}
+              watcherZone={watcherZone}
               onResolveTrade={handleResolveTrade}
               isResolvingTrade={isResolvingTrade}
             />

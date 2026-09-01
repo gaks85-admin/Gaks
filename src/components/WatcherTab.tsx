@@ -59,6 +59,17 @@ export interface WatcherTabProps {
   geminiKeyExists?: boolean;
   onGoToSettings?: () => void;
   activeTrade?: ActiveTradeData | null;
+  watcherZone?: {
+    id?: string;
+    type?: string;
+    direction?: 'BUY' | 'SELL';
+    high?: number;
+    low?: number;
+    invalidationLevel?: number;
+    status?: string;
+    reasoning?: string;
+    tappedAt?: string | null;
+  } | null;
   onResolveTrade?: (watcherId: string, resolutionType: 'TP_HIT' | 'SL_HIT' | 'BREAKEVEN' | 'MANUAL_CLOSE', exitPrice?: number) => Promise<void>;
   isResolvingTrade?: boolean;
 }
@@ -89,6 +100,7 @@ export const WatcherTab: React.FC<WatcherTabProps> = ({
   geminiKeyExists = true,
   onGoToSettings,
   activeTrade,
+  watcherZone,
   onResolveTrade,
   isResolvingTrade = false,
 }) => {
@@ -276,6 +288,64 @@ export const WatcherTab: React.FC<WatcherTabProps> = ({
           </div>
         )}
       </div>
+
+      {/* Marked Trading Zone Card (When waiting for tap or tapped) */}
+      {isWatcherActive && watcherTradeStatus !== 'ACTIVE' && watcherZone && (
+        <div className={`p-5 rounded-3xl border ${
+          watcherZone.status === 'ZONE_TAPPED'
+            ? 'border-indigo-500/30 dark:border-indigo-500/20 bg-indigo-500/5 dark:bg-indigo-950/20'
+            : 'border-amber-500/30 dark:border-amber-500/20 bg-amber-500/5 dark:bg-amber-950/20'
+        } space-y-4 shadow-sm animate-fade-in`}>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5">
+              <Target className={`w-4 h-4 ${watcherZone.status === 'ZONE_TAPPED' ? 'text-indigo-500' : 'text-amber-500'}`} />
+              <span className="text-xs font-bold uppercase tracking-wider text-zinc-900 dark:text-white">
+                Marked Zone Markout
+              </span>
+              <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold tracking-wider uppercase border ${
+                watcherZone.status === 'ZONE_TAPPED'
+                  ? 'bg-indigo-100 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border-indigo-300 dark:border-indigo-800'
+                  : 'bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-800'
+              }`}>
+                {watcherZone.status === 'ZONE_TAPPED' ? 'ZONE TAPPED · EVALUATING CONFIRMATION' : 'WAITING FOR PRICE TAP'}
+              </span>
+              {watcherZone.type && (
+                <span className="text-[10px] font-mono text-zinc-500 dark:text-zinc-400 bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 rounded-md uppercase">
+                  {watcherZone.type} ({watcherZone.direction || 'ZONE'})
+                </span>
+              )}
+            </div>
+            {watcherZone.reasoning && (
+              <span className="text-[11px] text-zinc-500 dark:text-zinc-400 italic">
+                {watcherZone.reasoning}
+              </span>
+            )}
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            <div className="p-3 rounded-2xl bg-white/80 dark:bg-zinc-900/60 border border-zinc-200/80 dark:border-zinc-800 space-y-0.5 shadow-xs">
+              <span className="text-[10px] uppercase font-bold text-zinc-500 block">Zone High</span>
+              <span className="text-xs sm:text-sm font-bold font-mono text-zinc-900 dark:text-white tabular-nums">
+                {watcherZone.high}
+              </span>
+            </div>
+            <div className="p-3 rounded-2xl bg-white/80 dark:bg-zinc-900/60 border border-zinc-200/80 dark:border-zinc-800 space-y-0.5 shadow-xs">
+              <span className="text-[10px] uppercase font-bold text-zinc-500 block">Zone Low</span>
+              <span className="text-xs sm:text-sm font-bold font-mono text-zinc-900 dark:text-white tabular-nums">
+                {watcherZone.low}
+              </span>
+            </div>
+            {watcherZone.invalidationLevel && (
+              <div className="p-3 rounded-2xl bg-white/80 dark:bg-zinc-900/60 border border-zinc-200/80 dark:border-zinc-800 space-y-0.5 shadow-xs">
+                <span className="text-[10px] uppercase font-bold text-rose-500 block">Invalidation Level</span>
+                <span className="text-xs sm:text-sm font-bold font-mono text-zinc-900 dark:text-white tabular-nums">
+                  {watcherZone.invalidationLevel}
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Active Trade Live Telemetry Card (When in ACTIVE trade status) */}
       {isWatcherActive && watcherTradeStatus === 'ACTIVE' && activeTrade && activeTelemetry && (

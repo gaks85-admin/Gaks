@@ -448,6 +448,16 @@ CREATE TABLE IF NOT EXISTS public.watchers (
   cooldown_until TIMESTAMPTZ,
   signal_message_id TEXT,
 
+  -- Stateful Zone Markout & Tap Confirmation
+  zone_data JSONB DEFAULT NULL,
+  zone_status TEXT DEFAULT 'NO_ZONE',
+  zone_high NUMERIC DEFAULT NULL,
+  zone_low NUMERIC DEFAULT NULL,
+  zone_type TEXT DEFAULT NULL,
+  zone_invalidation_level NUMERIC DEFAULT NULL,
+  zone_marked_at TIMESTAMPTZ DEFAULT NULL,
+  zone_tapped_at TIMESTAMPTZ DEFAULT NULL,
+
   -- Gemini Quota & Health Status tracking
   gemini_status TEXT DEFAULT 'READY',
   next_gemini_retry_at TIMESTAMPTZ,

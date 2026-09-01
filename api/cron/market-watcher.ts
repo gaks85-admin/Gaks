@@ -46,6 +46,7 @@ import { evaluateAdaptiveExecution } from '../../src/lib/adaptive-execution-engi
 import { evaluateClosedLoopCalibration } from '../../src/lib/closed-loop-calibration-engine.js';
 import { resolveAuthoritativeDecision, DecisionGateResult } from '../../src/lib/decision-attribution.js';
 import { processWithConcurrency } from '../../src/lib/concurrency.js';
+import { identifyMarkedZone, evaluateZoneState, isPriceInOrTappingZone, MarkedZone } from '../../src/lib/zone-engine.js';
 
 
 // --- Inlined Gemini Wrapper ---
@@ -963,6 +964,14 @@ export default async function handler(req: any, res: any) {
             opened_at: null,
             closed_at: null,
             cooldown_until: null,
+            zone_data: null,
+            zone_status: 'NO_ZONE',
+            zone_high: null,
+            zone_low: null,
+            zone_type: null,
+            zone_invalidation_level: null,
+            zone_marked_at: null,
+            zone_tapped_at: null,
             updated_at: new Date().toISOString()
           })
           .eq("id", watcher.id)
@@ -1567,6 +1576,191 @@ Reason: ${activeValidation.reason}`);
         const strategyCompilationConfidence = strategyCompilationConfidenceRecord.normalized;
 
         const marketStructure = extractMarketStructure(candleData, compiledStrategy.detector_validation?.supported_detectors);
+
+        // =====================================================================
+        // STATEFUL ZONE MARKOUT & TAP CONFIRMATION LIFECYCLE
+        // =====================================================================
+        cronTimer.startStage("Stateful Zone Evaluation");
+        const latestCandle = candleData[candleData.length - 1];
+        const activeCurrentPrice = latestCandle?.close || 0;
+
+        let currentZone: MarkedZone | null = null;
+        if (watcher.zone_data) {
+          try {
+            currentZone = typeof watcher.zone_data === 'string' ? JSON.parse(watcher.zone_data) : watcher.zone_data;
+          } catch (e) {
+            currentZone = null;
+          }
+        }
+
+        // 1. If an active zone already exists, evaluate its state
+        if (currentZone && currentZone.status !== 'INVALIDATED' && currentZone.status !== 'CONFIRMED') {
+          const zoneEval = evaluateZoneState(currentZone, latestClosedCandle, activeCurrentPrice, marketStructure.volatilityInformation?.atr);
+
+          if (zoneEval.isInvalidated) {
+            console.log(`[ZONE INVALIDATED] Watcher ID: ${watcher.id} (${selectedPair}) marked zone [${currentZone.low} - ${currentZone.high}] (${currentZone.type}) invalidated: ${zoneEval.reason}. Clearing zone.`);
+            logWatcherEvent('ZONE INVALIDATED', logCtx, {
+              'Zone Type': currentZone.type,
+              'Zone High': currentZone.high,
+              'Zone Low': currentZone.low,
+              'Invalidation Level': currentZone.invalidationLevel,
+              'Reason': zoneEval.reason
+            });
+
+            await supabase.from("watchers").update({
+              zone_data: null,
+              zone_status: 'NO_ZONE',
+              zone_high: null,
+              zone_low: null,
+              zone_type: null,
+              zone_invalidation_level: null,
+              updated_at: new Date().toISOString()
+            }).eq("id", watcher.id);
+
+            currentZone = null; // Cleared, allows discovering fresh zone below
+          } else if (!zoneEval.isTapped) {
+            // Zone is intact, but price has NOT tapped the zone yet.
+            // Preserves 100% of Gemini API quota and halts scan cleanly!
+            console.log(`[WAITING FOR ZONE TAP] Watcher ID: ${watcher.id} (${selectedPair}): Price ${activeCurrentPrice} is outside marked zone [${currentZone.low} - ${currentZone.high}] (${currentZone.type} ${currentZone.direction}). Bypassing AI evaluation.`);
+            logWatcherEvent('WAITING FOR ZONE TAP', logCtx, {
+              'Zone Type': currentZone.type,
+              'Direction': currentZone.direction,
+              'Zone Bounds': `[${currentZone.low} - ${currentZone.high}]`,
+              'Current Price': activeCurrentPrice,
+              'Invalidation Level': currentZone.invalidationLevel,
+              'Action': 'WAITING_FOR_PRICE_TO_REACH_ZONE'
+            });
+
+            const scanDurationMs = Date.now() - scanStart;
+            await recordEvaluation(supabase, {
+              user_id: userId,
+              watcher_id: watcher.id,
+              pair: selectedPair,
+              timeframe: selectedTimeframe,
+              strategy_mode: compiledStrategy.strategy_mode,
+              decision_score: 0,
+              matched_weight: 0,
+              possible_weight: 0,
+              recommendation: 'FAIL',
+              mandatory_rules_passed: false,
+              matched_rules: [],
+              failed_rules: [`Price ${activeCurrentPrice} has not reached marked ${currentZone.type} zone [${currentZone.low} - ${currentZone.high}]`],
+              gemini_used: false,
+              trade_sent: false,
+              trade_reason: `Waiting for price to enter marked ${currentZone.type} zone [${currentZone.low} - ${currentZone.high}]. AI confirmation bypassed.`,
+              scan_duration_ms: scanDurationMs,
+              decision_snapshot: null
+            });
+
+            await supabase
+              .from("watchers")
+              .update({
+                zone_status: 'WAITING_FOR_TAP',
+                last_scan_at: new Date().toISOString(),
+                last_analyzed_closed_candle_time: latestClosedCandleTime,
+                updated_at: new Date().toISOString()
+              })
+              .eq("id", watcher.id);
+
+            watchersProcessedCount++;
+            isWatcherSkipped = false;
+            results.push({ userId, symbol, tradeStatus: 'WAITING_FOR_TAP', result: 'Waiting for zone tap' });
+            return;
+          } else {
+            // Zone is TAPPED!
+            console.log(`[ZONE TAPPED] Watcher ID: ${watcher.id} (${selectedPair}): Price ${activeCurrentPrice} tapped marked zone [${currentZone.low} - ${currentZone.high}] (${currentZone.type}). Proceeding to confirmation analysis.`);
+            logWatcherEvent('ZONE TAPPED', logCtx, {
+              'Zone Type': currentZone.type,
+              'Zone Bounds': `[${currentZone.low} - ${currentZone.high}]`,
+              'Tapped Price': activeCurrentPrice,
+              'Action': 'RUNNING_CONFIRMATION_ANALYSIS'
+            });
+
+            currentZone = zoneEval.updatedZone;
+            await supabase.from("watchers").update({
+              zone_data: currentZone,
+              zone_status: 'ZONE_TAPPED',
+              zone_tapped_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            }).eq("id", watcher.id);
+          }
+        }
+
+        // 2. If NO active zone exists, identify and mark a fresh high-quality structural zone
+        if (!currentZone) {
+          const discoveredZone = identifyMarkedZone(candleData, marketStructure, compiledStrategy, activeCurrentPrice);
+
+          if (discoveredZone) {
+            console.log(`[ZONE MARKED] Watcher ID: ${watcher.id} (${selectedPair}): Identified fresh ${discoveredZone.type} (${discoveredZone.direction}) [${discoveredZone.low} - ${discoveredZone.high}], Invalidation: ${discoveredZone.invalidationLevel}.`);
+            logWatcherEvent('ZONE MARKED', logCtx, {
+              'Zone ID': discoveredZone.id,
+              'Zone Type': discoveredZone.type,
+              'Direction': discoveredZone.direction,
+              'Zone Bounds': `[${discoveredZone.low} - ${discoveredZone.high}]`,
+              'Invalidation Level': discoveredZone.invalidationLevel,
+              'Reasoning': discoveredZone.reasoning
+            });
+
+            const isImmediateTap = isPriceInOrTappingZone(discoveredZone, latestCandle, activeCurrentPrice);
+            discoveredZone.status = isImmediateTap ? 'ZONE_TAPPED' : 'WAITING_FOR_TAP';
+            if (isImmediateTap) discoveredZone.tappedAt = new Date().toISOString();
+
+            await supabase.from("watchers").update({
+              zone_data: discoveredZone,
+              zone_status: discoveredZone.status,
+              zone_high: discoveredZone.high,
+              zone_low: discoveredZone.low,
+              zone_type: discoveredZone.type,
+              zone_invalidation_level: discoveredZone.invalidationLevel,
+              zone_marked_at: new Date().toISOString(),
+              zone_tapped_at: isImmediateTap ? new Date().toISOString() : null,
+              updated_at: new Date().toISOString()
+            }).eq("id", watcher.id);
+
+            if (!isImmediateTap) {
+              console.log(`[WAITING FOR ZONE TAP] Watcher ID: ${watcher.id} (${selectedPair}): Newly marked zone [${discoveredZone.low} - ${discoveredZone.high}] is waiting for price tap. Bypassing AI evaluation.`);
+              const scanDurationMs = Date.now() - scanStart;
+              await recordEvaluation(supabase, {
+                user_id: userId,
+                watcher_id: watcher.id,
+                pair: selectedPair,
+                timeframe: selectedTimeframe,
+                strategy_mode: compiledStrategy.strategy_mode,
+                decision_score: 0,
+                matched_weight: 0,
+                possible_weight: 0,
+                recommendation: 'FAIL',
+                mandatory_rules_passed: false,
+                matched_rules: [],
+                failed_rules: [`Newly marked zone [${discoveredZone.low} - ${discoveredZone.high}] waiting for price tap`],
+                gemini_used: false,
+                trade_sent: false,
+                trade_reason: `Marked ${discoveredZone.type} zone [${discoveredZone.low} - ${discoveredZone.high}]. Waiting for price tap before AI confirmation.`,
+                scan_duration_ms: scanDurationMs,
+                decision_snapshot: null
+              });
+
+              await supabase
+                .from("watchers")
+                .update({
+                  last_scan_at: new Date().toISOString(),
+                  last_analyzed_closed_candle_time: latestClosedCandleTime,
+                  updated_at: new Date().toISOString()
+                })
+                .eq("id", watcher.id);
+
+              watchersProcessedCount++;
+              isWatcherSkipped = false;
+              results.push({ userId, symbol, tradeStatus: 'WAITING_FOR_TAP', result: 'Zone marked, waiting for tap' });
+              return;
+            }
+
+            currentZone = discoveredZone;
+          } else {
+            console.log(`[ZONE SEARCH] Watcher ID: ${watcher.id} (${selectedPair}): No distinct structural POI/Zone identified in current market structure. Waiting for new structural formation.`);
+            logWatcherEvent('ZONE SEARCH', logCtx, 'No high-quality structural POI/Zone identified in current candles.');
+          }
+        }
 
         // Stage 2
         const cleanSymUpper = (selectedPair || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
@@ -3319,6 +3513,7 @@ Source: ${brokerQuote.source}`);
             stop_loss: analysis.stopLoss,
             take_profit: analysis.takeProfit,
             direction: analysis.signal,
+            zone_status: 'CONFIRMED',
             opened_at: new Date().toISOString(),
             closed_at: null,
             cooldown_until: null,

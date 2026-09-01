@@ -23,6 +23,7 @@ import { resolveAuthoritativeDecision, DecisionGateResult } from "../decision-at
 import { calculateHistoricalProbability, recordCompletedTrade } from "../learning-engine.js";
 import { validateActiveTradeState } from "../trade-validator.js";
 import { buildActiveTradeTelemetry, evaluateActiveTradeExit } from "../active-trade-monitor.js";
+import { identifyMarkedZone, evaluateZoneState, isPriceInOrTappingZone, MarkedZone } from "../zone-engine.js";
 
 
 /**
@@ -571,6 +572,105 @@ export default async function handler(req: any, res: any) {
       'Strategy Compiler'
     );
     const strategyCompilationConfidence = strategyCompilationConfidenceRecord.normalized;
+
+    // =========================================================================
+    // STATEFUL ZONE MARKOUT & TAP CONFIRMATION LIFECYCLE
+    // =========================================================================
+    const latestCandle = candleData[candleData.length - 1];
+    const latestClosedCandle = candleData[candleData.length - 2] || latestCandle;
+    const activeCurrentPrice = latestCandle?.close || 0;
+
+    let currentZone: MarkedZone | null = null;
+    if (watcher.zone_data) {
+      try {
+        currentZone = typeof watcher.zone_data === 'string' ? JSON.parse(watcher.zone_data) : watcher.zone_data;
+      } catch (e) {
+        currentZone = null;
+      }
+    }
+
+    if (currentZone && currentZone.status !== 'INVALIDATED' && currentZone.status !== 'CONFIRMED') {
+      const zoneEval = evaluateZoneState(currentZone, latestClosedCandle, activeCurrentPrice, marketStructure.volatilityInformation?.atr);
+
+      if (zoneEval.isInvalidated) {
+        console.log(`[ZONE INVALIDATED] Manual Scan - Watcher ${watcher.id} (${symbol}): Zone [${currentZone.low} - ${currentZone.high}] invalidated: ${zoneEval.reason}`);
+        await supabase.from("watchers").update({
+          zone_data: null,
+          zone_status: 'NO_ZONE',
+          zone_high: null,
+          zone_low: null,
+          zone_type: null,
+          zone_invalidation_level: null,
+          updated_at: new Date().toISOString()
+        }).eq("id", watcher.id);
+        currentZone = null;
+      } else if (!zoneEval.isTapped) {
+        console.log(`[WAITING FOR ZONE TAP] Manual Scan - Watcher ${watcher.id} (${symbol}): Price ${activeCurrentPrice} is outside zone [${currentZone.low} - ${currentZone.high}].`);
+        await supabase.from("watchers").update({
+          zone_status: 'WAITING_FOR_TAP',
+          last_scan_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        }).eq("id", watcher.id);
+
+        return res.json({
+          success: true,
+          data: {
+            watcher_id: watcher.id,
+            pair: symbol,
+            signal: 'NO_TRADE',
+            confidence: 0,
+            status: 'WAITING_FOR_TAP',
+            zone: currentZone,
+            reasoning: [`Waiting for price (${activeCurrentPrice}) to reach marked ${currentZone.type} zone [${currentZone.low} - ${currentZone.high}]. AI confirmation bypassed.`]
+          }
+        });
+      } else {
+        currentZone = zoneEval.updatedZone;
+        await supabase.from("watchers").update({
+          zone_data: currentZone,
+          zone_status: 'ZONE_TAPPED',
+          zone_tapped_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        }).eq("id", watcher.id);
+      }
+    }
+
+    if (!currentZone) {
+      const discoveredZone = identifyMarkedZone(candleData, marketStructure, compiledStrategy, activeCurrentPrice);
+      if (discoveredZone) {
+        const isImmediateTap = isPriceInOrTappingZone(discoveredZone, latestCandle, activeCurrentPrice);
+        discoveredZone.status = isImmediateTap ? 'ZONE_TAPPED' : 'WAITING_FOR_TAP';
+        if (isImmediateTap) discoveredZone.tappedAt = new Date().toISOString();
+
+        await supabase.from("watchers").update({
+          zone_data: discoveredZone,
+          zone_status: discoveredZone.status,
+          zone_high: discoveredZone.high,
+          zone_low: discoveredZone.low,
+          zone_type: discoveredZone.type,
+          zone_invalidation_level: discoveredZone.invalidationLevel,
+          zone_marked_at: new Date().toISOString(),
+          zone_tapped_at: isImmediateTap ? new Date().toISOString() : null,
+          updated_at: new Date().toISOString()
+        }).eq("id", watcher.id);
+
+        if (!isImmediateTap) {
+          return res.json({
+            success: true,
+            data: {
+              watcher_id: watcher.id,
+              pair: symbol,
+              signal: 'NO_TRADE',
+              confidence: 0,
+              status: 'WAITING_FOR_TAP',
+              zone: discoveredZone,
+              reasoning: [`Marked ${discoveredZone.type} zone [${discoveredZone.low} - ${discoveredZone.high}]. Waiting for price tap before AI confirmation.`]
+            }
+          });
+        }
+        currentZone = discoveredZone;
+      }
+    }
 
     // Stage 2
     const cleanSymUpper = (symbol || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
