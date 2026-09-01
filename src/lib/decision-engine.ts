@@ -350,6 +350,7 @@ export function evaluateDecision(
   // for the active trade setup.
   const directionalPairs: [string, string][] = [
     ['support', 'resistance'],
+    ['demand_zone', 'supply_zone'],
     ['support_rejection', 'resistance_rejection']
   ];
 
