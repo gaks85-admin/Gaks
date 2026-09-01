@@ -17,7 +17,8 @@ import {
   SessionEvaluator,
   TimeframeEvaluator,
   RiskRewardEvaluator,
-  ConfirmationCandleEvaluator
+  ConfirmationCandleEvaluator,
+  OrderBlockEvaluator
 } from './decision-engine/index.js';
 
 export interface EvaluatedRuleDetail {
@@ -97,7 +98,8 @@ export function evaluateDecision(
   // Evaluator's rule IDs based on compiled_rules state and supported engine catalog
   const knownRuleIds = [
     'trendline_breakout', 'break_and_retest', 'confirmation_candle', 'bos', 'choch',
-    'liquidity_sweep', 'fair_value_gap', 'support', 'resistance', 'support_rejection',
+    'liquidity_sweep', 'fair_value_gap', 'order_block', 'supply_demand', 'unmitigated_zone',
+    'demand_zone', 'supply_zone', 'support', 'resistance', 'support_rejection',
     'resistance_rejection', 'ema', 'rsi', 'macd', 'atr', 'volume_confirmation',
     'session', 'timeframes', 'risk_reward'
   ];
@@ -152,6 +154,7 @@ export function evaluateDecision(
   const tfEval = new TimeframeEvaluator();
   const rrEval = new RiskRewardEvaluator();
   const ccEval = new ConfirmationCandleEvaluator();
+  const obEval = new OrderBlockEvaluator();
 
   const evaluatedRules: EvaluatedRuleDetail[] = [];
 
@@ -323,6 +326,23 @@ export function evaluateDecision(
   // 19. Confirmation Candle
   if (rules.confirmation_candle === true) {
     processRule("Confirmation Candle", "confirmation_candle", "confirmation_candle", () => ccEval.evaluate(rules, marketStructure));
+  }
+
+  // 20. Order Block / Supply & Demand
+  if (rules.order_block === true) {
+    processRule("Order Block", "order_block", "order_block", () => obEval.evaluate(rules, marketStructure));
+  }
+  if (rules.supply_demand === true) {
+    processRule("Supply and Demand", "supply_demand", "supply_demand", () => obEval.evaluate(rules, marketStructure));
+  }
+  if (rules.unmitigated_zone === true) {
+    processRule("Unmitigated Zone", "unmitigated_zone", "unmitigated_zone", () => obEval.evaluate(rules, marketStructure));
+  }
+  if (rules.demand_zone === true) {
+    processRule("Demand Zone", "demand_zone", "demand_zone", () => obEval.evaluate(rules, marketStructure));
+  }
+  if (rules.supply_zone === true) {
+    processRule("Supply Zone", "supply_zone", "supply_zone", () => obEval.evaluate(rules, marketStructure));
   }
 
   // Handle directional pairs: If both opposing directional rules (e.g. support & resistance)

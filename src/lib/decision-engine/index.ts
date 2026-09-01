@@ -15,3 +15,4 @@ export * from './session.js';
 export * from './timeframe.js';
 export * from './risk-reward.js';
 export * from './confirmation-candle.js';
+export * from './order-block.js';
