@@ -106,12 +106,119 @@ export function identifyMarkedZone(
   const trend = marketStructure?.trend || 'SIDEWAYS';
   const pair = marketStructure?.pair || 'MARKET';
 
+  // Strategy preference filtering: 100% align with user's configured rules
+  const rules = compiledStrategy?.compiled_rules;
+  const hasOrderBlockPreference = !!(rules?.order_block || rules?.supply_demand || rules?.unmitigated_zone);
+  const hasFvgPreference = !!rules?.fair_value_gap;
+  const hasSrPreference = !!(rules?.support || rules?.resistance || rules?.support_rejection || rules?.resistance_rejection);
+  const hasLiquidityPreference = !!rules?.liquidity_sweep;
+
+  const isStrategyFiltered = hasOrderBlockPreference || hasFvgPreference || hasSrPreference || hasLiquidityPreference;
+  const allowFvg = isStrategyFiltered ? hasFvgPreference : true;
+  const allowOrderBlocks = isStrategyFiltered ? hasOrderBlockPreference : true;
+  const allowLiquidity = isStrategyFiltered ? hasLiquidityPreference : true;
+  const allowSr = isStrategyFiltered ? hasSrPreference : true;
+  const enforceUnmitigated = rules?.unmitigated_zone !== false; // Default true for quality order blocks
+
   const candidateZones: MarkedZone[] = [];
 
   // =========================================================================
-  // 1. FAIR VALUE GAPS (FVG)
+  // 1. ORDER BLOCKS & SUPPLY / DEMAND (Strict Unmitigated Discovery)
   // =========================================================================
-  if (marketStructure?.fairValueGaps && marketStructure.fairValueGaps.length > 0) {
+  if (allowOrderBlocks) {
+    // Scan historical candles for fresh, unmitigated order blocks
+    for (let i = sortedCandles.length - 2; i >= Math.max(1, sortedCandles.length - 35); i--) {
+      const c = sortedCandles[i];
+      const nextC = sortedCandles[i + 1];
+      const body = Math.abs(c.close - c.open);
+      const nextBody = Math.abs(nextC.close - nextC.open);
+
+      // Bullish Demand Order Block: Down or base candle followed by strong upward displacement
+      const isBullishDisplacement = (nextC.close > c.high || (nextC.close > nextC.open && nextBody > Math.max(body * 1.2, atr * 0.7)));
+      if ((c.close <= c.open || body <= atr * 0.5) && isBullishDisplacement && c.low < activePrice) {
+        const obHigh = Number(Math.max(c.open, c.high).toFixed(5));
+        const obLow = Number(c.low.toFixed(5));
+        const invalidation = Number((obLow - buffer).toFixed(5));
+
+        // Check if any subsequent candle already mitigated this zone
+        let isMitigated = false;
+        for (let k = i + 2; k < sortedCandles.length - 1; k++) {
+          if (sortedCandles[k].low <= obHigh) {
+            isMitigated = true;
+            break;
+          }
+        }
+
+        if (!enforceUnmitigated || !isMitigated) {
+          const distanceRatio = Math.abs(activePrice - obHigh) / activePrice;
+          const proximityScore = Math.max(0, 98 - (distanceRatio * 1000));
+          const strength = Math.round(proximityScore * (trend === 'BULLISH' ? 1.0 : 0.85));
+
+          candidateZones.push({
+            id: generateZoneId(pair, 'BULLISH_ORDER_BLOCK', 'BUY'),
+            type: 'BULLISH_ORDER_BLOCK',
+            direction: 'BUY',
+            high: obHigh,
+            low: obLow,
+            invalidationLevel: invalidation,
+            strength,
+            createdAt: new Date().toISOString(),
+            createdCandleTime: String(c.timestamp),
+            tappedAt: null,
+            tapCount: 0,
+            status: 'WAITING_FOR_TAP',
+            reasoning: `Fresh unmitigated Demand Zone / Bullish Order Block [${obLow} - ${obHigh}].`,
+            candleIndex: i
+          });
+        }
+      }
+
+      // Bearish Supply Order Block: Up or base candle followed by sharp downward displacement
+      const isBearishDisplacement = (nextC.close < c.low || (nextC.close < nextC.open && nextBody > Math.max(body * 1.2, atr * 0.7)));
+      if ((c.close >= c.open || body <= atr * 0.5) && isBearishDisplacement && c.high > activePrice) {
+        const obHigh = Number(c.high.toFixed(5));
+        const obLow = Number(Math.min(c.open, c.low).toFixed(5));
+        const invalidation = Number((obHigh + buffer).toFixed(5));
+
+        // Check if any subsequent candle already mitigated this zone
+        let isMitigated = false;
+        for (let k = i + 2; k < sortedCandles.length - 1; k++) {
+          if (sortedCandles[k].high >= obLow) {
+            isMitigated = true;
+            break;
+          }
+        }
+
+        if (!enforceUnmitigated || !isMitigated) {
+          const distanceRatio = Math.abs(obLow - activePrice) / activePrice;
+          const proximityScore = Math.max(0, 98 - (distanceRatio * 1000));
+          const strength = Math.round(proximityScore * (trend === 'BEARISH' ? 1.0 : 0.85));
+
+          candidateZones.push({
+            id: generateZoneId(pair, 'BEARISH_ORDER_BLOCK', 'SELL'),
+            type: 'BEARISH_ORDER_BLOCK',
+            direction: 'SELL',
+            high: obHigh,
+            low: obLow,
+            invalidationLevel: invalidation,
+            strength,
+            createdAt: new Date().toISOString(),
+            createdCandleTime: String(c.timestamp),
+            tappedAt: null,
+            tapCount: 0,
+            status: 'WAITING_FOR_TAP',
+            reasoning: `Fresh unmitigated Supply Zone / Bearish Order Block [${obLow} - ${obHigh}].`,
+            candleIndex: i
+          });
+        }
+      }
+    }
+  }
+
+  // =========================================================================
+  // 2. FAIR VALUE GAPS (FVG) - Only if enabled in user strategy
+  // =========================================================================
+  if (allowFvg && marketStructure?.fairValueGaps && marketStructure.fairValueGaps.length > 0) {
     // Unfilled or partially filled FVGs
     for (const fvg of marketStructure.fairValueGaps) {
       if (fvg.isFilled) continue;
@@ -122,7 +229,6 @@ export function identifyMarkedZone(
         const high = Number(fvg.top.toFixed(5));
         const invalidation = Number((low - buffer).toFixed(5));
         
-        // Distance score: closer to current price gets higher priority
         const distanceRatio = Math.abs(activePrice - high) / activePrice;
         const proximityScore = Math.max(0, 100 - (distanceRatio * 1000));
         const strength = Math.round(proximityScore * (trend === 'BULLISH' ? 1.0 : 0.8));
@@ -174,78 +280,9 @@ export function identifyMarkedZone(
   }
 
   // =========================================================================
-  // 2. ORDER BLOCKS (Derived from Swing Pivots & Momentum Candles)
+  // 3. KEY SWING LEVELS & LIQUIDITY POOLS - Only if allowed
   // =========================================================================
-  // Search for the last opposing candle before strong displacement
-  for (let i = sortedCandles.length - 3; i >= Math.max(2, sortedCandles.length - 25); i--) {
-    const c = sortedCandles[i];
-    const nextC = sortedCandles[i + 1];
-    const body = Math.abs(c.close - c.open);
-    const nextBody = Math.abs(nextC.close - nextC.open);
-
-    // Bullish Order Block: Down-close candle followed by strong upward displacement
-    if (c.close < c.open && nextC.close > nextC.open && nextBody > body * 1.2 && c.low < activePrice) {
-      const obHigh = Number(Math.max(c.open, c.high).toFixed(5));
-      const obLow = Number(c.low.toFixed(5));
-      const invalidation = Number((obLow - buffer).toFixed(5));
-
-      const distanceRatio = Math.abs(activePrice - obHigh) / activePrice;
-      const proximityScore = Math.max(0, 95 - (distanceRatio * 1000));
-      const strength = Math.round(proximityScore * (trend === 'BULLISH' ? 1.0 : 0.85));
-
-      candidateZones.push({
-        id: generateZoneId(pair, 'BULLISH_ORDER_BLOCK', 'BUY'),
-        type: 'BULLISH_ORDER_BLOCK',
-        direction: 'BUY',
-        high: obHigh,
-        low: obLow,
-        invalidationLevel: invalidation,
-        strength,
-        createdAt: new Date().toISOString(),
-        createdCandleTime: String(c.timestamp),
-        tappedAt: null,
-        tapCount: 0,
-        status: 'WAITING_FOR_TAP',
-        reasoning: `Bullish Order Block formed at index ${i} [${obLow} - ${obHigh}].`,
-        candleIndex: i
-      });
-      break; // Only capture most recent prominent OB
-    }
-
-    // Bearish Order Block: Up-close candle followed by strong downward displacement
-    if (c.close > c.open && nextC.close < nextC.open && nextBody > body * 1.2 && c.high > activePrice) {
-      const obHigh = Number(c.high.toFixed(5));
-      const obLow = Number(Math.min(c.open, c.low).toFixed(5));
-      const invalidation = Number((obHigh + buffer).toFixed(5));
-
-      const distanceRatio = Math.abs(obLow - activePrice) / activePrice;
-      const proximityScore = Math.max(0, 95 - (distanceRatio * 1000));
-      const strength = Math.round(proximityScore * (trend === 'BEARISH' ? 1.0 : 0.85));
-
-      candidateZones.push({
-        id: generateZoneId(pair, 'BEARISH_ORDER_BLOCK', 'SELL'),
-        type: 'BEARISH_ORDER_BLOCK',
-        direction: 'SELL',
-        high: obHigh,
-        low: obLow,
-        invalidationLevel: invalidation,
-        strength,
-        createdAt: new Date().toISOString(),
-        createdCandleTime: String(c.timestamp),
-        tappedAt: null,
-        tapCount: 0,
-        status: 'WAITING_FOR_TAP',
-        reasoning: `Bearish Order Block formed at index ${i} [${obLow} - ${obHigh}].`,
-        candleIndex: i
-      });
-      break;
-    }
-  }
-
-  // =========================================================================
-  // 3. KEY SWING LEVELS & LIQUIDITY POOLS
-  // =========================================================================
-  if (marketStructure?.swingLows && marketStructure.swingLows.length > 0) {
+  if (allowLiquidity && marketStructure?.swingLows && marketStructure.swingLows.length > 0) {
     const validSwingLows = marketStructure.swingLows.filter(s => !s.isBroken && s.price < activePrice);
     if (validSwingLows.length > 0) {
       const nearestLow = validSwingLows[validSwingLows.length - 1];
@@ -275,7 +312,7 @@ export function identifyMarkedZone(
     }
   }
 
-  if (marketStructure?.swingHighs && marketStructure.swingHighs.length > 0) {
+  if (allowLiquidity && marketStructure?.swingHighs && marketStructure.swingHighs.length > 0) {
     const validSwingHighs = marketStructure.swingHighs.filter(s => !s.isBroken && s.price > activePrice);
     if (validSwingHighs.length > 0) {
       const nearestHigh = validSwingHighs[validSwingHighs.length - 1];
@@ -306,9 +343,9 @@ export function identifyMarkedZone(
   }
 
   // =========================================================================
-  // 4. STRUCTURAL SUPPORT / RESISTANCE ZONES
+  // 4. STRUCTURAL SUPPORT / RESISTANCE ZONES - Only if allowed
   // =========================================================================
-  if (marketStructure?.supportZones && marketStructure.supportZones.length > 0) {
+  if (allowSr && marketStructure?.supportZones && marketStructure.supportZones.length > 0) {
     for (const sz of marketStructure.supportZones) {
       if (sz.priceMin < activePrice) {
         const low = Number(sz.priceMin.toFixed(5));
@@ -334,7 +371,7 @@ export function identifyMarkedZone(
     }
   }
 
-  if (marketStructure?.resistanceZones && marketStructure.resistanceZones.length > 0) {
+  if (allowSr && marketStructure?.resistanceZones && marketStructure.resistanceZones.length > 0) {
     for (const rz of marketStructure.resistanceZones) {
       if (rz.priceMax > activePrice) {
         const low = Number(rz.priceMin.toFixed(5));

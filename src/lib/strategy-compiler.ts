@@ -12,6 +12,7 @@ import { SupportResistanceParser } from './strategy-compiler/support-resistance.
 import { MacdParser } from './strategy-compiler/macd.js';
 import { AtrParser } from './strategy-compiler/atr.js';
 import { ConfirmationCandleParser } from './strategy-compiler/confirmation-candle.js';
+import { OrderBlockParser } from './strategy-compiler/order-block.js';
 import { RiskRewardParser } from './strategy-compiler/risk-reward.js';
 import { TimeframeParser } from './strategy-compiler/timeframe.js';
 import { ClassificationParser } from './strategy-compiler/classification.js';
@@ -65,6 +66,7 @@ export function compileStrategy(strategyText: string): CompilerOutput {
   const macdParser = new MacdParser();
   const atrParser = new AtrParser();
   const confirmationCandleParser = new ConfirmationCandleParser();
+  const orderBlockParser = new OrderBlockParser();
   const rrParser = new RiskRewardParser();
   const timeframeParser = new TimeframeParser();
   const classificationParser = new ClassificationParser();
@@ -79,6 +81,7 @@ export function compileStrategy(strategyText: string): CompilerOutput {
   const volumeResult = volumeParser.parse(strategyText);
   const liquidityResult = liquidityParser.parse(strategyText);
   const fvgResult = fvgParser.parse(strategyText);
+  const orderBlockResult = orderBlockParser.parse(strategyText);
   const srResult = srParser.parse(strategyText);
   const macdResult = macdParser.parse(strategyText);
   const atrResult = atrParser.parse(strategyText);
@@ -96,6 +99,9 @@ export function compileStrategy(strategyText: string): CompilerOutput {
     choch: chochResult.parsedRule,
     liquidity_sweep: liquidityResult.parsedRule,
     fair_value_gap: fvgResult.parsedRule,
+    order_block: orderBlockResult.parsedRule.order_block,
+    supply_demand: orderBlockResult.parsedRule.supply_demand,
+    unmitigated_zone: orderBlockResult.parsedRule.unmitigated_zone,
     support: srResult.parsedRule.support,
     resistance: srResult.parsedRule.resistance,
     support_rejection: srResult.parsedRule.support_rejection,
@@ -131,6 +137,7 @@ export function compileStrategy(strategyText: string): CompilerOutput {
   if (volumeResult.supported) confidences.push(volumeResult.confidence);
   if (liquidityResult.supported) confidences.push(liquidityResult.confidence);
   if (fvgResult.supported) confidences.push(fvgResult.confidence);
+  if (orderBlockResult.supported) confidences.push(orderBlockResult.confidence);
   if (srResult.supported) confidences.push(srResult.confidence);
   if (macdResult.supported) confidences.push(macdResult.confidence);
   if (atrResult.supported) confidences.push(atrResult.confidence);
@@ -158,6 +165,9 @@ export function compileStrategy(strategyText: string): CompilerOutput {
     { name: 'volume', result: volumeResult },
     { name: 'liquidity', result: liquidityResult },
     { name: 'fair_value_gap', result: fvgResult },
+    { name: 'order_block', result: orderBlockResult },
+    { name: 'supply_demand', result: orderBlockResult },
+    { name: 'unmitigated_zone', result: orderBlockResult },
     { name: 'support_resistance', result: srResult },
     { name: 'macd', result: macdResult },
     { name: 'atr', result: atrResult },
@@ -184,6 +194,9 @@ export function compileStrategy(strategyText: string): CompilerOutput {
     { id: 'break_and_retest', name: 'Break and Retest', phrase: 'retest', weight: 20, active: !!compiled_rules.break_and_retest },
     { id: 'bos', name: 'BOS', phrase: 'bos', weight: 20, active: !!compiled_rules.bos },
     { id: 'choch', name: 'CHOCH', phrase: 'choch', weight: 15, active: !!compiled_rules.choch },
+    { id: 'order_block', name: 'Order Block', phrase: 'order block', weight: 20, active: !!compiled_rules.order_block },
+    { id: 'supply_demand', name: 'Supply and Demand', phrase: 'supply and demand', weight: 20, active: !!compiled_rules.supply_demand },
+    { id: 'unmitigated_zone', name: 'Unmitigated Zone', phrase: 'unmitigated', weight: 15, active: !!compiled_rules.unmitigated_zone },
     { id: 'confirmation_candle', name: 'Confirmation Candle', phrase: 'confirmation candle', weight: 15, active: !!compiled_rules.confirmation_candle },
     { id: 'liquidity_sweep', name: 'Liquidity Sweep', phrase: 'liquidity', weight: 15, active: !!compiled_rules.liquidity_sweep },
     { id: 'fair_value_gap', name: 'Fair Value Gap', phrase: 'fair value gap', weight: 12, active: !!compiled_rules.fair_value_gap },
@@ -212,6 +225,9 @@ export function compileStrategy(strategyText: string): CompilerOutput {
     break_and_retest: ['break and retest', 'break & retest', 'retest'],
     bos: ['break of structure', 'bos'],
     choch: ['change of character', 'choch'],
+    order_block: ['order block', 'order blocks', 'orderblock', 'ob', 'demand zone', 'supply zone', 'institutional zone'],
+    supply_demand: ['supply and demand', 'supply & demand', 'demand zone', 'supply zone'],
+    unmitigated_zone: ['unmitigated zone', 'unmitigated', 'fresh zone', 'unmitigated order block'],
     confirmation_candle: ['confirmation candle', 'candle confirmation', 'confirmation'],
     liquidity_sweep: ['liquidity sweep', 'liquidity'],
     fair_value_gap: ['fair value gap', 'fvg'],

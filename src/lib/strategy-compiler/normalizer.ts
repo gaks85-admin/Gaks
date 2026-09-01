@@ -203,6 +203,11 @@ export function normalizeRuleId(rawRuleId: string): string {
   if (clean === 'confirmation_candle' || clean === 'confirmation') return 'confirmation_candle';
   if (clean === 'liquidity_sweep' || clean === 'liquidity') return 'liquidity_sweep';
   if (clean === 'fair_value_gap' || clean === 'fvg') return 'fair_value_gap';
+  if (clean === 'order_block' || clean === 'orderblock' || clean === 'ob' || clean === 'obs') return 'order_block';
+  if (clean === 'supply_demand' || clean === 'supply_and_demand' || clean === 's_d') return 'supply_demand';
+  if (clean === 'unmitigated_zone' || clean === 'unmitigated' || clean === 'unmitigated_order_block') return 'unmitigated_zone';
+  if (clean === 'demand_zone' || clean === 'demand') return 'demand_zone';
+  if (clean === 'supply_zone' || clean === 'supply') return 'supply_zone';
   if (clean === 'support' || clean === 'support_zone') return 'support';
   if (clean === 'resistance' || clean === 'resistance_zone') return 'resistance';
   if (clean === 'support_rejection') return 'support_rejection';

@@ -14,6 +14,9 @@ export interface CompiledRules {
   choch?: boolean;
   liquidity_sweep?: boolean;
   fair_value_gap?: boolean;
+  order_block?: boolean;
+  supply_demand?: boolean;
+  unmitigated_zone?: boolean;
   support?: boolean;
   resistance?: boolean;
   support_rejection?: boolean;
