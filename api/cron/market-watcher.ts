@@ -889,6 +889,7 @@ export default async function handler(req: any, res: any) {
 
       if (!isDue) {
         logWatcherEvent('SIGNAL SKIPPED', logCtx, `Not due yet (${dueReason})`);
+        console.log(`[WATCHER SKIP] ${selectedPair} (${selectedTimeframe}) not due yet | interval=${scanIntervalMinutes}m | nextScan=${nextScanDate ? nextScanDate.toISOString() : 'unknown'}`);
         skipped.push({ userId, reason: `Not due yet (${dueReason})` });
         watchersSkippedCount++;
         return;
@@ -3625,7 +3626,7 @@ Source: ${brokerQuote.source}`);
       console.log(`=================================================\n`);
     }
 
-    console.log(`[CRON] END | duration=${totalTime}ms | processed=${watchersProcessedCount} | signals=${telegramMessagesSentCount} | errors=${errors.length}`);
+    console.log(`[CRON] END | duration=${totalTime}ms | processed=${watchersProcessedCount} | skipped=${watchersSkippedCount} | signals=${telegramMessagesSentCount} | errors=${errors.length}`);
 
     if (hasProcessingTimeRemaining()) {
       try {
