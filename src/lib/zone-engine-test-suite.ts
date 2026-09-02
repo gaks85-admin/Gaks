@@ -209,6 +209,59 @@ export function runZoneEngineTestSuite(): { passed: boolean; results: { name: st
     assert(evalResult.isInvalidated === true, 'isInvalidated must be true');
   });
 
+  // =========================================================================
+  // Test 6: Runaway Price Expiration Check (Price moved away without tapping)
+  // =========================================================================
+  test('6. Should expire zone when price runs away in target direction without tapping', () => {
+    const testZoneBuy: MarkedZone = {
+      id: 'test_zone_runaway_buy',
+      type: 'BULLISH_ORDER_BLOCK',
+      direction: 'BUY',
+      high: 1.3517,
+      low: 1.3510,
+      invalidationLevel: 1.3503,
+      strength: 92,
+      createdAt: new Date().toISOString(),
+      tapCount: 0,
+      status: 'WAITING_FOR_TAP',
+      reasoning: 'Test Bullish OB'
+    };
+
+    // Price expands up to 1.3590 (over 70 pips above zone, without ever tapping 1.3517)
+    const runawayCandle: Candle = { timestamp: '2026-01-01T04:00:00Z', open: 1.3575, high: 1.3595, low: 1.3570, close: 1.3590 };
+    const evalResult = evaluateZoneState(testZoneBuy, runawayCandle, 1.3590, 0.0010);
+
+    assert(evalResult.status === 'EXPIRED', 'Status must transition to EXPIRED when price runs away');
+    assert(evalResult.isInvalidated === true, 'isInvalidated must be true so zone is cleared for a new setup');
+    assert(!evalResult.isTapped, 'isTapped must be false');
+  });
+
+  // =========================================================================
+  // Test 7: Trend Reversal Expiration Check
+  // =========================================================================
+  test('7. Should expire zone when market structure flips contrary to zone direction', () => {
+    const testZoneBuy: MarkedZone = {
+      id: 'test_zone_trend_flip',
+      type: 'BULLISH_ORDER_BLOCK',
+      direction: 'BUY',
+      high: 1.3517,
+      low: 1.3510,
+      invalidationLevel: 1.3503,
+      strength: 90,
+      createdAt: new Date().toISOString(),
+      tapCount: 0,
+      status: 'WAITING_FOR_TAP',
+      reasoning: 'Test Bullish OB'
+    };
+
+    const normalCandle: Candle = { timestamp: '2026-01-01T04:00:00Z', open: 1.3525, high: 1.3530, low: 1.3520, close: 1.3525 };
+    const bearishStructure = { trend: 'BEARISH' } as any;
+    const evalResult = evaluateZoneState(testZoneBuy, normalCandle, 1.3525, 0.0010, undefined, bearishStructure);
+
+    assert(evalResult.status === 'EXPIRED', 'Status must be EXPIRED when trend flips to BEARISH');
+    assert(evalResult.isInvalidated === true, 'isInvalidated must be true to clear zone and search for new setup');
+  });
+
   const allPassed = results.every(r => r.success);
   return { passed: allPassed, results };
 }

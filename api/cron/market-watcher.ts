@@ -1595,7 +1595,7 @@ Reason: ${activeValidation.reason}`);
 
         // 1. If an active zone already exists, evaluate its state
         if (currentZone && currentZone.status !== 'INVALIDATED' && currentZone.status !== 'CONFIRMED') {
-          const zoneEval = evaluateZoneState(currentZone, latestClosedCandle, activeCurrentPrice, marketStructure.volatilityInformation?.atr);
+          const zoneEval = evaluateZoneState(currentZone, latestClosedCandle, activeCurrentPrice, marketStructure.volatilityInformation?.atr, candleData, marketStructure);
 
           if (zoneEval.isInvalidated) {
             console.log(`[ZONE INVALIDATED] Watcher ID: ${watcher.id} (${selectedPair}) marked zone [${currentZone.low} - ${currentZone.high}] (${currentZone.type}) invalidated: ${zoneEval.reason}. Clearing zone.`);

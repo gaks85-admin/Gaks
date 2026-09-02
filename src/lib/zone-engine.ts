@@ -123,100 +123,7 @@ export function identifyMarkedZone(
   const candidateZones: MarkedZone[] = [];
 
   // =========================================================================
-  // 1. ORDER BLOCKS & SUPPLY / DEMAND (Strict Unmitigated Discovery)
-  // =========================================================================
-  if (allowOrderBlocks) {
-    // Scan historical candles for fresh, unmitigated order blocks
-    for (let i = sortedCandles.length - 2; i >= Math.max(1, sortedCandles.length - 35); i--) {
-      const c = sortedCandles[i];
-      const nextC = sortedCandles[i + 1];
-      const body = Math.abs(c.close - c.open);
-      const nextBody = Math.abs(nextC.close - nextC.open);
-
-      // Bullish Demand Order Block: Down or base candle followed by strong upward displacement
-      const isBullishDisplacement = (nextC.close > c.high || (nextC.close > nextC.open && nextBody > Math.max(body * 1.2, atr * 0.7)));
-      if ((c.close <= c.open || body <= atr * 0.5) && isBullishDisplacement && c.low < activePrice) {
-        const obHigh = Number(Math.max(c.open, c.high).toFixed(5));
-        const obLow = Number(c.low.toFixed(5));
-        const invalidation = Number((obLow - buffer).toFixed(5));
-
-        // Check if any subsequent candle already mitigated this zone
-        let isMitigated = false;
-        for (let k = i + 2; k < sortedCandles.length - 1; k++) {
-          if (sortedCandles[k].low <= obHigh) {
-            isMitigated = true;
-            break;
-          }
-        }
-
-        if (!enforceUnmitigated || !isMitigated) {
-          const distanceRatio = Math.abs(activePrice - obHigh) / activePrice;
-          const proximityScore = Math.max(0, 98 - (distanceRatio * 1000));
-          const strength = Math.round(proximityScore * (trend === 'BULLISH' ? 1.0 : 0.85));
-
-          candidateZones.push({
-            id: generateZoneId(pair, 'BULLISH_ORDER_BLOCK', 'BUY'),
-            type: 'BULLISH_ORDER_BLOCK',
-            direction: 'BUY',
-            high: obHigh,
-            low: obLow,
-            invalidationLevel: invalidation,
-            strength,
-            createdAt: new Date().toISOString(),
-            createdCandleTime: String(c.timestamp),
-            tappedAt: null,
-            tapCount: 0,
-            status: 'WAITING_FOR_TAP',
-            reasoning: `Fresh unmitigated Demand Zone / Bullish Order Block [${obLow} - ${obHigh}].`,
-            candleIndex: i
-          });
-        }
-      }
-
-      // Bearish Supply Order Block: Up or base candle followed by sharp downward displacement
-      const isBearishDisplacement = (nextC.close < c.low || (nextC.close < nextC.open && nextBody > Math.max(body * 1.2, atr * 0.7)));
-      if ((c.close >= c.open || body <= atr * 0.5) && isBearishDisplacement && c.high > activePrice) {
-        const obHigh = Number(c.high.toFixed(5));
-        const obLow = Number(Math.min(c.open, c.low).toFixed(5));
-        const invalidation = Number((obHigh + buffer).toFixed(5));
-
-        // Check if any subsequent candle already mitigated this zone
-        let isMitigated = false;
-        for (let k = i + 2; k < sortedCandles.length - 1; k++) {
-          if (sortedCandles[k].high >= obLow) {
-            isMitigated = true;
-            break;
-          }
-        }
-
-        if (!enforceUnmitigated || !isMitigated) {
-          const distanceRatio = Math.abs(obLow - activePrice) / activePrice;
-          const proximityScore = Math.max(0, 98 - (distanceRatio * 1000));
-          const strength = Math.round(proximityScore * (trend === 'BEARISH' ? 1.0 : 0.85));
-
-          candidateZones.push({
-            id: generateZoneId(pair, 'BEARISH_ORDER_BLOCK', 'SELL'),
-            type: 'BEARISH_ORDER_BLOCK',
-            direction: 'SELL',
-            high: obHigh,
-            low: obLow,
-            invalidationLevel: invalidation,
-            strength,
-            createdAt: new Date().toISOString(),
-            createdCandleTime: String(c.timestamp),
-            tappedAt: null,
-            tapCount: 0,
-            status: 'WAITING_FOR_TAP',
-            reasoning: `Fresh unmitigated Supply Zone / Bearish Order Block [${obLow} - ${obHigh}].`,
-            candleIndex: i
-          });
-        }
-      }
-    }
-  }
-
-  // =========================================================================
-  // 2. FAIR VALUE GAPS (FVG) - Only if enabled in user strategy
+  // 1. FAIR VALUE GAPS (FVG) - Top structural POI priority when present
   // =========================================================================
   if (allowFvg && marketStructure?.fairValueGaps && marketStructure.fairValueGaps.length > 0) {
     // Unfilled or partially filled FVGs
@@ -275,6 +182,101 @@ export function identifyMarkedZone(
           reasoning: `Bearish Fair Value Gap [${low} - ${high}] identified as key institutional supply area.`,
           candleIndex: fvg.candleIndex
         });
+      }
+    }
+  }
+
+  // =========================================================================
+  // 2. ORDER BLOCKS & SUPPLY / DEMAND (Strict Unmitigated Discovery)
+  // =========================================================================
+  if (allowOrderBlocks) {
+    // Scan historical candles for fresh, unmitigated order blocks
+    for (let i = sortedCandles.length - 2; i >= Math.max(0, sortedCandles.length - 35); i--) {
+      const c = sortedCandles[i];
+      const nextC = sortedCandles[i + 1];
+      const body = Math.abs(c.close - c.open);
+      const nextBody = Math.abs(nextC.close - nextC.open);
+
+      // Bullish Demand Order Block: Down candle followed by strong upward displacement
+      const isDownCandle = c.close < c.open || (c.close === c.open && body <= atr * 0.1);
+      const isBullishDisplacement = nextC.close > nextC.open && (nextC.close > c.high || nextBody > Math.max(body * 1.2, atr * 0.6));
+      if (isDownCandle && isBullishDisplacement && c.low < activePrice) {
+        const obHigh = Number(Math.max(c.open, c.high).toFixed(5));
+        const obLow = Number(c.low.toFixed(5));
+        const invalidation = Number((obLow - buffer).toFixed(5));
+
+        // Check if any subsequent candle already mitigated this zone
+        let isMitigated = false;
+        for (let k = i + 2; k < sortedCandles.length - 1; k++) {
+          if (sortedCandles[k].low <= obHigh) {
+            isMitigated = true;
+            break;
+          }
+        }
+
+        if (!enforceUnmitigated || !isMitigated) {
+          const distanceRatio = Math.abs(activePrice - obHigh) / activePrice;
+          const proximityScore = Math.max(0, 95 - (distanceRatio * 1000));
+          const strength = Math.round(proximityScore * (trend === 'BULLISH' ? 1.0 : 0.85));
+
+          candidateZones.push({
+            id: generateZoneId(pair, 'BULLISH_ORDER_BLOCK', 'BUY'),
+            type: 'BULLISH_ORDER_BLOCK',
+            direction: 'BUY',
+            high: obHigh,
+            low: obLow,
+            invalidationLevel: invalidation,
+            strength,
+            createdAt: new Date().toISOString(),
+            createdCandleTime: String(c.timestamp),
+            tappedAt: null,
+            tapCount: 0,
+            status: 'WAITING_FOR_TAP',
+            reasoning: `Fresh unmitigated Demand Zone / Bullish Order Block [${obLow} - ${obHigh}].`,
+            candleIndex: i
+          });
+        }
+      }
+
+      // Bearish Supply Order Block: Up candle followed by sharp downward displacement
+      const isUpCandle = c.close > c.open || (c.close === c.open && body <= atr * 0.1);
+      const isBearishDisplacement = nextC.close < nextC.open && (nextC.close < c.low || nextBody > Math.max(body * 1.2, atr * 0.6));
+      if (isUpCandle && isBearishDisplacement && c.high > activePrice) {
+        const obHigh = Number(Math.max(c.close, c.high).toFixed(5));
+        const obLow = Number(Math.min(c.open, c.low).toFixed(5));
+        const invalidation = Number((obHigh + buffer).toFixed(5));
+
+        // Check if any subsequent candle already mitigated this zone
+        let isMitigated = false;
+        for (let k = i + 2; k < sortedCandles.length - 1; k++) {
+          if (sortedCandles[k].high >= obLow) {
+            isMitigated = true;
+            break;
+          }
+        }
+
+        if (!enforceUnmitigated || !isMitigated) {
+          const distanceRatio = Math.abs(obLow - activePrice) / activePrice;
+          const proximityScore = Math.max(0, 95 - (distanceRatio * 1000));
+          const strength = Math.round(proximityScore * (trend === 'BEARISH' ? 1.0 : 0.85));
+
+          candidateZones.push({
+            id: generateZoneId(pair, 'BEARISH_ORDER_BLOCK', 'SELL'),
+            type: 'BEARISH_ORDER_BLOCK',
+            direction: 'SELL',
+            high: obHigh,
+            low: obLow,
+            invalidationLevel: invalidation,
+            strength,
+            createdAt: new Date().toISOString(),
+            createdCandleTime: String(c.timestamp),
+            tappedAt: null,
+            tapCount: 0,
+            status: 'WAITING_FOR_TAP',
+            reasoning: `Fresh unmitigated Supply Zone / Bearish Order Block [${obLow} - ${obHigh}].`,
+            candleIndex: i
+          });
+        }
       }
     }
   }
@@ -448,18 +450,22 @@ export function isPriceInOrTappingZone(
  * Evaluates the current state of an existing marked zone:
  * 1. Checks for structural invalidation (e.g. candle close through zone & invalidation level)
  * 2. Checks for price tap/entry
- * 3. Checks for zone expiration/staleness
+ * 3. Checks for runaway price expansion (price left without tapping, target leg completed)
+ * 4. Checks for zone expiration/staleness (too many candles elapsed without tap)
+ * 5. Checks for market structure / trend reversal against the zone
  */
 export function evaluateZoneState(
   zone: MarkedZone,
   latestCandle: Candle,
   currentPrice: number,
-  atr?: number
+  atr?: number,
+  candles?: Candle[],
+  marketStructure?: MarketStructure
 ): ZoneEvaluationResult {
   const updatedZone: MarkedZone = { ...zone };
 
   // =========================================================================
-  // 1. STRUCTURAL INVALIDATION CHECK
+  // 1. STRUCTURAL INVALIDATION CHECK (Direct penetration through invalidation level)
   // =========================================================================
   if (zone.direction === 'BUY') {
     // For a BUY (Demand) zone:
@@ -490,7 +496,7 @@ export function evaluateZoneState(
   }
 
   // =========================================================================
-  // 2. TAP DETECTION CHECK
+  // 2. TAP DETECTION CHECK (Price has entered or wicked into the zone)
   // =========================================================================
   const tapped = isPriceInOrTappingZone(zone, latestCandle, currentPrice);
 
@@ -509,7 +515,90 @@ export function evaluateZoneState(
   }
 
   // =========================================================================
-  // 3. WAITING STATE (Price has not yet reached the zone)
+  // 3. RUNAWAY PRICE EXPANSION (Price moved too far in target direction without tapping)
+  // When price moves far away without retracing, the impulse move is already complete.
+  // Waiting indefinitely is invalid because any eventual return is a reversal or dump, not a fresh retest.
+  // =========================================================================
+  const effectiveAtr = atr && atr > 0 ? atr : currentPrice * 0.0015;
+
+  if (zone.direction === 'BUY') {
+    const riskDistance = Math.max(zone.high - zone.invalidationLevel, effectiveAtr);
+    const maxRunawayThreshold = zone.high + Math.max(riskDistance * 4.5, effectiveAtr * 5.0);
+
+    if (latestCandle.close > maxRunawayThreshold || currentPrice > maxRunawayThreshold) {
+      updatedZone.status = 'EXPIRED';
+      return {
+        status: 'EXPIRED',
+        isTapped: false,
+        isInvalidated: true, // Clears zone to allow scanning for fresh setup
+        reason: `Zone expired (Runaway): Price expanded to ${currentPrice.toFixed(5)} (>4.5R away) without retracing to Demand Zone [${zone.low} - ${zone.high}]. Leg completed; seeking fresh setup.`,
+        updatedZone
+      };
+    }
+  } else if (zone.direction === 'SELL') {
+    const riskDistance = Math.max(zone.invalidationLevel - zone.low, effectiveAtr);
+    const maxRunawayThreshold = zone.low - Math.max(riskDistance * 4.5, effectiveAtr * 5.0);
+
+    if (latestCandle.close < maxRunawayThreshold || currentPrice < maxRunawayThreshold) {
+      updatedZone.status = 'EXPIRED';
+      return {
+        status: 'EXPIRED',
+        isTapped: false,
+        isInvalidated: true, // Clears zone to allow scanning for fresh setup
+        reason: `Zone expired (Runaway): Price expanded downward to ${currentPrice.toFixed(5)} (>4.5R away) without retracing to Supply Zone [${zone.low} - ${zone.high}]. Leg completed; seeking fresh setup.`,
+        updatedZone
+      };
+    }
+  }
+
+  // =========================================================================
+  // 4. TREND REVERSAL / STRUCTURAL CONFLICT
+  // If market structure shifts opposite to the marked zone direction, the setup is obsolete.
+  // =========================================================================
+  if (marketStructure?.trend) {
+    if (zone.direction === 'BUY' && marketStructure.trend === 'BEARISH') {
+      updatedZone.status = 'EXPIRED';
+      return {
+        status: 'EXPIRED',
+        isTapped: false,
+        isInvalidated: true,
+        reason: `Zone expired: Market trend flipped to BEARISH while waiting for Bullish Zone [${zone.low} - ${zone.high}]. Seeking fresh bearish setup.`,
+        updatedZone
+      };
+    }
+    if (zone.direction === 'SELL' && marketStructure.trend === 'BULLISH') {
+      updatedZone.status = 'EXPIRED';
+      return {
+        status: 'EXPIRED',
+        isTapped: false,
+        isInvalidated: true,
+        reason: `Zone expired: Market trend flipped to BULLISH while waiting for Bearish Zone [${zone.low} - ${zone.high}]. Seeking fresh bullish setup.`,
+        updatedZone
+      };
+    }
+  }
+
+  // =========================================================================
+  // 5. ZONE STALENESS / CANDLE TIMEOUT
+  // If a zone has remained untapped for > 30 candles or > 3 hours, clear it to discover fresh levels.
+  // =========================================================================
+  if (zone.createdAt) {
+    const ageMs = Date.now() - new Date(zone.createdAt).getTime();
+    const maxAgeMs = 3 * 60 * 60 * 1000; // 3 hours
+    if (ageMs > maxAgeMs) {
+      updatedZone.status = 'EXPIRED';
+      return {
+        status: 'EXPIRED',
+        isTapped: false,
+        isInvalidated: true,
+        reason: `Zone expired (Stale): Marked zone [${zone.low} - ${zone.high}] remained untapped for over 3 hours. Clearing to locate updated institutional structure.`,
+        updatedZone
+      };
+    }
+  }
+
+  // =========================================================================
+  // 6. WAITING STATE (Price is still traveling towards the zone)
   // =========================================================================
   updatedZone.status = 'WAITING_FOR_TAP';
   return {

@@ -590,7 +590,7 @@ export default async function handler(req: any, res: any) {
     }
 
     if (currentZone && currentZone.status !== 'INVALIDATED' && currentZone.status !== 'CONFIRMED') {
-      const zoneEval = evaluateZoneState(currentZone, latestClosedCandle, activeCurrentPrice, marketStructure.volatilityInformation?.atr);
+      const zoneEval = evaluateZoneState(currentZone, latestClosedCandle, activeCurrentPrice, marketStructure.volatilityInformation?.atr, candleData, marketStructure);
 
       if (zoneEval.isInvalidated) {
         console.log(`[ZONE INVALIDATED] Manual Scan - Watcher ${watcher.id} (${symbol}): Zone [${currentZone.low} - ${currentZone.high}] invalidated: ${zoneEval.reason}`);
