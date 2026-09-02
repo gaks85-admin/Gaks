@@ -6,5 +6,7 @@ export const fvgSynonyms = [
   "3-candle imbalance",
   "three candle imbalance",
   "price inefficiency",
-  "fair value"
+  "fair value",
+  "imbalance",
+  "market imbalance"
 ];

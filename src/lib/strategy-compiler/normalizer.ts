@@ -100,6 +100,47 @@ export function findSynonymMatch(
   };
 }
 
+export function extractDedicatedMandatorySection(text: string): string[] | null {
+  if (!text) return null;
+  const lines = text.split('\n');
+  let inMandatorySection = false;
+  const sectionLines: string[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const rawLine = lines[i];
+    const trimmed = rawLine.trim().toLowerCase();
+
+    // Check if line is a dedicated mandatory section header
+    // e.g. "Mandatory rules:", "Madoratory rules;", "Mandatory Rules", "Core Entry Rules (Mandatory):"
+    const isSectionHeader = /^(?:(?:mandatory|madoratory)\s+rules?|core\s+mandatory\s+rules?)\s*[:;=-]*$/i.test(trimmed) ||
+                            /^(?:core\s+entry\s+rules|entry\s+rules)\s*\((?:mandatory|madoratory)\)\s*[:;=-]*$/i.test(trimmed);
+
+    if (isSectionHeader) {
+      inMandatorySection = true;
+      sectionLines.length = 0; // If multiple exist, the latter takes precedence
+      continue;
+    }
+
+    if (inMandatorySection) {
+      // Check if a new top-level section started
+      const isNewSection = /^[a-z][a-z0-9\s]{2,}\s*[:;=-]$/i.test(trimmed) &&
+                           !/^\d+[\.\)]/.test(trimmed) &&
+                           !trimmed.startsWith('-') &&
+                           !trimmed.startsWith('*');
+
+      if (isNewSection) {
+        break;
+      }
+
+      if (trimmed.length > 0) {
+        sectionLines.push(trimmed);
+      }
+    }
+  }
+
+  return sectionLines.length > 0 ? sectionLines : null;
+}
+
 export function isMandatory(originalText: string, matchedPhrase: string): boolean {
   if (!matchedPhrase || !matchedPhrase.trim()) return false;
   
@@ -112,6 +153,26 @@ export function isMandatory(originalText: string, matchedPhrase: string): boolea
   
   const mandatoryKeywords = ['must', 'required', 'mandatory', 'strictly'];
   const optionalKeywords = ['optional', 'confirmation', 'extra', 'additional', 'if possible', 'weighted', 'filter out', 'ignore', 'avoid'];
+
+  // 0. Dedicated Mandatory Section Isolation
+  // If the strategy explicitly contains a dedicated "Mandatory rules:" section,
+  // restrict mandatory rule extraction strictly to items specified in that section.
+  const dedicatedSectionLines = extractDedicatedMandatorySection(originalText);
+  if (dedicatedSectionLines) {
+    return dedicatedSectionLines.some(line => {
+      if (isNegativeOrExclusionContext(line, matchedPhrase)) return false;
+
+      const normalizedLine = normalizeText(line);
+      // If the line explicitly refers to "supply and demand", it targets supply_demand,
+      // rather than standalone support/resistance.
+      const isSupplyDemandLine = normalizedLine.includes('supply and demand') || normalizedLine.includes('supply & demand');
+      if (isSupplyDemandLine && (matchedPhrase === 'support' || matchedPhrase === 'resistance' || matchedPhrase === 'demand' || matchedPhrase === 'supply' || matchedPhrase === 'demand zone' || matchedPhrase === 'supply zone')) {
+        return false;
+      }
+
+      return matchPhraseWithBoundaries(line, matchedPhrase) || normalizedLine.includes(normalizedPhrase);
+    });
+  }
 
   // 1. Identify clauses from original text preserving line breaks
   // Split on punctuation (. , ; \n), contrasting conjunctions (whereas, however, although, but),

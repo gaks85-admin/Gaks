@@ -17,6 +17,8 @@ export interface CompiledRules {
   order_block?: boolean;
   supply_demand?: boolean;
   unmitigated_zone?: boolean;
+  demand_zone?: boolean;
+  supply_zone?: boolean;
   support?: boolean;
   resistance?: boolean;
   support_rejection?: boolean;
