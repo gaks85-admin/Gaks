@@ -30,6 +30,11 @@ export function normalizeText(text: string): string {
   normalized = normalized.replace(/\bs\/r\b|\bs&r\b|\bsubport\b/g, 'support resistance');
   normalized = normalized.replace(/\bt\/l\b/g, 'trendline');
   normalized = normalized.replace(/\br\/r\b|\br:r\b/g, 'risk reward');
+  normalized = normalized.replace(/\brisk\s*(?:to|&|and|-)\s*reward\b/g, 'risk reward');
+  normalized = normalized.replace(/\b(?:\d+\s*:\s*\d+\s*)?(?:rr|r:r|r\/r)\b/g, 'risk reward');
+  normalized = normalized.replace(/\bsupply\s*(?:&|\/|and)\s*demand\b/g, 'supply and demand');
+  normalized = normalized.replace(/\bs&d\b/g, 'supply and demand');
+  normalized = normalized.replace(/\border\s*blocks?\b/g, 'order block');
   normalized = normalized.replace(/\bfvg\b/g, 'fair value gap');
   normalized = normalized.replace(/\bbos\b/g, 'break of structure');
   normalized = normalized.replace(/\bchoch\b/g, 'change of character');
@@ -104,7 +109,8 @@ export function extractDedicatedMandatorySection(text: string): string[] | null 
   if (!text) return null;
   const lines = text.split('\n');
   let inMandatorySection = false;
-  const sectionLines: string[] = [];
+  const dedicatedHeaderLines: string[] = [];
+  const labeledItemLines: string[] = [];
 
   for (let i = 0; i < lines.length; i++) {
     const rawLine = lines[i];
@@ -117,7 +123,7 @@ export function extractDedicatedMandatorySection(text: string): string[] | null 
 
     if (isSectionHeader) {
       inMandatorySection = true;
-      sectionLines.length = 0; // If multiple exist, the latter takes precedence
+      dedicatedHeaderLines.length = 0; // If a new dedicated section header appears, it takes precedence
       continue;
     }
 
@@ -129,16 +135,31 @@ export function extractDedicatedMandatorySection(text: string): string[] | null 
                            !trimmed.startsWith('*');
 
       if (isNewSection) {
-        break;
+        inMandatorySection = false;
+        continue;
       }
 
       if (trimmed.length > 0) {
-        sectionLines.push(trimmed);
+        dedicatedHeaderLines.push(trimmed);
+      }
+    } else {
+      // Also catch individually numbered/bulleted lines explicitly labeled as (Mandatory)
+      // e.g. "1. Unmitigated Zone Identification (Mandatory):" or "2. Risk & Reward (Mandatory)"
+      if (/^\d+[\.\)]\s*.*\((?:mandatory|madoratory)\)/i.test(trimmed)) {
+        labeledItemLines.push(trimmed);
       }
     }
   }
 
-  return sectionLines.length > 0 ? sectionLines : null;
+  if (dedicatedHeaderLines.length > 0) {
+    return dedicatedHeaderLines;
+  }
+
+  if (labeledItemLines.length > 0) {
+    return labeledItemLines;
+  }
+
+  return null;
 }
 
 export function isMandatory(originalText: string, matchedPhrase: string): boolean {
@@ -151,7 +172,7 @@ export function isMandatory(originalText: string, matchedPhrase: string): boolea
 
   const normalizedPhrase = normalizeText(matchedPhrase);
   
-  const mandatoryKeywords = ['must', 'required', 'mandatory', 'strictly'];
+  const mandatoryKeywords = ['must', 'required', 'mandatory', 'madoratory', 'strictly'];
   const optionalKeywords = ['optional', 'confirmation', 'extra', 'additional', 'if possible', 'weighted', 'filter out', 'ignore', 'avoid'];
 
   // 0. Dedicated Mandatory Section Isolation
@@ -165,9 +186,20 @@ export function isMandatory(originalText: string, matchedPhrase: string): boolea
       const normalizedLine = normalizeText(line);
       // If the line explicitly refers to "supply and demand", it targets supply_demand,
       // rather than standalone support/resistance.
-      const isSupplyDemandLine = normalizedLine.includes('supply and demand') || normalizedLine.includes('supply & demand');
-      if (isSupplyDemandLine && (matchedPhrase === 'support' || matchedPhrase === 'resistance' || matchedPhrase === 'demand' || matchedPhrase === 'supply' || matchedPhrase === 'demand zone' || matchedPhrase === 'supply zone')) {
+      const isSupplyDemandLine = normalizedLine.includes('supply and demand');
+      if (isSupplyDemandLine && (matchedPhrase === 'support' || matchedPhrase === 'resistance')) {
         return false;
+      }
+
+      // Check if line mentions unmitigated zone or order block
+      if ((normalizedLine.includes('unmitigated') || normalizedLine.includes('order block')) &&
+          (matchedPhrase === 'order block' || matchedPhrase === 'unmitigated zone' || matchedPhrase === 'order blocks' || matchedPhrase === 'unmitigated' || matchedPhrase === 'unmitigated order block')) {
+        return true;
+      }
+
+      // Check if line mentions risk reward
+      if (normalizedPhrase === 'risk reward' && (normalizedLine.includes('risk reward') || normalizedLine.includes('rr'))) {
+        return true;
       }
 
       return matchPhraseWithBoundaries(line, matchedPhrase) || normalizedLine.includes(normalizedPhrase);
@@ -187,10 +219,10 @@ export function isMandatory(originalText: string, matchedPhrase: string): boolea
       continue;
     }
     const targetClause = normalizeText(clauseRaw);
-    const isOptional = optionalKeywords.some(k => new RegExp(`\\b${escapeRegExp(k)}\\b`, 'i').test(targetClause));
+    const isOptionalClause = optionalKeywords.some(k => new RegExp(`\\b${escapeRegExp(k)}\\b`, 'i').test(targetClause));
     const isMandatoryExplicit = mandatoryKeywords.some(k => new RegExp(`\\b${escapeRegExp(k)}\\b`, 'i').test(targetClause));
 
-    if (isOptional) continue;
+    if (isOptionalClause) continue;
     if (isMandatoryExplicit) return true;
   }
 
@@ -250,7 +282,52 @@ export function isMandatory(originalText: string, matchedPhrase: string): boolea
     }
   }
 
-  return false; // Rules are optional confluences by default
+  return false;
+}
+
+export function isOptional(originalText: string, matchedPhrase: string): boolean {
+  if (!matchedPhrase || !matchedPhrase.trim()) return false;
+  if (isNegativeOrExclusionContext(originalText, matchedPhrase)) return false;
+
+  const normalizedPhrase = normalizeText(matchedPhrase);
+  const optionalKeywords = ['optional', 'if possible', 'secondary', 'nice to have', 'extra', 'additional', 'optionally', 'preferred'];
+
+  // 1. Check if phrase appears under an explicit Optional section
+  const lines = originalText.split('\n');
+  let inOptionalSection = false;
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim().toLowerCase();
+    const isOptionalHeader = /^(?:optional\s+rules?|secondary\s+rules?|optional)\s*[:;=-]*$/i.test(trimmed);
+    if (isOptionalHeader) {
+      inOptionalSection = true;
+      continue;
+    }
+    if (inOptionalSection) {
+      const isNewSection = /^[a-z][a-z0-9\s]{2,}\s*[:;=-]$/i.test(trimmed) &&
+                           !/^\d+[\.\)]/.test(trimmed) &&
+                           !trimmed.startsWith('-') &&
+                           !trimmed.startsWith('*');
+      if (isNewSection) {
+        inOptionalSection = false;
+      } else if (matchPhraseWithBoundaries(trimmed, matchedPhrase) || normalizeText(trimmed).includes(normalizedPhrase)) {
+        return true;
+      }
+    }
+  }
+
+  // 2. Check individual clauses for explicit optional keywords
+  const clauses = originalText.toLowerCase().split(/[\n.;,]|\b(?:whereas|however|although|while|but)\b/i);
+  for (const clauseRaw of clauses) {
+    if (!matchPhraseWithBoundaries(clauseRaw, matchedPhrase) && !normalizeText(clauseRaw).includes(normalizedPhrase)) {
+      continue;
+    }
+    if (isNegativeOrExclusionContext(clauseRaw, matchedPhrase)) continue;
+    const targetClause = normalizeText(clauseRaw);
+    const hasOptional = optionalKeywords.some(k => new RegExp(`\\b${escapeRegExp(k)}\\b`, 'i').test(targetClause));
+    if (hasOptional) return true;
+  }
+
+  return false;
 }
 
 export function normalizeRuleId(rawRuleId: string): string {

@@ -14,19 +14,21 @@ export class SupportResistanceParser implements StrategyParserModule<SupportResi
   parse(text: string): ParserResult<SupportResistanceRule> {
     const match = findSynonymMatch(text, supportResistanceSynonyms, 'SUPPORT_RESISTANCE', 0.95);
     
+    const isSMC = /supply\s*(?:and|&|\/)\s*demand|order\s*block|unmitigated/i.test(text);
+
     let hasSupport = (
       matchPhraseWithBoundaries(text, 'support') ||
-      matchPhraseWithBoundaries(text, 'demand') ||
-      matchPhraseWithBoundaries(text, 'demand zone') ||
+      matchPhraseWithBoundaries(text, 'support zone') ||
+      (!isSMC && (matchPhraseWithBoundaries(text, 'demand') || matchPhraseWithBoundaries(text, 'demand zone'))) ||
       matchPhraseWithBoundaries(text, 'key level')
-    ) && !isNegativeOrExclusionContext(text, 'support') && !isNegativeOrExclusionContext(text, 'demand');
+    ) && !isNegativeOrExclusionContext(text, 'support');
     
     let hasResistance = (
       matchPhraseWithBoundaries(text, 'resistance') ||
-      matchPhraseWithBoundaries(text, 'supply') ||
-      matchPhraseWithBoundaries(text, 'supply zone') ||
+      matchPhraseWithBoundaries(text, 'resistance zone') ||
+      (!isSMC && (matchPhraseWithBoundaries(text, 'supply') || matchPhraseWithBoundaries(text, 'supply zone'))) ||
       matchPhraseWithBoundaries(text, 'key level')
-    ) && !isNegativeOrExclusionContext(text, 'resistance') && !isNegativeOrExclusionContext(text, 'supply');
+    ) && !isNegativeOrExclusionContext(text, 'resistance');
     
     if (match.matched) {
       hasSupport = true;

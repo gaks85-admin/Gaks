@@ -16,7 +16,7 @@ import { OrderBlockParser } from './strategy-compiler/order-block.js';
 import { RiskRewardParser } from './strategy-compiler/risk-reward.js';
 import { TimeframeParser } from './strategy-compiler/timeframe.js';
 import { ClassificationParser } from './strategy-compiler/classification.js';
-import { isMandatory, normalizeRuleId } from './strategy-compiler/normalizer.js';
+import { isMandatory, isOptional, extractDedicatedMandatorySection, normalizeRuleId } from './strategy-compiler/normalizer.js';
 import { validateDetectors } from './detector-capability-validator.js';
 
 export * from './strategy-compiler/types.js';
@@ -225,14 +225,14 @@ export function compileStrategy(strategyText: string): CompilerOutput {
     break_and_retest: ['break and retest', 'break & retest', 'retest'],
     bos: ['break of structure', 'bos'],
     choch: ['change of character', 'choch'],
-    order_block: ['order block', 'order blocks', 'orderblock', 'ob', 'demand zone', 'supply zone', 'institutional zone'],
-    supply_demand: ['supply and demand', 'supply & demand', 'demand zone', 'supply zone'],
-    unmitigated_zone: ['unmitigated zone', 'unmitigated', 'fresh zone', 'unmitigated order block'],
+    order_block: ['order block', 'order blocks', 'orderblock', 'ob', 'demand zone', 'supply zone', 'institutional zone', 'unmitigated order block'],
+    supply_demand: ['supply and demand', 'supply & demand', 'demand zone', 'supply zone', 'supply', 'demand'],
+    unmitigated_zone: ['unmitigated zone', 'unmitigated', 'fresh zone', 'unmitigated order block', 'unmitigated filter'],
     confirmation_candle: ['confirmation candle', 'candle confirmation', 'confirmation'],
     liquidity_sweep: ['liquidity sweep', 'liquidity'],
     fair_value_gap: ['fair value gap', 'fvg'],
-    support: ['demand zone', 'demand', 'support zone', 'support'],
-    resistance: ['supply zone', 'supply', 'resistance zone', 'resistance'],
+    support: ['support zone', 'support level', 'support'],
+    resistance: ['resistance zone', 'resistance level', 'resistance'],
     support_rejection: ['support rejection', 'bounce from support', 'demand rejection'],
     resistance_rejection: ['resistance rejection', 'bounce from resistance', 'supply rejection'],
     ema: ['ema alignment', 'ema'],
@@ -242,8 +242,24 @@ export function compileStrategy(strategyText: string): CompilerOutput {
     volume_confirmation: ['volume confirmation', 'volume'],
     session: ['session filter', 'session'],
     timeframes: ['timeframe filter', 'timeframe'],
-    risk_reward: ['risk & reward', 'risk reward', 'risk-to-reward', 'risk to reward', 'risk:reward', 'take profit', 'stop loss']
+    risk_reward: ['risk & reward', 'risk reward', 'risk-to-reward', 'risk to reward', 'risk:reward', 'take profit', 'stop loss', '1:2rr', '1:2 rr', 'rr']
   };
+
+  // Check if strategy has any explicitly declared mandatory rules or mandatory sections
+  const hasDedicatedMandatory = !!extractDedicatedMandatorySection(strategyText);
+  let hasAnyMandatoryRule = hasDedicatedMandatory;
+
+  if (!hasAnyMandatoryRule) {
+    for (const item of ruleCatalog) {
+      if (item.active) {
+        const phrasesToCheck = [item.phrase, ...(rulePhrases[item.id] || [])];
+        if (phrasesToCheck.some(p => isMandatory(strategyText, p))) {
+          hasAnyMandatoryRule = true;
+          break;
+        }
+      }
+    }
+  }
 
   for (const item of ruleCatalog) {
     if (item.active) {
@@ -259,17 +275,39 @@ export function compileStrategy(strategyText: string): CompilerOutput {
         return true;
       });
       const isMand = phrasesToCheck.some(p => isMandatory(strategyText, p));
-      canonicalRuleDefs.push({
-        id: item.id,
-        name: item.name,
-        isMandatory: isMand,
-        weight: item.weight
-      });
-      canonical_rules.push(item.id);
-      weighted_rules.push({ rule: item.id, weight: item.weight });
+      const isOpt = phrasesToCheck.some(p => isOptional(strategyText, p));
+
       if (isMand) {
+        canonicalRuleDefs.push({
+          id: item.id,
+          name: item.name,
+          isMandatory: true,
+          weight: item.weight
+        });
+        canonical_rules.push(item.id);
+        weighted_rules.push({ rule: item.id, weight: item.weight });
         mandatory_rules.push(item.id);
-      } else {
+      } else if (isOpt) {
+        canonicalRuleDefs.push({
+          id: item.id,
+          name: item.name,
+          isMandatory: false,
+          weight: item.weight
+        });
+        canonical_rules.push(item.id);
+        weighted_rules.push({ rule: item.id, weight: item.weight });
+        optional_rules.push(item.id);
+      } else if (!hasAnyMandatoryRule) {
+        // Only if the strategy has NO mandatory declarations at all,
+        // treat detected rules as default weighted/optional rules.
+        canonicalRuleDefs.push({
+          id: item.id,
+          name: item.name,
+          isMandatory: false,
+          weight: item.weight
+        });
+        canonical_rules.push(item.id);
+        weighted_rules.push({ rule: item.id, weight: item.weight });
         optional_rules.push(item.id);
       }
     }
