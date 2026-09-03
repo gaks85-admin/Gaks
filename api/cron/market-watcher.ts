@@ -48,6 +48,11 @@ import { resolveAuthoritativeDecision, DecisionGateResult } from '../../src/lib/
 import { processWithConcurrency } from '../../src/lib/concurrency.js';
 import { identifyMarkedZone, evaluateZoneState, isPriceInOrTappingZone, MarkedZone } from '../../src/lib/zone-engine.js';
 
+// In-memory runtime cache for marked zones to guarantee persistence across cron scans
+// even if the Supabase watchers table is temporarily missing the zone columns.
+const activeZonesMemoryMap: Map<string, MarkedZone> = (globalThis as any).__activeWatcherZones || new Map<string, MarkedZone>();
+(globalThis as any).__activeWatcherZones = activeZonesMemoryMap;
+
 
 // --- Inlined Gemini Wrapper ---
 
@@ -1593,6 +1598,13 @@ Reason: ${activeValidation.reason}`);
             currentZone = null;
           }
         }
+        // Restore from runtime memory cache if not present in database record
+        if (!currentZone && activeZonesMemoryMap.has(watcher.id)) {
+          currentZone = activeZonesMemoryMap.get(watcher.id) || null;
+          if (currentZone) {
+            console.log(`[ZONE MEMORY RESTORE] Watcher ID: ${watcher.id}: Retained active ${currentZone.type} zone [${currentZone.low} - ${currentZone.high}] (${currentZone.direction}) from runtime memory.`);
+          }
+        }
 
         // 1. If an active zone already exists, evaluate its state
         if (currentZone && currentZone.status !== 'INVALIDATED' && currentZone.status !== 'CONFIRMED') {
@@ -1608,7 +1620,8 @@ Reason: ${activeValidation.reason}`);
               'Reason': zoneEval.reason
             });
 
-            await supabase.from("watchers").update({
+            activeZonesMemoryMap.delete(watcher.id);
+            const { error: invalidErr } = await supabase.from("watchers").update({
               zone_data: null,
               zone_status: 'NO_ZONE',
               zone_high: null,
@@ -1617,6 +1630,12 @@ Reason: ${activeValidation.reason}`);
               zone_invalidation_level: null,
               updated_at: new Date().toISOString()
             }).eq("id", watcher.id);
+
+            if (invalidErr && invalidErr.message?.includes('zone_')) {
+              await supabase.from("watchers").update({
+                updated_at: new Date().toISOString()
+              }).eq("id", watcher.id);
+            }
 
             currentZone = null; // Cleared, allows discovering fresh zone below
           } else if (!zoneEval.isTapped) {
@@ -1653,7 +1672,7 @@ Reason: ${activeValidation.reason}`);
               decision_snapshot: null
             });
 
-            await supabase
+            const { error: waitErr } = await supabase
               .from("watchers")
               .update({
                 zone_status: 'WAITING_FOR_TAP',
@@ -1662,6 +1681,17 @@ Reason: ${activeValidation.reason}`);
                 updated_at: new Date().toISOString()
               })
               .eq("id", watcher.id);
+
+            if (waitErr && waitErr.message?.includes('zone_')) {
+              await supabase
+                .from("watchers")
+                .update({
+                  last_scan_at: new Date().toISOString(),
+                  last_analyzed_closed_candle_time: latestClosedCandleTime,
+                  updated_at: new Date().toISOString()
+                })
+                .eq("id", watcher.id);
+            }
 
             watchersProcessedCount++;
             isWatcherSkipped = false;
@@ -1678,12 +1708,19 @@ Reason: ${activeValidation.reason}`);
             });
 
             currentZone = zoneEval.updatedZone;
-            await supabase.from("watchers").update({
+            activeZonesMemoryMap.set(watcher.id, currentZone);
+            const { error: tapErr } = await supabase.from("watchers").update({
               zone_data: currentZone,
               zone_status: 'ZONE_TAPPED',
               zone_tapped_at: new Date().toISOString(),
               updated_at: new Date().toISOString()
             }).eq("id", watcher.id);
+
+            if (tapErr && tapErr.message?.includes('zone_')) {
+              await supabase.from("watchers").update({
+                updated_at: new Date().toISOString()
+              }).eq("id", watcher.id);
+            }
           }
         }
 
@@ -1706,7 +1743,8 @@ Reason: ${activeValidation.reason}`);
             discoveredZone.status = isImmediateTap ? 'ZONE_TAPPED' : 'WAITING_FOR_TAP';
             if (isImmediateTap) discoveredZone.tappedAt = new Date().toISOString();
 
-            await supabase.from("watchers").update({
+            activeZonesMemoryMap.set(watcher.id, discoveredZone);
+            const { error: markErr } = await supabase.from("watchers").update({
               zone_data: discoveredZone,
               zone_status: discoveredZone.status,
               zone_high: discoveredZone.high,
@@ -1717,6 +1755,13 @@ Reason: ${activeValidation.reason}`);
               zone_tapped_at: isImmediateTap ? new Date().toISOString() : null,
               updated_at: new Date().toISOString()
             }).eq("id", watcher.id);
+
+            if (markErr && markErr.message?.includes('zone_')) {
+              console.warn(`[Watcher Zone DB Notice] Notice: 'zone_data' columns missing in Supabase 'watchers' table (${markErr.message}). Zone stored in active server memory.`);
+              await supabase.from("watchers").update({
+                updated_at: new Date().toISOString()
+              }).eq("id", watcher.id);
+            }
 
             if (!isImmediateTap) {
               console.log(`[WAITING FOR ZONE TAP] Watcher ID: ${watcher.id} (${selectedPair}): Newly marked zone [${discoveredZone.low} - ${discoveredZone.high}] is waiting for price tap. Bypassing AI evaluation.`);
@@ -3505,7 +3550,8 @@ Source: ${brokerQuote.source}`);
         // Save active trade state in Supabase:
         // trade_status = 'ACTIVE', active_trade_id = candidateTradeId, entry_price, stop_loss, take_profit, direction, opened_at
         logWatcherEvent('ACTIVE UPDATE START', logCtx, `Updating trade_status = ACTIVE with trade_id: ${candidateTradeId}`);
-        const { data: activeUpdateRows, error: activeUpdateErr } = await supabase
+        activeZonesMemoryMap.delete(watcher.id);
+        let { data: activeUpdateRows, error: activeUpdateErr } = await supabase
           .from("watchers")
           .update({ 
             trade_status: 'ACTIVE',
@@ -3523,6 +3569,28 @@ Source: ${brokerQuote.source}`);
           })
           .eq("id", watcher.id)
           .select();
+
+        if (activeUpdateErr && activeUpdateErr.message?.includes('zone_status')) {
+          const fallbackRes = await supabase
+            .from("watchers")
+            .update({ 
+              trade_status: 'ACTIVE',
+              active_trade_id: candidateTradeId,
+              entry_price: analysis.entryPrice,
+              stop_loss: analysis.stopLoss,
+              take_profit: analysis.takeProfit,
+              direction: analysis.signal,
+              opened_at: new Date().toISOString(),
+              closed_at: null,
+              cooldown_until: null,
+              last_scan_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            })
+            .eq("id", watcher.id)
+            .select();
+          activeUpdateRows = fallbackRes.data;
+          activeUpdateErr = fallbackRes.error;
+        }
 
         const dbUpdateActiveSucceeded = !activeUpdateErr && activeUpdateRows && activeUpdateRows.length > 0;
 

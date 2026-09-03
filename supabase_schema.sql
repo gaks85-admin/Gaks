@@ -477,6 +477,16 @@ CREATE TABLE IF NOT EXISTS public.watchers (
   CONSTRAINT unique_user_pair UNIQUE (user_id, selected_pair)
 );
 
+-- Ensure zone columns exist on existing databases
+ALTER TABLE public.watchers ADD COLUMN IF NOT EXISTS zone_data JSONB DEFAULT NULL;
+ALTER TABLE public.watchers ADD COLUMN IF NOT EXISTS zone_status TEXT DEFAULT 'NO_ZONE';
+ALTER TABLE public.watchers ADD COLUMN IF NOT EXISTS zone_high NUMERIC DEFAULT NULL;
+ALTER TABLE public.watchers ADD COLUMN IF NOT EXISTS zone_low NUMERIC DEFAULT NULL;
+ALTER TABLE public.watchers ADD COLUMN IF NOT EXISTS zone_type TEXT DEFAULT NULL;
+ALTER TABLE public.watchers ADD COLUMN IF NOT EXISTS zone_invalidation_level NUMERIC DEFAULT NULL;
+ALTER TABLE public.watchers ADD COLUMN IF NOT EXISTS zone_marked_at TIMESTAMPTZ DEFAULT NULL;
+ALTER TABLE public.watchers ADD COLUMN IF NOT EXISTS zone_tapped_at TIMESTAMPTZ DEFAULT NULL;
+
 -- Enable Row Level Security (RLS) to protect user data privacy
 ALTER TABLE public.watchers ENABLE ROW LEVEL SECURITY;
 
