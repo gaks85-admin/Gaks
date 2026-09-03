@@ -130,8 +130,8 @@ export function identifyMarkedZone(
     for (const fvg of marketStructure.fairValueGaps) {
       if (fvg.isFilled) continue;
 
-      if (fvg.type === 'BULLISH_FVG' && fvg.top <= activePrice * 1.015) {
-        // Bullish Demand FVG below or near current price
+      if (fvg.type === 'BULLISH_FVG' && fvg.bottom <= activePrice) {
+        // Bullish Demand FVG below or at current price (price pulls down into demand to buy)
         const low = Number(fvg.bottom.toFixed(5));
         const high = Number(fvg.top.toFixed(5));
         const invalidation = Number((low - buffer).toFixed(5));
@@ -156,8 +156,8 @@ export function identifyMarkedZone(
           reasoning: `Bullish Fair Value Gap [${low} - ${high}] identified as key institutional demand area.`,
           candleIndex: fvg.candleIndex
         });
-      } else if (fvg.type === 'BEARISH_FVG' && fvg.bottom >= activePrice * 0.985) {
-        // Bearish Supply FVG above or near current price
+      } else if (fvg.type === 'BEARISH_FVG' && fvg.top >= activePrice) {
+        // Bearish Supply FVG above or at current price (price rallies up into supply to sell)
         const low = Number(fvg.bottom.toFixed(5));
         const high = Number(fvg.top.toFixed(5));
         const invalidation = Number((high + buffer).toFixed(5));
@@ -197,85 +197,147 @@ export function identifyMarkedZone(
       const body = Math.abs(c.close - c.open);
       const nextBody = Math.abs(nextC.close - nextC.open);
 
-      // Bullish Demand Order Block: Down candle followed by strong upward displacement
+      // Bullish Displacement Structure: Down candle followed by strong upward impulse
       const isDownCandle = c.close < c.open || (c.close === c.open && body <= atr * 0.1);
       const isBullishDisplacement = nextC.close > nextC.open && (nextC.close > c.high || nextBody > Math.max(body * 1.2, atr * 0.6));
-      if (isDownCandle && isBullishDisplacement && c.low < activePrice) {
+      
+      if (isDownCandle && isBullishDisplacement) {
         const obHigh = Number(Math.max(c.open, c.high).toFixed(5));
         const obLow = Number(c.low.toFixed(5));
-        const invalidation = Number((obLow - buffer).toFixed(5));
 
-        // Check if any subsequent candle already mitigated this zone
+        // Check mitigation
         let isMitigated = false;
         for (let k = i + 2; k < sortedCandles.length - 1; k++) {
-          if (sortedCandles[k].low <= obHigh) {
+          if (sortedCandles[k].low <= obHigh && sortedCandles[k].high >= obLow) {
             isMitigated = true;
             break;
           }
         }
 
         if (!enforceUnmitigated || !isMitigated) {
-          const distanceRatio = Math.abs(activePrice - obHigh) / activePrice;
-          const proximityScore = Math.max(0, 95 - (distanceRatio * 1000));
-          const strength = Math.round(proximityScore * (trend === 'BULLISH' ? 1.0 : 0.85));
+          // GEOMETRIC DIRECTION CLASSIFICATION:
+          // 1. If the zone sits AT or BELOW activePrice (activePrice >= obLow):
+          //    Price is above or inside demand -> Bullish Order Block (BUY).
+          // 2. If the zone sits OVERHEAD above activePrice (activePrice < obLow):
+          //    Price has broken below this base! Retesting from below acts as Resistance / Supply -> Bearish (SELL).
+          if (activePrice >= obLow - buffer * 0.2) {
+            const invalidation = Number((obLow - buffer).toFixed(5));
+            const distanceRatio = Math.abs(activePrice - obHigh) / activePrice;
+            const proximityScore = Math.max(0, 95 - (distanceRatio * 1000));
+            const strength = Math.round(proximityScore * (trend === 'BULLISH' ? 1.0 : 0.85));
 
-          candidateZones.push({
-            id: generateZoneId(pair, 'BULLISH_ORDER_BLOCK', 'BUY'),
-            type: 'BULLISH_ORDER_BLOCK',
-            direction: 'BUY',
-            high: obHigh,
-            low: obLow,
-            invalidationLevel: invalidation,
-            strength,
-            createdAt: new Date().toISOString(),
-            createdCandleTime: String(c.timestamp),
-            tappedAt: null,
-            tapCount: 0,
-            status: 'WAITING_FOR_TAP',
-            reasoning: `Fresh unmitigated Demand Zone / Bullish Order Block [${obLow} - ${obHigh}].`,
-            candleIndex: i
-          });
+            candidateZones.push({
+              id: generateZoneId(pair, 'BULLISH_ORDER_BLOCK', 'BUY'),
+              type: 'BULLISH_ORDER_BLOCK',
+              direction: 'BUY',
+              high: obHigh,
+              low: obLow,
+              invalidationLevel: invalidation,
+              strength,
+              createdAt: new Date().toISOString(),
+              createdCandleTime: String(c.timestamp),
+              tappedAt: null,
+              tapCount: 0,
+              status: 'WAITING_FOR_TAP',
+              reasoning: `Fresh Demand Zone / Bullish Order Block [${obLow} - ${obHigh}].`,
+              candleIndex: i
+            });
+          } else {
+            // Broken demand flipped to overhead supply / breaker
+            const invalidation = Number((obHigh + buffer).toFixed(5));
+            const distanceRatio = Math.abs(obLow - activePrice) / activePrice;
+            const proximityScore = Math.max(0, 95 - (distanceRatio * 1000));
+            const strength = Math.round(proximityScore * (trend === 'BEARISH' ? 1.0 : 0.85));
+
+            candidateZones.push({
+              id: generateZoneId(pair, 'BEARISH_ORDER_BLOCK', 'SELL'),
+              type: 'BEARISH_ORDER_BLOCK',
+              direction: 'SELL',
+              high: obHigh,
+              low: obLow,
+              invalidationLevel: invalidation,
+              strength,
+              createdAt: new Date().toISOString(),
+              createdCandleTime: String(c.timestamp),
+              tappedAt: null,
+              tapCount: 0,
+              status: 'WAITING_FOR_TAP',
+              reasoning: `Overhead Supply / Flipped Resistance Zone [${obLow} - ${obHigh}].`,
+              candleIndex: i
+            });
+          }
         }
       }
 
-      // Bearish Supply Order Block: Up candle followed by sharp downward displacement
+      // Bearish Displacement Structure: Up candle followed by sharp downward impulse
       const isUpCandle = c.close > c.open || (c.close === c.open && body <= atr * 0.1);
       const isBearishDisplacement = nextC.close < nextC.open && (nextC.close < c.low || nextBody > Math.max(body * 1.2, atr * 0.6));
-      if (isUpCandle && isBearishDisplacement && c.high > activePrice) {
+      
+      if (isUpCandle && isBearishDisplacement) {
         const obHigh = Number(Math.max(c.close, c.high).toFixed(5));
         const obLow = Number(Math.min(c.open, c.low).toFixed(5));
-        const invalidation = Number((obHigh + buffer).toFixed(5));
 
-        // Check if any subsequent candle already mitigated this zone
+        // Check mitigation
         let isMitigated = false;
         for (let k = i + 2; k < sortedCandles.length - 1; k++) {
-          if (sortedCandles[k].high >= obLow) {
+          if (sortedCandles[k].high >= obLow && sortedCandles[k].low <= obHigh) {
             isMitigated = true;
             break;
           }
         }
 
         if (!enforceUnmitigated || !isMitigated) {
-          const distanceRatio = Math.abs(obLow - activePrice) / activePrice;
-          const proximityScore = Math.max(0, 95 - (distanceRatio * 1000));
-          const strength = Math.round(proximityScore * (trend === 'BEARISH' ? 1.0 : 0.85));
+          // GEOMETRIC DIRECTION CLASSIFICATION:
+          // 1. If the zone sits AT or ABOVE activePrice (activePrice <= obHigh):
+          //    Price is below or inside supply -> Bearish Order Block (SELL).
+          // 2. If the zone sits UNDERNEATH activePrice (activePrice > obHigh):
+          //    Price broke above supply -> flipped to Demand / Support (BUY).
+          if (activePrice <= obHigh + buffer * 0.2) {
+            const invalidation = Number((obHigh + buffer).toFixed(5));
+            const distanceRatio = Math.abs(obLow - activePrice) / activePrice;
+            const proximityScore = Math.max(0, 95 - (distanceRatio * 1000));
+            const strength = Math.round(proximityScore * (trend === 'BEARISH' ? 1.0 : 0.85));
 
-          candidateZones.push({
-            id: generateZoneId(pair, 'BEARISH_ORDER_BLOCK', 'SELL'),
-            type: 'BEARISH_ORDER_BLOCK',
-            direction: 'SELL',
-            high: obHigh,
-            low: obLow,
-            invalidationLevel: invalidation,
-            strength,
-            createdAt: new Date().toISOString(),
-            createdCandleTime: String(c.timestamp),
-            tappedAt: null,
-            tapCount: 0,
-            status: 'WAITING_FOR_TAP',
-            reasoning: `Fresh unmitigated Supply Zone / Bearish Order Block [${obLow} - ${obHigh}].`,
-            candleIndex: i
-          });
+            candidateZones.push({
+              id: generateZoneId(pair, 'BEARISH_ORDER_BLOCK', 'SELL'),
+              type: 'BEARISH_ORDER_BLOCK',
+              direction: 'SELL',
+              high: obHigh,
+              low: obLow,
+              invalidationLevel: invalidation,
+              strength,
+              createdAt: new Date().toISOString(),
+              createdCandleTime: String(c.timestamp),
+              tappedAt: null,
+              tapCount: 0,
+              status: 'WAITING_FOR_TAP',
+              reasoning: `Fresh Supply Zone / Bearish Order Block [${obLow} - ${obHigh}].`,
+              candleIndex: i
+            });
+          } else {
+            // Broken supply flipped to support
+            const invalidation = Number((obLow - buffer).toFixed(5));
+            const distanceRatio = Math.abs(activePrice - obHigh) / activePrice;
+            const proximityScore = Math.max(0, 95 - (distanceRatio * 1000));
+            const strength = Math.round(proximityScore * (trend === 'BULLISH' ? 1.0 : 0.85));
+
+            candidateZones.push({
+              id: generateZoneId(pair, 'BULLISH_ORDER_BLOCK', 'BUY'),
+              type: 'BULLISH_ORDER_BLOCK',
+              direction: 'BUY',
+              high: obHigh,
+              low: obLow,
+              invalidationLevel: invalidation,
+              strength,
+              createdAt: new Date().toISOString(),
+              createdCandleTime: String(c.timestamp),
+              tappedAt: null,
+              tapCount: 0,
+              status: 'WAITING_FOR_TAP',
+              reasoning: `Flipped Support Zone [${obLow} - ${obHigh}].`,
+              candleIndex: i
+            });
+          }
         }
       }
     }
@@ -403,14 +465,19 @@ export function identifyMarkedZone(
     return null;
   }
 
-  // Filter candidates aligned with trend if trend is strong
+  // Filter candidates aligned with trend and recent market momentum
+  const recentSlice = sortedCandles.slice(-15);
+  const recentDelta = recentSlice[recentSlice.length - 1].close - recentSlice[0].close;
+  const isMomentumBearish = recentDelta < -atr * 0.4 || trend === 'BEARISH';
+  const isMomentumBullish = recentDelta > atr * 0.4 || trend === 'BULLISH';
+
   let filteredCandidates = candidateZones;
-  if (trend === 'BULLISH') {
-    const buyCandidates = candidateZones.filter(z => z.direction === 'BUY');
-    if (buyCandidates.length > 0) filteredCandidates = buyCandidates;
-  } else if (trend === 'BEARISH') {
+  if (isMomentumBearish && !isMomentumBullish) {
     const sellCandidates = candidateZones.filter(z => z.direction === 'SELL');
     if (sellCandidates.length > 0) filteredCandidates = sellCandidates;
+  } else if (isMomentumBullish && !isMomentumBearish) {
+    const buyCandidates = candidateZones.filter(z => z.direction === 'BUY');
+    if (buyCandidates.length > 0) filteredCandidates = buyCandidates;
   }
 
   // Sort by highest strength and closest proximity
@@ -463,33 +530,42 @@ export function evaluateZoneState(
   marketStructure?: MarketStructure
 ): ZoneEvaluationResult {
   const updatedZone: MarkedZone = { ...zone };
+  const effectiveAtr = atr || 0.0005;
 
   // =========================================================================
   // 1. STRUCTURAL INVALIDATION CHECK (Direct penetration through invalidation level)
   // =========================================================================
   if (zone.direction === 'BUY') {
     // For a BUY (Demand) zone:
-    // If the latest closed candle closes BELOW the invalidation level, the zone is structurally broken.
-    if (latestCandle.close < zone.invalidationLevel || currentPrice < zone.invalidationLevel) {
+    // If price or close is below invalidation OR below the zone's low while attempting to approach from underneath:
+    if (
+      latestCandle.close < zone.invalidationLevel || 
+      currentPrice < zone.invalidationLevel ||
+      currentPrice < zone.low - effectiveAtr * 0.5
+    ) {
       updatedZone.status = 'INVALIDATED';
       return {
         status: 'INVALIDATED',
         isTapped: false,
         isInvalidated: true,
-        reason: `Zone invalidated: Price (${currentPrice.toFixed(5)}) or Candle Close (${latestCandle.close.toFixed(5)}) broke below invalidation level (${zone.invalidationLevel.toFixed(5)}).`,
+        reason: `Zone invalidated: Price (${currentPrice.toFixed(5)}) or Candle Close (${latestCandle.close.toFixed(5)}) broke below BUY invalidation / low level (${zone.invalidationLevel.toFixed(5)}).`,
         updatedZone
       };
     }
   } else if (zone.direction === 'SELL') {
     // For a SELL (Supply) zone:
-    // If the latest closed candle closes ABOVE the invalidation level, the zone is structurally broken.
-    if (latestCandle.close > zone.invalidationLevel || currentPrice > zone.invalidationLevel) {
+    // If price or close is above invalidation OR above the zone's high while attempting to approach from above:
+    if (
+      latestCandle.close > zone.invalidationLevel || 
+      currentPrice > zone.invalidationLevel ||
+      currentPrice > zone.high + effectiveAtr * 0.5
+    ) {
       updatedZone.status = 'INVALIDATED';
       return {
         status: 'INVALIDATED',
         isTapped: false,
         isInvalidated: true,
-        reason: `Zone invalidated: Price (${currentPrice.toFixed(5)}) or Candle Close (${latestCandle.close.toFixed(5)}) broke above invalidation level (${zone.invalidationLevel.toFixed(5)}).`,
+        reason: `Zone invalidated: Price (${currentPrice.toFixed(5)}) or Candle Close (${latestCandle.close.toFixed(5)}) broke above SELL invalidation / high level (${zone.invalidationLevel.toFixed(5)}).`,
         updatedZone
       };
     }
@@ -519,7 +595,6 @@ export function evaluateZoneState(
   // When price moves far away without retracing, the impulse move is already complete.
   // Waiting indefinitely is invalid because any eventual return is a reversal or dump, not a fresh retest.
   // =========================================================================
-  const effectiveAtr = atr && atr > 0 ? atr : currentPrice * 0.0015;
 
   if (zone.direction === 'BUY') {
     const riskDistance = Math.max(zone.high - zone.invalidationLevel, effectiveAtr);
