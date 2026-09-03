@@ -378,11 +378,15 @@ export default async function handler(req: any, res: any) {
           keySource: keyRes.keySource,
           watcherId: 'watcher-start'
         });
-        await supabase
+        const { error: sumErrUpdate } = await supabase
           .from("trading_preferences")
           .update({ strategy_summary: summary, updated_at: new Date().toISOString() })
           .eq("user_id", userId);
-        console.log("[Watcher Start] Populated strategy_summary:", summary);
+        if (sumErrUpdate) {
+          console.warn("[Watcher Start] Notice: Could not write strategy_summary to DB (column may not exist yet):", sumErrUpdate.message);
+        } else {
+          console.log("[Watcher Start] Populated strategy_summary:", summary);
+        }
       } catch (sumErr: any) {
         console.error("[Watcher Start] Failed to populate strategy_summary:", sumErr.message);
         if (sumErr.errorType === 'INVALID_CREDENTIALS' || sumErr.errorType === 'QUOTA_EXHAUSTED' || sumErr.errorType === 'PERMISSION_ERROR') {

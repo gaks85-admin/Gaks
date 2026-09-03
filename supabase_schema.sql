@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS public.trading_preferences (
 • Confirmation indicators
 • Exit & stop-loss logic
 • Risk management rules',
+  strategy_summary TEXT NULL,
   capital TEXT DEFAULT '$1,000',
   custom_capital TEXT DEFAULT '',
   preferred_risk TEXT DEFAULT '1%',
@@ -47,6 +48,9 @@ CREATE TABLE IF NOT EXISTS public.trading_preferences (
   preferred_timeframes TEXT[] DEFAULT ARRAY['M15', 'H1']::TEXT[],
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
+
+-- Ensure strategy_summary column exists on existing tables
+ALTER TABLE public.trading_preferences ADD COLUMN IF NOT EXISTS strategy_summary TEXT;
 
 -- Enable Row Level Security (RLS) for trading_preferences
 ALTER TABLE public.trading_preferences ENABLE ROW LEVEL SECURITY;

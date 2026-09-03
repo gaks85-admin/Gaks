@@ -93,6 +93,21 @@ export default async function strategySummaryHandler(req: Request, res: Response
 
         if (!error) {
           updatedInDb = true;
+        } else if (error.message?.includes('strategy_summary') || error.code === 'PGRST204' || error.message?.includes('schema cache')) {
+          console.warn('[Strategy Summary API] Note: strategy_summary column not present in trading_preferences table yet. Upserting strategy_text safely without it.');
+          const { error: fallbackErr } = await supabase
+            .from('trading_preferences')
+            .upsert({
+              user_id: userId,
+              strategy_text: strategyText,
+              updated_at: new Date().toISOString()
+            }, { onConflict: 'user_id' });
+
+          if (!fallbackErr) {
+            updatedInDb = true;
+          } else {
+            console.error('[Strategy Summary API] Fallback upsert error:', fallbackErr.message);
+          }
         } else {
           console.error('[Strategy Summary API] Supabase update error:', error.message);
         }
