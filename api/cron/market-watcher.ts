@@ -1741,6 +1741,7 @@ Reason: ${activeValidation.reason}`);
 
             const isImmediateTap = isPriceInOrTappingZone(discoveredZone, latestCandle, activeCurrentPrice);
             discoveredZone.status = isImmediateTap ? 'ZONE_TAPPED' : 'WAITING_FOR_TAP';
+            discoveredZone.tapCount = isImmediateTap ? 1 : 0;
             if (isImmediateTap) discoveredZone.tappedAt = new Date().toISOString();
 
             activeZonesMemoryMap.set(watcher.id, discoveredZone);
