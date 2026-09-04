@@ -46,7 +46,7 @@ import { evaluateAdaptiveExecution } from '../../src/lib/adaptive-execution-engi
 import { evaluateClosedLoopCalibration } from '../../src/lib/closed-loop-calibration-engine.js';
 import { resolveAuthoritativeDecision, DecisionGateResult } from '../../src/lib/decision-attribution.js';
 import { processWithConcurrency } from '../../src/lib/concurrency.js';
-import { identifyMarkedZone, evaluateZoneState, isPriceInOrTappingZone, MarkedZone } from '../../src/lib/zone-engine.js';
+import { identifyMarkedZone, evaluateZoneState, isPriceInOrTappingZone, MarkedZone, ZoneEvaluationResult, evaluateZoneRejection } from '../../src/lib/zone-engine.js';
 
 // In-memory runtime cache for marked zones to guarantee persistence across cron scans
 // even if the Supabase watchers table is temporarily missing the zone columns.
@@ -1606,9 +1606,12 @@ Reason: ${activeValidation.reason}`);
           }
         }
 
+        let lastZoneEval: ZoneEvaluationResult | null = null;
+
         // 1. If an active zone already exists, evaluate its state
-        if (currentZone && currentZone.status !== 'INVALIDATED' && currentZone.status !== 'CONFIRMED') {
+        if (currentZone && currentZone.status !== 'INVALIDATED') {
           const zoneEval = evaluateZoneState(currentZone, latestClosedCandle, activeCurrentPrice, marketStructure.volatilityInformation?.atr, candleData, marketStructure);
+          lastZoneEval = zoneEval;
 
           if (zoneEval.isInvalidated) {
             console.log(`[ZONE INVALIDATED] Watcher ID: ${watcher.id} (${selectedPair}) marked zone [${currentZone.low} - ${currentZone.high}] (${currentZone.type}) invalidated: ${zoneEval.reason}. Clearing zone.`);
@@ -1711,7 +1714,7 @@ Reason: ${activeValidation.reason}`);
             activeZonesMemoryMap.set(watcher.id, currentZone);
             const { error: tapErr } = await supabase.from("watchers").update({
               zone_data: currentZone,
-              zone_status: 'ZONE_TAPPED',
+              zone_status: currentZone.status,
               zone_tapped_at: new Date().toISOString(),
               updated_at: new Date().toISOString()
             }).eq("id", watcher.id);
@@ -1739,10 +1742,25 @@ Reason: ${activeValidation.reason}`);
               'Reasoning': discoveredZone.reasoning
             });
 
-            const isImmediateTap = isPriceInOrTappingZone(discoveredZone, latestCandle, activeCurrentPrice);
-            discoveredZone.status = isImmediateTap ? 'ZONE_TAPPED' : 'WAITING_FOR_TAP';
-            discoveredZone.tapCount = isImmediateTap ? 1 : 0;
-            if (isImmediateTap) discoveredZone.tappedAt = new Date().toISOString();
+            const isImmediateTap = isPriceInOrTappingZone(discoveredZone, latestClosedCandle, activeCurrentPrice);
+            if (isImmediateTap) {
+              const immediateRejection = evaluateZoneRejection(discoveredZone, latestClosedCandle, activeCurrentPrice);
+              discoveredZone.status = immediateRejection.isRejected ? 'CONFIRMED' : 'ZONE_TAPPED';
+              discoveredZone.tapCount = 1;
+              discoveredZone.tappedAt = new Date().toISOString();
+              lastZoneEval = {
+                status: discoveredZone.status,
+                isTapped: true,
+                isInvalidated: false,
+                isRejected: immediateRejection.isRejected,
+                rejectionReason: immediateRejection.rejectionReason,
+                reason: 'Immediate tap on newly discovered zone',
+                updatedZone: discoveredZone
+              };
+            } else {
+              discoveredZone.status = 'WAITING_FOR_TAP';
+              discoveredZone.tapCount = 0;
+            }
 
             activeZonesMemoryMap.set(watcher.id, discoveredZone);
             const { error: markErr } = await supabase.from("watchers").update({
@@ -1818,6 +1836,12 @@ Reason: ${activeValidation.reason}`);
         (marketStructure as any).pair = selectedPair;
         (marketStructure as any).timeframe = selectedTimeframe;
         (marketStructure as any).lastClosedCandleTimestamp = candleData[candleData.length - 2]?.timestamp || '';
+        (marketStructure as any).markedZone = currentZone;
+        (marketStructure as any).zone_status = currentZone?.status || 'NO_ZONE';
+        (marketStructure as any).zone_tapped = Boolean(currentZone && (currentZone.status === 'ZONE_TAPPED' || currentZone.status === 'CONFIRMED' || lastZoneEval?.isTapped));
+        (marketStructure as any).zone_rejected = Boolean(lastZoneEval?.isRejected || currentZone?.status === 'CONFIRMED');
+        (marketStructure as any).rejectionConfirmed = Boolean(lastZoneEval?.isRejected || currentZone?.status === 'CONFIRMED');
+        (marketStructure as any).zone_direction = currentZone?.direction;
         const initialResult = evaluateDecision(compiledStrategy, marketStructure);
 
         // Fetch Historical Probability from Learning Engine
@@ -2179,8 +2203,14 @@ You are an expert AI trading analyst.
 Strategy Summary:
 - Style: ${compiledStrategy.strategy_mode || 'HYBRID'}
 - Timeframe: ${selectedTimeframe}
+- Confirmation Mode: ${compiledStrategy.compiled_rules?.tap_and_rejection ? 'Default Confirmation (Tap & Rejection of Marked Zone)' : 'Explicit Strategy Rules'}
 
 Current Price: ${currentPrice}
+
+Marked Zone / Point of Interest (POI):
+${currentZone ? `- Zone: ${currentZone.type} (${currentZone.direction}) [${currentZone.low.toFixed(5)} - ${currentZone.high.toFixed(5)}]
+- Invalidation Level: ${currentZone.invalidationLevel.toFixed(5)}
+- Status: ${currentZone.status} (Tapped: YES, Rejection Confirmed: ${lastZoneEval?.isRejected || currentZone.status === 'CONFIRMED' ? 'YES' : 'IN_PROGRESS'})` : '- None'}
 
 Detailed Numeric Market Structure & Key Levels:
 - Trend: ${marketStructure.trend}
@@ -2193,11 +2223,11 @@ Detailed Numeric Market Structure & Key Levels:
 - ATR: ${marketStructure.volatilityInformation.atr.toFixed(5)}
 
 AI Instructions:
-1. Evaluate ONLY the supplied market evidence.
-2. Determine whether the available confluence is enough to produce a BUY, SELL, or NO_TRADE.
+1. Evaluate ONLY the supplied market evidence and marked POI zone.
+2. If Confirmation Mode is Default Confirmation (Tap & Rejection of Marked Zone), price has tapped the marked POI zone and held above/below invalidation. Provide a ${currentZone?.direction || 'directional'} trade approval in accordance with the zone.
 3. If BUY or SELL, provide the exact Entry Price, Stop Loss, and Take Profit based on actual NUMERIC market structure.
-4. For BUY: Stop Loss MUST be placed BELOW entry, below relevant support zone, swing low, or demand structure.
-5. For SELL: Stop Loss MUST be placed ABOVE entry, above relevant resistance zone, swing high, or supply structure.
+4. For BUY: Stop Loss MUST be placed BELOW entry, at or below marked zone invalidation level (${currentZone?.direction === 'BUY' ? currentZone.invalidationLevel.toFixed(5) : 'support structure'}).
+5. For SELL: Stop Loss MUST be placed ABOVE entry, at or above marked zone invalidation level (${currentZone?.direction === 'SELL' ? currentZone.invalidationLevel.toFixed(5) : 'resistance structure'}).
 6. Identify the basis used for the Stop Loss in "stopLossBasis" (SUPPORT_ZONE, RESISTANCE_ZONE, SWING_LOW, SWING_HIGH, DEMAND_ZONE, SUPPLY_ZONE, STRUCTURAL_CANDLE, ATR_FALLBACK).
 7. Only return NO_TRADE when the supplied evidence clearly argues against taking a trade.
 
@@ -2491,7 +2521,27 @@ Output ONLY valid JSON.
             timeframe: compiledStrategy.compiled_rules.timeframes?.[0],
             minimumRiskReward: compiledStrategy.compiled_rules.risk_reward?.min_ratio
           };
-          const localAnalysis = analyzeMarket(candleData, mappedParsedStrategy);
+          let localAnalysis = analyzeMarket(candleData, mappedParsedStrategy);
+          if ((!localAnalysis || localAnalysis.signal === 'NO_TRADE') && currentZone && (currentZone.status === 'ZONE_TAPPED' || currentZone.status === 'CONFIRMED' || lastZoneEval?.isTapped)) {
+            const signalDir = currentZone.direction;
+            const entry = activeCurrentPrice;
+            const sl = currentZone.invalidationLevel;
+            const risk = Math.abs(entry - sl);
+            const rr = parseRiskRewardRatio(riskRewardStr);
+            const tp = signalDir === 'BUY' ? entry + (risk * rr) : entry - (risk * rr);
+            localAnalysis = {
+              signal: signalDir,
+              confidence: 85,
+              entryPrice: entry,
+              stopLoss: sl,
+              takeProfit: tp,
+              tp1: tp,
+              stopLossBasis: 'STRUCTURAL_ZONE',
+              structuralLevel: sl,
+              riskReward: riskRewardStr,
+              reasoning: [`[Default Confirmation Mode] Price tapped marked ${currentZone.type} [${currentZone.low} - ${currentZone.high}] and confirmed rejection in ${signalDir} direction while holding invalidation (${sl}).`]
+            } as any;
+          }
           const localSignal = localAnalysis?.signal || 'NO_TRADE';
           console.log(`[RULE_ONLY DECISION] Direction: ${localSignal}`);
 
@@ -2513,16 +2563,41 @@ Output ONLY valid JSON.
           }
           analysis = localAnalysis || { signal: 'NO_TRADE', confidence: 0, reasoning: ['Rule-only engine produced no signal'] };
         } else if (!geminiSucceeded || (analysis.signal !== 'BUY' && analysis.signal !== 'SELL')) {
-          console.log(`[Safety Invariant] Gemini required. Executed: ${geminiCalled ? 'YES' : 'NO'}, Result: ${parsedResult?.direction || (geminiSucceeded ? 'NO_TRADE' : 'ERROR/UNAVAILABLE')}`);
-          analysis = {
-            signal: 'NO_TRADE',
-            confidence: 0,
-            entryPrice: null,
-            stopLoss: null,
-            takeProfit: null,
-            riskReward: null,
-            reasoning: analysis.reasoning?.length ? analysis.reasoning : ['Gemini required but did not produce valid BUY or SELL decision.']
-          };
+          // If default tap and rejection confirmation is enabled and the zone was tapped & rejected:
+          if (compiledStrategy.compiled_rules?.tap_and_rejection && currentZone && (currentZone.status === 'CONFIRMED' || lastZoneEval?.isRejected || lastZoneEval?.isTapped)) {
+            console.log(`[Default Tap & Rejection Fallback] Zone ${currentZone.type} tapped and rejected. Triggering trade under default confirmation mode.`);
+            const signalDir = currentZone.direction;
+            const entry = activeCurrentPrice;
+            const sl = currentZone.invalidationLevel;
+            const risk = Math.abs(entry - sl);
+            const rr = parseRiskRewardRatio(riskRewardStr);
+            const tp = signalDir === 'BUY' ? entry + (risk * rr) : entry - (risk * rr);
+            analysis = {
+              signal: signalDir,
+              confidence: 85,
+              entryPrice: entry,
+              stopLoss: sl,
+              takeProfit: tp,
+              tp1: tp,
+              stopLossBasis: 'STRUCTURAL_ZONE',
+              structuralLevel: sl,
+              riskReward: riskRewardStr,
+              reasoning: [
+                `[Default Confirmation Mode] Price tapped marked ${currentZone.type} [${currentZone.low} - ${currentZone.high}] and rejected in ${signalDir} direction holding invalidation level (${sl}). Trade validated via default confirmation mode.`
+              ]
+            };
+          } else {
+            console.log(`[Safety Invariant] Gemini required. Executed: ${geminiCalled ? 'YES' : 'NO'}, Result: ${parsedResult?.direction || (geminiSucceeded ? 'NO_TRADE' : 'ERROR/UNAVAILABLE')}`);
+            analysis = {
+              signal: 'NO_TRADE',
+              confidence: 0,
+              entryPrice: null,
+              stopLoss: null,
+              takeProfit: null,
+              riskReward: null,
+              reasoning: analysis.reasoning?.length ? analysis.reasoning : ['Gemini required but did not produce valid BUY or SELL decision.']
+            };
+          }
         }
       } else {
         // Gemini NOT required! Fallback to local strategy engine
@@ -2551,7 +2626,27 @@ Output ONLY valid JSON.
             timeframe: compiledStrategy.compiled_rules.timeframes?.[0],
             minimumRiskReward: compiledStrategy.compiled_rules.risk_reward?.min_ratio
           };
-          const localAnalysis = analyzeMarket(candleData, mappedParsedStrategy);
+          let localAnalysis = analyzeMarket(candleData, mappedParsedStrategy);
+          if ((!localAnalysis || localAnalysis.signal === 'NO_TRADE') && currentZone && (currentZone.status === 'ZONE_TAPPED' || currentZone.status === 'CONFIRMED' || lastZoneEval?.isTapped)) {
+            const signalDir = currentZone.direction;
+            const entry = activeCurrentPrice;
+            const sl = currentZone.invalidationLevel;
+            const risk = Math.abs(entry - sl);
+            const rr = parseRiskRewardRatio(riskRewardStr);
+            const tp = signalDir === 'BUY' ? entry + (risk * rr) : entry - (risk * rr);
+            localAnalysis = {
+              signal: signalDir,
+              confidence: 85,
+              entryPrice: entry,
+              stopLoss: sl,
+              takeProfit: tp,
+              tp1: tp,
+              stopLossBasis: 'STRUCTURAL_ZONE',
+              structuralLevel: sl,
+              riskReward: riskRewardStr,
+              reasoning: [`[Default Confirmation Mode] Price tapped marked ${currentZone.type} [${currentZone.low} - ${currentZone.high}] and confirmed rejection in ${signalDir} direction while holding invalidation (${sl}).`]
+            } as any;
+          }
           if (localAnalysis && localAnalysis.signal !== 'NO_TRADE' && localAnalysis.entryPrice) {
             const slResult = calculateStructuralStopLoss(
               localAnalysis.signal as 'BUY' | 'SELL',

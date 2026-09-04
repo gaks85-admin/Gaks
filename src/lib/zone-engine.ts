@@ -44,6 +44,8 @@ export interface ZoneEvaluationResult {
   status: ZoneStatus;
   isTapped: boolean;
   isInvalidated: boolean;
+  isRejected?: boolean;
+  rejectionReason?: string;
   reason: string;
   updatedZone: MarkedZone;
 }
@@ -507,9 +509,106 @@ export function isPriceInOrTappingZone(
 }
 
 /**
+ * Evaluates whether price action has confirmed a rejection of the marked zone.
+ * 
+ * Rejection criteria:
+ * 1. Wick rejection: Lower shadow (BUY) or Upper shadow (SELL) testing the zone and springing back.
+ * 2. Candle rejection bounce: Green candle (BUY) or Red candle (SELL) closing off the zone.
+ * 3. Directional departure: Price advancing in trade direction away from the zone while holding invalidation.
+ */
+export interface ZoneRejectionResult {
+  isRejected: boolean;
+  rejectionType?: 'WICK' | 'BOUNCE' | 'DEPARTURE';
+  rejectionReason: string;
+}
+
+export function evaluateZoneRejection(
+  zone: MarkedZone,
+  latestCandle: Candle,
+  currentPrice: number,
+  prevCandle?: Candle
+): ZoneRejectionResult {
+  const candleRange = Math.max(0.00001, latestCandle.high - latestCandle.low);
+
+  if (zone.direction === 'BUY') {
+    // Check if price broke invalidation
+    if (latestCandle.close < zone.invalidationLevel || currentPrice < zone.invalidationLevel) {
+      return { isRejected: false, rejectionReason: 'Price broke below BUY invalidation level.' };
+    }
+
+    // 1. Lower wick rejection (candle dipped into zone and sprang back up)
+    const lowerWick = Math.min(latestCandle.open, latestCandle.close) - latestCandle.low;
+    const lowerWickRatio = lowerWick / candleRange;
+    if (lowerWickRatio >= 0.20 && latestCandle.low <= zone.high && latestCandle.close >= zone.low) {
+      return {
+        isRejected: true,
+        rejectionType: 'WICK',
+        rejectionReason: `Bullish wick rejection: Lower shadow ${(lowerWickRatio * 100).toFixed(0)}% tested zone [${zone.low} - ${zone.high}] and rejected upward.`
+      };
+    }
+
+    // 2. Bullish candle close after tapping zone
+    const isBullishCandle = latestCandle.close > latestCandle.open;
+    if (isBullishCandle && (latestCandle.low <= zone.high || (prevCandle && prevCandle.low <= zone.high)) && latestCandle.close >= zone.low) {
+      return {
+        isRejected: true,
+        rejectionType: 'BOUNCE',
+        rejectionReason: `Bullish candle rejection: Closed green (${latestCandle.close.toFixed(5)} > ${latestCandle.open.toFixed(5)}) off marked zone.`
+      };
+    }
+
+    // 3. Rejection bounce away from zone in trade direction
+    if (currentPrice >= zone.low && currentPrice > latestCandle.low && currentPrice > zone.invalidationLevel) {
+      return {
+        isRejected: true,
+        rejectionType: 'DEPARTURE',
+        rejectionReason: `Bullish rejection bounce: Price (${currentPrice.toFixed(5)}) holding above invalidation (${zone.invalidationLevel.toFixed(5)}) and advancing upward.`
+      };
+    }
+  } else if (zone.direction === 'SELL') {
+    // Check if price broke invalidation
+    if (latestCandle.close > zone.invalidationLevel || currentPrice > zone.invalidationLevel) {
+      return { isRejected: false, rejectionReason: 'Price broke above SELL invalidation level.' };
+    }
+
+    // 1. Upper wick rejection (candle pushed into zone and rejected back down)
+    const upperWick = latestCandle.high - Math.max(latestCandle.open, latestCandle.close);
+    const upperWickRatio = upperWick / candleRange;
+    if (upperWickRatio >= 0.20 && latestCandle.high >= zone.low && latestCandle.close <= zone.high) {
+      return {
+        isRejected: true,
+        rejectionType: 'WICK',
+        rejectionReason: `Bearish wick rejection: Upper shadow ${(upperWickRatio * 100).toFixed(0)}% tested zone [${zone.low} - ${zone.high}] and rejected downward.`
+      };
+    }
+
+    // 2. Bearish candle close after tapping zone
+    const isBearishCandle = latestCandle.close < latestCandle.open;
+    if (isBearishCandle && (latestCandle.high >= zone.low || (prevCandle && prevCandle.high >= zone.low)) && latestCandle.close <= zone.high) {
+      return {
+        isRejected: true,
+        rejectionType: 'BOUNCE',
+        rejectionReason: `Bearish candle rejection: Closed red (${latestCandle.close.toFixed(5)} < ${latestCandle.open.toFixed(5)}) off marked zone.`
+      };
+    }
+
+    // 3. Rejection bounce away from zone in trade direction
+    if (currentPrice <= zone.high && currentPrice < latestCandle.high && currentPrice < zone.invalidationLevel) {
+      return {
+        isRejected: true,
+        rejectionType: 'DEPARTURE',
+        rejectionReason: `Bearish rejection bounce: Price (${currentPrice.toFixed(5)}) holding below invalidation (${zone.invalidationLevel.toFixed(5)}) and advancing downward.`
+      };
+    }
+  }
+
+  return { isRejected: false, rejectionReason: 'Awaiting clean price action rejection from marked zone.' };
+}
+
+/**
  * Evaluates the current state of an existing marked zone:
  * 1. Checks for structural invalidation (e.g. candle close through zone & invalidation level)
- * 2. Checks for price tap/entry
+ * 2. Checks for price tap/entry and rejection
  * 3. Checks for runaway price expansion (price left without tapping, target leg completed)
  * 4. Checks for zone expiration/staleness (too many candles elapsed without tap)
  * 5. Checks for market structure / trend reversal against the zone
@@ -565,38 +664,58 @@ export function evaluateZoneState(
   }
 
   // =========================================================================
-  // 2. TAP DETECTION CHECK (Price has entered or wicked into the zone)
+  // 2. TAP AND REJECTION DETECTION CHECK
   // =========================================================================
+  const prevCandle = candles && candles.length >= 2 ? candles[candles.length - 2] : undefined;
   const tapped = isPriceInOrTappingZone(zone, latestCandle, currentPrice);
 
   if (tapped) {
-    updatedZone.status = 'ZONE_TAPPED';
+    const rejection = evaluateZoneRejection(zone, latestCandle, currentPrice, prevCandle);
+    const isRejected = rejection.isRejected;
+    updatedZone.status = isRejected ? 'CONFIRMED' : 'ZONE_TAPPED';
     updatedZone.tappedAt = zone.tappedAt || new Date().toISOString();
     updatedZone.tapCount = (zone.tapCount || 0) + 1;
 
     return {
-      status: 'ZONE_TAPPED',
+      status: updatedZone.status,
       isTapped: true,
       isInvalidated: false,
-      reason: `Zone tapped: Price (${currentPrice.toFixed(5)}) / Candle range [${latestCandle.low} - ${latestCandle.high}] entered marked zone [${zone.low} - ${zone.high}].`,
+      isRejected,
+      rejectionReason: rejection.rejectionReason,
+      reason: isRejected
+        ? `Zone tapped & rejected: Price (${currentPrice.toFixed(5)}) tapped zone [${zone.low} - ${zone.high}] and confirmed rejection. ${rejection.rejectionReason}`
+        : `Zone tapped: Price (${currentPrice.toFixed(5)}) / Candle range [${latestCandle.low} - ${latestCandle.high}] entered marked zone [${zone.low} - ${zone.high}]. Awaiting rejection confirmation.`,
       updatedZone
     };
   }
 
   // =========================================================================
-  // 2B. POST-TAP MITIGATION CHECK (Price tapped zone and has now departed)
+  // 2B. POST-TAP REJECTION CONFIRMATION & MITIGATION
   // =========================================================================
-  // In SMC/ICT unmitigated zone trading, a zone is tested once upon tap.
-  // When price moves back outside the zone after a tap, the mitigation is complete.
-  // The zone MUST NOT revert to WAITING_FOR_TAP. It expires so a fresh unmitigated zone can be found!
-  const wasPreviouslyTapped = zone.status === 'ZONE_TAPPED' || (zone.tapCount !== undefined && zone.tapCount > 0) || !!zone.tappedAt;
+  const wasPreviouslyTapped = zone.status === 'ZONE_TAPPED' || zone.status === 'CONFIRMED' || (zone.tapCount !== undefined && zone.tapCount > 0) || !!zone.tappedAt;
   if (wasPreviouslyTapped) {
+    const rejection = evaluateZoneRejection(zone, latestCandle, currentPrice, prevCandle);
+    if (rejection.isRejected) {
+      updatedZone.status = 'CONFIRMED';
+      return {
+        status: 'CONFIRMED',
+        isTapped: true,
+        isInvalidated: false,
+        isRejected: true,
+        rejectionReason: rejection.rejectionReason,
+        reason: `Zone tapped & rejected: Price (${currentPrice.toFixed(5)}) confirmed rejection bounce departing marked zone [${zone.low} - ${zone.high}]. ${rejection.rejectionReason}`,
+        updatedZone
+      };
+    }
+
+    // If price left the zone without confirming a rejection bounce in the trade direction:
     updatedZone.status = 'EXPIRED';
     return {
       status: 'EXPIRED',
       isTapped: false,
       isInvalidated: true,
-      reason: `Zone already mitigated: Marked zone [${zone.low} - ${zone.high}] was tapped (tapCount: ${zone.tapCount || 1}) and price (${currentPrice.toFixed(5)}) has left the zone. Zone is complete and cleared for fresh unmitigated structure.`,
+      isRejected: false,
+      reason: `Zone already mitigated: Marked zone [${zone.low} - ${zone.high}] was tapped (tapCount: ${zone.tapCount || 1}) and price (${currentPrice.toFixed(5)}) has departed without valid rejection confirmation. Zone cleared for fresh structure.`,
       updatedZone
     };
   }

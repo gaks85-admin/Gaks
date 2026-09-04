@@ -118,6 +118,26 @@ export function compileStrategy(strategyText: string): CompilerOutput {
     ai_only_elements: classificationResult.parsedRule.ai_only_elements
   };
 
+  // Determine if strategy contains any explicit confirmation rules.
+  // If the user does not specify a confirmation, fall back to default mode:
+  // Tap and Rejection of the marked zone!
+  const hasExplicitConfirmation = Boolean(
+    compiled_rules.confirmation_candle ||
+    compiled_rules.support_rejection ||
+    compiled_rules.resistance_rejection ||
+    compiled_rules.bos ||
+    compiled_rules.choch ||
+    compiled_rules.liquidity_sweep ||
+    compiled_rules.volume_confirmation ||
+    compiled_rules.rsi?.enabled ||
+    compiled_rules.macd?.enabled ||
+    compiled_rules.ema?.enabled
+  );
+
+  if (!hasExplicitConfirmation) {
+    compiled_rules.tap_and_rejection = true;
+  }
+
   // Classify strategy mode based on strict deterministic priority rules:
   let strategy_mode: 'RULE_ONLY' | 'HYBRID' | 'AI_ONLY' = 'RULE_ONLY';
   if (classificationResult.parsedRule.ai_only_elements.length > 0) {
@@ -204,6 +224,7 @@ export function compileStrategy(strategyText: string): CompilerOutput {
     { id: 'resistance', name: 'Resistance Zone', phrase: 'resistance', weight: 10, active: !!compiled_rules.resistance },
     { id: 'support_rejection', name: 'Support Rejection', phrase: 'support rejection', weight: 10, active: !!compiled_rules.support_rejection },
     { id: 'resistance_rejection', name: 'Resistance Rejection', phrase: 'resistance rejection', weight: 10, active: !!compiled_rules.resistance_rejection },
+    { id: 'tap_and_rejection', name: 'Tap and Rejection (Default)', phrase: 'tap and rejection', weight: 20, active: !!compiled_rules.tap_and_rejection },
     { id: 'ema', name: 'EMA Alignment', phrase: 'ema', weight: 5, active: !!compiled_rules.ema?.enabled },
     { id: 'rsi', name: 'RSI Filter', phrase: 'rsi', weight: 4, active: !!compiled_rules.rsi?.enabled },
     { id: 'macd', name: 'MACD Filter', phrase: 'macd', weight: 4, active: !!compiled_rules.macd?.enabled },
@@ -235,6 +256,7 @@ export function compileStrategy(strategyText: string): CompilerOutput {
     resistance: ['resistance zone', 'resistance level', 'resistance'],
     support_rejection: ['support rejection', 'bounce from support', 'demand rejection'],
     resistance_rejection: ['resistance rejection', 'bounce from resistance', 'supply rejection'],
+    tap_and_rejection: ['tap and rejection', 'tap & rejection', 'zone tap', 'tap', 'rejection'],
     ema: ['ema alignment', 'ema'],
     rsi: ['rsi filter', 'rsi'],
     macd: ['macd filter', 'macd'],

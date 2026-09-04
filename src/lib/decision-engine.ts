@@ -100,7 +100,7 @@ export function evaluateDecision(
     'trendline_breakout', 'break_and_retest', 'confirmation_candle', 'bos', 'choch',
     'liquidity_sweep', 'fair_value_gap', 'order_block', 'supply_demand', 'unmitigated_zone',
     'demand_zone', 'supply_zone', 'support', 'resistance', 'support_rejection',
-    'resistance_rejection', 'ema', 'rsi', 'macd', 'atr', 'volume_confirmation',
+    'resistance_rejection', 'tap_and_rejection', 'ema', 'rsi', 'macd', 'atr', 'volume_confirmation',
     'session', 'timeframes', 'risk_reward'
   ];
   const evaluatorMandatoryIds = compilerMandatoryIds.filter(id => knownRuleIds.includes(id)).sort();
@@ -343,6 +343,51 @@ export function evaluateDecision(
   }
   if (rules.supply_zone === true) {
     processRule("Supply Zone", "supply_zone", "supply_zone", () => obEval.evaluate(rules, marketStructure));
+  }
+
+  // 21. Tap & Rejection (Default Confirmation Mode when no explicit confirmation rule is defined)
+  if (rules.tap_and_rejection === true) {
+    processRule("Tap & Rejection", "tap_and_rejection", "tap_and_rejection", () => {
+      const ms = marketStructure as any;
+      const isRejected = ms.zone_rejected === true || ms.rejectionConfirmed === true;
+      const isTapped = ms.zone_tapped === true || ms.zone_status === 'ZONE_TAPPED' || ms.zone_status === 'CONFIRMED';
+      const zone = ms.markedZone;
+      const activeStatus = ms.zone_status;
+
+      if (isRejected && isTapped) {
+        return {
+          matched: true,
+          score: 1.0,
+          scoreOutOf10: 10,
+          reason: `Default Confirmation: Price tapped marked ${zone?.type || 'structural'} zone [${zone?.low ?? ''} - ${zone?.high ?? ''}] and confirmed rejection bounce (10/10).`
+        };
+      }
+
+      if (isTapped) {
+        return {
+          matched: true,
+          score: 0.9,
+          scoreOutOf10: 9,
+          reason: `Default Confirmation: Price tapped marked ${zone?.type || 'structural'} zone [${zone?.low ?? ''} - ${zone?.high ?? ''}]. Rejection bounce active (9/10).`
+        };
+      }
+
+      if (activeStatus === 'WAITING_FOR_TAP' || zone) {
+        return {
+          matched: false,
+          score: 0,
+          scoreOutOf10: 0,
+          reason: `Default Confirmation: Waiting for price to tap marked ${zone?.type || 'structural'} zone [${zone?.low ?? ''} - ${zone?.high ?? ''}] (0/10).`
+        };
+      }
+
+      return {
+        matched: false,
+        score: 0,
+        scoreOutOf10: 0,
+        reason: "Default Confirmation: No active marked zone identified to evaluate tap & rejection (0/10)."
+      };
+    });
   }
 
   // Handle directional pairs: If both opposing directional rules (e.g. support & resistance)
