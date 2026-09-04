@@ -1675,10 +1675,15 @@ Reason: ${activeValidation.reason}`);
               decision_snapshot: null
             });
 
+            currentZone = zoneEval.updatedZone;
+            activeZonesMemoryMap.set(watcher.id, currentZone);
+
             const { error: waitErr } = await supabase
               .from("watchers")
               .update({
+                zone_data: currentZone,
                 zone_status: 'WAITING_FOR_TAP',
+                zone_tapped_at: null,
                 last_scan_at: new Date().toISOString(),
                 last_analyzed_closed_candle_time: latestClosedCandleTime,
                 updated_at: new Date().toISOString()
@@ -1742,36 +1747,20 @@ Reason: ${activeValidation.reason}`);
               'Reasoning': discoveredZone.reasoning
             });
 
-            const isImmediateTap = isPriceInOrTappingZone(discoveredZone, latestClosedCandle, activeCurrentPrice);
-            if (isImmediateTap) {
-              const immediateRejection = evaluateZoneRejection(discoveredZone, latestClosedCandle, activeCurrentPrice);
-              discoveredZone.status = immediateRejection.isRejected ? 'CONFIRMED' : 'ZONE_TAPPED';
-              discoveredZone.tapCount = 1;
-              discoveredZone.tappedAt = new Date().toISOString();
-              lastZoneEval = {
-                status: discoveredZone.status,
-                isTapped: true,
-                isInvalidated: false,
-                isRejected: immediateRejection.isRejected,
-                rejectionReason: immediateRejection.rejectionReason,
-                reason: 'Immediate tap on newly discovered zone',
-                updatedZone: discoveredZone
-              };
-            } else {
-              discoveredZone.status = 'WAITING_FOR_TAP';
-              discoveredZone.tapCount = 0;
-            }
+            discoveredZone.status = 'WAITING_FOR_TAP';
+            discoveredZone.tapCount = 0;
+            discoveredZone.tappedAt = null;
 
             activeZonesMemoryMap.set(watcher.id, discoveredZone);
             const { error: markErr } = await supabase.from("watchers").update({
               zone_data: discoveredZone,
-              zone_status: discoveredZone.status,
+              zone_status: 'WAITING_FOR_TAP',
               zone_high: discoveredZone.high,
               zone_low: discoveredZone.low,
               zone_type: discoveredZone.type,
               zone_invalidation_level: discoveredZone.invalidationLevel,
               zone_marked_at: new Date().toISOString(),
-              zone_tapped_at: isImmediateTap ? new Date().toISOString() : null,
+              zone_tapped_at: null,
               updated_at: new Date().toISOString()
             }).eq("id", watcher.id);
 
@@ -1782,45 +1771,41 @@ Reason: ${activeValidation.reason}`);
               }).eq("id", watcher.id);
             }
 
-            if (!isImmediateTap) {
-              console.log(`[WAITING FOR ZONE TAP] Watcher ID: ${watcher.id} (${selectedPair}): Newly marked zone [${discoveredZone.low} - ${discoveredZone.high}] is waiting for price tap. Bypassing AI evaluation.`);
-              const scanDurationMs = Date.now() - scanStart;
-              await recordEvaluation(supabase, {
-                user_id: userId,
-                watcher_id: watcher.id,
-                pair: selectedPair,
-                timeframe: selectedTimeframe,
-                strategy_mode: compiledStrategy.strategy_mode,
-                decision_score: 0,
-                matched_weight: 0,
-                possible_weight: 0,
-                recommendation: 'FAIL',
-                mandatory_rules_passed: false,
-                matched_rules: [],
-                failed_rules: [`Newly marked zone [${discoveredZone.low} - ${discoveredZone.high}] waiting for price tap`],
-                gemini_used: false,
-                trade_sent: false,
-                trade_reason: `Marked ${discoveredZone.type} zone [${discoveredZone.low} - ${discoveredZone.high}]. Waiting for price tap before AI confirmation.`,
-                scan_duration_ms: scanDurationMs,
-                decision_snapshot: null
-              });
+            console.log(`[WAITING FOR ZONE TAP] Watcher ID: ${watcher.id} (${selectedPair}): Freshly marked zone [${discoveredZone.low} - ${discoveredZone.high}] (${discoveredZone.type} ${discoveredZone.direction}) waiting for price tap. Bypassing AI evaluation.`);
+            const scanDurationMs = Date.now() - scanStart;
+            await recordEvaluation(supabase, {
+              user_id: userId,
+              watcher_id: watcher.id,
+              pair: selectedPair,
+              timeframe: selectedTimeframe,
+              strategy_mode: compiledStrategy.strategy_mode,
+              decision_score: 0,
+              matched_weight: 0,
+              possible_weight: 0,
+              recommendation: 'FAIL',
+              mandatory_rules_passed: false,
+              matched_rules: [],
+              failed_rules: [`Newly marked zone [${discoveredZone.low} - ${discoveredZone.high}] waiting for price tap`],
+              gemini_used: false,
+              trade_sent: false,
+              trade_reason: `Marked ${discoveredZone.type} zone [${discoveredZone.low} - ${discoveredZone.high}]. Waiting for price tap before AI confirmation.`,
+              scan_duration_ms: scanDurationMs,
+              decision_snapshot: null
+            });
 
-              await supabase
-                .from("watchers")
-                .update({
-                  last_scan_at: new Date().toISOString(),
-                  last_analyzed_closed_candle_time: latestClosedCandleTime,
-                  updated_at: new Date().toISOString()
-                })
-                .eq("id", watcher.id);
+            await supabase
+              .from("watchers")
+              .update({
+                last_scan_at: new Date().toISOString(),
+                last_analyzed_closed_candle_time: latestClosedCandleTime,
+                updated_at: new Date().toISOString()
+              })
+              .eq("id", watcher.id);
 
-              watchersProcessedCount++;
-              isWatcherSkipped = false;
-              results.push({ userId, symbol, tradeStatus: 'WAITING_FOR_TAP', result: 'Zone marked, waiting for tap' });
-              return;
-            }
-
-            currentZone = discoveredZone;
+            watchersProcessedCount++;
+            isWatcherSkipped = false;
+            results.push({ userId, symbol, tradeStatus: 'WAITING_FOR_TAP', result: 'Zone marked, waiting for tap' });
+            return;
           } else {
             console.log(`[ZONE SEARCH] Watcher ID: ${watcher.id} (${selectedPair}): No distinct structural POI/Zone identified in current market structure. Waiting for new structural formation.`);
             logWatcherEvent('ZONE SEARCH', logCtx, 'No high-quality structural POI/Zone identified in current candles.');

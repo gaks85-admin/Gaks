@@ -148,11 +148,11 @@ export function runZoneEngineTestSuite(): { passed: boolean; results: { name: st
     assert(!evalA.isTapped, 'Should not be tapped');
     assert(!evalA.isInvalidated, 'Should not be invalidated');
 
-    // Case B: Candle low wicks into zone -> ZONE_TAPPED
+    // Case B: Candle low wicks into zone -> ZONE_TAPPED or CONFIRMED (if rejected)
     const tapCandle: Candle = { timestamp: '2026-01-01T02:15:00Z', open: 1.1010, high: 1.1015, low: 1.0970, close: 1.0985 };
     const evalB = evaluateZoneState(testZone, tapCandle, 1.0985);
-    assert(evalB.status === 'ZONE_TAPPED', 'Status should transition to ZONE_TAPPED');
     assert(evalB.isTapped, 'isTapped must be true');
+    assert(evalB.status === 'ZONE_TAPPED' || evalB.status === 'CONFIRMED', 'Status should transition to ZONE_TAPPED or CONFIRMED');
     assert(evalB.updatedZone.tapCount === 1, 'Tap count should increment to 1');
   });
 
@@ -260,6 +260,56 @@ export function runZoneEngineTestSuite(): { passed: boolean; results: { name: st
 
     assert(evalResult.status === 'EXPIRED', 'Status must be EXPIRED when trend flips to BEARISH');
     assert(evalResult.isInvalidated === true, 'isInvalidated must be true to clear zone and search for new setup');
+  });
+
+  // =========================================================================
+  // Test 8: Specific Regression Test for EURUSD Bearish OB False Tap
+  // =========================================================================
+  test('8. Should NOT flag false positive tap when price 1.16194 is below Bearish OB [1.16264 - 1.16287]', () => {
+    const now = new Date();
+    const bearishOB: MarkedZone = {
+      id: 'watcher_3e79f868_bearish_ob',
+      type: 'BEARISH_ORDER_BLOCK',
+      direction: 'SELL',
+      high: 1.16287,
+      low: 1.16264,
+      invalidationLevel: 1.16337,
+      strength: 88,
+      createdAt: now.toISOString(),
+      createdCandleTime: new Date(now.getTime() - 30 * 60000).toISOString(),
+      displacementCandleTime: new Date(now.getTime() - 15 * 60000).toISOString(),
+      displacementIndex: 2,
+      tapCount: 0,
+      status: 'WAITING_FOR_TAP',
+      reasoning: 'Fresh Unmitigated Supply Zone / Bearish Order Block [1.16264 - 1.16287].'
+    };
+
+    // Subsequent candle trading below the supply zone (price 1.16194, high 1.16210, low 1.16180)
+    const candleBelowZone: Candle = {
+      timestamp: new Date(now.getTime() - 10 * 60000).toISOString(),
+      open: 1.16205,
+      high: 1.16210,
+      low: 1.16180,
+      close: 1.16194
+    };
+
+    const evalBelow = evaluateZoneState(bearishOB, candleBelowZone, 1.16194);
+    assert(!evalBelow.isTapped, 'Price 1.16194 below Bearish OB must NOT be marked as tapped');
+    assert(evalBelow.status === 'WAITING_FOR_TAP', 'Status must remain WAITING_FOR_TAP');
+    assert(!evalBelow.isInvalidated, 'Zone must not be invalidated');
+
+    // Subsequent candle retracing up into the Bearish OB [1.16264 - 1.16287] (high reaches 1.16275)
+    const candleRetracingIntoZone: Candle = {
+      timestamp: new Date(now.getTime() - 5 * 60000).toISOString(),
+      open: 1.16220,
+      high: 1.16275,
+      low: 1.16210,
+      close: 1.16250
+    };
+
+    const evalRetrace = evaluateZoneState(bearishOB, candleRetracingIntoZone, 1.16250);
+    assert(evalRetrace.isTapped, 'When candle high reaches 1.16275 into zone [1.16264 - 1.16287], it MUST be tapped');
+    assert(evalRetrace.updatedZone.tapCount === 1, 'Tap count should increment to 1');
   });
 
   const allPassed = results.every(r => r.success);

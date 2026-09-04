@@ -33,6 +33,8 @@ export interface MarkedZone {
   strength: number; // 0 to 100
   createdAt: string;
   createdCandleTime?: string;
+  displacementCandleTime?: string;
+  displacementIndex?: number;
   tappedAt?: string | null;
   tapCount: number;
   status: ZoneStatus;
@@ -256,7 +258,10 @@ export function identifyMarkedZone(
               const invalidation = Number((obLow - buffer).toFixed(5));
               const distanceRatio = Math.abs(activePrice - obHigh) / activePrice;
               const proximityScore = Math.max(0, 95 - (distanceRatio * 1000));
-              const strength = Math.round(proximityScore * (trend === 'BULLISH' ? 1.0 : 0.85));
+              const isImmediate = displacementIdx === i + 1;
+              const recencyWeight = (i / sortedCandles.length) * 15;
+              const immediateBonus = isImmediate ? 20 : 0;
+              const strength = Math.round((proximityScore * 0.6 + recencyWeight + immediateBonus) * (trend === 'BULLISH' ? 1.0 : 0.85));
 
               candidateZones.push({
                 id: generateZoneId(pair, 'BULLISH_ORDER_BLOCK', 'BUY'),
@@ -268,6 +273,8 @@ export function identifyMarkedZone(
                 strength,
                 createdAt: new Date().toISOString(),
                 createdCandleTime: String(c.timestamp),
+                displacementCandleTime: String(sortedCandles[displacementIdx].timestamp),
+                displacementIndex: displacementIdx,
                 tappedAt: null,
                 tapCount: 0,
                 status: 'WAITING_FOR_TAP',
@@ -313,7 +320,10 @@ export function identifyMarkedZone(
               const invalidation = Number((obHigh + buffer).toFixed(5));
               const distanceRatio = Math.abs(obLow - activePrice) / activePrice;
               const proximityScore = Math.max(0, 95 - (distanceRatio * 1000));
-              const strength = Math.round(proximityScore * (trend === 'BEARISH' ? 1.0 : 0.85));
+              const isImmediate = displacementIdx === i + 1;
+              const recencyWeight = (i / sortedCandles.length) * 15;
+              const immediateBonus = isImmediate ? 20 : 0;
+              const strength = Math.round((proximityScore * 0.6 + recencyWeight + immediateBonus) * (trend === 'BEARISH' ? 1.0 : 0.85));
 
               candidateZones.push({
                 id: generateZoneId(pair, 'BEARISH_ORDER_BLOCK', 'SELL'),
@@ -325,6 +335,8 @@ export function identifyMarkedZone(
                 strength,
                 createdAt: new Date().toISOString(),
                 createdCandleTime: String(c.timestamp),
+                displacementCandleTime: String(sortedCandles[displacementIdx].timestamp),
+                displacementIndex: displacementIdx,
                 tappedAt: null,
                 tapCount: 0,
                 status: 'WAITING_FOR_TAP',
@@ -483,6 +495,23 @@ export function identifyMarkedZone(
 
 /**
  * Checks whether price or incoming candle has tapped/entered the zone.
+ * 
+ * Strict SMC Retrace & Mitigation Rules:
+ * 1. Temporal Check:
+ *    A candle cannot tap a zone if it occurred at or before the zone's origin/displacement candle.
+ * 
+ * 2. Retrace Direction Check:
+ *    - SELL Zone (Bearish Order Block, Supply, Resistance):
+ *      The zone sits above price. A tap requires price to RETRACE UPWARDS into the zone:
+ *      * Live currentPrice inside zone: currentPrice >= zone.low && currentPrice <= zone.invalidationLevel
+ *      * OR incoming post-displacement candle wicked into zone: candle.high >= zone.low && candle.close <= zone.invalidationLevel
+ *      * If currentPrice < zone.low AND candle.high < zone.low, price has NOT reached the zone. Return false.
+ * 
+ *    - BUY Zone (Bullish Order Block, Demand, Support):
+ *      The zone sits below price. A tap requires price to RETRACE DOWNWARDS into the zone:
+ *      * Live currentPrice inside zone: currentPrice <= zone.high && currentPrice >= zone.invalidationLevel
+ *      * OR incoming post-displacement candle dipped into zone: candle.low <= zone.high && candle.close >= zone.invalidationLevel
+ *      * If currentPrice > zone.high AND candle.low > zone.high, price has NOT reached the zone. Return false.
  */
 export function isPriceInOrTappingZone(
   zone: MarkedZone,
@@ -491,21 +520,41 @@ export function isPriceInOrTappingZone(
 ): boolean {
   if (!zone || !candle) return false;
 
-  const low = candle.low;
-  const high = candle.high;
-
-  // Candle range overlaps zone range
-  const candleOverlaps = (low <= zone.high && high >= zone.low);
-
-  if (candleOverlaps) return true;
-
-  if (currentPrice !== undefined && currentPrice !== null && !isNaN(currentPrice)) {
-    if (currentPrice >= zone.low && currentPrice <= zone.high) {
-      return true;
+  // 1. Temporal validation: Reject candles from at or before zone creation / displacement
+  const refTime = zone.displacementCandleTime || zone.createdCandleTime;
+  if (refTime && candle.timestamp) {
+    const candleTime = new Date(candle.timestamp).getTime();
+    const zoneOriginTime = new Date(refTime).getTime();
+    if (!isNaN(candleTime) && !isNaN(zoneOriginTime) && candleTime <= zoneOriginTime) {
+      return false;
     }
   }
 
-  return false;
+  const activePrice = (currentPrice !== undefined && currentPrice !== null && !isNaN(currentPrice))
+    ? currentPrice
+    : candle.close;
+
+  // 2. Retrace and tap evaluation based on zone direction
+  if (zone.direction === 'SELL') {
+    // For SELL, zone sits ABOVE. Market must retrace UP into [zone.low, zone.invalidationLevel]
+    const livePriceInZone = activePrice >= zone.low && activePrice <= zone.invalidationLevel;
+    const candleHighInZone = candle.high >= zone.low && candle.close <= zone.invalidationLevel;
+
+    // Strict boundary: If neither live price nor candle high touched zone.low, it's NOT a tap
+    return livePriceInZone || candleHighInZone;
+  } else if (zone.direction === 'BUY') {
+    // For BUY, zone sits BELOW. Market must retrace DOWN into [zone.invalidationLevel, zone.high]
+    const livePriceInZone = activePrice <= zone.high && activePrice >= zone.invalidationLevel;
+    const candleLowInZone = candle.low <= zone.high && candle.close >= zone.invalidationLevel;
+
+    // Strict boundary: If neither live price nor candle low touched zone.high, it's NOT a tap
+    return livePriceInZone || candleLowInZone;
+  }
+
+  // Fallback for neutral zones
+  const livePriceInZone = activePrice >= zone.low && activePrice <= zone.high;
+  const candleOverlaps = candle.low <= zone.high && candle.high >= zone.low;
+  return livePriceInZone || candleOverlaps;
 }
 
 /**
@@ -536,6 +585,12 @@ export function evaluateZoneRejection(
       return { isRejected: false, rejectionReason: 'Price broke below BUY invalidation level.' };
     }
 
+    // Did latest candle or previous candle actually reach into the zone?
+    const candleReachedZone = latestCandle.low <= zone.high || (prevCandle && prevCandle.low <= zone.high);
+    if (!candleReachedZone && currentPrice > zone.high) {
+      return { isRejected: false, rejectionReason: 'Price has not tested the marked BUY zone.' };
+    }
+
     // 1. Lower wick rejection (candle dipped into zone and sprang back up)
     const lowerWick = Math.min(latestCandle.open, latestCandle.close) - latestCandle.low;
     const lowerWickRatio = lowerWick / candleRange;
@@ -549,7 +604,7 @@ export function evaluateZoneRejection(
 
     // 2. Bullish candle close after tapping zone
     const isBullishCandle = latestCandle.close > latestCandle.open;
-    if (isBullishCandle && (latestCandle.low <= zone.high || (prevCandle && prevCandle.low <= zone.high)) && latestCandle.close >= zone.low) {
+    if (isBullishCandle && candleReachedZone && latestCandle.close >= zone.low) {
       return {
         isRejected: true,
         rejectionType: 'BOUNCE',
@@ -557,18 +612,24 @@ export function evaluateZoneRejection(
       };
     }
 
-    // 3. Rejection bounce away from zone in trade direction
-    if (currentPrice >= zone.low && currentPrice > latestCandle.low && currentPrice > zone.invalidationLevel) {
+    // 3. Rejection bounce away from zone in trade direction (must have tested zone)
+    if (candleReachedZone && currentPrice > latestCandle.open && currentPrice >= zone.low) {
       return {
         isRejected: true,
         rejectionType: 'DEPARTURE',
-        rejectionReason: `Bullish rejection bounce: Price (${currentPrice.toFixed(5)}) holding above invalidation (${zone.invalidationLevel.toFixed(5)}) and advancing upward.`
+        rejectionReason: `Bullish rejection bounce: Price (${currentPrice.toFixed(5)}) tested zone [${zone.low} - ${zone.high}] and advancing upward holding invalidation (${zone.invalidationLevel.toFixed(5)}).`
       };
     }
   } else if (zone.direction === 'SELL') {
     // Check if price broke invalidation
     if (latestCandle.close > zone.invalidationLevel || currentPrice > zone.invalidationLevel) {
       return { isRejected: false, rejectionReason: 'Price broke above SELL invalidation level.' };
+    }
+
+    // Did latest candle or previous candle actually reach into the zone?
+    const candleReachedZone = latestCandle.high >= zone.low || (prevCandle && prevCandle.high >= zone.low);
+    if (!candleReachedZone && currentPrice < zone.low) {
+      return { isRejected: false, rejectionReason: 'Price has not tested the marked SELL zone.' };
     }
 
     // 1. Upper wick rejection (candle pushed into zone and rejected back down)
@@ -584,7 +645,7 @@ export function evaluateZoneRejection(
 
     // 2. Bearish candle close after tapping zone
     const isBearishCandle = latestCandle.close < latestCandle.open;
-    if (isBearishCandle && (latestCandle.high >= zone.low || (prevCandle && prevCandle.high >= zone.low)) && latestCandle.close <= zone.high) {
+    if (isBearishCandle && candleReachedZone && latestCandle.close <= zone.high) {
       return {
         isRejected: true,
         rejectionType: 'BOUNCE',
@@ -592,12 +653,12 @@ export function evaluateZoneRejection(
       };
     }
 
-    // 3. Rejection bounce away from zone in trade direction
-    if (currentPrice <= zone.high && currentPrice < latestCandle.high && currentPrice < zone.invalidationLevel) {
+    // 3. Rejection bounce away from zone in trade direction (must have tested zone)
+    if (candleReachedZone && currentPrice < latestCandle.open && currentPrice <= zone.high) {
       return {
         isRejected: true,
         rejectionType: 'DEPARTURE',
-        rejectionReason: `Bearish rejection bounce: Price (${currentPrice.toFixed(5)}) holding below invalidation (${zone.invalidationLevel.toFixed(5)}) and advancing downward.`
+        rejectionReason: `Bearish rejection bounce: Price (${currentPrice.toFixed(5)}) tested zone [${zone.low} - ${zone.high}] and advancing downward holding invalidation (${zone.invalidationLevel.toFixed(5)}).`
       };
     }
   }
@@ -692,7 +753,40 @@ export function evaluateZoneState(
   // =========================================================================
   // 2B. POST-TAP REJECTION CONFIRMATION & MITIGATION
   // =========================================================================
-  const wasPreviouslyTapped = zone.status === 'ZONE_TAPPED' || zone.status === 'CONFIRMED' || (zone.tapCount !== undefined && zone.tapCount > 0) || !!zone.tappedAt;
+  let wasPreviouslyTapped = zone.status === 'ZONE_TAPPED' || zone.status === 'CONFIRMED' || (zone.tapCount !== undefined && zone.tapCount > 0) || !!zone.tappedAt;
+
+  // SANITY RECTIFICATION: Verify if this zone was actually tapped by checking post-creation candles or price
+  if (wasPreviouslyTapped && candles && candles.length > 0) {
+    const originTime = zone.displacementCandleTime || zone.createdCandleTime;
+    let actuallyTappedInHistory = false;
+    for (let cIdx = candles.length - 1; cIdx >= 0; cIdx--) {
+      const c = candles[cIdx];
+      if (originTime && c.timestamp) {
+        const cTime = new Date(c.timestamp).getTime();
+        const oTime = new Date(originTime).getTime();
+        if (!isNaN(cTime) && !isNaN(oTime) && cTime <= oTime) {
+          break; // Do not check candles from before or during zone origin
+        }
+      }
+      if (zone.direction === 'SELL' && c.high >= zone.low && c.close <= zone.invalidationLevel) {
+        actuallyTappedInHistory = true;
+        break;
+      }
+      if (zone.direction === 'BUY' && c.low <= zone.high && c.close >= zone.invalidationLevel) {
+        actuallyTappedInHistory = true;
+        break;
+      }
+    }
+
+    if (!actuallyTappedInHistory) {
+      console.log(`[ZONE SANITY RECTIFY] Marked zone ${zone.type} [${zone.low} - ${zone.high}] (${zone.direction}) had false tapped status. No post-creation candle reached zone. Resetting to WAITING_FOR_TAP.`);
+      wasPreviouslyTapped = false;
+      updatedZone.status = 'WAITING_FOR_TAP';
+      updatedZone.tapCount = 0;
+      updatedZone.tappedAt = null;
+    }
+  }
+
   if (wasPreviouslyTapped) {
     const rejection = evaluateZoneRejection(zone, latestCandle, currentPrice, prevCandle);
     if (rejection.isRejected) {
