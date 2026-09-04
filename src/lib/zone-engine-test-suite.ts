@@ -237,11 +237,11 @@ export function runZoneEngineTestSuite(): { passed: boolean; results: { name: st
   });
 
   // =========================================================================
-  // Test 7: Trend Reversal Expiration Check
+  // Test 7: Stick to Entry Position Check (No Large Displacement Detected)
   // =========================================================================
-  test('7. Should expire zone when market structure flips contrary to zone direction', () => {
+  test('7. Should stick to entry position and NOT expire zone when no large candle displacement is detected', () => {
     const testZoneBuy: MarkedZone = {
-      id: 'test_zone_trend_flip',
+      id: 'test_zone_stick_entry',
       type: 'BULLISH_ORDER_BLOCK',
       direction: 'BUY',
       high: 1.3517,
@@ -254,12 +254,14 @@ export function runZoneEngineTestSuite(): { passed: boolean; results: { name: st
       reasoning: 'Test Bullish OB'
     };
 
+    // Normal small candles / consolidation / minor pullback
     const normalCandle: Candle = { timestamp: '2026-01-01T04:00:00Z', open: 1.3525, high: 1.3530, low: 1.3520, close: 1.3525 };
     const bearishStructure = { trend: 'BEARISH' } as any;
     const evalResult = evaluateZoneState(testZoneBuy, normalCandle, 1.3525, 0.0010, undefined, bearishStructure);
 
-    assert(evalResult.status === 'EXPIRED', 'Status must be EXPIRED when trend flips to BEARISH');
-    assert(evalResult.isInvalidated === true, 'isInvalidated must be true to clear zone and search for new setup');
+    assert(evalResult.status === 'WAITING_FOR_TAP', 'Status must stay WAITING_FOR_TAP (sticking with entry position)');
+    assert(evalResult.isInvalidated === false, 'isInvalidated must be false when no large displacement candle is detected');
+    assert(!evalResult.isTapped, 'isTapped must be false');
   });
 
   // =========================================================================
@@ -310,6 +312,62 @@ export function runZoneEngineTestSuite(): { passed: boolean; results: { name: st
     const evalRetrace = evaluateZoneState(bearishOB, candleRetracingIntoZone, 1.16250);
     assert(evalRetrace.isTapped, 'When candle high reaches 1.16275 into zone [1.16264 - 1.16287], it MUST be tapped');
     assert(evalRetrace.updatedZone.tapCount === 1, 'Tap count should increment to 1');
+  });
+
+  // =========================================================================
+  // Test 9: Strict Discipline Test - Stick with Entry Position Across Multiple Candles
+  // until Large Candle Displacement Occurs
+  // =========================================================================
+  test('9. Should strictly hold entry position across small candles and only rule invalid upon Large Candle Displacement', () => {
+    const baseTime = Date.now();
+    const plannedDemandZone: MarkedZone = {
+      id: 'watcher_planned_entry_demand',
+      type: 'BULLISH_ORDER_BLOCK',
+      direction: 'BUY',
+      high: 1.1020,
+      low: 1.1000,
+      invalidationLevel: 1.0970,
+      strength: 95,
+      createdAt: new Date(baseTime - 120 * 60000).toISOString(),
+      createdCandleTime: new Date(baseTime - 120 * 60000).toISOString(),
+      displacementCandleTime: new Date(baseTime - 105 * 60000).toISOString(),
+      displacementIndex: 1,
+      tapCount: 0,
+      status: 'WAITING_FOR_TAP',
+      reasoning: 'H1 Bullish Order Block planned entry [1.1000 - 1.1020].'
+    };
+
+    const atr = 0.0010;
+
+    // Series of 5 small/chop candles hovering between 1.1030 and 1.1060 (no tap, no invalidation, no large displacement)
+    const smallCandles: Candle[] = [
+      { timestamp: new Date(baseTime - 90 * 60000).toISOString(), open: 1.1040, high: 1.1048, low: 1.1035, close: 1.1042 },
+      { timestamp: new Date(baseTime - 75 * 60000).toISOString(), open: 1.1042, high: 1.1052, low: 1.1038, close: 1.1049 },
+      { timestamp: new Date(baseTime - 60 * 60000).toISOString(), open: 1.1049, high: 1.1055, low: 1.1040, close: 1.1045 },
+      { timestamp: new Date(baseTime - 45 * 60000).toISOString(), open: 1.1045, high: 1.1058, low: 1.1042, close: 1.1050 },
+      { timestamp: new Date(baseTime - 30 * 60000).toISOString(), open: 1.1050, high: 1.1060, low: 1.1045, close: 1.1055 }
+    ];
+
+    // Evaluate across these small candles: Must NOT change or leave entry position
+    const evalSticking = evaluateZoneState(plannedDemandZone, smallCandles[smallCandles.length - 1], 1.1055, atr, smallCandles);
+    assert(evalSticking.status === 'WAITING_FOR_TAP', 'Status MUST stay WAITING_FOR_TAP across small candles');
+    assert(evalSticking.isInvalidated === false, 'isInvalidated MUST be false (do not leave entry position)');
+    assert(!evalSticking.isTapped, 'isTapped must be false');
+
+    // Now, a Large Bullish Displacement Candle occurs (range 0.0028 >= 1.6*ATR, strong body 0.0022, closing at 1.1078 > zone.high + 3.5*ATR)
+    const largeDisplacementCandle: Candle = {
+      timestamp: new Date(baseTime - 15 * 60000).toISOString(),
+      open: 1.1055,
+      high: 1.1080,
+      low: 1.1052,
+      close: 1.1078
+    };
+    const candlesWithDisplacement = [...smallCandles, largeDisplacementCandle];
+
+    // Evaluate with large displacement candle: Now it can rule price is not coming back
+    const evalWithDisplacement = evaluateZoneState(plannedDemandZone, largeDisplacementCandle, 1.1078, atr, candlesWithDisplacement);
+    assert(evalWithDisplacement.status === 'EXPIRED', 'Status should transition to EXPIRED only after Large Candle Displacement');
+    assert(evalWithDisplacement.isInvalidated === true, 'isInvalidated must be true once large displacement departs');
   });
 
   const allPassed = results.every(r => r.success);

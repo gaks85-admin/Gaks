@@ -667,12 +667,91 @@ export function evaluateZoneRejection(
 }
 
 /**
+ * Detects if a large candle displacement has occurred departing from or contrary to the marked zone.
+ * 
+ * Strict SMC Rule:
+ * If price has not tapped the zone and has not violated the invalidation level,
+ * the system MUST stick with the entry position and marked zone UNLESS a large institutional
+ * displacement candle is detected that indicates price is not coming to the zone.
+ * 
+ * A candle qualifies as a Large Candle Displacement if:
+ * 1. It is a closed candle (either in candles history or latestCandle).
+ * 2. Range expansion: range >= 1.6 * effectiveAtr.
+ * 3. Dominant momentum body: body / range >= 0.55 (strong directional expansion).
+ * 4. Directional departure:
+ *    - For BUY zone: Bullish displacement candle expanding far above zone (> 3.5 * ATR away) without retrace.
+ *    - For SELL zone: Bearish displacement candle expanding far below zone (> 3.5 * ATR away) without retrace.
+ */
+export function detectLargeDisplacementAway(
+  zone: MarkedZone,
+  candles?: Candle[],
+  latestCandle?: Candle,
+  effectiveAtr: number = 0.0005,
+  currentPrice?: number
+): { hasDisplaced: boolean; reason?: string } {
+  const candidateCandles: Candle[] = [];
+  if (candles && candles.length > 0) {
+    candidateCandles.push(...candles);
+  } else if (latestCandle) {
+    candidateCandles.push(latestCandle);
+  }
+
+  if (candidateCandles.length === 0) {
+    return { hasDisplaced: false };
+  }
+
+  const originTime = zone.displacementCandleTime || zone.createdCandleTime;
+  const originTimestamp = originTime ? new Date(originTime).getTime() : 0;
+
+  // Filter post-creation candles (if timestamps are available)
+  const postCandles = candidateCandles.filter(c => {
+    if (!c.timestamp || isNaN(originTimestamp) || originTimestamp === 0) return true;
+    const cTime = new Date(c.timestamp).getTime();
+    return !isNaN(cTime) && cTime > originTimestamp;
+  });
+
+  const checkList = postCandles.length > 0 ? postCandles : (latestCandle ? [latestCandle] : candidateCandles.slice(-3));
+
+  for (let i = checkList.length - 1; i >= 0; i--) {
+    const c = checkList[i];
+    const range = c.high - c.low;
+    const body = Math.abs(c.close - c.open);
+
+    const isLargeCandle = range >= effectiveAtr * 1.6;
+    const isStrongBody = range > 0 && (body / range) >= 0.55;
+
+    if (isLargeCandle && isStrongBody) {
+      if (zone.direction === 'BUY') {
+        const isBullish = c.close > c.open;
+        const departedFar = c.close > zone.high + (effectiveAtr * 3.5);
+        if (isBullish && departedFar) {
+          return {
+            hasDisplaced: true,
+            reason: `Large Bullish Displacement Candle detected (${range.toFixed(5)} range >= ${(effectiveAtr * 1.6).toFixed(5)}, body ${(body / range * 100).toFixed(0)}%) closing at ${c.close.toFixed(5)} (>3.5 ATR above Demand Zone [${zone.low} - ${zone.high}]). Institutional displacement departed away without retrace.`
+          };
+        }
+      } else if (zone.direction === 'SELL') {
+        const isBearish = c.close < c.open;
+        const departedFar = c.close < zone.low - (effectiveAtr * 3.5);
+        if (isBearish && departedFar) {
+          return {
+            hasDisplaced: true,
+            reason: `Large Bearish Displacement Candle detected (${range.toFixed(5)} range >= ${(effectiveAtr * 1.6).toFixed(5)}, body ${(body / range * 100).toFixed(0)}%) closing at ${c.close.toFixed(5)} (>3.5 ATR below Supply Zone [${zone.low} - ${zone.high}]). Institutional displacement departed away without retrace.`
+          };
+        }
+      }
+    }
+  }
+
+  return { hasDisplaced: false };
+}
+
+/**
  * Evaluates the current state of an existing marked zone:
  * 1. Checks for structural invalidation (e.g. candle close through zone & invalidation level)
  * 2. Checks for price tap/entry and rejection
- * 3. Checks for runaway price expansion (price left without tapping, target leg completed)
- * 4. Checks for zone expiration/staleness (too many candles elapsed without tap)
- * 5. Checks for market structure / trend reversal against the zone
+ * 3. Requires Large Candle Displacement before ruling price is not coming to marked zone
+ * 4. Sticking to the entry position: NEVER leaves marked zone unless invalidation breached or large displacement detected
  */
 export function evaluateZoneState(
   zone: MarkedZone,
@@ -689,36 +768,32 @@ export function evaluateZoneState(
   // 1. STRUCTURAL INVALIDATION CHECK (Direct penetration through invalidation level)
   // =========================================================================
   if (zone.direction === 'BUY') {
-    // For a BUY (Demand) zone:
-    // If price or close is below invalidation OR below the zone's low while attempting to approach from underneath:
+    // For a BUY (Demand) zone: candle close or live price below invalidation level
     if (
       latestCandle.close < zone.invalidationLevel || 
-      currentPrice < zone.invalidationLevel ||
-      currentPrice < zone.low - effectiveAtr * 0.5
+      currentPrice < zone.invalidationLevel
     ) {
       updatedZone.status = 'INVALIDATED';
       return {
         status: 'INVALIDATED',
         isTapped: false,
         isInvalidated: true,
-        reason: `Zone invalidated: Price (${currentPrice.toFixed(5)}) or Candle Close (${latestCandle.close.toFixed(5)}) broke below BUY invalidation / low level (${zone.invalidationLevel.toFixed(5)}).`,
+        reason: `Zone invalidated: Price (${currentPrice.toFixed(5)}) or Candle Close (${latestCandle.close.toFixed(5)}) broke below BUY invalidation level (${zone.invalidationLevel.toFixed(5)}).`,
         updatedZone
       };
     }
   } else if (zone.direction === 'SELL') {
-    // For a SELL (Supply) zone:
-    // If price or close is above invalidation OR above the zone's high while attempting to approach from above:
+    // For a SELL (Supply) zone: candle close or live price above invalidation level
     if (
       latestCandle.close > zone.invalidationLevel || 
-      currentPrice > zone.invalidationLevel ||
-      currentPrice > zone.high + effectiveAtr * 0.5
+      currentPrice > zone.invalidationLevel
     ) {
       updatedZone.status = 'INVALIDATED';
       return {
         status: 'INVALIDATED',
         isTapped: false,
         isInvalidated: true,
-        reason: `Zone invalidated: Price (${currentPrice.toFixed(5)}) or Candle Close (${latestCandle.close.toFixed(5)}) broke above SELL invalidation / high level (${zone.invalidationLevel.toFixed(5)}).`,
+        reason: `Zone invalidated: Price (${currentPrice.toFixed(5)}) or Candle Close (${latestCandle.close.toFixed(5)}) broke above SELL invalidation level (${zone.invalidationLevel.toFixed(5)}).`,
         updatedZone
       };
     }
@@ -802,109 +877,62 @@ export function evaluateZoneState(
       };
     }
 
-    // If price left the zone without confirming a rejection bounce in the trade direction:
-    updatedZone.status = 'EXPIRED';
+    // Check if large displacement departed away contrary to or through the zone
+    const displacementCheck = detectLargeDisplacementAway(zone, candles, latestCandle, effectiveAtr, currentPrice);
+    if (displacementCheck.hasDisplaced) {
+      updatedZone.status = 'EXPIRED';
+      return {
+        status: 'EXPIRED',
+        isTapped: false,
+        isInvalidated: true,
+        isRejected: false,
+        reason: displacementCheck.reason || `Zone expired: Large displacement candle departed without confirming bounce.`,
+        updatedZone
+      };
+    }
+
+    // Otherwise, price is still testing / consolidating around the zone: STAY in ZONE_TAPPED!
+    updatedZone.status = 'ZONE_TAPPED';
     return {
-      status: 'EXPIRED',
-      isTapped: false,
-      isInvalidated: true,
+      status: 'ZONE_TAPPED',
+      isTapped: true,
+      isInvalidated: false,
       isRejected: false,
-      reason: `Zone already mitigated: Marked zone [${zone.low} - ${zone.high}] was tapped (tapCount: ${zone.tapCount || 1}) and price (${currentPrice.toFixed(5)}) has departed without valid rejection confirmation. Zone cleared for fresh structure.`,
+      reason: `Zone tapped: Price (${currentPrice.toFixed(5)}) is testing marked zone [${zone.low} - ${zone.high}]. Holding entry position awaiting rejection confirmation.`,
       updatedZone
     };
   }
 
   // =========================================================================
-  // 3. RUNAWAY PRICE EXPANSION (Price moved too far in target direction without tapping)
-  // When price moves far away without retracing, the impulse move is already complete.
-  // Waiting indefinitely is invalid because any eventual return is a reversal or dump, not a fresh retest.
+  // 3. LARGE CANDLE DISPLACEMENT CHECK BEFORE RULING PRICE IS NOT COMING
   // =========================================================================
-
-  if (zone.direction === 'BUY') {
-    const riskDistance = Math.max(zone.high - zone.invalidationLevel, effectiveAtr);
-    const maxRunawayThreshold = zone.high + Math.max(riskDistance * 4.5, effectiveAtr * 5.0);
-
-    if (latestCandle.close > maxRunawayThreshold || currentPrice > maxRunawayThreshold) {
-      updatedZone.status = 'EXPIRED';
-      return {
-        status: 'EXPIRED',
-        isTapped: false,
-        isInvalidated: true, // Clears zone to allow scanning for fresh setup
-        reason: `Zone expired (Runaway): Price expanded to ${currentPrice.toFixed(5)} (>4.5R away) without retracing to Demand Zone [${zone.low} - ${zone.high}]. Leg completed; seeking fresh setup.`,
-        updatedZone
-      };
-    }
-  } else if (zone.direction === 'SELL') {
-    const riskDistance = Math.max(zone.invalidationLevel - zone.low, effectiveAtr);
-    const maxRunawayThreshold = zone.low - Math.max(riskDistance * 4.5, effectiveAtr * 5.0);
-
-    if (latestCandle.close < maxRunawayThreshold || currentPrice < maxRunawayThreshold) {
-      updatedZone.status = 'EXPIRED';
-      return {
-        status: 'EXPIRED',
-        isTapped: false,
-        isInvalidated: true, // Clears zone to allow scanning for fresh setup
-        reason: `Zone expired (Runaway): Price expanded downward to ${currentPrice.toFixed(5)} (>4.5R away) without retracing to Supply Zone [${zone.low} - ${zone.high}]. Leg completed; seeking fresh setup.`,
-        updatedZone
-      };
-    }
+  // Strict Rule:
+  // If price has not tapped the zone and has not violated invalidation,
+  // the system MUST NOT leave the entry position UNLESS a Large Candle Displacement
+  // has been detected moving away in target direction without retracing.
+  const displacementCheck = detectLargeDisplacementAway(zone, candles, latestCandle, effectiveAtr, currentPrice);
+  if (displacementCheck.hasDisplaced) {
+    updatedZone.status = 'EXPIRED';
+    return {
+      status: 'EXPIRED',
+      isTapped: false,
+      isInvalidated: true, // Clears zone because large displacement proved market departed
+      reason: displacementCheck.reason || `Zone expired: Large candle displacement detected departing without retrace.`,
+      updatedZone
+    };
   }
 
   // =========================================================================
-  // 4. TREND REVERSAL / STRUCTURAL CONFLICT
-  // If market structure shifts opposite to the marked zone direction, the setup is obsolete.
+  // 4. STICK TO ENTRY POSITION: NO LARGE DISPLACEMENT HAS BEEN DETECTED
   // =========================================================================
-  if (marketStructure?.trend) {
-    if (zone.direction === 'BUY' && marketStructure.trend === 'BEARISH') {
-      updatedZone.status = 'EXPIRED';
-      return {
-        status: 'EXPIRED',
-        isTapped: false,
-        isInvalidated: true,
-        reason: `Zone expired: Market trend flipped to BEARISH while waiting for Bullish Zone [${zone.low} - ${zone.high}]. Seeking fresh bearish setup.`,
-        updatedZone
-      };
-    }
-    if (zone.direction === 'SELL' && marketStructure.trend === 'BULLISH') {
-      updatedZone.status = 'EXPIRED';
-      return {
-        status: 'EXPIRED',
-        isTapped: false,
-        isInvalidated: true,
-        reason: `Zone expired: Market trend flipped to BULLISH while waiting for Bearish Zone [${zone.low} - ${zone.high}]. Seeking fresh bullish setup.`,
-        updatedZone
-      };
-    }
-  }
-
-  // =========================================================================
-  // 5. ZONE STALENESS / CANDLE TIMEOUT
-  // If a zone has remained untapped for > 30 candles or > 3 hours, clear it to discover fresh levels.
-  // =========================================================================
-  if (zone.createdAt) {
-    const ageMs = Date.now() - new Date(zone.createdAt).getTime();
-    const maxAgeMs = 3 * 60 * 60 * 1000; // 3 hours
-    if (ageMs > maxAgeMs) {
-      updatedZone.status = 'EXPIRED';
-      return {
-        status: 'EXPIRED',
-        isTapped: false,
-        isInvalidated: true,
-        reason: `Zone expired (Stale): Marked zone [${zone.low} - ${zone.high}] remained untapped for over 3 hours. Clearing to locate updated institutional structure.`,
-        updatedZone
-      };
-    }
-  }
-
-  // =========================================================================
-  // 6. WAITING STATE (Price is still traveling towards the zone)
-  // =========================================================================
+  // No large candle displacement has occurred. Price is oscillating or traveling.
+  // The system sticks with the entry position and marked zone.
   updatedZone.status = 'WAITING_FOR_TAP';
   return {
     status: 'WAITING_FOR_TAP',
     isTapped: false,
     isInvalidated: false,
-    reason: `Waiting for tap: Price (${currentPrice.toFixed(5)}) is outside zone [${zone.low} - ${zone.high}] (${zone.direction} setup).`,
+    reason: `Sticking with entry position: Price (${currentPrice.toFixed(5)}) has not tapped marked zone [${zone.low} - ${zone.high}]. No large candle displacement detected; maintaining entry position.`,
     updatedZone
   };
 }
