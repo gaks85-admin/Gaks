@@ -1,4 +1,5 @@
 import { Candle } from "./strategy-engine.js";
+import { getMarketSchedule } from "./market-hours.js";
 
 export interface MarketDataRequest {
   symbol: string;
@@ -515,6 +516,16 @@ export class MarketDataGateway {
     const canonical = toCanonicalSymbol(symbol);
     const display = toDisplaySymbol(symbol);
 
+    // Weekend Market Hours Check: If market is closed on weekends, avoid remote API requests
+    const schedule = getMarketSchedule(canonical);
+    if (!schedule.isOpen && schedule.closesOnWeekends) {
+      const cached = this.priceCache.get(canonical);
+      if (cached) {
+        return cached.price;
+      }
+      return null;
+    }
+
     // 1. Check price cache
     const cached = this.priceCache.get(canonical);
     if (cached && (Date.now() - cached.timestamp < MARKET_DATA_PROVIDER_LIMITS.priceTtlMs)) {
@@ -620,6 +631,33 @@ export class MarketDataGateway {
         cacheAgeMs,
         creditsUsed: this.healthState.creditsUsed,
         creditsRemaining: this.healthState.creditsRemaining
+      };
+    }
+
+    // Weekend Market Hours Check: Exclude pairs whose market is closed on weekends (Forex, Metals, Indices)
+    // Crypto pairs (BTC, ETH, SOL) trade 24/7/365 and are never closed.
+    const schedule = getMarketSchedule(canonical);
+    if (!schedule.isOpen && schedule.closesOnWeekends) {
+      if (cached && cached.result && cached.result.candles && cached.result.candles.length >= 2) {
+        this.healthState.cacheHits++;
+        this.healthState.requestsSaved++;
+        console.log(`[WEEKEND MARKET DATA] ${canonical} closed for weekend (${schedule.reason}). Serving Friday close candles from cache.`);
+        return {
+          ...cached.result,
+          fromCache: true,
+          cacheAgeMs: now - cached.cachedAt,
+          reason: 'MARKET_CLOSED_WEEKEND_CACHED',
+          creditsUsed: this.healthState.creditsUsed,
+          creditsRemaining: this.healthState.creditsRemaining
+        };
+      }
+
+      console.log(`[WEEKEND CANDLE DOWNLOAD EXCLUDED] ${canonical} skipped: Market closed for weekend (${schedule.reasonWat}). Reopens ${schedule.nextOpenWatFormatted || 'Sunday 10:00 PM WAT'} (${schedule.nextOpenTimeFormatted || 'Sunday 5:00 PM ET'}). Zero API credits burned.`);
+      return {
+        isValid: false,
+        candles: [],
+        reason: `MARKET_CLOSED_WEEKEND: ${schedule.reasonWat}. Reopens ${schedule.nextOpenWatFormatted || 'Sunday 10:00 PM WAT'}`,
+        errorType: 'UNAVAILABLE'
       };
     }
 

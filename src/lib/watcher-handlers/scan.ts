@@ -525,8 +525,11 @@ export default async function handler(req: any, res: any) {
     const candleData = tsResult.candles || [];
 
     if (!tsResult.isValid || candleData.length < 2) {
+      const isWeekendClosed = Boolean(tsResult.reason?.includes('MARKET_CLOSED_WEEKEND'));
       const isQuota = tsResult.errorType === 'QUOTA_EXHAUSTED' || tsResult.reason === 'MARKET_DATA_PROVIDER_QUOTA_EXHAUSTED' || tsResult.reason?.includes('429');
-      const failReason = isQuota ? 'MARKET_DATA_PROVIDER_QUOTA_EXHAUSTED' : (tsResult.reason || 'Insufficient market candle data.');
+      const failReason = isWeekendClosed
+        ? `Market is closed for the weekend (${tsResult.reason}). Candle downloading is paused until markets reopen. Crypto pairs (BTCUSD, ETHUSD, SOLUSD) trade 24/7.`
+        : (isQuota ? 'MARKET_DATA_PROVIDER_QUOTA_EXHAUSTED' : (tsResult.reason || 'Insufficient market candle data.'));
       
       console.warn(`[MANUAL SCAN MARKET DATA] Watcher ${watcher.id} (${symbol}): ${failReason}`);
       return res.json({
@@ -537,7 +540,8 @@ export default async function handler(req: any, res: any) {
           signal: 'NO_TRADE',
           confidence: 0,
           reasoning: [`Market Data Check: ${failReason}`],
-          reasonCode: isQuota ? 'MARKET_DATA_PROVIDER_QUOTA_EXHAUSTED' : 'MARKET_DATA_UNAVAILABLE',
+          reasonCode: isWeekendClosed ? 'MARKET_CLOSED_WEEKEND' : (isQuota ? 'MARKET_DATA_PROVIDER_QUOTA_EXHAUSTED' : 'MARKET_DATA_UNAVAILABLE'),
+          marketClosedWeekend: isWeekendClosed,
           marketDataUnavailable: true,
           creditsUsed: tsResult.creditsUsed ?? null,
           creditsRemaining: tsResult.creditsRemaining ?? null

@@ -4,6 +4,7 @@ import { generateStrategySummary } from '../strategy-summarizer.js';
 import { resolveUserGeminiKey } from '../gemini-key-resolver.js';
 import { timeframeToMinutes } from '../timeframe.js';
 import { defaultMarketDataService } from '../market-data-service.js';
+import { getMarketSchedule } from '../market-hours.js';
 
 /**
  * Self-contained Supabase client initialization.
@@ -652,19 +653,37 @@ export default async function handler(req: any, res: any) {
 
     console.log(`[Watcher Start] AI Market Watcher activated successfully for user ${userId}.`);
 
+    const marketSchedule = getMarketSchedule(selectedPair);
+    let marketNoticeTelegram = '';
+    let activationMessage = "AI Market Watcher activated successfully.";
+
+    if (!marketSchedule.isOpen && marketSchedule.closesOnWeekends) {
+      marketNoticeTelegram = `\n\n*Market Notice (Nigeria Time / WAT):*\n⚠️ ${selectedPair} is currently closed for the weekend (${marketSchedule.reasonWat}). Reopens *${marketSchedule.nextOpenWatFormatted || 'Sunday 10:00 PM WAT'}*. Watcher is active and candle downloads will automatically begin once markets reopen.`;
+      activationMessage = `AI Market Watcher activated! Note: ${selectedPair} is closed for the weekend and reopens ${marketSchedule.nextOpenWatFormatted || 'Sunday 10:00 PM WAT'} (Nigeria Time).`;
+    } else if (!marketSchedule.closesOnWeekends) {
+      marketNoticeTelegram = `\n\n*Market Status:*\n⚡ ${selectedPair} trades 24/7 in Nigeria (WAT). Real-time monitoring and candle scanning are running.`;
+    }
+
     const telegramSuccess = await sendTelegramMessage(telegramChatId, `✅ *Gaks AI Market Watcher Activated*\n\n` +
       `*Status:* Active 🟢\n` +
       `*Pairs Monitored:* ${pairsMonitored}\n` +
       `*Strategy:* ${strategyDetails.name} (${strategyDetails.isDefault ? 'Default' : 'Custom'})\n` +
       `*Account Size:* $${accountSize || 'Not set'}\n` +
       `*Risk:* ${riskPercentage ? riskPercentage + '%' : 'Not set'}\n` +
-      `*Scan Interval:* Every ${computedInterval} minutes\n\n` +
+      `*Scan Interval:* Every ${computedInterval} minutes` +
+      marketNoticeTelegram + `\n\n` +
       `I will now monitor the markets and alert you of any high-probability setups matching your strategy.`
     );
 
     return res.json({
       success: true,
-      message: "AI Market Watcher activated successfully.",
+      message: activationMessage,
+      market_status: {
+        is_open: marketSchedule.isOpen,
+        closes_on_weekends: marketSchedule.closesOnWeekends,
+        next_open_wat: marketSchedule.nextOpenWatFormatted,
+        closure_schedule_wat: marketSchedule.closureScheduleWat
+      },
       telegram_delivered: telegramSuccess
     });
 

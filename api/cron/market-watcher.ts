@@ -47,6 +47,7 @@ import { evaluateClosedLoopCalibration } from '../../src/lib/closed-loop-calibra
 import { resolveAuthoritativeDecision, DecisionGateResult } from '../../src/lib/decision-attribution.js';
 import { processWithConcurrency } from '../../src/lib/concurrency.js';
 import { identifyMarkedZone, evaluateZoneState, isPriceInOrTappingZone, MarkedZone, ZoneEvaluationResult, evaluateZoneRejection } from '../../src/lib/zone-engine.js';
+import { getMarketSchedule } from '../../src/lib/market-hours.js';
 
 // In-memory runtime cache for marked zones to guarantee persistence across cron scans
 // even if the Supabase watchers table is temporarily missing the zone columns.
@@ -517,6 +518,7 @@ export default async function handler(req: any, res: any) {
     // Metrics trackers
     let watchersProcessedCount = 0;
     let watchersSkippedCount = 0;
+    let watchersSkippedWeekendCount = 0;
     let signalsGeneratedCount = 0;
     let telegramMessagesSentCount = 0;
     let ruleEnginePassedCount = 0;
@@ -904,6 +906,36 @@ export default async function handler(req: any, res: any) {
       if (!selectedPair || selectedPair === 'unknown') {
         logWatcherEvent('SIGNAL SKIPPED', logCtx, 'No selected pair');
         skipped.push({ userId, reason: "No selected pair" });
+        watchersSkippedCount++;
+        return;
+      }
+
+      // =====================================================================
+      // WEEKEND MARKET HOURS CHECK
+      // Exclude pairs whose market closes on weekends (Forex, Metals, Indices)
+      // to avoid downloading stale candles, consuming API credits, and running Gemini.
+      // Continuous markets (Crypto: BTCUSD, ETHUSD, SOLUSD, etc.) run 24/7/365.
+      // =====================================================================
+      const marketSchedule = getMarketSchedule(selectedPair, now);
+      if (!marketSchedule.isOpen && marketSchedule.closesOnWeekends) {
+        logWatcherEvent('WEEKEND SKIP', logCtx, {
+          'Pair': selectedPair,
+          'Asset Class': marketSchedule.assetClass,
+          'Market Status': 'WEEKEND_CLOSED',
+          'Reason': marketSchedule.reason,
+          'Reason WAT': marketSchedule.reasonWat,
+          'Next Open (WAT / Nigeria)': marketSchedule.nextOpenWatFormatted || 'Sunday 10:00 PM WAT',
+          'Next Open (NY)': marketSchedule.nextOpenTimeFormatted || 'Sunday 5:00 PM ET',
+          'Current WAT Time': marketSchedule.currentWatTime.formatted,
+          'Current NY Time': marketSchedule.currentNyTime.formatted,
+          'Action': 'Candle download excluded on weekends'
+        });
+        console.log(`[WEEKEND MARKET EXCLUDED] Watcher ${watcher.id} (${selectedPair}): Market closed for weekend. Next open: ${marketSchedule.nextOpenWatFormatted || 'Sunday 10:00 PM WAT'} (${marketSchedule.nextOpenTimeFormatted || 'Sunday 5:00 PM ET'}). Candle downloads paused.`);
+        skipped.push({
+          userId,
+          reason: `Market closed for weekend (${selectedPair} ${marketSchedule.assetClass} - ${marketSchedule.reasonWat}). Next open: ${marketSchedule.nextOpenWatFormatted || 'Sunday 10:00 PM WAT'}`
+        });
+        watchersSkippedWeekendCount++;
         watchersSkippedCount++;
         return;
       }
@@ -3820,6 +3852,7 @@ Source: ${brokerQuote.source}`);
       watchersDiscovered: watchersDiscoveredCount,
       watchersProcessed: watchersProcessedCount,
       watchersSkipped: watchersSkippedCount,
+      watchersSkippedWeekend: watchersSkippedWeekendCount,
       geminiCallsExecuted: geminiCallsExecutedCount,
       geminiTimeouts: geminiTimeoutsCount,
       gemini503Errors: geminiCalls503Count,
@@ -3836,6 +3869,7 @@ Source: ${brokerQuote.source}`);
         watchersEligible: watchersEligibleCount,
         watchersProcessed: watchersProcessedCount,
         watchersSkipped: watchersSkippedCount,
+        watchersSkippedWeekend: watchersSkippedWeekendCount,
         watchersSkippedByDeadline: watchersSkippedByDeadlineCount,
         watchersSkippedByGeminiTimeout: watchersSkippedByGeminiTimeoutCount,
         watchersSkippedByGemini429: watchersSkippedByGemini429Count,

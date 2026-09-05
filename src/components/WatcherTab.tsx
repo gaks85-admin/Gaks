@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { WatchlistItem } from '../types';
 import { normalizeSymbol } from '../../lib/market-utils';
+import { getMarketStatusBadge } from '../lib/market-hours';
 
 export interface ActiveTradeData {
   watcherId?: string;
@@ -623,10 +624,16 @@ export const WatcherTab: React.FC<WatcherTabProps> = ({
 
       {/* Quick Add Pills */}
       <div className="space-y-2.5">
-        <span className="text-[11px] font-bold text-zinc-500 uppercase tracking-wider">Select Symbol to Configure:</span>
+        <div className="flex items-center justify-between">
+          <span className="text-[11px] font-bold text-zinc-500 uppercase tracking-wider">Select Symbol to Configure:</span>
+          <span className="text-[10px] text-zinc-400 font-medium">
+            Nigeria Time (WAT / GMT+1) • Crypto 24/7 • Forex/Metals pause Fri 10 PM – Sun 10 PM WAT
+          </span>
+        </div>
         <div className="flex flex-wrap gap-2">
           {['EURUSD', 'GBPUSD', 'XAUUSD', 'BTCUSD', 'NAS100', 'US30'].map(symbol => {
             const isSelected = normalizeSymbol(watcherSearch) === normalizeSymbol(symbol);
+            const badge = getMarketStatusBadge(symbol);
             return (
               <button
                 key={symbol}
@@ -639,9 +646,23 @@ export const WatcherTab: React.FC<WatcherTabProps> = ({
                     ? 'border-zinc-950 dark:border-white bg-zinc-950 dark:bg-white text-white dark:text-black shadow-md'
                     : 'border-zinc-200 dark:border-zinc-900 bg-white dark:bg-zinc-950/40 text-zinc-500 dark:text-zinc-300 hover:text-zinc-950 dark:hover:text-white hover:border-zinc-400 dark:hover:border-zinc-800'
                 }`}
+                title={`${symbol} (${badge.label}: ${badge.detail})`}
               >
                 {isSelected && <Check className="w-3.5 h-3.5" />}
-                {symbol}
+                <span className={`w-1.5 h-1.5 rounded-full ${
+                  badge.status === '24_7'
+                    ? 'bg-emerald-500'
+                    : badge.status === 'open'
+                    ? 'bg-blue-500'
+                    : 'bg-amber-400'
+                }`} />
+                <span>{symbol}</span>
+                {badge.status === '24_7' && (
+                  <span className="text-[9px] px-1 py-0.2 rounded bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 font-bold">24/7</span>
+                )}
+                {badge.status === 'closed' && (
+                  <span className="text-[9px] px-1 py-0.2 rounded bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-400 font-bold">Closed</span>
+                )}
               </button>
             );
           })}
@@ -672,6 +693,7 @@ export const WatcherTab: React.FC<WatcherTabProps> = ({
               const isBullish = pair.direction === 'Bullish';
               const isBearish = pair.direction === 'Bearish';
               const { lineD, fillD } = getSparklinePaths(pair.history, 100, 24);
+              const marketBadge = getMarketStatusBadge(pair.symbol);
               
               return (
                 <div
@@ -694,6 +716,18 @@ export const WatcherTab: React.FC<WatcherTabProps> = ({
                         <span className="px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wider bg-zinc-50 dark:bg-zinc-900 text-zinc-500 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-800/80 uppercase">
                           {pair.timeframe || 'H1'}
                         </span>
+                        <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wider uppercase border flex items-center gap-1 ${
+                          marketBadge.status === '24_7'
+                            ? 'bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800'
+                            : marketBadge.status === 'open'
+                            ? 'bg-blue-50 dark:bg-blue-950/50 text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-800'
+                            : 'bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800'
+                        }`} title={marketBadge.detail}>
+                          <span className={`w-1.5 h-1.5 rounded-full ${
+                            marketBadge.status === 'closed' ? 'bg-amber-500' : 'bg-emerald-500 animate-pulse'
+                          }`} />
+                          {marketBadge.label}
+                        </span>
                       </h3>
                       <p className="text-[10px] text-zinc-500 dark:text-zinc-400 font-medium">{pair.name}</p>
                     </div>
@@ -706,6 +740,32 @@ export const WatcherTab: React.FC<WatcherTabProps> = ({
                       <X className="w-4 h-4" />
                     </button>
                   </div>
+
+                  {/* Weekend status notice */}
+                  {marketBadge.status === 'closed' && (
+                    <div className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-amber-50/80 dark:bg-amber-950/30 border border-amber-200/60 dark:border-amber-900/40 text-[11px] text-amber-800 dark:text-amber-300 font-medium">
+                      <Clock className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+                      <span>
+                        <strong className="font-semibold text-amber-900 dark:text-amber-200">Weekend Market Close (Nigeria Time):</strong> Candle downloads paused. Reopens {marketBadge.nextOpenWatFormatted || 'Sunday 10:00 PM WAT'} (WAT / GMT+1).
+                      </span>
+                    </div>
+                  )}
+                  {marketBadge.status === 'open' && (
+                    <div className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-blue-50/80 dark:bg-blue-950/30 border border-blue-200/60 dark:border-blue-900/40 text-[11px] text-blue-800 dark:text-blue-300 font-medium">
+                      <Activity className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
+                      <span>
+                        <strong className="font-semibold text-blue-900 dark:text-blue-200">Market Open:</strong> Trading actively in Nigerian Time. {marketBadge.closureScheduleWat}.
+                      </span>
+                    </div>
+                  )}
+                  {marketBadge.status === '24_7' && (
+                    <div className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-emerald-50/80 dark:bg-emerald-950/30 border border-emerald-200/60 dark:border-emerald-900/40 text-[11px] text-emerald-800 dark:text-emerald-300 font-medium">
+                      <Activity className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                      <span>
+                        <strong className="font-semibold text-emerald-900 dark:text-emerald-200">24/7 Market Active:</strong> Real-time crypto candle updates and scanning active 24/7 in Nigerian Time (WAT).
+                      </span>
+                    </div>
+                  )}
 
                   {/* Bid/Ask Price display & tiny sparkline wave */}
                   <div className="flex justify-between items-end">
