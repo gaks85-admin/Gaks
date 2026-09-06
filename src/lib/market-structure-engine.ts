@@ -25,7 +25,7 @@ export interface MarketStructure {
   htfTrend?: 'BULLISH' | 'BEARISH' | 'SIDEWAYS';
   htfTimeframe?: string;
   htfReason?: string;
-  htfAllowedDirection?: 'BUY' | 'SELL' | 'BOTH';
+  htfAllowedDirection?: 'BUY' | 'SELL' | 'BOTH' | 'NONE';
   htfBiasAligned?: boolean;
   swingHighs: SwingLevel[];
   swingLows: SwingLevel[];

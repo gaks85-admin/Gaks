@@ -292,6 +292,21 @@ export const WatcherTab: React.FC<WatcherTabProps> = ({
         )}
       </div>
 
+      {/* Sideways / Unclear Trend Banner (Default to NO TRADE per user rule) */}
+      {isWatcherActive && watcherTradeStatus === 'SIDEWAYS_NO_TRADE' && (
+        <div className="p-4 rounded-3xl border border-amber-500/30 dark:border-amber-500/20 bg-amber-500/5 dark:bg-amber-950/20 flex items-start gap-3 shadow-xs animate-fade-in">
+          <ShieldAlert className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
+          <div className="space-y-1">
+            <span className="text-xs font-bold text-zinc-900 dark:text-white uppercase tracking-wider block">
+              Higher Timeframe Trend Sideways / Unclear — No Trade Mode Active
+            </span>
+            <p className="text-[11px] text-zinc-600 dark:text-zinc-400 leading-relaxed">
+              Market structure analysis indicates sideways consolidation or ambiguous momentum. Per your strategy rules, Gaks AI has defaulted to NO TRADE to protect capital. The engine will resume marking zones as soon as a decisive directional trend is established.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Marked Trading Zone Card (When waiting for tap or tapped) */}
       {isWatcherActive && watcherTradeStatus !== 'ACTIVE' && watcherZone && (
         <div className={`p-5 rounded-3xl border ${

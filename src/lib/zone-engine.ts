@@ -487,7 +487,12 @@ export function identifyMarkedZone(
 
   let filteredCandidates = candidateZones;
 
-  if (followHtfTrend && htfTrend && htfTrend !== 'SIDEWAYS') {
+  if (followHtfTrend) {
+    if (!htfTrend || htfTrend === 'SIDEWAYS' || marketStructure?.htfAllowedDirection === 'NONE') {
+      console.log(`[HTF TREND FILTER] ${pair}: ${htfTimeframe} Trend is SIDEWAYS / unclear (${marketStructure?.htfReason || 'consolidation'}). Defaulting to NO TRADE. No zones marked.`);
+      return null;
+    }
+
     if (htfTrend === 'BULLISH') {
       const buyCandidates = candidateZones.filter(z => z.direction === 'BUY');
       if (buyCandidates.length > 0) {
@@ -506,11 +511,15 @@ export function identifyMarkedZone(
       }
     }
   } else {
-    // If HTF trend is SIDEWAYS or unspecified, align with structural trend
-    if (effectiveTrend === 'BEARISH') {
+    // If followHtfTrend is explicitly false, fall back to current timeframe structural trend
+    if (trend === 'SIDEWAYS') {
+      console.log(`[TREND FILTER] ${pair}: Current timeframe trend is SIDEWAYS / unclear. Defaulting to NO TRADE.`);
+      return null;
+    }
+    if (trend === 'BEARISH') {
       const sellCandidates = candidateZones.filter(z => z.direction === 'SELL');
       if (sellCandidates.length > 0) filteredCandidates = sellCandidates;
-    } else if (effectiveTrend === 'BULLISH') {
+    } else if (trend === 'BULLISH') {
       const buyCandidates = candidateZones.filter(z => z.direction === 'BUY');
       if (buyCandidates.length > 0) filteredCandidates = buyCandidates;
     }
@@ -802,6 +811,43 @@ export function evaluateZoneState(
 ): ZoneEvaluationResult {
   const updatedZone: MarkedZone = { ...zone };
   const effectiveAtr = atr || 0.0005;
+
+  // =========================================================================
+  // 0. HIGHER TIMEFRAME TREND VALIDITY CHECK (User Rule: Sideways/Unclear = NO TRADE)
+  // =========================================================================
+  if (marketStructure?.htfTrend === 'SIDEWAYS' || marketStructure?.htfAllowedDirection === 'NONE') {
+    updatedZone.status = 'INVALIDATED';
+    return {
+      status: 'INVALIDATED',
+      isTapped: false,
+      isInvalidated: true,
+      reason: `Zone invalidated: Higher timeframe (${marketStructure?.htfTimeframe || 'H4'}) trend is SIDEWAYS / unclear. System strictly defaults to NO TRADE in consolidation.`,
+      updatedZone
+    };
+  }
+
+  if (marketStructure?.htfTrend) {
+    if (zone.direction === 'BUY' && marketStructure.htfTrend === 'BEARISH') {
+      updatedZone.status = 'INVALIDATED';
+      return {
+        status: 'INVALIDATED',
+        isTapped: false,
+        isInvalidated: true,
+        reason: `Zone invalidated: Higher timeframe (${marketStructure?.htfTimeframe || 'H4'}) trend is BEARISH contrary to BUY marked zone.`,
+        updatedZone
+      };
+    }
+    if (zone.direction === 'SELL' && marketStructure.htfTrend === 'BULLISH') {
+      updatedZone.status = 'INVALIDATED';
+      return {
+        status: 'INVALIDATED',
+        isTapped: false,
+        isInvalidated: true,
+        reason: `Zone invalidated: Higher timeframe (${marketStructure?.htfTimeframe || 'H4'}) trend is BULLISH contrary to SELL marked zone.`,
+        updatedZone
+      };
+    }
+  }
 
   // =========================================================================
   // 1. STRUCTURAL INVALIDATION CHECK (Direct penetration through invalidation level)

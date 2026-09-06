@@ -7,7 +7,7 @@ export type TrendDirection = 'BULLISH' | 'BEARISH' | 'SIDEWAYS';
 export interface HtfTrendResult {
   trend: TrendDirection;
   timeframe: 'H4' | 'D1';
-  allowedDirection: 'BUY' | 'SELL' | 'BOTH';
+  allowedDirection: 'BUY' | 'SELL' | 'NONE';
   reason: string;
   confidence: number;
   ema50?: number;
@@ -52,9 +52,9 @@ export function evaluateHtfCandles(
     return {
       trend: 'SIDEWAYS',
       timeframe,
-      allowedDirection: 'BOTH',
-      reason: 'Insufficient higher timeframe candle data to determine trend.',
-      confidence: 50,
+      allowedDirection: 'NONE',
+      reason: 'Insufficient higher timeframe candle data to determine clear trend. Defaulting to NO TRADE.',
+      confidence: 0,
       currentPrice: 0,
       source
     };
@@ -141,25 +141,29 @@ export function evaluateHtfCandles(
 
   // Final trend determination
   let trend: TrendDirection = 'SIDEWAYS';
-  let allowedDirection: 'BUY' | 'SELL' | 'BOTH' = 'BOTH';
-  let confidence = 60;
+  let allowedDirection: 'BUY' | 'SELL' | 'NONE' = 'NONE';
+  let confidence = 50;
 
-  if (bullishScore >= bearishScore + 1.5) {
+  // Strict trend threshold: require decisive directional bias and confidence
+  if (bullishScore >= bearishScore + 2.0 && bullishScore >= 4.0) {
     trend = 'BULLISH';
     allowedDirection = 'BUY';
     confidence = Math.min(95, Math.round(65 + bullishScore * 4));
-  } else if (bearishScore >= bullishScore + 1.5) {
+  } else if (bearishScore >= bullishScore + 2.0 && bearishScore >= 4.0) {
     trend = 'BEARISH';
     allowedDirection = 'SELL';
     confidence = Math.min(95, Math.round(65 + bearishScore * 4));
   } else {
+    // Trend is sideways, consolidating, or unclear: default to NO TRADE!
     trend = 'SIDEWAYS';
-    allowedDirection = 'BOTH';
-    confidence = 55;
+    allowedDirection = 'NONE';
+    confidence = 45;
   }
 
   const swingsSummary = `${highs.length} swing highs, ${lows.length} swing lows on ${timeframe}`;
-  const reason = `${timeframe} Trend is ${trend}: ${reasonNotes.join(', ') || 'Mixed structural signals'}.`;
+  const reason = trend === 'SIDEWAYS'
+    ? `${timeframe} Trend is SIDEWAYS / unclear (${reasonNotes.join(', ') || 'Mixed structural momentum / consolidation'}). Defaulting to NO TRADE.`
+    : `${timeframe} Trend is ${trend}: ${reasonNotes.join(', ') || 'Aligned institutional signals'}.`;
 
   return {
     trend,
