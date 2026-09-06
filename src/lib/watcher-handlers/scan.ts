@@ -672,6 +672,35 @@ export default async function handler(req: any, res: any) {
             reasoning: [`Marked ${discoveredZone.type} zone [${discoveredZone.low} - ${discoveredZone.high}]. Waiting for price tap before AI confirmation.`]
           }
         });
+      } else {
+        const rules = compiledStrategy?.compiled_rules;
+        const requiresZoneSetup = Boolean(
+          rules?.order_block ||
+          rules?.supply_demand ||
+          rules?.unmitigated_zone ||
+          rules?.fair_value_gap ||
+          rules?.support ||
+          rules?.resistance ||
+          rules?.support_rejection ||
+          rules?.resistance_rejection ||
+          rules?.liquidity_sweep
+        );
+
+        if (requiresZoneSetup) {
+          console.log(`[ZONE SEARCH] Watcher ID: ${watcher.id} (${symbol}): No distinct structural POI/Zone identified. Waiting for new structural formation.`);
+          return res.json({
+            success: true,
+            data: {
+              watcher_id: watcher.id,
+              pair: symbol,
+              signal: 'NO_TRADE',
+              confidence: 0,
+              status: 'ZONE_SEARCH',
+              zone: null,
+              reasoning: ['No distinct structural POI/Zone identified in current market structure. Waiting for new structural formation.']
+            }
+          });
+        }
       }
     }
 
@@ -680,6 +709,7 @@ export default async function handler(req: any, res: any) {
     const pipSize = (cleanSymUpper.includes('JPY') || cleanSymUpper.includes('XAU') || cleanSymUpper.includes('GOLD')) ? 0.01 : 0.0001;
 
     // 8. Weighted Decision Engine Execution (Pass 1 to get matched rules)
+    (marketStructure as any).watcherId = watcher.id;
     (marketStructure as any).pair = symbol;
     (marketStructure as any).timeframe = selectedTimeframe;
     (marketStructure as any).lastClosedCandleTimestamp = candleData[candleData.length - 2]?.timestamp || '';

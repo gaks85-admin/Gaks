@@ -1841,6 +1841,57 @@ Reason: ${activeValidation.reason}`);
           } else {
             console.log(`[ZONE SEARCH] Watcher ID: ${watcher.id} (${selectedPair}): No distinct structural POI/Zone identified in current market structure. Waiting for new structural formation.`);
             logWatcherEvent('ZONE SEARCH', logCtx, 'No high-quality structural POI/Zone identified in current candles.');
+
+            const rules = compiledStrategy?.compiled_rules;
+            const requiresZoneSetup = Boolean(
+              rules?.order_block ||
+              rules?.supply_demand ||
+              rules?.unmitigated_zone ||
+              rules?.fair_value_gap ||
+              rules?.support ||
+              rules?.resistance ||
+              rules?.support_rejection ||
+              rules?.resistance_rejection ||
+              rules?.liquidity_sweep
+            );
+
+            if (requiresZoneSetup) {
+              console.log(`[WAITING FOR SETUP] Watcher ID: ${watcher.id} (${selectedPair}): Strategy requires a structural zone/setup. Bypassing decision score trace and AI evaluation.`);
+              const scanDurationMs = Date.now() - scanStart;
+              await recordEvaluation(supabase, {
+                user_id: userId,
+                watcher_id: watcher.id,
+                pair: selectedPair,
+                timeframe: selectedTimeframe,
+                strategy_mode: compiledStrategy.strategy_mode,
+                decision_score: 0,
+                matched_weight: 0,
+                possible_weight: 0,
+                recommendation: 'FAIL',
+                mandatory_rules_passed: false,
+                matched_rules: [],
+                failed_rules: ['No distinct structural POI/Zone identified in current market structure'],
+                gemini_used: false,
+                trade_sent: false,
+                trade_reason: 'No distinct structural POI/Zone identified in current market structure. Waiting for new structural formation.',
+                scan_duration_ms: scanDurationMs,
+                decision_snapshot: null
+              });
+
+              await supabase
+                .from("watchers")
+                .update({
+                  last_scan_at: new Date().toISOString(),
+                  last_analyzed_closed_candle_time: latestClosedCandleTime,
+                  updated_at: new Date().toISOString()
+                })
+                .eq("id", watcher.id);
+
+              watchersProcessedCount++;
+              isWatcherSkipped = false;
+              results.push({ userId, symbol, tradeStatus: 'WAITING_FOR_SETUP', result: 'No structural POI/Zone identified. Waiting for new formation.' });
+              return;
+            }
           }
         }
 
@@ -1850,6 +1901,7 @@ Reason: ${activeValidation.reason}`);
 
         // Run Weighted Decision Engine (Pass 1 to get matched rules)
         cronTimer.startStage("Decision Engine Evaluation");
+        (marketStructure as any).watcherId = watcher.id;
         (marketStructure as any).pair = selectedPair;
         (marketStructure as any).timeframe = selectedTimeframe;
         (marketStructure as any).lastClosedCandleTimestamp = candleData[candleData.length - 2]?.timestamp || '';
