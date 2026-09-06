@@ -40,6 +40,9 @@ export interface MarkedZone {
   status: ZoneStatus;
   reasoning: string;
   candleIndex?: number;
+  htfTrend?: 'BULLISH' | 'BEARISH' | 'SIDEWAYS';
+  htfTimeframe?: string;
+  htfReason?: string;
 }
 
 export interface ZoneEvaluationResult {
@@ -472,25 +475,61 @@ export function identifyMarkedZone(
     return null;
   }
 
-  // Filter candidates aligned with trend and recent market momentum
-  const recentSlice = sortedCandles.slice(-15);
-  const recentDelta = recentSlice[recentSlice.length - 1].close - recentSlice[0].close;
-  const isMomentumBearish = recentDelta < -atr * 0.4 || trend === 'BEARISH';
-  const isMomentumBullish = recentDelta > atr * 0.4 || trend === 'BULLISH';
+  // =========================================================================
+  // 5. HIGHER TIMEFRAME (HTF) TREND ALIGNMENT (Default User Requirement)
+  // Always follow the trend of the higher timeframe (4hr / 1day) to mark out zones.
+  // Never flip-flop between Bearish and Bullish zones on micro 5-minute candle oscillations.
+  // =========================================================================
+  const followHtfTrend = compiledStrategy?.compiled_rules?.follow_htf_trend !== false;
+  const htfTrend = marketStructure?.htfTrend;
+  const htfTimeframe = marketStructure?.htfTimeframe || 'H4';
+  const effectiveTrend = (followHtfTrend && htfTrend) ? htfTrend : trend;
 
   let filteredCandidates = candidateZones;
-  if (isMomentumBearish && !isMomentumBullish) {
-    const sellCandidates = candidateZones.filter(z => z.direction === 'SELL');
-    if (sellCandidates.length > 0) filteredCandidates = sellCandidates;
-  } else if (isMomentumBullish && !isMomentumBearish) {
-    const buyCandidates = candidateZones.filter(z => z.direction === 'BUY');
-    if (buyCandidates.length > 0) filteredCandidates = buyCandidates;
+
+  if (followHtfTrend && htfTrend && htfTrend !== 'SIDEWAYS') {
+    if (htfTrend === 'BULLISH') {
+      const buyCandidates = candidateZones.filter(z => z.direction === 'BUY');
+      if (buyCandidates.length > 0) {
+        filteredCandidates = buyCandidates;
+      } else {
+        console.log(`[HTF TREND FILTER] ${pair}: ${htfTimeframe} Trend is BULLISH. Filtered out ${candidateZones.length} counter-trend SELL zones. Waiting for fresh BUY/Demand zone aligned with HTF trend.`);
+        return null;
+      }
+    } else if (htfTrend === 'BEARISH') {
+      const sellCandidates = candidateZones.filter(z => z.direction === 'SELL');
+      if (sellCandidates.length > 0) {
+        filteredCandidates = sellCandidates;
+      } else {
+        console.log(`[HTF TREND FILTER] ${pair}: ${htfTimeframe} Trend is BEARISH. Filtered out ${candidateZones.length} counter-trend BUY zones. Waiting for fresh SELL/Supply zone aligned with HTF trend.`);
+        return null;
+      }
+    }
+  } else {
+    // If HTF trend is SIDEWAYS or unspecified, align with structural trend
+    if (effectiveTrend === 'BEARISH') {
+      const sellCandidates = candidateZones.filter(z => z.direction === 'SELL');
+      if (sellCandidates.length > 0) filteredCandidates = sellCandidates;
+    } else if (effectiveTrend === 'BULLISH') {
+      const buyCandidates = candidateZones.filter(z => z.direction === 'BUY');
+      if (buyCandidates.length > 0) filteredCandidates = buyCandidates;
+    }
   }
 
   // Sort by highest strength and closest proximity
   filteredCandidates.sort((a, b) => b.strength - a.strength);
 
-  return filteredCandidates[0];
+  const selectedZone = filteredCandidates[0];
+  if (selectedZone) {
+    selectedZone.htfTrend = htfTrend || 'SIDEWAYS';
+    selectedZone.htfTimeframe = htfTimeframe;
+    selectedZone.htfReason = marketStructure?.htfReason;
+    if (htfTrend && htfTrend !== 'SIDEWAYS') {
+      selectedZone.reasoning = `[${htfTimeframe} ${htfTrend} Trend Aligned] ` + selectedZone.reasoning;
+    }
+  }
+
+  return selectedZone;
 }
 
 /**

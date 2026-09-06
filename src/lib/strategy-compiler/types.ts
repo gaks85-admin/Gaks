@@ -24,6 +24,8 @@ export interface CompiledRules {
   support_rejection?: boolean;
   resistance_rejection?: boolean;
   tap_and_rejection?: boolean;
+  follow_htf_trend?: boolean;
+  preferred_htf?: 'H4' | 'D1';
   ema?: {
     enabled: boolean;
     periods: number[];

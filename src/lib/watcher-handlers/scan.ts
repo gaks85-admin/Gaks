@@ -24,6 +24,7 @@ import { calculateHistoricalProbability, recordCompletedTrade } from "../learnin
 import { validateActiveTradeState } from "../trade-validator.js";
 import { buildActiveTradeTelemetry, evaluateActiveTradeExit } from "../active-trade-monitor.js";
 import { identifyMarkedZone, evaluateZoneState, isPriceInOrTappingZone, MarkedZone } from "../zone-engine.js";
+import { resolveHigherTimeframeTrend } from "../htf-trend-engine.js";
 
 
 /**
@@ -570,6 +571,23 @@ export default async function handler(req: any, res: any) {
 
     // 7. Extract Market Structure & Compile Strategy
     const marketStructure = extractMarketStructure(candleData);
+
+    // Enforce Higher Timeframe (HTF: 4H / 1D) Trend Alignment (User Default Requirement)
+    const htfPreference = compiledStrategy.compiled_rules?.preferred_htf || 'H4';
+    const htfTrendResult = await resolveHigherTimeframeTrend(
+      symbol,
+      candleData,
+      selectedTimeframe,
+      { preferredHtf: htfPreference }
+    );
+
+    marketStructure.htfTrend = htfTrendResult.trend;
+    marketStructure.htfTimeframe = htfTrendResult.timeframe;
+    marketStructure.htfReason = htfTrendResult.reason;
+    marketStructure.htfAllowedDirection = htfTrendResult.allowedDirection;
+    marketStructure.htfBiasAligned = true;
+
+    console.log(`[HTF TREND] Manual Scan - Watcher ID: ${watcher.id} (${symbol}): ${htfTrendResult.timeframe} Trend is ${htfTrendResult.trend} (${htfTrendResult.reason}). Enforcing trend-following zone markout.`);
     const strategyCompilationConfidenceRecord = normalizeConfidence(
       compiledStrategy.overall_confidence ?? compiledStrategy.confidence,
       'strategy_compilation',

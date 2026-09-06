@@ -47,6 +47,7 @@ import { evaluateClosedLoopCalibration } from '../../src/lib/closed-loop-calibra
 import { resolveAuthoritativeDecision, DecisionGateResult } from '../../src/lib/decision-attribution.js';
 import { processWithConcurrency } from '../../src/lib/concurrency.js';
 import { identifyMarkedZone, evaluateZoneState, isPriceInOrTappingZone, MarkedZone, ZoneEvaluationResult, evaluateZoneRejection } from '../../src/lib/zone-engine.js';
+import { resolveHigherTimeframeTrend } from '../../src/lib/htf-trend-engine.js';
 import { getMarketSchedule } from '../../src/lib/market-hours.js';
 
 // In-memory runtime cache for marked zones to guarantee persistence across cron scans
@@ -1614,6 +1615,29 @@ Reason: ${activeValidation.reason}`);
         const strategyCompilationConfidence = strategyCompilationConfidenceRecord.normalized;
 
         const marketStructure = extractMarketStructure(candleData, compiledStrategy.detector_validation?.supported_detectors);
+
+        // Enforce Higher Timeframe (HTF: 4H / 1D) Trend Alignment (User Default Requirement)
+        const htfPreference = compiledStrategy.compiled_rules?.preferred_htf || 'H4';
+        const htfTrendResult = await resolveHigherTimeframeTrend(
+          selectedPair,
+          candleData,
+          selectedTimeframe,
+          { preferredHtf: htfPreference }
+        );
+
+        marketStructure.htfTrend = htfTrendResult.trend;
+        marketStructure.htfTimeframe = htfTrendResult.timeframe;
+        marketStructure.htfReason = htfTrendResult.reason;
+        marketStructure.htfAllowedDirection = htfTrendResult.allowedDirection;
+        marketStructure.htfBiasAligned = true;
+
+        console.log(`[HTF TREND] Watcher ID: ${watcher.id} (${selectedPair}): ${htfTrendResult.timeframe} Trend is ${htfTrendResult.trend} (${htfTrendResult.reason}). Enforcing trend-following zone markout.`);
+        logWatcherEvent('HTF TREND EVALUATION', logCtx, {
+          'HTF Timeframe': htfTrendResult.timeframe,
+          'HTF Trend': htfTrendResult.trend,
+          'Allowed Direction': htfTrendResult.allowedDirection,
+          'Reason': htfTrendResult.reason
+        });
 
         // =====================================================================
         // STATEFUL ZONE MARKOUT & TAP CONFIRMATION LIFECYCLE

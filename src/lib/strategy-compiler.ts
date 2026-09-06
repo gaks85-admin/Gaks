@@ -138,6 +138,12 @@ export function compileStrategy(strategyText: string): CompilerOutput {
     compiled_rules.tap_and_rejection = true;
   }
 
+  // Default setting requested by user:
+  // "default setting of follow the trend it should always stick with the trend of higher timeframe (4hr,1day) always follow the trend to mark out zone"
+  const mentionsDaily = /\b(daily|1d|d1|1day)\b/i.test(strategyText);
+  compiled_rules.follow_htf_trend = true;
+  compiled_rules.preferred_htf = mentionsDaily ? 'D1' : 'H4';
+
   // Classify strategy mode based on strict deterministic priority rules:
   let strategy_mode: 'RULE_ONLY' | 'HYBRID' | 'AI_ONLY' = 'RULE_ONLY';
   if (classificationResult.parsedRule.ai_only_elements.length > 0) {

@@ -70,6 +70,8 @@ export interface WatcherTabProps {
     status?: string;
     reasoning?: string;
     tappedAt?: string | null;
+    htfTrend?: string;
+    htfTimeframe?: string;
   } | null;
   onResolveTrade?: (watcherId: string, resolutionType: 'TP_HIT' | 'SL_HIT' | 'BREAKEVEN' | 'MANUAL_CLOSE', exitPrice?: number) => Promise<void>;
   isResolvingTrade?: boolean;
@@ -313,6 +315,17 @@ export const WatcherTab: React.FC<WatcherTabProps> = ({
               {watcherZone.type && (
                 <span className="text-[10px] font-mono text-zinc-500 dark:text-zinc-400 bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 rounded-md uppercase">
                   {watcherZone.type} ({watcherZone.direction || 'ZONE'})
+                </span>
+              )}
+              {watcherZone.htfTrend && (
+                <span className={`px-2 py-0.5 rounded-md text-[10px] font-mono font-semibold uppercase border ${
+                  watcherZone.htfTrend === 'BULLISH'
+                    ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
+                    : watcherZone.htfTrend === 'BEARISH'
+                    ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20'
+                    : 'bg-zinc-500/10 text-zinc-600 dark:text-zinc-400 border-zinc-500/20'
+                }`}>
+                  {watcherZone.htfTimeframe || 'H4'} TREND: {watcherZone.htfTrend}
                 </span>
               )}
             </div>
