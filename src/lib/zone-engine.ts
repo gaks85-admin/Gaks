@@ -136,11 +136,14 @@ export function identifyMarkedZone(
     // Unfilled or partially filled FVGs
     for (const fvg of marketStructure.fairValueGaps) {
       if (fvg.isFilled) continue;
-      if (enforceUnmitigated && fvg.filledPercentage !== undefined && fvg.filledPercentage > 0.05) continue;
+      // Do not select ancient FVGs from dozens of candles ago (recency limit matching order blocks)
+      if (fvg.candleIndex !== undefined && fvg.candleIndex < sortedCandles.length - 45) continue;
+      // Discard FVGs that have already been mitigated or significantly filled (>20%)
+      if (fvg.filledPercentage !== undefined && fvg.filledPercentage > 0.20) continue;
 
       if (fvg.type === 'BULLISH_FVG' && fvg.bottom <= activePrice) {
-        // In unmitigated mode, ensure no subsequent candle pulled down into the gap (low <= fvg.top)
-        if (enforceUnmitigated && fvg.candleIndex !== undefined) {
+        // Ensure no subsequent candle has already mitigated the gap (low <= fvg.top)
+        if (fvg.candleIndex !== undefined) {
           let gapMitigated = false;
           for (let k = fvg.candleIndex + 1; k < sortedCandles.length; k++) {
             if (sortedCandles[k].low <= fvg.top) {
@@ -177,8 +180,8 @@ export function identifyMarkedZone(
           candleIndex: fvg.candleIndex
         });
       } else if (fvg.type === 'BEARISH_FVG' && fvg.top >= activePrice) {
-        // In unmitigated mode, ensure no subsequent candle rallied up into the gap (high >= fvg.bottom)
-        if (enforceUnmitigated && fvg.candleIndex !== undefined) {
+        // Ensure no subsequent candle has already mitigated the gap (high >= fvg.bottom)
+        if (fvg.candleIndex !== undefined) {
           let gapMitigated = false;
           for (let k = fvg.candleIndex + 1; k < sortedCandles.length; k++) {
             if (sortedCandles[k].high >= fvg.bottom) {
@@ -888,7 +891,29 @@ export function evaluateZoneState(
   // 2. TAP AND REJECTION DETECTION CHECK
   // =========================================================================
   const prevCandle = candles && candles.length >= 2 ? candles[candles.length - 2] : undefined;
-  const tapped = isPriceInOrTappingZone(zone, latestCandle, currentPrice);
+  let tapped = isPriceInOrTappingZone(zone, latestCandle, currentPrice);
+  let historicalTapFound = false;
+
+  // If latest candle or current price is not currently in the zone, check if ANY candle
+  // since zone creation tapped into the zone (e.g., a wick tap 1-3 candles ago)
+  if (!tapped && candles && candles.length > 0) {
+    const originTime = zone.displacementCandleTime || zone.createdCandleTime;
+    const originTimestamp = originTime ? new Date(originTime).getTime() : 0;
+    for (let cIdx = candles.length - 1; cIdx >= 0; cIdx--) {
+      const c = candles[cIdx];
+      if (originTimestamp > 0 && c.timestamp) {
+        const cTime = new Date(c.timestamp).getTime();
+        if (!isNaN(cTime) && cTime <= originTimestamp) {
+          break; // Do not check candles at or before zone creation
+        }
+      }
+      if (isPriceInOrTappingZone(zone, c)) {
+        tapped = true;
+        historicalTapFound = true;
+        break;
+      }
+    }
+  }
 
   if (tapped) {
     const rejection = evaluateZoneRejection(zone, latestCandle, currentPrice, prevCandle);
@@ -904,8 +929,10 @@ export function evaluateZoneState(
       isRejected,
       rejectionReason: rejection.rejectionReason,
       reason: isRejected
-        ? `Zone tapped & rejected: Price (${currentPrice.toFixed(5)}) tapped zone [${zone.low} - ${zone.high}] and confirmed rejection. ${rejection.rejectionReason}`
-        : `Zone tapped: Price (${currentPrice.toFixed(5)}) / Candle range [${latestCandle.low} - ${latestCandle.high}] entered marked zone [${zone.low} - ${zone.high}]. Awaiting rejection confirmation.`,
+        ? `Zone tapped & rejected: Price (${currentPrice.toFixed(5)}) confirmed rejection bounce departing marked zone [${zone.low} - ${zone.high}]. ${rejection.rejectionReason}`
+        : historicalTapFound
+          ? `Zone tapped: Previous post-creation candle range entered marked zone [${zone.low} - ${zone.high}]. Awaiting rejection confirmation.`
+          : `Zone tapped: Price (${currentPrice.toFixed(5)}) / Candle range [${latestCandle.low} - ${latestCandle.high}] entered marked zone [${zone.low} - ${zone.high}]. Awaiting rejection confirmation.`,
       updatedZone
     };
   }
