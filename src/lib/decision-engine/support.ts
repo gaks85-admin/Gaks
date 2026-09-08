@@ -11,16 +11,17 @@ export class SupportEvaluator {
     const isNestedMatched = market.supportZones && Array.isArray(market.supportZones) && 
       market.supportZones.length > 0;
     const isSwingLowNear = market.swingLows && Array.isArray(market.swingLows) && market.swingLows.length > 0;
-    const isObNear = market.orderBlocks && Array.isArray(market.orderBlocks) && market.orderBlocks.some((b: any) => b.type === 'BULLISH');
+    const isObNear = market.orderBlocks && Array.isArray(market.orderBlocks) && market.orderBlocks.some((b: any) => b.type === 'BULLISH' || b.type === 'BULLISH_ORDER_BLOCK');
+    const isMarkedSupportNear = Boolean(market.markedZone && (market.markedZone.direction === 'BUY' || market.markedZone.type === 'DEMAND' || market.markedZone.type === 'BULLISH_ORDER_BLOCK' || market.markedZone.type === 'SUPPORT'));
 
     let scoreOutOf10 = 0;
     let matched = false;
     let reason = "";
 
-    if (isFlatMatched || isNestedMatched) {
+    if (isFlatMatched || isNestedMatched || isMarkedSupportNear) {
       scoreOutOf10 = 10;
       matched = true;
-      reason = "Price is trading directly at or in a key support zone (10/10).";
+      reason = "Price is trading directly at or in a key support/demand zone (10/10).";
     } else if (isObNear || isSwingLowNear) {
       scoreOutOf10 = 7;
       matched = true;
@@ -51,12 +52,13 @@ export class SupportEvaluator {
     const isCandleRejection = market.candlePatterns && Array.isArray(market.candlePatterns) &&
       market.candlePatterns.some((p: any) => p.direction === 'BULLISH');
     const isWickRejection = market.lowerWickRejection === true || market.wickRejection === true;
+    const isZoneRejection = market.zone_status === 'CONFIRMED' || market.isRejected === true || Boolean(market.rejectionReason);
 
     let scoreOutOf10 = 0;
     let matched = false;
     let reason = "";
 
-    if (isFlatMatched || (isNestedMatched && isCandleRejection)) {
+    if (isFlatMatched || (isNestedMatched && isCandleRejection) || isZoneRejection) {
       scoreOutOf10 = 10;
       matched = true;
       reason = "Strong bullish rejection & candle bounce from support zone confirmed (10/10).";

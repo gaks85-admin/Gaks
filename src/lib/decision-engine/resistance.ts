@@ -11,16 +11,17 @@ export class ResistanceEvaluator {
     const isNestedMatched = market.resistanceZones && Array.isArray(market.resistanceZones) && 
       market.resistanceZones.length > 0;
     const isSwingHighNear = market.swingHighs && Array.isArray(market.swingHighs) && market.swingHighs.length > 0;
-    const isObNear = market.orderBlocks && Array.isArray(market.orderBlocks) && market.orderBlocks.some((b: any) => b.type === 'BEARISH');
+    const isObNear = market.orderBlocks && Array.isArray(market.orderBlocks) && market.orderBlocks.some((b: any) => b.type === 'BEARISH' || b.type === 'BEARISH_ORDER_BLOCK');
+    const isMarkedResistanceNear = Boolean(market.markedZone && (market.markedZone.direction === 'SELL' || market.markedZone.type === 'SUPPLY' || market.markedZone.type === 'BEARISH_ORDER_BLOCK' || market.markedZone.type === 'RESISTANCE'));
 
     let scoreOutOf10 = 0;
     let matched = false;
     let reason = "";
 
-    if (isFlatMatched || isNestedMatched) {
+    if (isFlatMatched || isNestedMatched || isMarkedResistanceNear) {
       scoreOutOf10 = 10;
       matched = true;
-      reason = "Price is trading directly at or in a key resistance zone (10/10).";
+      reason = "Price is trading directly at or in a key resistance/supply zone (10/10).";
     } else if (isObNear || isSwingHighNear) {
       scoreOutOf10 = 7;
       matched = true;
@@ -51,12 +52,13 @@ export class ResistanceEvaluator {
     const isCandleRejection = market.candlePatterns && Array.isArray(market.candlePatterns) &&
       market.candlePatterns.some((p: any) => p.direction === 'BEARISH');
     const isWickRejection = market.upperWickRejection === true || market.wickRejection === true;
+    const isZoneRejection = market.zone_status === 'CONFIRMED' || market.isRejected === true || Boolean(market.rejectionReason);
 
     let scoreOutOf10 = 0;
     let matched = false;
     let reason = "";
 
-    if (isFlatMatched || (isNestedMatched && isCandleRejection)) {
+    if (isFlatMatched || (isNestedMatched && isCandleRejection) || isZoneRejection) {
       scoreOutOf10 = 10;
       matched = true;
       reason = "Strong bearish rejection & candle bounce from resistance zone confirmed (10/10).";

@@ -13,14 +13,21 @@ export class OrderBlockEvaluator {
     const hasBullishOb = market.orderBlocks && Array.isArray(market.orderBlocks) && market.orderBlocks.some((b: any) => b.type === 'BULLISH' || b.type === 'BULLISH_ORDER_BLOCK');
     const hasBearishOb = market.orderBlocks && Array.isArray(market.orderBlocks) && market.orderBlocks.some((b: any) => b.type === 'BEARISH' || b.type === 'BEARISH_ORDER_BLOCK');
     
-    // Also check active marked zone from zone engine
-    const hasActiveZone = market.zone_status === 'ZONE_TAPPED' || market.zone_status === 'WAITING_FOR_TAP';
+    // Also check active marked zone from zone engine or market structure
+    const hasActiveZone = market.zone_status === 'ZONE_TAPPED' || 
+                          market.zone_status === 'WAITING_FOR_TAP' || 
+                          market.zone_status === 'CONFIRMED' ||
+                          market.zone_status === 'ACTIVE' ||
+                          Boolean(market.markedZone && market.markedZone.status !== 'INVALIDATED' && market.markedZone.status !== 'EXPIRED');
+
+    const hasSupplyDemand = (Array.isArray(market.supportZones) && market.supportZones.length > 0) ||
+                            (Array.isArray(market.resistanceZones) && market.resistanceZones.length > 0);
 
     let scoreOutOf10 = 0;
     let matched = false;
     let reason = "";
 
-    if (isFlatMatched || (hasBullishOb || hasBearishOb) || hasActiveZone) {
+    if (isFlatMatched || (hasBullishOb || hasBearishOb) || hasActiveZone || hasSupplyDemand) {
       scoreOutOf10 = 10;
       matched = true;
       reason = "Price is aligned with an unmitigated institutional Order Block / Supply-Demand zone (10/10).";

@@ -2,7 +2,7 @@ import { MarketStructure } from './market-structure-engine.js';
 
 export interface StructuralStopLossResult {
   stopLoss: number;
-  stopLossBasis: 'SUPPORT_ZONE' | 'RESISTANCE_ZONE' | 'SWING_LOW' | 'SWING_HIGH' | 'DEMAND_ZONE' | 'SUPPLY_ZONE' | 'STRUCTURAL_CANDLE' | 'ATR_FALLBACK';
+  stopLossBasis: 'SUPPORT_ZONE' | 'RESISTANCE_ZONE' | 'SWING_LOW' | 'SWING_HIGH' | 'DEMAND_ZONE' | 'SUPPLY_ZONE' | 'ORDER_BLOCK' | 'STRUCTURAL_CANDLE' | 'ATR_FALLBACK';
   structuralLevel: number | null;
 }
 
@@ -36,6 +36,16 @@ export function calculateStructuralStopLoss(
   const buffer = Math.max(atr * 0.2, entryPrice * 0.0005);
 
   if (direction === 'BUY') {
+    // 0. Marked Zone (Order Block / Demand POI) below entry
+    const markedZone = (marketStructure as any)?.markedZone;
+    if (markedZone && markedZone.direction === 'BUY' && markedZone.invalidationLevel && markedZone.invalidationLevel < entryPrice) {
+      return {
+        stopLoss: Number(markedZone.invalidationLevel.toFixed(5)),
+        stopLossBasis: markedZone.type?.includes('ORDER_BLOCK') ? 'ORDER_BLOCK' : 'DEMAND_ZONE',
+        structuralLevel: Number(markedZone.low.toFixed(5))
+      };
+    }
+
     // 1. Support Zones below entry
     if (marketStructure?.supportZones && marketStructure.supportZones.length > 0) {
       const validSupports = marketStructure.supportZones.filter(z => z.priceMin < entryPrice);
@@ -111,6 +121,16 @@ export function calculateStructuralStopLoss(
     };
   } else {
     // SELL direction
+    // 0. Marked Zone (Order Block / Supply POI) above entry
+    const markedZone = (marketStructure as any)?.markedZone;
+    if (markedZone && markedZone.direction === 'SELL' && markedZone.invalidationLevel && markedZone.invalidationLevel > entryPrice) {
+      return {
+        stopLoss: Number(markedZone.invalidationLevel.toFixed(5)),
+        stopLossBasis: markedZone.type?.includes('ORDER_BLOCK') ? 'ORDER_BLOCK' : 'SUPPLY_ZONE',
+        structuralLevel: Number(markedZone.high.toFixed(5))
+      };
+    }
+
     // 1. Resistance Zones above entry
     if (marketStructure?.resistanceZones && marketStructure.resistanceZones.length > 0) {
       const validResistances = marketStructure.resistanceZones.filter(z => z.priceMax > entryPrice);

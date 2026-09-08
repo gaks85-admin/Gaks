@@ -10,8 +10,9 @@ export class FvgEvaluator {
     const isFlatMatched = market.fair_value_gap === true || market.fvg === true || market.fair_value_gap?.matched === true || market.fvg?.matched === true;
     const isNestedMatched = market.fairValueGaps && Array.isArray(market.fairValueGaps) && 
       market.fairValueGaps.length > 0;
+    const isMarkedFvg = Boolean(market.markedZone && (market.markedZone.type === 'BULLISH_FVG' || market.markedZone.type === 'BEARISH_FVG'));
 
-    const matched = isFlatMatched || isNestedMatched;
+    const matched = isFlatMatched || isNestedMatched || isMarkedFvg;
 
     return {
       matched,
