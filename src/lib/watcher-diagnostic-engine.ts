@@ -280,11 +280,11 @@ export async function runWatcherDiagnosticReplay(options: ReplayOptions): Promis
   const dataAgeMs = currentServerMs - newestCandleMs;
   const maxAllowedAgeMs = getMaxAllowedAgeMs(selectedTimeframe);
 
+  // NOTE: TEMPORARY DISENGAGEMENT PER USER DIRECTIVE
+  // "disengage every confirmation after a signal have been found temporary and leave only the break and retest confirmation note do not audit anything apart from it and also Note it's temporary"
   let freshnessStatus: 'FRESH' | 'STALE' | 'HISTORICAL_REPLAY' = 'FRESH';
   if (isHistorical) {
     freshnessStatus = 'HISTORICAL_REPLAY';
-  } else if (dataAgeMs > maxAllowedAgeMs) {
-    freshnessStatus = 'STALE';
   }
 
   const marketDataSnapshot: MarketDataSnapshot = {
@@ -378,7 +378,7 @@ export async function runWatcherDiagnosticReplay(options: ReplayOptions): Promis
   let cleanErrorMessage: string | null = null;
   let parsedSetup: any = null;
 
-  if (freshnessStatus === 'STALE' && !isHistorical) {
+  if ((freshnessStatus as string) === 'STALE' && !isHistorical) {
     classification = 'SKIPPED_STALE_DATA';
     cleanErrorMessage = `Market data is stale (${formatAgeString(dataAgeMs)} old > ${formatAgeString(maxAllowedAgeMs)} limit). Gemini call bypassed for safety.`;
   } else if (options.skipGemini) {
@@ -496,9 +496,9 @@ export async function runWatcherDiagnosticReplay(options: ReplayOptions): Promis
   // Gate 1: Market Data
   gatesList.push({
     gate: 'MARKET_DATA',
-    status: rawCandles.length > 0 && freshnessStatus !== 'STALE' ? 'PASS' : 'REJECT',
-    reasonCode: freshnessStatus === 'STALE' ? 'STALE_MARKET_DATA' : (rawCandles.length > 0 ? 'MARKET_DATA_VALID' : 'MARKET_DATA_EMPTY'),
-    reason: freshnessStatus === 'STALE' ? `Market data stale (${marketDataSnapshot.data_age})` : `Received ${rawCandles.length} candles`,
+    status: rawCandles.length > 0 ? 'PASS' : 'REJECT',
+    reasonCode: rawCandles.length > 0 ? 'MARKET_DATA_VALID' : 'MARKET_DATA_EMPTY',
+    reason: rawCandles.length > 0 ? `Received ${rawCandles.length} candles` : 'Market data missing or empty',
     timestamp: new Date().toISOString()
   });
 

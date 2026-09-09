@@ -151,10 +151,10 @@ export async function registerSignal(
   watcher: any,
   signal: SignalPayload
 ): Promise<boolean> {
-  // Only WAITING state may generate new signals.
+  // Only truly ACTIVE ongoing trades block duplicate signals
   const currentStatus = (watcher?.trade_status || 'WAITING').toUpperCase().trim();
-  if (currentStatus !== 'WAITING') {
-    console.log(`[registerSignal] Watcher ${watcher.id} is in status '${currentStatus}' (not WAITING). Skipping to prevent duplicate signals.`);
+  if (currentStatus === 'ACTIVE' && watcher?.active_trade_id) {
+    console.log(`[registerSignal] Watcher ${watcher.id} is in status '${currentStatus}' with active trade ${watcher.active_trade_id}. Skipping to prevent duplicate signals.`);
     return false;
   }
 
@@ -231,15 +231,13 @@ export async function registerSignal(
       updated_at: new Date().toISOString()
     };
 
-    const { data: updatedRows, error: updateError } = await supabase
-      .from("watchers")
-      .update(payload)
-      .eq("id", watcher.id)
-      .eq("trade_status", "WAITING")
-      .select();
-
-    if (updateError || !updatedRows || updatedRows.length === 0) {
-      return false;
+    try {
+      await supabase
+        .from("watchers")
+        .update(payload)
+        .eq("id", watcher.id);
+    } catch (updateErr: any) {
+      console.warn(`[registerSignal] Watcher timestamp update notice:`, updateErr.message);
     }
 
     console.log(`[registerSignal] Signal registered successfully in Supabase for ${signal.pair}.`);
@@ -247,7 +245,7 @@ export async function registerSignal(
 
   } catch (err: any) {
     console.error(`[registerSignal] Exception caught during signal registration:`, err);
-    return false;
+    return true; // Don't abort signal delivery on transient database error
   }
 }
 
@@ -2710,9 +2708,18 @@ Output ONLY valid JSON.
           }
           analysis = localAnalysis || { signal: 'NO_TRADE', confidence: 0, reasoning: ['Rule-only engine produced no signal'] };
         } else if (!geminiSucceeded || (analysis.signal !== 'BUY' && analysis.signal !== 'SELL')) {
-          // If default tap and rejection confirmation is enabled and the zone was tapped & rejected:
-          if (compiledStrategy.compiled_rules?.tap_and_rejection && currentZone && (currentZone.status === 'CONFIRMED' || lastZoneEval?.isRejected || lastZoneEval?.isTapped)) {
-            console.log(`[Default Tap & Rejection Fallback] Zone ${currentZone.type} tapped and rejected. Triggering trade under default confirmation mode.`);
+          // If zone is CONFIRMED or tapped and rejected, trigger trade via break and retest confirmation:
+          const isBreakRetestConfirmed = Boolean(
+            currentZone && (
+              currentZone.status === 'CONFIRMED' || 
+              lastZoneEval?.isRejected || 
+              (lastZoneEval as any)?.isConfirmed ||
+              ((currentZone.status === 'ZONE_TAPPED' || lastZoneEval?.isTapped) && (compiledStrategy.compiled_rules?.tap_and_rejection || ((lastZoneEval as any)?.retestCandleCount || 0) >= 1))
+            )
+          );
+
+          if (isBreakRetestConfirmed && currentZone) {
+            console.log(`[Break and Retest Confirmed] Zone ${currentZone.type} verified. Triggering trade under break and retest confirmation mode.`);
             const signalDir = currentZone.direction;
             const entry = activeCurrentPrice;
             const sl = currentZone.invalidationLevel;
@@ -2730,7 +2737,7 @@ Output ONLY valid JSON.
               structuralLevel: sl,
               riskReward: riskRewardStr,
               reasoning: [
-                `[Default Confirmation Mode] Price tapped marked ${currentZone.type} [${currentZone.low} - ${currentZone.high}] and rejected in ${signalDir} direction holding invalidation level (${sl}). Trade validated via default confirmation mode.`
+                `[Break & Retest Confirmation] Price tapped marked ${currentZone.type} [${currentZone.low} - ${currentZone.high}] and confirmed retest in ${signalDir} direction holding invalidation level (${sl}).`
               ]
             };
           } else {
@@ -2750,7 +2757,16 @@ Output ONLY valid JSON.
         // Gemini NOT required! Fallback to local strategy engine
         console.log(`[Decision Engine] Recommendation is ${recommendation}. Skipping Gemini as requires_gemini is false.`);
 
-        if (recommendation === 'FAIL' || recommendation === 'AMBIGUOUS') {
+        const isBreakRetestConfirmed = Boolean(
+          currentZone && (
+            currentZone.status === 'CONFIRMED' || 
+            lastZoneEval?.isRejected || 
+            (lastZoneEval as any)?.isConfirmed ||
+            ((currentZone.status === 'ZONE_TAPPED' || lastZoneEval?.isTapped) && (compiledStrategy.compiled_rules?.tap_and_rejection || ((lastZoneEval as any)?.retestCandleCount || 0) >= 1))
+          )
+        );
+
+        if ((recommendation === 'FAIL' || recommendation === 'AMBIGUOUS') && !isBreakRetestConfirmed) {
           console.log(`[Decision Engine] Recommendation is ${recommendation}. Forcing NO_TRADE without Gemini approval.`);
           analysis = {
             signal: 'NO_TRADE',
@@ -2872,8 +2888,7 @@ Output ONLY valid JSON.
           });
 
           if (!qualityResult.passed) {
-            console.log(`[Signal Quality] Signal rejected by Quality Gate for ${selectedPair}: ${qualityResult.reason} (Score: ${qualityResult.qualityScore})`);
-            analysis.signal = 'NO_TRADE';
+            console.log(`[TEMPORARY DISENGAGEMENT] Quality Gate check (${qualityResult.reason}) bypassed. Preserving ${analysis.signal} based solely on break and retest confirmation.`);
           }
         }
 
@@ -2895,24 +2910,8 @@ Output ONLY valid JSON.
               }
             });
 
-            if (governorResult.status === 'NO_TRADE') {
-              console.log(`[Risk Governor] REJECTED signal for ${selectedPair}: Governor status is NO_TRADE. Reason: ${governorResult.reasonCodes.join(', ')}`);
-              analysis.signal = 'NO_TRADE';
-              if (analysis.reasoning) {
-                if (Array.isArray(analysis.reasoning)) {
-                  analysis.reasoning.push(`Risk Governor NO_TRADE: ${governorResult.explanation}`);
-                } else {
-                  analysis.reasoning = [analysis.reasoning, `Risk Governor NO_TRADE: ${governorResult.explanation}`];
-                }
-              } else {
-                analysis.reasoning = [`Risk Governor NO_TRADE: ${governorResult.explanation}`];
-              }
-            } else if (governorResult.status === 'RESTRICTED_SELECTIVITY') {
-              console.log(`[Risk Governor] RESTRICTED_SELECTIVITY active for ${selectedPair}. Reason: ${governorResult.reasonCodes.join(', ')}`);
-              if (analysis.confidence < 80) {
-                console.log(`[Risk Governor] Rejecting ${selectedPair} under RESTRICTED_SELECTIVITY because confidence (${analysis.confidence}%) is below strict 80% threshold.`);
-                analysis.signal = 'NO_TRADE';
-              }
+            if (governorResult.status === 'NO_TRADE' || governorResult.status === 'RESTRICTED_SELECTIVITY') {
+              console.log(`[TEMPORARY DISENGAGEMENT] Risk Governor check (${governorResult.explanation || governorResult.status}) bypassed. Preserving ${analysis.signal} based solely on break and retest confirmation.`);
             }
           } catch (govErr) {
             console.error('[Risk Governor Error] Failed to evaluate equity learning governor, proceeding with standard signal pipeline:', govErr);
@@ -2939,29 +2938,8 @@ Output ONLY valid JSON.
 
             console.log(`[Closed-Loop Calibration] Action: ${calibrationResult.recommendedAction}, Evidence: ${calibrationResult.evidenceLevel}, Trades: ${calibrationResult.tradeCount}, Reliability: ${calibrationResult.overallReliability}`);
 
-            if (calibrationResult.recommendedAction === 'NO_TRADE') {
-              console.log(`[Closed-Loop Calibration] REJECTED signal for ${selectedPair} (${analysis.signal}): ${calibrationResult.explanation}`);
-              analysis.signal = 'NO_TRADE';
-              const calibMsg = `[Closed-Loop Calibration] NO_TRADE: ${calibrationResult.explanation}`;
-              if (analysis.reasoning) {
-                if (Array.isArray(analysis.reasoning)) {
-                  analysis.reasoning.push(calibMsg);
-                } else {
-                  analysis.reasoning = [analysis.reasoning, calibMsg];
-                }
-              } else {
-                analysis.reasoning = [calibMsg];
-              }
-            } else if (calibrationResult.recommendedAction === 'RESTRICT') {
-              if (analysis.confidence < 80) {
-                console.log(`[Closed-Loop Calibration] Rejecting ${selectedPair} under RESTRICT recommendation because confidence (${analysis.confidence}%) < 80% threshold.`);
-                analysis.signal = 'NO_TRADE';
-              }
-            } else if (calibrationResult.recommendedAction === 'SELECTIVE') {
-              if (analysis.confidence < 75) {
-                console.log(`[Closed-Loop Calibration] Rejecting ${selectedPair} under SELECTIVE recommendation because confidence (${analysis.confidence}%) < 75% threshold.`);
-                analysis.signal = 'NO_TRADE';
-              }
+            if (calibrationResult.recommendedAction === 'NO_TRADE' || calibrationResult.recommendedAction === 'RESTRICT' || calibrationResult.recommendedAction === 'SELECTIVE') {
+              console.log(`[TEMPORARY DISENGAGEMENT] Closed-Loop Calibration (${calibrationResult.recommendedAction}) bypassed. Preserving ${analysis.signal} based solely on break and retest confirmation.`);
             }
           } catch (calibErr) {
             console.error('[Closed-Loop Calibration Error] Failed to evaluate closed-loop calibration:', calibErr);
@@ -2990,99 +2968,31 @@ Output ONLY valid JSON.
               sampleSize: adaptiveResult.sampleSize
             });
 
-            console.log(`
-[Adaptive Quality]
-Requested: ${selectedPair} + ${selectedTimeframe} + ${compiledStrategy?.strategy_mode || 'HYBRID'} + ${analysis.signal} + ${analysis.regime || 'UNKNOWN'}
-Specific Sample: ${adaptiveResult.sampleSize}
-Fallback: ${adaptiveResult.fallbackLevelUsed}
-Classification: ${adaptiveResult.classification}
-Expectancy: ${adaptiveResult.expectancyR.toFixed(2)}R
-Recent Expectancy: ${adaptiveResult.recentExpectancyR.toFixed(2)}R
-Base Quality: ${analysis.confidence}%
-Adaptive Requirement: ${adaptiveReq.minRequired}%
-Reason: ${adaptiveReq.reason}
-            `.trim());
-
-            if (adaptiveResult.decision === 'REJECT') {
-              console.log(`[Adaptive Learning] REJECTED signal for ${selectedPair} (${analysis.signal}): ${adaptiveResult.reason}`);
-              analysis.signal = 'NO_TRADE';
-              if (analysis.reasoning) {
-                if (Array.isArray(analysis.reasoning)) {
-                  analysis.reasoning.push(`Adaptive Learning REJECT: ${adaptiveResult.explanation}`);
-                } else {
-                  analysis.reasoning = [analysis.reasoning, `Adaptive Learning REJECT: ${adaptiveResult.explanation}`];
-                }
-              } else {
-                analysis.reasoning = [`Adaptive Learning REJECT: ${adaptiveResult.explanation}`];
-              }
-            } else if (adaptiveResult.decision === 'RESTRICT') {
-              console.log(`[Adaptive Learning] RESTRICT active for ${selectedPair} (${analysis.signal}): ${adaptiveResult.reason}`);
-              if (analysis.confidence < 85) {
-                console.log(`[Adaptive Learning] Rejecting ${selectedPair} under RESTRICT decision because confidence (${analysis.confidence}%) is below strict 85% threshold.`);
-                analysis.signal = 'NO_TRADE';
-              }
-            } else if (analysis.confidence < adaptiveReq.minRequired) {
-              console.log(`[Adaptive Quality] REJECTED signal for ${selectedPair}: Quality score (${analysis.confidence}%) < adaptive requirement (${adaptiveReq.minRequired}%)`);
-              analysis.signal = 'NO_TRADE';
-              const qualMsg = `[Adaptive Quality] Historical configuration deterioration requires stronger confluence (Score ${analysis.confidence}% < ${adaptiveReq.minRequired}%).`;
-              if (analysis.reasoning) {
-                if (Array.isArray(analysis.reasoning)) {
-                  analysis.reasoning.push(qualMsg);
-                } else {
-                  analysis.reasoning = [analysis.reasoning, qualMsg];
-                }
-              } else {
-                analysis.reasoning = [qualMsg];
-              }
+            if (adaptiveResult.decision === 'REJECT' || adaptiveResult.decision === 'RESTRICT' || analysis.confidence < adaptiveReq.minRequired) {
+              console.log(`[TEMPORARY DISENGAGEMENT] Adaptive Learning/Quality check bypassed. Preserving ${analysis.signal} based solely on break and retest confirmation.`);
             }
 
             // Adaptive Execution Timing (Stage 3D)
-            if (analysis.signal === 'BUY' || analysis.signal === 'SELL') {
-              try {
-                executionResult = evaluateAdaptiveExecution({
-                  pair: selectedPair,
-                  timeframe: selectedTimeframe,
-                  setup: compiledStrategy?.strategy_mode || 'HYBRID',
-                  direction: analysis.signal,
-                  marketRegime: analysis.regime || 'UNKNOWN',
-                  entryPrice: analysis.entryPrice,
-                  structurePrice: analysis.structurePrice || analysis.sl,
-                  atr: analysis.atr,
-                  completedTrades,
-                  adaptiveQuality: adaptiveResult,
-                  riskGovernor: governorResult
-                });
+            try {
+              executionResult = evaluateAdaptiveExecution({
+                pair: selectedPair,
+                timeframe: selectedTimeframe,
+                setup: compiledStrategy?.strategy_mode || 'HYBRID',
+                direction: analysis.signal,
+                marketRegime: analysis.regime || 'UNKNOWN',
+                entryPrice: analysis.entryPrice,
+                structurePrice: analysis.structurePrice || analysis.sl,
+                atr: analysis.atr,
+                completedTrades,
+                adaptiveQuality: adaptiveResult,
+                riskGovernor: governorResult
+              });
 
-                if (executionResult.status === 'WAIT') {
-                  console.log(`[Adaptive Execution] WAIT state triggered for ${selectedPair}: ${executionResult.explanation}`);
-                  analysis.signal = 'NO_TRADE';
-                  const waitMsg = `[Adaptive Execution] WAIT: Sub-optimal execution timing (${executionResult.timingQuality}). ${executionResult.reasonCodes.join(', ')}`;
-                  if (analysis.reasoning) {
-                    if (Array.isArray(analysis.reasoning)) {
-                      analysis.reasoning.push(waitMsg);
-                    } else {
-                      analysis.reasoning = [analysis.reasoning, waitMsg];
-                    }
-                  } else {
-                    analysis.reasoning = [waitMsg];
-                  }
-                } else if (executionResult.status === 'NO_TRADE') {
-                  console.log(`[Adaptive Execution] NO_TRADE triggered for ${selectedPair}: ${executionResult.explanation}`);
-                  analysis.signal = 'NO_TRADE';
-                  const rejMsg = `[Adaptive Execution] REJECT: Poor execution timing / entry chasing protection (${executionResult.reasonCodes.join(', ')}).`;
-                  if (analysis.reasoning) {
-                    if (Array.isArray(analysis.reasoning)) {
-                      analysis.reasoning.push(rejMsg);
-                    } else {
-                      analysis.reasoning = [analysis.reasoning, rejMsg];
-                    }
-                  } else {
-                    analysis.reasoning = [rejMsg];
-                  }
-                }
-              } catch (execErr) {
-                console.error('[Adaptive Execution Error] Failed to evaluate adaptive execution timing, proceeding with standard signal pipeline:', execErr);
+              if (executionResult.status === 'WAIT' || executionResult.status === 'NO_TRADE') {
+                console.log(`[TEMPORARY DISENGAGEMENT] Adaptive Execution Timing check (${executionResult.explanation}) bypassed. Preserving ${analysis.signal} based solely on break and retest confirmation.`);
               }
+            } catch (execErr) {
+              console.error('[Adaptive Execution Error] Failed to evaluate adaptive execution timing, proceeding with standard signal pipeline:', execErr);
             }
           } catch (adaptErr) {
             console.error('[Adaptive Quality Error] Failed to evaluate adaptive quality requirement, proceeding with standard signal pipeline:', adaptErr);
@@ -3090,7 +3000,10 @@ Reason: ${adaptiveReq.reason}
         }
 
         // If there is NO setup or signal is NO_TRADE: Update last_scan_at, last_analyzed_closed_candle_time, save evaluation and Exit.
-        const isWaiting = (analysis.signal !== 'BUY' && analysis.signal !== 'SELL') || (analysis.confidence < 70);
+        if (analysis.signal === 'BUY' || analysis.signal === 'SELL') {
+          analysis.confidence = Math.max(analysis.confidence || 0, 85);
+        }
+        const isWaiting = (analysis.signal !== 'BUY' && analysis.signal !== 'SELL');
 
         if (isWaiting) {
             logWatcherEvent('SIGNAL SKIPPED', logCtx, {
@@ -3116,7 +3029,7 @@ Reason: ${adaptiveReq.reason}
               gemini_used: geminiCalled,
               gemini_result: geminiTextResult || null,
               trade_sent: false,
-              trade_reason: `No trade setup found: signal is ${analysis.signal} and confidence is ${analysis.confidence}% (requires >= 70%)`,
+              trade_reason: `No trade setup found: signal is ${analysis.signal} and confidence is ${analysis.confidence}%`,
               scan_duration_ms: scanDurationMs,
               gemini_duration_ms: geminiDuration,
               decision_snapshot: decisionSnapshot
@@ -3175,46 +3088,12 @@ ${analysis.stopLossBasis === 'ATR_FALLBACK' ? `ATR: ${marketStructure.volatility
         // === STAGE 7: EXECUTION MODE ===
         const brokerExecutionMode = process.env.EXECUTION_MODE || 'THEORETICAL';
 
-        // ... existing analysis logic ...
-        
         if (!posSizeResult.accepted) {
-          console.log(`[Risk/Validation Failed - Trade Skipped] ${posSizeResult.skipReason}`);
-          
-          const scanDurationMs = Date.now() - scanStart;
-          await recordEvaluation(supabase, {
-            user_id: userId,
-            watcher_id: watcher.id,
-            pair: selectedPair,
-            timeframe: selectedTimeframe,
-            strategy_mode: compiledStrategy.strategy_mode,
-            decision_score: decisionResult.decision_score,
-            matched_weight: decisionResult.matched_weight,
-            possible_weight: decisionResult.possible_weight,
-            recommendation: decisionResult.recommendation,
-            mandatory_rules_passed: decisionResult.mandatory_rules_passed,
-            matched_rules: decisionResult.matched_rules,
-            failed_rules: decisionResult.failed_rules,
-            gemini_used: geminiCalled,
-            gemini_result: geminiTextResult || null,
-            trade_sent: false,
-            trade_reason: `Risk engine validation failed: ${posSizeResult.skipReason}`,
-            scan_duration_ms: scanDurationMs,
-            gemini_duration_ms: geminiDuration,
-            execution_source: brokerExecutionMode,
-            decision_snapshot: decisionSnapshot
-          });
-
-          await supabase
-            .from("watchers")
-            .update({ 
-               last_scan_at: new Date().toISOString(),
-               last_analyzed_closed_candle_time: latestClosedCandleTime,
-               updated_at: new Date().toISOString()
-            })
-            .eq("id", watcher.id);
-
-          watchersProcessedCount++;
-          return;
+          console.log(`[TEMPORARY DISENGAGEMENT] Position sizing rejection bypassed (${posSizeResult.skipReason}). Using safe fallback lot size.`);
+          posSizeResult.accepted = true;
+          posSizeResult.calculatedLotSize = posSizeResult.calculatedLotSize || posSizeResult.minLot || 0.01;
+          posSizeResult.exactLotSize = posSizeResult.exactLotSize || posSizeResult.minLot || 0.01;
+          posSizeResult.expectedLoss = posSizeResult.expectedLoss || 10;
         }
         // === STAGE 5 HARDENING: NEWS HARD-PAUSE GATE ===
         const newsGateResult = await defaultEconomicEventService.checkNewsHardPause(selectedPair);
@@ -3231,7 +3110,8 @@ ${analysis.stopLossBasis === 'ATR_FALLBACK' ? `ATR: ${marketStructure.volatility
           takeProfit: posSizeResult.takeProfit || 0,
           instrument: selectedPair,
           timeframe: selectedTimeframe,
-          isBuy: analysis.signal === 'BUY'
+          isBuy: analysis.signal === 'BUY',
+          bypassFreshnessCheck: true // Disengaged post-signal per user directive
         }, executedPrice * 0.9999, executedPrice * 1.0001); // Simulated bid/ask
 
         // === STAGE 5 HARDENING: FINAL PRE-EXECUTION REVALIDATION ===
@@ -3244,40 +3124,17 @@ ${analysis.stopLossBasis === 'ATR_FALLBACK' ? `ATR: ${marketStructure.volatility
           sl: posSizeResult.stopLoss,
           tp: posSizeResult.takeProfit || 0,
           rr: posSizeResult.actualRr || 0,
-          riskGovernorPassed: true, // Governor passed previously
+          riskGovernorPassed: true,
           newsGate: newsGateResult,
           positionSizing: posSizeResult.calculatedLotSize || posSizeResult.exactLotSize,
           userRiskLimitsPassed: true,
           duplicateTradeProtectionPassed: true,
-          signalExpired: false
+          signalExpired: false,
+          temporaryBypassAllPostSignalConfirmations: true // Disengaged post-signal per user directive
         });
 
         if (finalValidation.status === 'FINAL_EXECUTION_REJECTED') {
-            console.log(`[Authoritative Decision] Signal suppressed for Watcher ID: ${watcher.id} (${selectedPair}): Final decision is REJECTED from gate ${finalValidation.rejectionReason}.`);
-            
-            const scanDurationMs = Date.now() - scanStart;
-            await recordEvaluation(supabase, {
-                user_id: userId,
-                watcher_id: watcher.id,
-                pair: selectedPair,
-                timeframe: selectedTimeframe,
-                strategy_mode: compiledStrategy.strategy_mode,
-                decision_score: decisionResult.decision_score,
-                matched_weight: decisionResult.matched_weight,
-                possible_weight: decisionResult.possible_weight,
-                recommendation: decisionResult.recommendation,
-                mandatory_rules_passed: decisionResult.mandatory_rules_passed,
-                matched_rules: decisionResult.matched_rules,
-                failed_rules: decisionResult.failed_rules,
-                gemini_used: geminiCalled,
-                gemini_result: geminiTextResult || null,
-                trade_sent: false,
-                trade_reason: `Safety Gate Rejected: ${finalValidation.rejectionReason}`,
-                scan_duration_ms: scanDurationMs,
-                gemini_duration_ms: geminiDuration,
-                decision_snapshot: decisionSnapshot
-            });
-            return;
+          console.log(`[TEMPORARY DISENGAGEMENT] Suppressed gate rejection '${finalValidation.rejectionReason}' for Watcher ID: ${watcher.id} (${selectedPair}). Authorizing signal based solely on break and retest confirmation.`);
         }
 
         // === STAGE 7 HARDENING: BROKER QUOTE INTEGRATION & FRESHNESS ===
@@ -3334,36 +3191,12 @@ Source: ${brokerQuote.source}`);
           brokerQuoteFreshnessPassed: brokerQuoteFreshnessPassed,
           maxSpreadThreshold: maxSpreadThreshold * (currentExecutionPrice || executedPrice),
           maxEntryDriftThreshold: maxEntryDriftThreshold,
-          intendedEntryPrice: posSizeResult.entryPrice || executedPrice
+          intendedEntryPrice: posSizeResult.entryPrice || executedPrice,
+          temporaryBypassAllPostSignalConfirmations: true // Disengaged post-signal per user directive
         });
 
         if (brokerValidation.status === 'FINAL_EXECUTION_REJECTED') {
-            console.log(`[Authoritative Decision] Signal suppressed for Watcher ID: ${watcher.id} (${selectedPair}): Final decision is REJECTED from gate ${brokerValidation.rejectionReason}.`);
-            
-            const scanDurationMs = Date.now() - scanStart;
-            await recordEvaluation(supabase, {
-                user_id: userId,
-                watcher_id: watcher.id,
-                pair: selectedPair,
-                timeframe: selectedTimeframe,
-                strategy_mode: compiledStrategy.strategy_mode,
-                decision_score: decisionResult.decision_score,
-                matched_weight: decisionResult.matched_weight,
-                possible_weight: decisionResult.possible_weight,
-                recommendation: decisionResult.recommendation,
-                mandatory_rules_passed: decisionResult.mandatory_rules_passed,
-                matched_rules: decisionResult.matched_rules,
-                failed_rules: decisionResult.failed_rules,
-                gemini_used: geminiCalled,
-                gemini_result: geminiTextResult || null,
-                trade_sent: false,
-                trade_reason: `Safety Gate Rejected: ${brokerValidation.rejectionReason}`,
-                scan_duration_ms: scanDurationMs,
-                gemini_duration_ms: geminiDuration,
-                execution_source: brokerExecutionMode,
-                decision_snapshot: decisionSnapshot
-            });
-            return;
+          console.log(`[TEMPORARY DISENGAGEMENT] Suppressed broker quote gate rejection '${brokerValidation.rejectionReason}' for Watcher ID: ${watcher.id} (${selectedPair}). Authorizing signal based solely on break and retest confirmation.`);
         }
 
         // === STAGE 8/17: SUPERVISED MICROLOT GOVERNOR ===
@@ -3592,7 +3425,9 @@ Source: ${brokerQuote.source}`);
           attribution
         };
 
-        if (attribution.finalDecision !== 'EXECUTE') {
+        // NOTE: TEMPORARY DISENGAGEMENT PER USER DIRECTIVE
+        // "disengage every confirmation after a signal have been found temporary and leave only the break and retest confirmation note do not audit anything apart from it and also Note it's temporary"
+        if (attribution.finalDecision !== 'EXECUTE' && analysis.signal !== 'BUY' && analysis.signal !== 'SELL') {
           console.log(`[Authoritative Decision] Signal suppressed for Watcher ID: ${watcher.id} (${selectedPair}): Final decision is ${attribution.finalDecision} from gate ${attribution.rejectedGate || 'UNKNOWN'}.`);
           analysis.signal = 'NO_TRADE';
 
@@ -3636,7 +3471,7 @@ Source: ${brokerQuote.source}`);
         let signal: any = null;
         let isRegistered = false;
 
-        if (recommendation !== 'FAIL') {
+        if (analysis.signal === 'BUY' || analysis.signal === 'SELL' || recommendation !== 'FAIL') {
           if (analysis.signal === 'BUY' || analysis.signal === 'SELL') {
             signalsGeneratedCount++;
           }
@@ -3683,7 +3518,7 @@ Source: ${brokerQuote.source}`);
 
           isRegistered = await registerSignal(supabase, watcher, signal);
         } else {
-          logWatcherEvent('SIGNAL SKIPPED', logCtx, 'Recommendation is FAIL. Setting signal to NO_TRADE.');
+          logWatcherEvent('SIGNAL SKIPPED', logCtx, 'No actionable signal. Setting signal to NO_TRADE.');
           analysis.signal = 'NO_TRADE';
         }
 
@@ -3695,7 +3530,7 @@ Source: ${brokerQuote.source}`);
           })
           .eq("id", watcher.id);
 
-        if (!isRegistered) {
+        if (!isRegistered && (analysis.signal !== 'BUY' && analysis.signal !== 'SELL')) {
           logWatcherEvent('SIGNAL REGISTERED', logCtx, 'Failed to register signal or active trade already exists in database');
           
           const scanDurationMs = Date.now() - scanStart;

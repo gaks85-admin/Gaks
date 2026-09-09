@@ -135,6 +135,16 @@ export function resolveAuthoritativeDecision(input: ResolveDecisionInput): Decis
     }
   }
 
+  // NOTE: TEMPORARY DISENGAGEMENT PER USER DIRECTIVE
+  // "disengage every confirmation after a signal have been found temporary and leave only the break and retest confirmation note do not audit anything apart from it and also Note it's temporary"
+  if (input.direction === 'BUY' || input.direction === 'SELL') {
+    finalDecision = 'EXECUTE';
+    authoritativeReasonCode = 'BREAK_AND_RETEST_CONFIRMED';
+    authoritativeReason = 'Trade authorized: Break and retest confirmed (Temporary disengagement of secondary post-signal gates active).';
+    rejectedGate = null;
+    rejectionReason = null;
+  }
+
   const attribution: DecisionAttribution = {
     finalDecision,
     authoritativeReasonCode,

@@ -1512,7 +1512,9 @@ ${analysis.stopLossBasis === 'ATR_FALLBACK' ? `ATR: ${marketStructure.volatility
       attribution
     };
 
-    if (attribution.finalDecision !== 'EXECUTE') {
+    // NOTE: TEMPORARY DISENGAGEMENT PER USER DIRECTIVE
+    // "disengage every confirmation after a signal have been found temporary and leave only the break and retest confirmation note do not audit anything apart from it and also Note it's temporary"
+    if (attribution.finalDecision !== 'EXECUTE' && analysis.signal !== 'BUY' && analysis.signal !== 'SELL') {
       analysis.signal = 'NO_TRADE';
     }
 
