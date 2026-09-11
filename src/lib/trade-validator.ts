@@ -47,17 +47,28 @@ export function isWatcherDue(
   watcher: {
     last_scan_at?: string | null;
     selected_timeframe?: string | null;
+    trade_status?: string | null;
   },
   now: Date = new Date(),
   scanIntervalMinutes: number = 60,
   graceMs: number = 30000
 ): { isDue: boolean; reason: string; nextScanDate: Date | null } {
+  const tradeStatus = (watcher.trade_status || '').toUpperCase().trim();
   let lastScanDate: Date | null = null;
   if (watcher.last_scan_at) {
     const parsed = new Date(watcher.last_scan_at);
     if (!isNaN(parsed.getTime())) {
       lastScanDate = parsed;
     }
+  }
+
+  // Active trades MUST be monitored continuously for TP/SL hits on every cron run,
+  // without waiting for the candle timeframe interval (e.g. 5m, 15m, 1h, 4h).
+  if (tradeStatus === 'ACTIVE') {
+    if (lastScanDate && (now.getTime() - lastScanDate.getTime() < 5000)) {
+      return { isDue: false, reason: 'Active trade scanned less than 5s ago', nextScanDate: new Date(lastScanDate.getTime() + 5000) };
+    }
+    return { isDue: true, reason: 'Active trade eligible for immediate price monitoring', nextScanDate: null };
   }
 
   if (!lastScanDate) {

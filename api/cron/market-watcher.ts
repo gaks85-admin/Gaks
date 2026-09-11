@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import crypto from 'crypto';
 import { CronTimer } from '../../src/lib/cron-timer.js';
 import { WatcherLogContext, logWatcherEvent, logWatcherError, logWatcherWarn, resolveWatcherUserContext, logWatcherStart, logWatcherResult, isDebugMode } from '../../src/lib/watcher-logger.js';
 import { GoogleGenAI, Type } from '@google/genai';
@@ -158,6 +159,13 @@ export interface SignalPayload {
   lotType?: string;
 }
 
+export function toValidUuid(val: any): string {
+  if (typeof val === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val)) {
+    return val;
+  }
+  return crypto.randomUUID();
+}
+
 // In-memory fallback and detection for signal_fingerprints table
 let hasSignalFingerprintsTable: boolean = true;
 const inMemorySignalFingerprints = new Map<string, number>();
@@ -167,10 +175,10 @@ export async function registerSignal(
   watcher: any,
   signal: SignalPayload
 ): Promise<boolean> {
-  // Only truly ACTIVE ongoing trades block duplicate signals
+  // Truly ACTIVE ongoing trades block duplicate signals
   const currentStatus = (watcher?.trade_status || 'WAITING').toUpperCase().trim();
-  if (currentStatus === 'ACTIVE' && watcher?.active_trade_id) {
-    console.log(`[registerSignal] Watcher ${watcher.id} is in status '${currentStatus}' with active trade ${watcher.active_trade_id}. Skipping to prevent duplicate signals.`);
+  if (currentStatus === 'ACTIVE') {
+    console.log(`[registerSignal] Watcher ${watcher.id} is currently ACTIVE (trade_id: ${watcher.active_trade_id || 'ACTIVE'}). Skipping to prevent duplicate signals.`);
     return false;
   }
 
@@ -1494,11 +1502,29 @@ Reason: ${activeValidation.reason}`);
       // Strict Constraint: Check if user has an active trade for this symbol across ANY watcher.
       // A trade must hit either TP or stop loss before marking another zone.
       const cleanPairUpper = (selectedPair || '').replace('/', '').toUpperCase();
-      const hasActiveTradeOnPair = (watchers || []).some((w: any) => {
+      let hasActiveTradeOnPair = (watchers || []).some((w: any) => {
         if (w.user_id !== userId) return false;
         const wPair = (w.selected_pair || w.symbol || '').replace('/', '').toUpperCase();
         return wPair === cleanPairUpper && (w.trade_status || '').toUpperCase() === 'ACTIVE';
       });
+
+      if (!hasActiveTradeOnPair) {
+        try {
+          const { data: dbActiveList } = await supabase
+            .from("watchers")
+            .select("id, selected_pair, trade_status")
+            .eq("user_id", userId)
+            .eq("trade_status", "ACTIVE");
+          if (dbActiveList && dbActiveList.length > 0) {
+            hasActiveTradeOnPair = dbActiveList.some((w: any) => {
+              const p = (w.selected_pair || '').replace('/', '').toUpperCase();
+              return p === cleanPairUpper;
+            });
+          }
+        } catch (dbErr) {
+          // Fallback to in-memory check
+        }
+      }
 
       if (hasActiveTradeOnPair) {
         console.log(`[ACTIVE TRADE LOCK] Pair ${selectedPair} currently has an ACTIVE trade in progress. Skipping zone marking until the active trade hits TP or SL.`);
@@ -3708,7 +3734,8 @@ Source: ${brokerQuote.source}`);
         
         console.log(`[${brokerExecutionMode} BROKER] Order Placed: ${brokerOrder.orderId} (Status: ${brokerOrder.status})`);
 
-        const candidateTradeId = brokerOrder.tradeId || `TR-${watcher.id}-${Date.now()}`;
+        const candidateTradeUuid = toValidUuid(brokerOrder.tradeId);
+        const candidateTradeId = candidateTradeUuid;
 
         const gatesList: DecisionGateResult[] = [
           {
@@ -4022,44 +4049,72 @@ Source: ${brokerQuote.source}`);
         });
 
         // Save active trade state in Supabase:
-        // trade_status = 'ACTIVE', active_trade_id = candidateTradeId, entry_price, stop_loss, take_profit, direction, opened_at
-        logWatcherEvent('ACTIVE UPDATE START', logCtx, `Updating trade_status = ACTIVE with trade_id: ${candidateTradeId}`);
+        // trade_status = 'ACTIVE', active_trade_id = candidateTradeUuid, entry_price, stop_loss, take_profit, direction, opened_at
+        logWatcherEvent('ACTIVE UPDATE START', logCtx, `Updating trade_status = ACTIVE with trade_id: ${candidateTradeUuid}`);
         activeZonesMemoryMap.delete(watcher.id);
+        
+        let activePayload: any = { 
+          trade_status: 'ACTIVE',
+          active_trade_id: candidateTradeUuid,
+          entry_price: analysis.entryPrice,
+          stop_loss: analysis.stopLoss,
+          take_profit: analysis.takeProfit,
+          direction: analysis.signal,
+          zone_status: 'CONFIRMED',
+          opened_at: new Date().toISOString(),
+          closed_at: null,
+          cooldown_until: null,
+          last_scan_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        };
+
         let { data: activeUpdateRows, error: activeUpdateErr } = await supabase
           .from("watchers")
-          .update({ 
+          .update(activePayload)
+          .eq("id", watcher.id)
+          .select();
+
+        // Fallback 1: If zone_status column is rejected by schema, retry without it
+        if (activeUpdateErr && activeUpdateErr.message?.includes('zone_status')) {
+          delete activePayload.zone_status;
+          const fallbackRes = await supabase
+            .from("watchers")
+            .update(activePayload)
+            .eq("id", watcher.id)
+            .select();
+          activeUpdateRows = fallbackRes.data;
+          activeUpdateErr = fallbackRes.error;
+        }
+
+        // Fallback 2: If active_trade_id column is rejected (e.g. type mismatch or missing), retry without it
+        if (activeUpdateErr && (activeUpdateErr.code === '22P02' || activeUpdateErr.message?.includes('active_trade_id'))) {
+          console.warn(`[ACTIVE UPDATE WARNING] Retrying without active_trade_id for Watcher ID: ${watcher.id}:`, activeUpdateErr.message);
+          delete activePayload.active_trade_id;
+          const fallbackRes = await supabase
+            .from("watchers")
+            .update(activePayload)
+            .eq("id", watcher.id)
+            .select();
+          activeUpdateRows = fallbackRes.data;
+          activeUpdateErr = fallbackRes.error;
+        }
+
+        // Fallback 3: Minimal essential active payload to guarantee trade_status = 'ACTIVE'
+        if (activeUpdateErr) {
+          console.error(`[ACTIVE UPDATE CRITICAL] Retrying with minimal active payload for Watcher ID: ${watcher.id}:`, activeUpdateErr.message);
+          const minPayload = {
             trade_status: 'ACTIVE',
-            active_trade_id: candidateTradeId,
             entry_price: analysis.entryPrice,
             stop_loss: analysis.stopLoss,
             take_profit: analysis.takeProfit,
             direction: analysis.signal,
-            zone_status: 'CONFIRMED',
             opened_at: new Date().toISOString(),
-            closed_at: null,
-            cooldown_until: null,
             last_scan_at: new Date().toISOString(),
             updated_at: new Date().toISOString()
-          })
-          .eq("id", watcher.id)
-          .select();
-
-        if (activeUpdateErr && activeUpdateErr.message?.includes('zone_status')) {
+          };
           const fallbackRes = await supabase
             .from("watchers")
-            .update({ 
-              trade_status: 'ACTIVE',
-              active_trade_id: candidateTradeId,
-              entry_price: analysis.entryPrice,
-              stop_loss: analysis.stopLoss,
-              take_profit: analysis.takeProfit,
-              direction: analysis.signal,
-              opened_at: new Date().toISOString(),
-              closed_at: null,
-              cooldown_until: null,
-              last_scan_at: new Date().toISOString(),
-              updated_at: new Date().toISOString()
-            })
+            .update(minPayload)
             .eq("id", watcher.id)
             .select();
           activeUpdateRows = fallbackRes.data;

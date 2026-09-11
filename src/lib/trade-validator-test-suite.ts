@@ -117,6 +117,12 @@ export function runTradeValidatorTestSuite() {
   const isRecentOverlap = (nowO.getTime() - lastScanO.getTime() < 5000);
   assert(isRecentOverlap === true, 'Test O - Overlapping cron scan within 5s window is recognized and prevented');
 
+  // P. Active trade monitoring is due immediately regardless of timeframe interval
+  const nowP = new Date('2026-08-11T22:15:07.234Z');
+  const lastScanP = new Date('2026-08-11T22:14:00.000Z'); // 67s ago, but interval is 240m (H4)
+  const dueP = isWatcherDue({ last_scan_at: lastScanP.toISOString(), trade_status: 'ACTIVE' }, nowP, 240, 30000);
+  assert(dueP.isDue === true, 'Test P - Active trade is due immediately for price monitoring regardless of H4 interval');
+
   console.log(`\n==========================================`);
   console.log(`TRADE VALIDATOR & SCHEDULER TESTS COMPLETED: ${passedCount}/${totalCount} PASSED`);
   console.log(`==========================================`);

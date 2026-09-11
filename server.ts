@@ -100,7 +100,7 @@ async function startServer() {
   app.get("/api/telegram/webhook", telegramWebhookHandler as any);
 
   // Scheduled Cron execution for active market watchers
-  app.post("/api/cron/market-watcher", marketWatcherCronHandler as any);
+  app.all("/api/cron/market-watcher", marketWatcherCronHandler as any);
   app.all("/api/cron/test", (req, res) => {
     res.json({ success: true, message: "Cron endpoint reached" });
   });
