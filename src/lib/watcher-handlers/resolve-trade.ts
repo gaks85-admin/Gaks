@@ -1,7 +1,31 @@
 import { createClient } from '@supabase/supabase-js';
-import { recordCompletedTrade } from '../learning-engine.js';
+import { recordCompletedTrade, getUserWinRateStats } from '../learning-engine.js';
 import { validateActiveTradeState } from '../trade-validator.js';
-import { calculateUnrealizedPnlR, evaluateActiveTradeExit } from '../active-trade-monitor.js';
+import { calculateUnrealizedPnlR, evaluateActiveTradeExit, calculatePipsDistance } from '../active-trade-monitor.js';
+import { buildTelegramTradeOutcomeMessage } from '../telegram-formatter.js';
+
+async function sendTelegramMessage(chatId: string | number, text: string): Promise<boolean> {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) return false;
+  const url = `https://api.telegram.org/bot${token}/sendMessage`;
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, text: text, parse_mode: "Markdown" })
+    });
+    if (!res.ok) {
+      await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chat_id: chatId, text: text })
+      });
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 const getSupabase = () => {
   const url = process.env.VITE_SUPABASE_URL || "https://wkujrqmxivljnuvumfau.supabase.co";
@@ -155,7 +179,43 @@ export default async function handler(req: any, res: any) {
       decision_snapshot: latestEval?.decision_snapshot || null
     });
 
-    // 4. Update watcher to COOLDOWN
+    // 4. Send Telegram outcome alert with updated win rate if connected
+    try {
+      const { data: conn } = await supabase
+        .from("telegram_connections")
+        .select("telegram_chat_id, connected")
+        .eq("user_id", userId)
+        .maybeSingle();
+
+      if (conn?.connected && conn?.telegram_chat_id) {
+        const stats = await getUserWinRateStats(supabase, userId, watcher.selected_pair);
+        const pipsDistance = Math.abs(calculatePipsDistance(watcher.selected_pair, entryPrice || finalExitPrice, finalExitPrice));
+
+        const outcomeMsg = buildTelegramTradeOutcomeMessage({
+          pair: watcher.selected_pair,
+          direction: direction as 'BUY' | 'SELL',
+          entryPrice,
+          exitPrice: finalExitPrice,
+          stopLoss,
+          takeProfit,
+          outcome: outcome as 'WIN' | 'LOSS' | 'BREAKEVEN',
+          pips: pipsDistance,
+          realizedR: pnlR,
+          totalTrades: stats.totalTrades,
+          wins: stats.wins,
+          losses: stats.losses,
+          winRate: stats.winRate,
+          pairTotalTrades: stats.pairTotalTrades,
+          pairWins: stats.pairWins,
+          pairWinRate: stats.pairWinRate
+        });
+        await sendTelegramMessage(conn.telegram_chat_id, outcomeMsg);
+      }
+    } catch (tgErr) {
+      console.error("[Resolve Trade] Telegram outcome notification failed:", tgErr);
+    }
+
+    // 5. Update watcher to COOLDOWN & clear zone
     const outcomeStr = String(outcome);
     const isLoss = outcomeStr === 'LOSS' || outcomeStr === 'STOP_LOSS';
     const cooldownMs = isLoss ? 4 * 60 * 60 * 1000 : 5 * 60 * 1000;
@@ -169,6 +229,10 @@ export default async function handler(req: any, res: any) {
       .update({
         trade_status: 'COOLDOWN',
         active_trade_id: null,
+        zone_data: null,
+        zone_status: 'NO_ZONE',
+        zone_high: null,
+        zone_low: null,
         closed_at: new Date().toISOString(),
         cooldown_until: cooldownUntil,
         last_scan_at: new Date().toISOString(),

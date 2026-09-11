@@ -177,33 +177,8 @@ export function buildTelegramAlertMessage(signal: SignalTelegramPayload): string
     }
   }
 
-  // 5. WHY section
-  let reasons: string[] = [];
-  if (Array.isArray(signal.aiReasoning)) {
-    reasons = signal.aiReasoning.map(r => String(r).trim()).filter(Boolean);
-  } else if (typeof signal.aiReasoning === 'string') {
-    reasons = signal.aiReasoning.split(/\||\n|;/).map(s => s.trim()).filter(Boolean);
-  }
-
-  reasons = reasons.filter(r =>
-    !r.toLowerCase().includes('api_key') &&
-    !r.toLowerCase().includes('telegram') &&
-    !r.toLowerCase().includes('supabase') &&
-    !r.startsWith('{')
-  );
-
-  if (reasons.length === 0) {
-    reasons = [
-      isBuy ? "Bullish structure confirmed" : "Bearish structure confirmed",
-      isBuy ? "Break above key structural level" : "Rejection from key structural level",
-      "Strategy conditions satisfied"
-    ];
-  }
-
-  const bulletReasons = reasons
-    .slice(0, 4)
-    .map(r => r.startsWith('•') ? r : `• ${r}`)
-    .join('\n');
+  // 5. WHY section - Temporary directive: Disengage auxiliary confirmations and leave only break and retest confirmation
+  const bulletReasons = '• Break and retest confirmed.';
 
   return (
     `${headerIcon} ${headerDir} ${cleanPair} NOW 🚨\n\n` +
@@ -218,6 +193,78 @@ export function buildTelegramAlertMessage(signal: SignalTelegramPayload): string
     `Confidence — ${normalizedConf}%\n\n` +
     `🧠 WHY\n` +
     `${bulletReasons}\n\n` +
+    `⚡ Gaks AI`
+  );
+}
+
+export interface TradeOutcomeTelegramPayload {
+  pair: string;
+  direction: 'BUY' | 'SELL' | string;
+  entryPrice: number;
+  exitPrice: number;
+  stopLoss?: number | null;
+  takeProfit?: number | null;
+  outcome: 'WIN' | 'LOSS' | 'BREAKEVEN' | string;
+  pips?: number;
+  realizedR?: number;
+  totalTrades?: number;
+  wins?: number;
+  losses?: number;
+  winRate?: number;
+  pairTotalTrades?: number;
+  pairWins?: number;
+  pairWinRate?: number;
+}
+
+export function buildTelegramTradeOutcomeMessage(payload: TradeOutcomeTelegramPayload): string {
+  const isWin = payload.outcome === 'WIN' || payload.outcome === 'BROKER_REALIZED_WIN';
+  const cleanPair = (payload.pair || "").toUpperCase().replace('/', '').trim();
+  const dir = (payload.direction || 'BUY').toUpperCase();
+  const dirIcon = dir === 'BUY' ? '🟢' : '🔴';
+  
+  const headerIcon = isWin ? '🎯' : '🛑';
+  const headerTitle = isWin ? 'TAKE PROFIT HIT 🚨' : 'STOP LOSS HIT 🚨';
+  const statusLine = isWin 
+    ? `${dirIcon} ${cleanPair} ${dir} hit Take Profit` 
+    : `${dirIcon} ${cleanPair} ${dir} hit Stop Loss`;
+
+  const pipsVal = payload.pips !== undefined ? Math.abs(payload.pips) : 0;
+  const pipsFormatted = `${isWin ? '+' : '-'}${pipsVal.toFixed(1)} pips`;
+
+  let rFormatted = '';
+  if (payload.realizedR !== undefined && !isNaN(payload.realizedR)) {
+    const rVal = Math.abs(payload.realizedR);
+    rFormatted = `${isWin ? '+' : '-'}${rVal.toFixed(1)}R`;
+  } else {
+    rFormatted = isWin ? '+2.0R' : '-1.0R';
+  }
+
+  const resultLine = `${pipsFormatted} (${rFormatted})`;
+
+  let statsSection = '';
+  if (payload.totalTrades && payload.totalTrades > 0) {
+    const overallWinRateStr = payload.winRate !== undefined 
+      ? `${payload.winRate.toFixed(1)}%`
+      : '0.0%';
+    
+    let pairLine = '';
+    if (payload.pairTotalTrades && payload.pairTotalTrades > 0 && payload.pairWinRate !== undefined) {
+      pairLine = `\n• ${cleanPair} Win Rate — ${payload.pairWinRate.toFixed(1)}% (${payload.pairWins || 0}/${payload.pairTotalTrades})`;
+    }
+
+    statsSection = `\n\n📈 WIN RATE & PERFORMANCE\n• Total Closed Trades — ${payload.totalTrades}\n• Overall Win Rate — ${overallWinRateStr} (${payload.wins || 0}W / ${payload.losses || 0}L)${pairLine}`;
+  }
+
+  return (
+    `${headerIcon} ${headerTitle}\n\n` +
+    `${statusLine}\n\n` +
+    `━━━━━━━━━━━━\n\n` +
+    `📊 TRADE OUTCOME\n` +
+    `ENTRY — ${formatPrice(payload.entryPrice, payload.pair)}\n` +
+    `EXIT — ${formatPrice(payload.exitPrice, payload.pair)}\n` +
+    `RESULT — ${resultLine}\n` +
+    `OUTCOME — ${isWin ? 'WIN ✅' : 'LOSS ❌'}` +
+    `${statsSection}\n\n` +
     `⚡ Gaks AI`
   );
 }

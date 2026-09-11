@@ -615,25 +615,29 @@ export async function runWatcherDiagnosticReplay(options: ReplayOptions): Promis
   }
 
   if (!previousSignalData) {
-    // Check signal_fingerprints
-    const { data: fpData } = await supabase
-      .from('signal_fingerprints')
-      .select('*')
-      .eq('watcher_id', watcher.id)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    // Check signal_fingerprints if available
+    try {
+      const { data: fpData, error: fpErr } = await supabase
+        .from('signal_fingerprints')
+        .select('*')
+        .eq('watcher_id', watcher.id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
 
-    if (fpData) {
-      previousSignalData = {
-        symbol: selectedPair,
-        direction: fpData.direction || 'BUY',
-        timeframe: selectedTimeframe,
-        entryPrice: fpData.entry_price || currentPrice,
-        stopLoss: fpData.stop_loss || 0,
-        takeProfit: fpData.take_profit || 0,
-        alertedAt: fpData.created_at
-      };
+      if (!fpErr && fpData) {
+        previousSignalData = {
+          symbol: selectedPair,
+          direction: fpData.direction || 'BUY',
+          timeframe: selectedTimeframe,
+          entryPrice: fpData.entry_price || currentPrice,
+          stopLoss: fpData.stop_loss || 0,
+          takeProfit: fpData.take_profit || 0,
+          alertedAt: fpData.created_at
+        };
+      }
+    } catch (e) {
+      // ignore missing table error
     }
   }
 

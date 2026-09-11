@@ -740,6 +740,31 @@ CREATE INDEX IF NOT EXISTS idx_trade_learning_timeframe ON public.trade_learning
 
 COMMENT ON TABLE public.trade_learning IS 'Stores historical completed trade outcomes and associated execution parameters for statistical learning analytics.';
 
+-- Table: public.signal_fingerprints
+CREATE TABLE IF NOT EXISTS public.signal_fingerprints (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  watcher_id UUID REFERENCES public.watchers(id) ON DELETE CASCADE,
+  fingerprint TEXT NOT NULL,
+  pair TEXT NOT NULL,
+  direction TEXT NOT NULL,
+  entry_price TEXT,
+  stop_loss TEXT,
+  take_profit TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_signal_fingerprints_lookup 
+ON public.signal_fingerprints (watcher_id, fingerprint, created_at DESC);
+
+ALTER TABLE public.signal_fingerprints ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Allow service role full access on signal_fingerprints"
+ON public.signal_fingerprints
+FOR ALL
+USING (true)
+WITH CHECK (true);
+
+
 
 
 

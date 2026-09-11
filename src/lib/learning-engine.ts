@@ -533,3 +533,69 @@ export async function calculateHistoricalProbability(
     average_rr: result.average_rr
   };
 }
+
+export interface UserWinRateStats {
+  totalTrades: number;
+  wins: number;
+  losses: number;
+  winRate: number;
+  pairTotalTrades: number;
+  pairWins: number;
+  pairWinRate: number;
+}
+
+/**
+ * Fetches real-time win rate stats for a user and optionally a specific pair.
+ */
+export async function getUserWinRateStats(
+  supabase: any,
+  userId: string,
+  pair?: string
+): Promise<UserWinRateStats> {
+  const client = supabase || defaultSupabase;
+  if (!userId) {
+    return { totalTrades: 0, wins: 0, losses: 0, winRate: 0, pairTotalTrades: 0, pairWins: 0, pairWinRate: 0 };
+  }
+
+  try {
+    const { data: trades, error } = await client
+      .from('trade_learning')
+      .select('outcome, pair')
+      .eq('user_id', userId)
+      .in('outcome', ['WIN', 'LOSS', 'BROKER_REALIZED_WIN', 'BROKER_REALIZED_LOSS']);
+
+    if (error || !trades || trades.length === 0) {
+      return { totalTrades: 0, wins: 0, losses: 0, winRate: 0, pairTotalTrades: 0, pairWins: 0, pairWinRate: 0 };
+    }
+
+    const totalTrades = trades.length;
+    const wins = trades.filter((t: any) => t.outcome === 'WIN' || t.outcome === 'BROKER_REALIZED_WIN').length;
+    const losses = trades.filter((t: any) => t.outcome === 'LOSS' || t.outcome === 'BROKER_REALIZED_LOSS').length;
+    const winRate = totalTrades > 0 ? Number(((wins / totalTrades) * 100).toFixed(1)) : 0;
+
+    let pairTotalTrades = 0;
+    let pairWins = 0;
+    let pairWinRate = 0;
+
+    if (pair) {
+      const cleanPair = (pair || '').toUpperCase().replace('/', '').trim();
+      const pairTrades = trades.filter((t: any) => (t.pair || '').toUpperCase().replace('/', '').trim() === cleanPair);
+      pairTotalTrades = pairTrades.length;
+      pairWins = pairTrades.filter((t: any) => t.outcome === 'WIN' || t.outcome === 'BROKER_REALIZED_WIN').length;
+      pairWinRate = pairTotalTrades > 0 ? Number(((pairWins / pairTotalTrades) * 100).toFixed(1)) : 0;
+    }
+
+    return {
+      totalTrades,
+      wins,
+      losses,
+      winRate,
+      pairTotalTrades,
+      pairWins,
+      pairWinRate
+    };
+  } catch (err) {
+    console.error('[Learning Engine] getUserWinRateStats error:', err);
+    return { totalTrades: 0, wins: 0, losses: 0, winRate: 0, pairTotalTrades: 0, pairWins: 0, pairWinRate: 0 };
+  }
+}

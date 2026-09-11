@@ -3,7 +3,7 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { defaultMarketDataService, getMarketDataStats, getRequiredCandleCountForTimeframe } from '../market-data-service.js';
 import { analyzeMarket, Candle } from "../strategy-engine.js";
 import { extractRiskPreferences, calculatePositionSize, parseRiskRewardRatio } from "../risk-engine.js";
-import { calculateStructuralStopLoss, validateAndResolveStopLoss } from "../structural-stop-loss.js";
+import { calculateStructuralStopLoss, validateAndResolveStopLoss, validateZoneProximityAndStopLoss, getTimeframeMaxSlPips, getMaxDeparturePips } from "../structural-stop-loss.js";
 import { evaluateRules } from "../rule-engine.js";
 import { compileStrategy } from "../strategy-compiler.js";
 import { evaluateDecision } from "../decision-engine.js";
@@ -20,10 +20,19 @@ import { evaluateQualityGate, calculateAdaptiveQualityRequirement } from "../qua
 import { evaluateAdaptiveExecution } from "../adaptive-execution-engine.js";
 import { evaluateClosedLoopCalibration } from "../closed-loop-calibration-engine.js";
 import { resolveAuthoritativeDecision, DecisionGateResult } from "../decision-attribution.js";
-import { calculateHistoricalProbability, recordCompletedTrade } from "../learning-engine.js";
+import { calculateHistoricalProbability, recordCompletedTrade, getUserWinRateStats } from "../learning-engine.js";
 import { validateActiveTradeState } from "../trade-validator.js";
-import { buildActiveTradeTelemetry, evaluateActiveTradeExit } from "../active-trade-monitor.js";
-import { identifyMarkedZone, evaluateZoneState, isPriceInOrTappingZone, MarkedZone } from "../zone-engine.js";
+import { buildActiveTradeTelemetry, evaluateActiveTradeExit, calculatePipsDistance } from "../active-trade-monitor.js";
+import { buildTelegramTradeOutcomeMessage } from "../telegram-formatter.js";
+import { 
+  identifyMarkedZone, 
+  evaluateZoneState, 
+  isPriceInOrTappingZone, 
+  MarkedZone,
+  recordRejectedZone,
+  getRejectedZones,
+  clearRejectedZones
+} from "../zone-engine.js";
 import { resolveHigherTimeframeTrend } from "../htf-trend-engine.js";
 
 
@@ -68,8 +77,18 @@ async function sendTelegramMessage(chatId: string | number, text: string): Promi
     });
 
     if (!response.ok) {
-      console.error(`Telegram sendMessage failed with status ${response.status}:`, await response.text());
-      return false;
+      const errText = await response.text();
+      console.warn(`Telegram sendMessage Markdown failed (${response.status}: ${errText}). Retrying with plaintext...`);
+      const fallbackResponse = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chat_id: chatId, text: text })
+      });
+      if (!fallbackResponse.ok) {
+        console.error(`Telegram sendMessage failed with status ${fallbackResponse.status}:`, await fallbackResponse.text());
+        return false;
+      }
+      return true;
     }
     return true;
   } catch (err) {
@@ -289,16 +308,6 @@ export default async function handler(req: any, res: any) {
 
       // 1. Target Reached (TP_HIT)
       if (exitEval.exitStatus === 'TP_HIT') {
-        const { data: conn } = await supabase
-          .from("telegram_connections")
-          .select("telegram_chat_id, connected")
-          .eq("user_id", userId)
-          .maybeSingle();
-
-        if (conn?.connected && conn?.telegram_chat_id) {
-          await sendTelegramMessage(conn.telegram_chat_id, `✅ Trade closed\nTarget reached`);
-        }
-
         let latestEval: any = null;
         try {
           const { data } = await supabase
@@ -339,10 +348,51 @@ export default async function handler(req: any, res: any) {
           decision_snapshot: latestEval?.decision_snapshot || null
         });
 
+        // Send Telegram alert with trade outcome and real-time win rate
+        try {
+          const { data: conn } = await supabase
+            .from("telegram_connections")
+            .select("telegram_chat_id, connected")
+            .eq("user_id", userId)
+            .maybeSingle();
+
+          if (conn?.connected && conn?.telegram_chat_id) {
+            const stats = await getUserWinRateStats(supabase, userId, symbol);
+            const pipsDistance = Math.abs(calculatePipsDistance(symbol, entryPrice || currentPrice, currentPrice));
+            const realizedR = exitEval.realizedR > 0 ? exitEval.realizedR : 2.0;
+
+            const tpMsg = buildTelegramTradeOutcomeMessage({
+              pair: symbol,
+              direction: dir as 'BUY' | 'SELL',
+              entryPrice: entryPrice || 0,
+              exitPrice: currentPrice,
+              stopLoss,
+              takeProfit,
+              outcome: 'WIN',
+              pips: pipsDistance,
+              realizedR,
+              totalTrades: stats.totalTrades,
+              wins: stats.wins,
+              losses: stats.losses,
+              winRate: stats.winRate,
+              pairTotalTrades: stats.pairTotalTrades,
+              pairWins: stats.pairWins,
+              pairWinRate: stats.pairWinRate
+            });
+            await sendTelegramMessage(conn.telegram_chat_id, tpMsg);
+          }
+        } catch (tgErr) {
+          console.error("Failed to send TP Telegram outcome message:", tgErr);
+        }
+
         const cooldownUntilIso = new Date(Date.now() + 5 * 60 * 1000).toISOString();
         await supabase.from("watchers").update({
           trade_status: 'COOLDOWN',
           active_trade_id: null,
+          zone_data: null,
+          zone_status: 'NO_ZONE',
+          zone_high: null,
+          zone_low: null,
           closed_at: new Date().toISOString(),
           cooldown_until: cooldownUntilIso,
           last_scan_at: new Date().toISOString(),
@@ -368,16 +418,6 @@ export default async function handler(req: any, res: any) {
 
       // 2. Stop Loss Hit (SL_HIT)
       if (exitEval.exitStatus === 'SL_HIT') {
-        const { data: conn } = await supabase
-          .from("telegram_connections")
-          .select("telegram_chat_id, connected")
-          .eq("user_id", userId)
-          .maybeSingle();
-
-        if (conn?.connected && conn?.telegram_chat_id) {
-          await sendTelegramMessage(conn.telegram_chat_id, `❌ Trade closed\nStop loss hit`);
-        }
-
         let latestEval: any = null;
         try {
           const { data } = await supabase
@@ -418,11 +458,51 @@ export default async function handler(req: any, res: any) {
           decision_snapshot: latestEval?.decision_snapshot || null
         });
 
+        // Send Telegram alert with trade outcome and real-time win rate
+        try {
+          const { data: conn } = await supabase
+            .from("telegram_connections")
+            .select("telegram_chat_id, connected")
+            .eq("user_id", userId)
+            .maybeSingle();
+
+          if (conn?.connected && conn?.telegram_chat_id) {
+            const stats = await getUserWinRateStats(supabase, userId, symbol);
+            const pipsDistance = Math.abs(calculatePipsDistance(symbol, entryPrice || currentPrice, currentPrice));
+
+            const slMsg = buildTelegramTradeOutcomeMessage({
+              pair: symbol,
+              direction: dir as 'BUY' | 'SELL',
+              entryPrice: entryPrice || 0,
+              exitPrice: currentPrice,
+              stopLoss,
+              takeProfit,
+              outcome: 'LOSS',
+              pips: pipsDistance,
+              realizedR: -1.0,
+              totalTrades: stats.totalTrades,
+              wins: stats.wins,
+              losses: stats.losses,
+              winRate: stats.winRate,
+              pairTotalTrades: stats.pairTotalTrades,
+              pairWins: stats.pairWins,
+              pairWinRate: stats.pairWinRate
+            });
+            await sendTelegramMessage(conn.telegram_chat_id, slMsg);
+          }
+        } catch (tgErr) {
+          console.error("Failed to send SL Telegram outcome message:", tgErr);
+        }
+
         const cooldownUntilIso = new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString();
         console.log(`[LOSS COOLDOWN] Watcher ${watcher.id} entered 4-hour cooldown after STOP_LOSS.`);
         await supabase.from("watchers").update({
           trade_status: 'COOLDOWN',
           active_trade_id: null,
+          zone_data: null,
+          zone_status: 'NO_ZONE',
+          zone_high: null,
+          zone_low: null,
           closed_at: new Date().toISOString(),
           cooldown_until: cooldownUntilIso,
           last_scan_at: new Date().toISOString(),
@@ -689,7 +769,22 @@ export default async function handler(req: any, res: any) {
     }
 
     if (!currentZone) {
-      const discoveredZone = identifyMarkedZone(candleData, marketStructure, compiledStrategy, activeCurrentPrice);
+      // Strict Constraint: A trade must hit either TP or stop loss before it can mark another zone.
+      if (watcher.trade_status === 'ACTIVE' || watcher.active_trade_id) {
+        return res.status(200).json({
+          success: true,
+          data: {
+            watcher_id: watcher.id,
+            pair: symbol,
+            signal: 'HOLD',
+            status: 'ACTIVE',
+            message: 'Active trade currently open. A trade must hit either TP or stop loss before marking another zone.'
+          }
+        });
+      }
+
+      const rejectedList = getRejectedZones(watcher.id);
+      const discoveredZone = identifyMarkedZone(candleData, marketStructure, compiledStrategy, activeCurrentPrice, rejectedList);
       if (discoveredZone) {
         discoveredZone.status = 'WAITING_FOR_TAP';
         discoveredZone.tapCount = 0;
@@ -882,9 +977,12 @@ ${strategyText}
 
 AI Instructions:
 1. Determine if conditions satisfy the strategy ('BUY', 'SELL', 'NO_TRADE').
-2. For BUY: Stop Loss MUST be placed BELOW entry, below relevant support zone, swing low, or demand structure.
-3. For SELL: Stop Loss MUST be placed ABOVE entry, above relevant resistance zone, swing high, or supply structure.
-4. Identify stopLossBasis (SUPPORT_ZONE, RESISTANCE_ZONE, SWING_LOW, SWING_HIGH, DEMAND_ZONE, SUPPLY_ZONE, STRUCTURAL_CANDLE, ATR_FALLBACK).
+2. TIMEFRAME & STOP LOSS SCALING:
+- This is a ${selectedTimeframe} trade. Keep Stop Loss tight and proportionate to ${selectedTimeframe} (typically 5 to 10 pips for M5/M15). Never output wide H1/H4 swing stop losses.
+- If current price (${activeCurrentPrice}) has already moved significantly away from marked POI zone in the target direction (late entry / chasing after the move has started), evaluate as NO_TRADE. Do NOT chase late entries.
+3. For BUY: Stop Loss MUST be placed BELOW entry, below relevant support zone, swing low, or demand structure.
+4. For SELL: Stop Loss MUST be placed ABOVE entry, above relevant resistance zone, swing high, or supply structure.
+5. Identify stopLossBasis (SUPPORT_ZONE, RESISTANCE_ZONE, SWING_LOW, SWING_HIGH, DEMAND_ZONE, SUPPLY_ZONE, ORDER_BLOCK, STRUCTURAL_CANDLE, ATR_FALLBACK).
 
 Answer with JSON matching schema.
 `;
@@ -933,26 +1031,49 @@ Answer with JSON matching schema.
 
           if (parsedResult.satisfies && parsedResult.direction && parsedResult.direction !== 'NO_TRADE') {
             geminiSucceeded = true;
-            const signalDir = parsedResult.direction as 'BUY' | 'SELL';
+            let signalDir = parsedResult.direction as 'BUY' | 'SELL';
             const entry = Number(parsedResult.entryPrice) || candleData[candleData.length - 1].close;
 
-            const slResult = validateAndResolveStopLoss(
-              signalDir,
-              entry,
-              parsedResult.stopLoss,
-              parsedResult.stopLossBasis,
-              marketStructure
-            );
+            // If trade is associated with a marked zone, validate departure proximity and SL scaling
+            let proximityValidation: any = null;
+            if (currentZone && signalDir === currentZone.direction) {
+              proximityValidation = validateZoneProximityAndStopLoss(
+                signalDir,
+                entry,
+                currentZone,
+                selectedTimeframe,
+                watcher?.pair || 'EURUSD',
+                marketStructure?.volatilityInformation?.atr
+              );
+              if (proximityValidation.isLateEntry) {
+                console.log(`[GEMINI LATE ENTRY REJECTED] Watcher ID: ${watcher?.id}: ${proximityValidation.lateReason}`);
+                parsedResult.satisfies = false;
+                parsedResult.direction = 'NO_TRADE';
+                parsedResult.reasoning = proximityValidation.lateReason;
+              }
+            }
 
-            let finalTP = Number(parsedResult.takeProfit);
-            const isTpValid = !isNaN(finalTP) && finalTP > 0 &&
-              (signalDir === 'BUY' ? finalTP > entry : finalTP < entry);
+            if (parsedResult.satisfies && parsedResult.direction !== 'NO_TRADE') {
+              const candidateSl = proximityValidation?.stopLoss || parsedResult.stopLoss;
+              const candidateBasis = proximityValidation?.stopLossBasis || parsedResult.stopLossBasis;
+              const slResult = validateAndResolveStopLoss(
+                signalDir,
+                entry,
+                candidateSl,
+                candidateBasis,
+                marketStructure
+              );
 
-            if (!isTpValid) {
+              let finalTP = Number(parsedResult.takeProfit);
               const riskDist = Math.abs(entry - slResult.stopLoss);
               const rrRatio = parseRiskRewardRatio(riskRewardStr);
-              finalTP = signalDir === 'BUY' ? entry + (riskDist * rrRatio) : entry - (riskDist * rrRatio);
-            }
+              const isTpValid = !isNaN(finalTP) && finalTP > 0 &&
+                (signalDir === 'BUY' ? finalTP > entry : finalTP < entry) &&
+                Math.abs(finalTP - entry) <= (riskDist * rrRatio * 1.35);
+
+              if (!isTpValid) {
+                finalTP = signalDir === 'BUY' ? entry + (riskDist * rrRatio) : entry - (riskDist * rrRatio);
+              }
 
             const geminiConfRecord = normalizeConfidence(parsedResult.confidenceScore, 'gemini', 'Gemini AI Model');
             const finalConfRecord = normalizeConfidence(geminiConfRecord.normalized, 'final_trade', 'Executable Signal');
@@ -987,7 +1108,8 @@ TP Basis: ${parsedResult.stopLossBasis || 'Market Structure Target'}`);
               riskReward: riskRewardStr,
               reasoning: [parsedResult.reasoning || "Satisfies strategy rules and Gemini validation."]
             };
-          } else {
+          }
+        } else {
             console.log(`[Gemini Decision]
 Required: YES
 Status: REJECTED
@@ -1061,7 +1183,47 @@ Fallback: NO_TRADE`.trim());
         };
       } else {
         console.log(`[Decision Engine] Recommendation is ${recommendation}. Evaluating local strategy engine.`);
-        const localAnalysis = analyzeMarket(candleData, compiledStrategy as any);
+        const activeZoneDir = currentZone?.direction;
+        let localAnalysis = analyzeMarket(candleData, compiledStrategy as any, activeZoneDir);
+        if (currentZone && (currentZone.status === 'ZONE_TAPPED' || currentZone.status === 'CONFIRMED')) {
+          const signalDir = currentZone.direction;
+          if (!localAnalysis || localAnalysis.signal !== signalDir) {
+            const entry = activeCurrentPrice || candleData[candleData.length - 1]?.close;
+            const proximityValidation = validateZoneProximityAndStopLoss(
+              signalDir,
+              entry,
+              currentZone,
+              selectedTimeframe,
+              watcher?.pair || 'EURUSD',
+              marketStructure?.volatilityInformation?.atr
+            );
+
+            if (proximityValidation.isLateEntry || proximityValidation.isSlTooWide) {
+              console.log(`[LOCAL ENGINE REJECT] Watcher ID: ${watcher?.id}: ${proximityValidation.lateReason || 'Stop loss too wide for timeframe'}`);
+              localAnalysis = {
+                signal: 'NO_TRADE',
+                confidence: 0,
+                reasoning: [proximityValidation.lateReason || 'Stop loss too wide for timeframe']
+              } as any;
+            } else {
+              const sl = proximityValidation.stopLoss;
+              const risk = Math.abs(entry - sl);
+              const rr = parseRiskRewardRatio(riskRewardStr);
+              const tp = signalDir === 'BUY' ? entry + (risk * rr) : entry - (risk * rr);
+              localAnalysis = {
+                signal: signalDir,
+                confidence: 85,
+                entryPrice: entry,
+                stopLoss: sl,
+                takeProfit: tp,
+                riskReward: rr,
+                stopLossBasis: proximityValidation.stopLossBasis,
+                structuralLevel: proximityValidation.structuralLevel,
+                reasoning: [`[Break & Retest Confirmation] Price tapped marked ${currentZone.type} [${currentZone.low.toFixed(5)} - ${currentZone.high.toFixed(5)}] and confirmed retest in ${signalDir} direction while holding tight structural Stop Loss (${sl.toFixed(5)}).`]
+              } as any;
+            }
+          }
+        }
         if (localAnalysis && localAnalysis.signal !== 'NO_TRADE' && localAnalysis.entryPrice) {
           const slResult = calculateStructuralStopLoss(
             localAnalysis.signal as 'BUY' | 'SELL',
@@ -1516,6 +1678,29 @@ ${analysis.stopLossBasis === 'ATR_FALLBACK' ? `ATR: ${marketStructure.volatility
     // "disengage every confirmation after a signal have been found temporary and leave only the break and retest confirmation note do not audit anything apart from it and also Note it's temporary"
     if (attribution.finalDecision !== 'EXECUTE' && analysis.signal !== 'BUY' && analysis.signal !== 'SELL') {
       analysis.signal = 'NO_TRADE';
+    }
+
+    if ((analysis.signal === 'NO_TRADE' || (analysis.signal !== 'BUY' && analysis.signal !== 'SELL')) && currentZone && (currentZone.status === 'ZONE_TAPPED' || currentZone.status === 'CONFIRMED')) {
+      const rejectReason = analysis.reasoning?.join('; ') || 'Manual scan quality control rejected setup';
+      recordRejectedZone(watcher.id, currentZone, rejectReason);
+      console.log(`[ZONE REJECTED BY QUALITY CONTROL] Manual Scan - Watcher ID: ${watcher.id} (${symbol}): Setup on marked zone [${currentZone.low} - ${currentZone.high}] was rejected by quality control: ${rejectReason}. Clearing zone to prevent dwelling. Waiting for another zone to appear.`);
+      
+      try {
+        await supabase.from("watchers").update({
+          zone_data: null,
+          zone_status: 'NO_ZONE',
+          zone_high: null,
+          zone_low: null,
+          zone_type: null,
+          zone_invalidation_level: null,
+          zone_tapped_at: null,
+          last_scan_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        }).eq("id", watcher.id);
+        currentZone = null;
+      } catch (zoneClrErr) {
+        console.warn('[Zone Clear Warning] Failed to clear rejected zone in database:', zoneClrErr);
+      }
     }
 
     // 10. Telegram Send Decision (No actual telegram sending in manual scan)

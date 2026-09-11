@@ -111,7 +111,8 @@ export function determineMarketBias(candles: Candle[]): 'Bullish' | 'Bearish' | 
  */
 export function analyzeMarket(
   candles: Candle[],
-  parsedStrategy: ParsedStrategy | null
+  parsedStrategy: ParsedStrategy | string | null,
+  targetDirection?: 'BUY' | 'SELL'
 ): AnalysisResult {
   const result: AnalysisResult = {
     signal: 'NO_TRADE',
@@ -134,14 +135,29 @@ export function analyzeMarket(
     return result;
   }
 
+  const strategyObj: ParsedStrategy = typeof parsedStrategy === 'string'
+    ? { timeframe: parsedStrategy }
+    : parsedStrategy;
+
   const currentCandle = candles[candles.length - 1];
   const previousCandle = candles[candles.length - 2];
   
-  // Provisional direction based on recent price action
+  // Direction determination:
+  // If targetDirection is provided (e.g. from an active marked zone like BEARISH_ORDER_BLOCK => 'SELL'),
+  // strictly enforce that direction and reject opposite direction.
   const isBullish = currentCandle.close > currentCandle.open;
   const isBearish = currentCandle.close < currentCandle.open;
-  const isBuyDirection = isBullish;
-  const isSellDirection = isBearish;
+  const bias = determineMarketBias(candles);
+
+  let isBuyDirection = targetDirection ? targetDirection === 'BUY' : (bias === 'Bullish' || isBullish);
+  let isSellDirection = targetDirection ? targetDirection === 'SELL' : (bias === 'Bearish' || isBearish);
+
+  // If a strict target direction is provided, lock out the opposing direction completely
+  if (targetDirection === 'BUY') {
+    isSellDirection = false;
+  } else if (targetDirection === 'SELL') {
+    isBuyDirection = false;
+  }
 
   let score = 0;
   let maxScore = 0;
@@ -150,32 +166,32 @@ export function analyzeMarket(
 
   // Evaluate Rules Present in parsedStrategy
   
-  if (parsedStrategy.indicators && parsedStrategy.indicators.length > 0) {
+  if (strategyObj.indicators && strategyObj.indicators.length > 0) {
     requiredChecks++;
-    result.reasoning.push(`Evaluated indicators: ${parsedStrategy.indicators.join(', ')}`);
+    result.reasoning.push(`Evaluated indicators: ${strategyObj.indicators.join(', ')}`);
     checksPassed++;
     score += 10;
     maxScore += 10;
   }
 
-  if (parsedStrategy.emaValues && parsedStrategy.emaValues.length > 0) {
+  if (strategyObj.emaValues && strategyObj.emaValues.length > 0) {
     requiredChecks++;
-    result.reasoning.push(`Evaluated EMA conditions for periods: ${parsedStrategy.emaValues.join(', ')}`);
+    result.reasoning.push(`Evaluated EMA conditions for periods: ${strategyObj.emaValues.join(', ')}`);
     // Placeholder deterministic evaluation
     checksPassed++;
     score += 15;
     maxScore += 15;
   }
 
-  if (parsedStrategy.rsiThresholds) {
+  if (strategyObj.rsiThresholds) {
     requiredChecks++;
-    result.reasoning.push(`Evaluated RSI thresholds (OB: ${parsedStrategy.rsiThresholds.overbought}, OS: ${parsedStrategy.rsiThresholds.oversold})`);
+    result.reasoning.push(`Evaluated RSI thresholds (OB: ${strategyObj.rsiThresholds.overbought}, OS: ${strategyObj.rsiThresholds.oversold})`);
     checksPassed++;
     score += 15;
     maxScore += 15;
   }
 
-  if (parsedStrategy.bos) {
+  if (strategyObj.bos) {
     requiredChecks++;
     result.reasoning.push(`Evaluated Break of Structure (BOS) condition.`);
     checksPassed++;
@@ -183,7 +199,7 @@ export function analyzeMarket(
     maxScore += 10;
   }
 
-  if (parsedStrategy.choch) {
+  if (strategyObj.choch) {
     requiredChecks++;
     result.reasoning.push(`Evaluated Change of Character (CHoCH) condition.`);
     checksPassed++;
@@ -191,7 +207,7 @@ export function analyzeMarket(
     maxScore += 10;
   }
 
-  if (parsedStrategy.liquiditySweep) {
+  if (strategyObj.liquiditySweep) {
     requiredChecks++;
     result.reasoning.push(`Evaluated Liquidity Sweep condition.`);
     checksPassed++;
@@ -199,7 +215,7 @@ export function analyzeMarket(
     maxScore += 10;
   }
 
-  if (parsedStrategy.fairValueGap) {
+  if (strategyObj.fairValueGap) {
     requiredChecks++;
     result.reasoning.push(`Evaluated Fair Value Gap (FVG) condition.`);
     checksPassed++;
@@ -207,32 +223,32 @@ export function analyzeMarket(
     maxScore += 10;
   }
 
-  if (parsedStrategy.session) {
+  if (strategyObj.session) {
     requiredChecks++;
-    result.reasoning.push(`Evaluated session filter: ${parsedStrategy.session}`);
+    result.reasoning.push(`Evaluated session filter: ${strategyObj.session}`);
     checksPassed++;
     score += 5;
     maxScore += 5;
   }
 
-  if (parsedStrategy.timeframe) {
+  if (strategyObj.timeframe) {
     requiredChecks++;
-    result.reasoning.push(`Evaluated timeframe filter: ${parsedStrategy.timeframe}`);
+    result.reasoning.push(`Evaluated timeframe filter: ${strategyObj.timeframe}`);
     checksPassed++;
     score += 5;
     maxScore += 5;
   }
 
-  if (parsedStrategy.entryConditions && parsedStrategy.entryConditions.length > 0) {
+  if (strategyObj.entryConditions && strategyObj.entryConditions.length > 0) {
     requiredChecks++;
-    result.reasoning.push(`Evaluated custom entry conditions (${parsedStrategy.entryConditions.length} rules).`);
+    result.reasoning.push(`Evaluated custom entry conditions (${strategyObj.entryConditions.length} rules).`);
     checksPassed++;
     score += 10;
     maxScore += 10;
   }
 
-  if (parsedStrategy.exitConditions && parsedStrategy.exitConditions.length > 0) {
-    result.reasoning.push(`Registered custom exit conditions (${parsedStrategy.exitConditions.length} rules).`);
+  if (strategyObj.exitConditions && strategyObj.exitConditions.length > 0) {
+    result.reasoning.push(`Registered custom exit conditions (${strategyObj.exitConditions.length} rules).`);
   }
 
   // Calculate Confidence Score
@@ -272,9 +288,9 @@ export function analyzeMarket(
 
     // Parse Stop Loss
     let slPercent = 0.01; // 1% default
-    if (parsedStrategy.stopLoss) {
-      result.reasoning.push(`Applied Stop Loss logic: ${parsedStrategy.stopLoss}`);
-      const match = parsedStrategy.stopLoss.match(/(\d+(?:\.\d+)?)\s*%/);
+    if (strategyObj.stopLoss) {
+      result.reasoning.push(`Applied Stop Loss logic: ${strategyObj.stopLoss}`);
+      const match = strategyObj.stopLoss.match(/(\d+(?:\.\d+)?)\s*%/);
       if (match && match[1]) {
         slPercent = parseFloat(match[1]) / 100;
       }
@@ -282,9 +298,9 @@ export function analyzeMarket(
 
     // Parse Take Profit
     let tpPercent = 0.02; // 2% default
-    if (parsedStrategy.takeProfit) {
-      result.reasoning.push(`Applied Take Profit logic: ${parsedStrategy.takeProfit}`);
-      const match = parsedStrategy.takeProfit.match(/(\d+(?:\.\d+)?)\s*%/);
+    if (strategyObj.takeProfit) {
+      result.reasoning.push(`Applied Take Profit logic: ${strategyObj.takeProfit}`);
+      const match = strategyObj.takeProfit.match(/(\d+(?:\.\d+)?)\s*%/);
       if (match && match[1]) {
         tpPercent = parseFloat(match[1]) / 100;
       }
@@ -325,24 +341,24 @@ export function analyzeMarket(
       cleanReasons.push("• Price rejected resistance.");
     }
 
-    if (parsedStrategy.emaValues && parsedStrategy.emaValues.length > 0) {
+    if (strategyObj.emaValues && strategyObj.emaValues.length > 0) {
       cleanReasons.push("• EMA trend direction aligned.");
     }
-    if (parsedStrategy.rsiThresholds) {
+    if (strategyObj.rsiThresholds) {
       cleanReasons.push("• RSI momentum confirmed.");
     }
-    if (parsedStrategy.bos) {
+    if (strategyObj.bos) {
       cleanReasons.push("• Break of Structure (BOS) confirmed.");
     }
-    if (parsedStrategy.choch) {
+    if (strategyObj.choch) {
       cleanReasons.push("• Change of Character (CHoCH) detected.");
     }
     cleanReasons.push("• Strategy conditions satisfied.");
     result.reasoning = cleanReasons;
 
     // Minimum Risk Reward check
-    if (parsedStrategy.minimumRiskReward && result.riskReward !== null) {
-      if (result.riskReward < parsedStrategy.minimumRiskReward) {
+    if (strategyObj.minimumRiskReward && result.riskReward !== null) {
+      if (result.riskReward < strategyObj.minimumRiskReward) {
         result.signal = 'NO_TRADE';
         result.entryPrice = null;
         result.stopLoss = null;

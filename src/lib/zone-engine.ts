@@ -55,6 +55,61 @@ export interface ZoneEvaluationResult {
   updatedZone: MarkedZone;
 }
 
+export interface RejectedZoneRecord {
+  low: number;
+  high: number;
+  direction?: 'BUY' | 'SELL';
+  rejectedAt: number; // timestamp ms
+  reason: string;
+}
+
+// In-memory registry of recently rejected zones per watcher
+const watcherRejectedZonesMap: Map<string, RejectedZoneRecord[]> = 
+  (globalThis as any).__watcherRejectedZonesMap || new Map();
+(globalThis as any).__watcherRejectedZonesMap = watcherRejectedZonesMap;
+
+/**
+ * Records a zone as rejected by quality control features so the watcher
+ * will not re-select or dwell on this level again.
+ */
+export function recordRejectedZone(watcherId: string, zone: MarkedZone, reason: string): void {
+  if (!watcherId || !zone) return;
+  const existing = watcherRejectedZonesMap.get(watcherId) || [];
+  const now = Date.now();
+  // Keep records for 4 hours
+  const pruned = existing.filter(r => now - r.rejectedAt < 4 * 60 * 60 * 1000);
+  pruned.push({
+    low: zone.low,
+    high: zone.high,
+    direction: zone.direction,
+    rejectedAt: now,
+    reason
+  });
+  watcherRejectedZonesMap.set(watcherId, pruned);
+  console.log(`[ZONE REJECTION REGISTRY] Watcher ${watcherId}: Registered rejected zone [${zone.low} - ${zone.high}] (${zone.direction}). Total active rejected levels: ${pruned.length}. Reason: ${reason}`);
+}
+
+/**
+ * Returns active rejected zone records for a watcher.
+ */
+export function getRejectedZones(watcherId: string): RejectedZoneRecord[] {
+  if (!watcherId) return [];
+  const existing = watcherRejectedZonesMap.get(watcherId) || [];
+  const now = Date.now();
+  const pruned = existing.filter(r => now - r.rejectedAt < 4 * 60 * 60 * 1000);
+  if (pruned.length !== existing.length) {
+    watcherRejectedZonesMap.set(watcherId, pruned);
+  }
+  return pruned;
+}
+
+/**
+ * Clears the rejected zone history for a watcher.
+ */
+export function clearRejectedZones(watcherId: string): void {
+  if (watcherId) watcherRejectedZonesMap.delete(watcherId);
+}
+
 /**
  * Generates a unique zone identifier.
  */
@@ -101,7 +156,8 @@ export function identifyMarkedZone(
   candles: Candle[],
   marketStructure: MarketStructure,
   compiledStrategy?: CompilerOutput | null,
-  currentPrice?: number
+  currentPrice?: number,
+  rejectedZones?: RejectedZoneRecord[]
 ): MarkedZone | null {
   if (!candles || candles.length < 5) return null;
 
@@ -528,6 +584,29 @@ export function identifyMarkedZone(
     }
   }
 
+  // Filter out any candidate zones that were previously rejected by quality control features
+  // (Prevents repeatedly dwelling on or re-marking the same rejected zone)
+  if (rejectedZones && rejectedZones.length > 0 && filteredCandidates.length > 0) {
+    const originalCount = filteredCandidates.length;
+    filteredCandidates = filteredCandidates.filter(candidate => {
+      const isRejected = rejectedZones.some(rz => {
+        // Overlap or near-identical price boundary check
+        const overlaps = Math.max(candidate.low, rz.low) <= Math.min(candidate.high, rz.high);
+        const nearIdentical =
+          Math.abs(candidate.low - rz.low) / (candidate.low || 1) < 0.0015 &&
+          Math.abs(candidate.high - rz.high) / (candidate.high || 1) < 0.0015;
+        const sameDirection = !rz.direction || rz.direction === candidate.direction;
+        return (overlaps || nearIdentical) && sameDirection;
+      });
+      return !isRejected;
+    });
+
+    if (originalCount > 0 && filteredCandidates.length === 0) {
+      console.log(`[ZONE QUALITY DISENGAGEMENT] ${pair}: Filtered out ${originalCount} candidate zone(s) that were previously rejected by quality control. Waiting for another zone to appear.`);
+      return null;
+    }
+  }
+
   // Sort by highest strength and closest proximity
   filteredCandidates.sort((a, b) => b.strength - a.strength);
 
@@ -853,11 +932,29 @@ export function evaluateZoneState(
   }
 
   // =========================================================================
-  // 1. STRUCTURAL INVALIDATION CHECK (Direct penetration through invalidation level)
+  // 1. STRUCTURAL INVALIDATION & DEPARTURE EXPIRATION CHECK
   // =========================================================================
   const activePrice = (currentPrice !== undefined && currentPrice !== null && !isNaN(currentPrice))
     ? currentPrice
     : latestCandle.close;
+
+  // Check if previously CONFIRMED zone has already departed in profit direction
+  if (zone.status === 'CONFIRMED') {
+    const pipSize = (zone.high > 50) ? 0.01 : 0.0001;
+    const departure = zone.direction === 'SELL' ? (zone.low - activePrice) : (activePrice - zone.high);
+    const departurePips = departure / pipSize;
+    if (departurePips > 4.0 || departure > effectiveAtr * 0.5) {
+      updatedZone.status = 'EXPIRED';
+      return {
+        status: 'EXPIRED',
+        isTapped: true,
+        isInvalidated: true,
+        isRejected: false,
+        reason: `Zone expired: Confirmed ${zone.direction} zone [${zone.low.toFixed(5)} - ${zone.high.toFixed(5)}] has already moved ${departurePips.toFixed(1)} pips in target direction. Retest entry window has passed.`,
+        updatedZone
+      };
+    }
+  }
 
   const invLevel = (zone.invalidationLevel !== undefined && zone.invalidationLevel !== null && !isNaN(zone.invalidationLevel))
     ? zone.invalidationLevel
@@ -1051,6 +1148,21 @@ export function evaluateZoneState(
     }
 
     if (madeRetest) {
+      const pipSize = (zone.high > 50) ? 0.01 : 0.0001;
+      const departure = zone.direction === 'SELL' ? (zone.low - currentPrice) : (currentPrice - zone.high);
+      const departurePips = departure / pipSize;
+      if (departurePips > 4.0 || departure > effectiveAtr * 0.5) {
+        updatedZone.status = 'EXPIRED';
+        return {
+          status: 'EXPIRED',
+          isTapped: true,
+          isInvalidated: true,
+          isRejected: false,
+          reason: `Zone expired: After tapping and rejecting, price has already moved ${departurePips.toFixed(1)} pips past marked ${zone.direction} zone [${zone.low.toFixed(5)} - ${zone.high.toFixed(5)}]. Retest entry window has passed.`,
+          updatedZone
+        };
+      }
+
       updatedZone.status = 'CONFIRMED';
       return {
         status: 'CONFIRMED',

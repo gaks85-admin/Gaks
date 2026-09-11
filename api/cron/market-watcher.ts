@@ -4,7 +4,7 @@ import { WatcherLogContext, logWatcherEvent, logWatcherError, logWatcherWarn, re
 import { GoogleGenAI, Type } from '@google/genai';
 import { analyzeMarket, Candle } from '../../src/lib/strategy-engine.js';
 import { ParsedStrategy } from '../../src/lib/strategy-parser.js';
-import { buildTelegramAlertMessage } from '../../src/lib/telegram-formatter.js';
+import { buildTelegramAlertMessage, buildTelegramTradeOutcomeMessage } from '../../src/lib/telegram-formatter.js';
 import { dispatchTradeAlert } from '../../src/lib/telegramWrapper.js';
 import { extractRiskPreferences, calculatePositionSize, parseRiskRewardRatio } from '../../src/lib/risk-engine.js';
 import { evaluateRules } from '../../src/lib/rule-engine.js';
@@ -15,11 +15,12 @@ import { extractMarketStructure } from '../../src/lib/market-structure-engine.js
 import { defaultEconomicEventService } from '../../src/lib/economic-event-service.js';
 import { validateExecutionFreshness } from '../../src/lib/execution-freshness.js';
 import { revalidatePreExecution } from '../../src/lib/pre-execution-validator.js';
-import { calculateStructuralStopLoss, validateAndResolveStopLoss } from '../../src/lib/structural-stop-loss.js';
+import { calculateStructuralStopLoss, validateAndResolveStopLoss, validateZoneProximityAndStopLoss, getTimeframeMaxSlPips, getMaxDeparturePips } from '../../src/lib/structural-stop-loss.js';
 import { getBrokerProvider } from '../../src/lib/broker-factory.js';
 import { recordEvaluation } from '../../src/lib/explainability-engine.js';
 import { defaultMarketDataService, getMarketDataStats, getRequiredCandleCountForTimeframe } from '../../src/lib/market-data-service.js';
-import { calculateHistoricalProbability, recordCompletedTrade } from '../../src/lib/learning-engine.js';
+import { calculateHistoricalProbability, recordCompletedTrade, getUserWinRateStats } from '../../src/lib/learning-engine.js';
+import { calculatePipsDistance, calculateUnrealizedPnlR } from '../../src/lib/active-trade-monitor.js';
 import { BrokerReconciliationService } from '../../src/lib/broker-reconciliation-service.js';
 import { SafetyGovernor, defaultSafetyLimits } from '../../src/lib/safety-governor.js';
 import { SupervisedMicrolotGovernor, DEFAULT_MICROLOT_LIMITS } from '../../src/lib/microlot-governor.js';
@@ -46,7 +47,18 @@ import { evaluateAdaptiveExecution } from '../../src/lib/adaptive-execution-engi
 import { evaluateClosedLoopCalibration } from '../../src/lib/closed-loop-calibration-engine.js';
 import { resolveAuthoritativeDecision, DecisionGateResult } from '../../src/lib/decision-attribution.js';
 import { processWithConcurrency } from '../../src/lib/concurrency.js';
-import { identifyMarkedZone, evaluateZoneState, isPriceInOrTappingZone, MarkedZone, ZoneEvaluationResult, evaluateZoneRejection } from '../../src/lib/zone-engine.js';
+import { 
+  identifyMarkedZone, 
+  evaluateZoneState, 
+  isPriceInOrTappingZone, 
+  MarkedZone, 
+  ZoneEvaluationResult, 
+  evaluateZoneRejection,
+  recordRejectedZone,
+  getRejectedZones,
+  clearRejectedZones,
+  RejectedZoneRecord
+} from '../../src/lib/zone-engine.js';
 import { resolveHigherTimeframeTrend } from '../../src/lib/htf-trend-engine.js';
 import { getMarketSchedule } from '../../src/lib/market-hours.js';
 
@@ -146,6 +158,10 @@ export interface SignalPayload {
   lotType?: string;
 }
 
+// In-memory fallback and detection for signal_fingerprints table
+let hasSignalFingerprintsTable: boolean = true;
+const inMemorySignalFingerprints = new Map<string, number>();
+
 export async function registerSignal(
   supabase: any,
   watcher: any,
@@ -161,69 +177,76 @@ export async function registerSignal(
   const signalHash = `${watcher.id}_${signal.pair}_${signal.direction}_${signal.entryPrice}`;
 
   try {
-    // 1. Duplicate Check via Supabase (15-min window per watcher)
-    const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+    const fifteenMinutesAgoMs = Date.now() - 15 * 60 * 1000;
     
-    // Check signal_fingerprints table in Supabase
-    try {
-      const { data: existingFingerprints } = await supabase
-        .from('signal_fingerprints')
-        .select('id')
-        .eq('watcher_id', watcher.id)
-        .eq('fingerprint', signalHash)
-        .gte('created_at', fifteenMinutesAgo)
-        .limit(1);
-
-      if (existingFingerprints && existingFingerprints.length > 0) {
-        console.log(`[registerSignal] Duplicate signal fingerprint detected in Supabase for watcher ${watcher.id}. Skipping.`);
-        return false;
+    // Prune stale in-memory fingerprints
+    for (const [key, ts] of inMemorySignalFingerprints.entries()) {
+      if (ts < fifteenMinutesAgoMs) {
+        inMemorySignalFingerprints.delete(key);
       }
-    } catch (fpQueryErr) {
-      console.warn(`[registerSignal] Error querying signal_fingerprints from Supabase:`, fpQueryErr);
     }
 
-    // Secondary fallback check against scan_evaluations
-    try {
-      const { data: recentEvaluations } = await supabase
-        .from('scan_evaluations')
-        .select('id')
-        .eq('watcher_id', watcher.id)
-        .eq('pair', signal.pair)
-        .eq('trade_sent', true)
-        .gte('created_at', fifteenMinutesAgo)
-        .limit(1);
+    // 1. Duplicate Check via Supabase if table is confirmed present
+    if (hasSignalFingerprintsTable) {
+      try {
+        const fifteenMinutesAgo = new Date(fifteenMinutesAgoMs).toISOString();
+        const { data: existingFingerprints, error: fpQueryErr } = await supabase
+          .from('signal_fingerprints')
+          .select('id')
+          .eq('watcher_id', watcher.id)
+          .eq('fingerprint', signalHash)
+          .gte('created_at', fifteenMinutesAgo)
+          .limit(1);
 
-      if (recentEvaluations && recentEvaluations.length > 0) {
-        console.log(`[registerSignal] Recent trade alert already recorded in scan_evaluations for watcher ${watcher.id}. Skipping.`);
-        return false;
-      }
-    } catch (evalErr) {
-      // Ignore evaluation table check errors if table doesn't exist
-    }
-
-    // 2. Atomic fingerprint insertion FIRST to prevent concurrent duplicate signals across serverless cold starts
-    try {
-      const { error: insertFpErr } = await supabase
-        .from('signal_fingerprints')
-        .insert({
-          watcher_id: watcher.id,
-          fingerprint: signalHash,
-          pair: signal.pair,
-          direction: signal.direction,
-          entry_price: String(signal.entryPrice),
-          created_at: new Date().toISOString()
-        });
-
-      if (insertFpErr) {
-        if (insertFpErr.code === '23505' || insertFpErr.message?.includes('unique') || insertFpErr.message?.includes('duplicate')) {
-          console.log(`[registerSignal] Duplicate signal fingerprint blocked by database constraint for watcher ${watcher.id}. Skipping.`);
+        if (fpQueryErr) {
+          if (fpQueryErr.code === 'PGRST205' || fpQueryErr.message?.includes('schema cache') || fpQueryErr.message?.includes('does not exist')) {
+            hasSignalFingerprintsTable = false;
+          }
+        } else if (existingFingerprints && existingFingerprints.length > 0) {
+          console.log(`[registerSignal] Duplicate signal fingerprint detected in Supabase for watcher ${watcher.id}. Skipping.`);
           return false;
         }
-        console.warn(`[registerSignal] Could not insert signal fingerprint into Supabase:`, insertFpErr.message);
+      } catch (fpQueryErr: any) {
+        if (fpQueryErr?.message?.includes('schema cache') || fpQueryErr?.message?.includes('does not exist')) {
+          hasSignalFingerprintsTable = false;
+        }
       }
-    } catch (fpInsertEx) {
-      console.warn(`[registerSignal] Exception inserting signal fingerprint:`, fpInsertEx);
     }
+
+    // 2. Atomic fingerprint insertion if table is present, or fallback to in-memory tracking
+    if (hasSignalFingerprintsTable) {
+      try {
+        const { error: insertFpErr } = await supabase
+          .from('signal_fingerprints')
+          .insert({
+            watcher_id: watcher.id,
+            fingerprint: signalHash,
+            pair: signal.pair,
+            direction: signal.direction,
+            entry_price: String(signal.entryPrice),
+            created_at: new Date().toISOString()
+          });
+
+        if (insertFpErr) {
+          if (insertFpErr.code === 'PGRST205' || insertFpErr.message?.includes('schema cache') || insertFpErr.message?.includes('does not exist')) {
+            // Table not yet created in Supabase schema; silently switch to in-memory tracking
+            hasSignalFingerprintsTable = false;
+          } else if (insertFpErr.code === '23505' || insertFpErr.message?.includes('unique') || insertFpErr.message?.includes('duplicate')) {
+            console.log(`[registerSignal] Duplicate signal fingerprint blocked by database constraint for watcher ${watcher.id}. Skipping.`);
+            return false;
+          } else {
+            console.warn(`[registerSignal] Signal fingerprint persistence notice:`, insertFpErr.message);
+          }
+        }
+      } catch (fpInsertEx: any) {
+        if (fpInsertEx?.message?.includes('schema cache') || fpInsertEx?.message?.includes('does not exist')) {
+          hasSignalFingerprintsTable = false;
+        }
+      }
+    }
+
+    // Track fingerprint in memory
+    inMemorySignalFingerprints.set(signalHash, Date.now());
 
     // 3. Update watcher registration log in database
     const payload = {
@@ -334,8 +357,18 @@ export async function sendTelegramMessage(chatId: string | number, text: string)
     });
     if (!response.ok) {
       const errText = await response.text();
-      console.error(`Telegram API Error: ${response.status} - ${errText}`);
-      return false;
+      console.warn(`Telegram API Error: ${response.status} - ${errText}. Retrying without parse_mode...`);
+      const fallbackResponse = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chat_id: chatId, text: text })
+      });
+      if (!fallbackResponse.ok) {
+        const fbErr = await fallbackResponse.text();
+        console.error(`Telegram API Error (Plain text fallback): ${fallbackResponse.status} - ${fbErr}`);
+        return false;
+      }
+      return true;
     }
     return true;
   } catch (error: any) {
@@ -1088,7 +1121,10 @@ Reason: ${activeValidation.reason}`);
         const isSell = dir === 'SELL' || dir === 'SHORT';
 
         // === STAGE 6 HARDENING: BROKER RECONCILIATION ===
-        if (watcher.active_trade_id) {
+        // Broker reconciliation should ONLY reconcile live broker accounts when in LIVE execution mode.
+        // It must NOT prematurely close theoretical, paper, or signal-only trades.
+        const isLiveExecution = (process.env.EXECUTION_MODE || '').toUpperCase() === 'LIVE' && watcher.execution_source === 'LIVE';
+        if (isLiveExecution && watcher.active_trade_id) {
           const brokerPos = await brokerProvider.getPosition(selectedPair);
           
           if (!brokerPos) {
@@ -1215,12 +1251,6 @@ Reason: ${activeValidation.reason}`);
         // Handle TP Reached
         if (isTP) {
           console.log(`[STATE 2 - ACTIVE] ✅ Target reached for Watcher ID: ${watcher.id} (${selectedPair})! Exit price: ${currentPrice}, TP: ${takeProfit}`);
-          
-          if (telegramChatId) {
-            const tpMsg = `✅ Trade closed\nTarget reached`;
-            await sendTelegramMessage(telegramChatId, tpMsg);
-            telegramMessagesSentCount++;
-          }
 
           // Record completed trade to Learning Engine
           let latestEval: any = null;
@@ -1269,12 +1299,48 @@ Reason: ${activeValidation.reason}`);
             decision_snapshot: latestEval?.decision_snapshot || null
           });
 
-          // Transition to COOLDOWN
+          // Send Telegram alert with trade outcome and real-time win rate
+          if (telegramChatId) {
+            try {
+              const stats = await getUserWinRateStats(supabase, userId, selectedPair);
+              const pipsDistance = Math.abs(calculatePipsDistance(selectedPair, entryPrice || currentPrice, currentPrice));
+              const realizedR = calculateUnrealizedPnlR(dir, entryPrice || currentPrice, stopLoss || 0, currentPrice);
+
+              const tpMsg = buildTelegramTradeOutcomeMessage({
+                pair: selectedPair,
+                direction: dir as 'BUY' | 'SELL',
+                entryPrice: entryPrice || 0,
+                exitPrice: currentPrice,
+                stopLoss,
+                takeProfit,
+                outcome: 'WIN',
+                pips: pipsDistance,
+                realizedR: realizedR > 0 ? realizedR : 2.0,
+                totalTrades: stats.totalTrades,
+                wins: stats.wins,
+                losses: stats.losses,
+                winRate: stats.winRate,
+                pairTotalTrades: stats.pairTotalTrades,
+                pairWins: stats.pairWins,
+                pairWinRate: stats.pairWinRate
+              });
+              await sendTelegramMessage(telegramChatId, tpMsg);
+              telegramMessagesSentCount++;
+            } catch (tgErr: any) {
+              console.error(`[TELEGRAM OUTCOME ERROR] Error sending TP outcome message:`, tgErr);
+            }
+          }
+
+          // Transition to COOLDOWN & clear zone so another zone is not marked until cooldown expires
           const { data: tpCooldownData, error: tpCooldownErr } = await supabase
             .from("watchers")
             .update({
               trade_status: 'COOLDOWN',
               active_trade_id: null,
+              zone_data: null,
+              zone_status: 'NO_ZONE',
+              zone_high: null,
+              zone_low: null,
               closed_at: new Date().toISOString(),
               cooldown_until: cooldownUntilIso,
               last_scan_at: new Date().toISOString(),
@@ -1299,12 +1365,6 @@ Reason: ${activeValidation.reason}`);
         // Handle SL Reached
         if (isSL) {
           console.log(`[STATE 2 - ACTIVE] ❌ Stop loss hit for Watcher ID: ${watcher.id} (${selectedPair})! Exit price: ${currentPrice}, SL: ${stopLoss}`);
-
-          if (telegramChatId) {
-            const slMsg = `❌ Trade closed\nStop loss hit`;
-            await sendTelegramMessage(telegramChatId, slMsg);
-            telegramMessagesSentCount++;
-          }
 
           // Record completed trade to Learning Engine
           let latestEval: any = null;
@@ -1353,7 +1413,38 @@ Reason: ${activeValidation.reason}`);
             decision_snapshot: latestEval?.decision_snapshot || null
           });
 
-          // Transition to COOLDOWN (4 hours for STOP_LOSS / LOSS)
+          // Send Telegram alert with trade outcome and real-time win rate
+          if (telegramChatId) {
+            try {
+              const stats = await getUserWinRateStats(supabase, userId, selectedPair);
+              const pipsDistance = Math.abs(calculatePipsDistance(selectedPair, entryPrice || currentPrice, currentPrice));
+
+              const slMsg = buildTelegramTradeOutcomeMessage({
+                pair: selectedPair,
+                direction: dir as 'BUY' | 'SELL',
+                entryPrice: entryPrice || 0,
+                exitPrice: currentPrice,
+                stopLoss,
+                takeProfit,
+                outcome: 'LOSS',
+                pips: pipsDistance,
+                realizedR: -1.0,
+                totalTrades: stats.totalTrades,
+                wins: stats.wins,
+                losses: stats.losses,
+                winRate: stats.winRate,
+                pairTotalTrades: stats.pairTotalTrades,
+                pairWins: stats.pairWins,
+                pairWinRate: stats.pairWinRate
+              });
+              await sendTelegramMessage(telegramChatId, slMsg);
+              telegramMessagesSentCount++;
+            } catch (tgErr: any) {
+              console.error(`[TELEGRAM OUTCOME ERROR] Error sending SL outcome message:`, tgErr);
+            }
+          }
+
+          // Transition to COOLDOWN (4 hours for STOP_LOSS / LOSS) & clear zone
           const cooldownUntilSl = new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString();
           console.log(`[LOSS COOLDOWN] Watcher ${watcher.id} entered 4-hour cooldown after STOP_LOSS.`);
 
@@ -1362,6 +1453,10 @@ Reason: ${activeValidation.reason}`);
             .update({
               trade_status: 'COOLDOWN',
               active_trade_id: null,
+              zone_data: null,
+              zone_status: 'NO_ZONE',
+              zone_high: null,
+              zone_low: null,
               closed_at: new Date().toISOString(),
               cooldown_until: cooldownUntilSl,
               last_scan_at: new Date().toISOString(),
@@ -1393,6 +1488,23 @@ Reason: ${activeValidation.reason}`);
       console.log(`ENTERING WAITING`);
       if (tradeStatus !== 'WAITING') {
         console.warn(`[STATE GUARD] Watcher ID: ${watcher.id} is in status '${tradeStatus}' (not WAITING). Bypassing signal generation.`);
+        return;
+      }
+
+      // Strict Constraint: Check if user has an active trade for this symbol across ANY watcher.
+      // A trade must hit either TP or stop loss before marking another zone.
+      const cleanPairUpper = (selectedPair || '').replace('/', '').toUpperCase();
+      const hasActiveTradeOnPair = (watchers || []).some((w: any) => {
+        if (w.user_id !== userId) return false;
+        const wPair = (w.selected_pair || w.symbol || '').replace('/', '').toUpperCase();
+        return wPair === cleanPairUpper && (w.trade_status || '').toUpperCase() === 'ACTIVE';
+      });
+
+      if (hasActiveTradeOnPair) {
+        console.log(`[ACTIVE TRADE LOCK] Pair ${selectedPair} currently has an ACTIVE trade in progress. Skipping zone marking until the active trade hits TP or SL.`);
+        watchersProcessedCount++;
+        isWatcherSkipped = false;
+        results.push({ userId, symbol: selectedPair, tradeStatus: 'WAITING', result: 'Active trade open on pair; awaiting TP or SL before marking new zone.' });
         return;
       }
 
@@ -1815,7 +1927,11 @@ Reason: ${activeValidation.reason}`);
             return;
           } else {
             // Zone is TAPPED!
-            console.log(`[ZONE TAPPED] Watcher ID: ${watcher.id} (${selectedPair}): Price ${activeCurrentPrice} tapped marked zone [${currentZone.low} - ${currentZone.high}] (${currentZone.type}). Proceeding to confirmation analysis.`);
+            const isLiveInZone = activeCurrentPrice >= currentZone.low && activeCurrentPrice <= currentZone.high;
+            const tapStatusMsg = isLiveInZone
+              ? `Price ${activeCurrentPrice} tapped marked zone [${currentZone.low} - ${currentZone.high}] (${currentZone.type})`
+              : `Marked zone [${currentZone.low} - ${currentZone.high}] (${currentZone.type}) was tapped (Current Price: ${activeCurrentPrice})`;
+            console.log(`[ZONE TAPPED] Watcher ID: ${watcher.id} (${selectedPair}): ${tapStatusMsg}. Proceeding to confirmation analysis.`);
             logWatcherEvent('ZONE TAPPED', logCtx, {
               'Zone Type': currentZone.type,
               'Zone Bounds': `[${currentZone.low} - ${currentZone.high}]`,
@@ -1841,8 +1957,18 @@ Reason: ${activeValidation.reason}`);
         }
 
         // 2. If NO active zone exists, identify and mark a fresh high-quality structural zone
+        // CRITICAL: A trade must hit either TP or stop loss before marking another zone.
         if (!currentZone) {
-          const discoveredZone = identifyMarkedZone(candleData, marketStructure, compiledStrategy, activeCurrentPrice);
+          if (tradeStatus === 'ACTIVE' || watcher.trade_status === 'ACTIVE' || watcher.active_trade_id || hasActiveTradeOnPair) {
+            console.log(`[ZONE MARKING BLOCKED] Watcher ID: ${watcher.id} (${selectedPair}) has an active trade in progress. Must hit TP or SL before marking another zone.`);
+            watchersProcessedCount++;
+            isWatcherSkipped = false;
+            results.push({ userId, symbol: selectedPair, tradeStatus: watcher.trade_status, result: 'Awaiting TP or SL before marking new zone.' });
+            return;
+          }
+
+          const rejectedList = getRejectedZones(watcher.id);
+          const discoveredZone = identifyMarkedZone(candleData, marketStructure, compiledStrategy, activeCurrentPrice, rejectedList);
 
           if (discoveredZone) {
             console.log(`[ZONE MARKED] Watcher ID: ${watcher.id} (${selectedPair}): Identified fresh ${discoveredZone.type} (${discoveredZone.direction}) [${discoveredZone.low} - ${discoveredZone.high}], Invalidation: ${discoveredZone.invalidationLevel}.`);
@@ -2115,14 +2241,50 @@ Action: LOCAL_NO_TRADE (Gemini API Bypassed - Quota 100% Preserved)
             decision_snapshot: decisionSnapshot
           });
 
-          await supabase
-            .from("watchers")
-            .update({ 
-               last_scan_at: new Date().toISOString(),
-               last_analyzed_closed_candle_time: latestClosedCandleTime,
-               updated_at: new Date().toISOString()
-            })
-            .eq("id", watcher.id);
+          if (currentZone && (currentZone.status === 'ZONE_TAPPED' || currentZone.status === 'CONFIRMED' || lastZoneEval?.isTapped)) {
+            const rejectReason = decisionResult.no_trade_reason ||
+              decisionResult.explanation ||
+              `Deterministic pre-filter rejected setup (Score: ${decisionResult.decision_score?.toFixed(1)}% < ${PRE_FILTER_MIN_SCORE}%)`;
+            
+            recordRejectedZone(watcher.id, currentZone, rejectReason);
+            activeZonesMemoryMap.delete(watcher.id);
+            console.log(`[ZONE REJECTED BY QUALITY CONTROL] Watcher ID: ${watcher.id} (${selectedPair}): Setup on marked zone [${currentZone.low} - ${currentZone.high}] (${currentZone.type}) was rejected by deterministic pre-filter gate: ${rejectReason}. Clearing zone to prevent dwelling. Waiting for another zone to appear.`);
+
+            logWatcherEvent('ZONE REJECTED BY QUALITY CONTROL', logCtx, {
+              'Zone Type': currentZone.type,
+              'Zone Bounds': `[${currentZone.low} - ${currentZone.high}]`,
+              'Direction': currentZone.direction,
+              'Reason': rejectReason,
+              'Action': 'WAITING_FOR_ANOTHER_ZONE'
+            });
+
+            await supabase
+              .from("watchers")
+              .update({ 
+                 zone_data: null,
+                 zone_status: 'NO_ZONE',
+                 zone_high: null,
+                 zone_low: null,
+                 zone_type: null,
+                 zone_invalidation_level: null,
+                 zone_tapped_at: null,
+                 last_scan_at: new Date().toISOString(),
+                 last_analyzed_closed_candle_time: latestClosedCandleTime,
+                 updated_at: new Date().toISOString()
+              })
+              .eq("id", watcher.id);
+
+            currentZone = null;
+          } else {
+            await supabase
+              .from("watchers")
+              .update({ 
+                 last_scan_at: new Date().toISOString(),
+                 last_analyzed_closed_candle_time: latestClosedCandleTime,
+                 updated_at: new Date().toISOString()
+              })
+              .eq("id", watcher.id);
+          }
 
           watchersProcessedCount++;
           isWatcherSkipped = false;
@@ -2370,11 +2532,14 @@ Detailed Numeric Market Structure & Key Levels:
 AI Instructions:
 1. Evaluate ONLY the supplied market evidence and marked POI zone.
 2. If Confirmation Mode is Default Confirmation (Tap & Rejection of Marked Zone), price has tapped the marked POI zone and held above/below invalidation. Provide a ${currentZone?.direction || 'directional'} trade approval in accordance with the zone.
-3. If BUY or SELL, provide the exact Entry Price, Stop Loss, and Take Profit based on actual NUMERIC market structure.
-4. For BUY: Stop Loss MUST be placed BELOW entry, at or below marked zone invalidation level (${currentZone?.direction === 'BUY' ? currentZone.invalidationLevel.toFixed(5) : 'support structure'}).
-5. For SELL: Stop Loss MUST be placed ABOVE entry, at or above marked zone invalidation level (${currentZone?.direction === 'SELL' ? currentZone.invalidationLevel.toFixed(5) : 'resistance structure'}).
-6. Identify the basis used for the Stop Loss in "stopLossBasis" (SUPPORT_ZONE, RESISTANCE_ZONE, SWING_LOW, SWING_HIGH, DEMAND_ZONE, SUPPLY_ZONE, STRUCTURAL_CANDLE, ATR_FALLBACK).
-7. Only return NO_TRADE when the supplied evidence clearly argues against taking a trade.
+3. TIMEFRAME & STOP LOSS SCALING:
+- This is a ${selectedTimeframe} trade. Keep Stop Loss tight and proportionate to ${selectedTimeframe} (typically 5 to 10 pips for M5/M15). Never output wide H1/H4 swing stop losses.
+- If current price (${currentPrice}) has already moved significantly away from the marked POI zone in the target direction (late entry / chasing after the move has started), evaluate as NO_TRADE. Do NOT chase late entries.
+4. If BUY or SELL, provide the exact Entry Price, Stop Loss, and Take Profit based on actual NUMERIC market structure.
+5. For BUY: Stop Loss MUST be placed BELOW entry, at or below marked zone invalidation level (${currentZone?.direction === 'BUY' ? currentZone.invalidationLevel.toFixed(5) : 'support structure'}).
+6. For SELL: Stop Loss MUST be placed ABOVE entry, at or above marked zone invalidation level (${currentZone?.direction === 'SELL' ? currentZone.invalidationLevel.toFixed(5) : 'resistance structure'}).
+7. Identify the basis used for the Stop Loss in "stopLossBasis" (SUPPORT_ZONE, RESISTANCE_ZONE, SWING_LOW, SWING_HIGH, DEMAND_ZONE, SUPPLY_ZONE, ORDER_BLOCK, STRUCTURAL_CANDLE, ATR_FALLBACK).
+8. Only return NO_TRADE when the supplied evidence clearly argues against taking a trade.
 
 Output ONLY valid JSON.
 `;
@@ -2541,49 +2706,88 @@ Output ONLY valid JSON.
                   geminiDirection = parsedResult.direction;
                   const entry = Number(parsedResult.entryPrice) || candleData[candleData.length - 1].close;
 
-                  // Resolve structural stop loss using market structure
-                  const slResult = validateAndResolveStopLoss(
-                    geminiDirection as 'BUY' | 'SELL',
-                    entry,
-                    parsedResult.stopLoss,
-                    parsedResult.stopLossBasis,
-                    marketStructure
-                  );
-
-                  let finalTP = Number(parsedResult.takeProfit);
-                  const isTpValid = !isNaN(finalTP) && finalTP > 0 &&
-                    (geminiDirection === 'BUY' ? finalTP > entry : finalTP < entry);
-
-                  if (!isTpValid) {
-                    const riskDist = Math.abs(entry - slResult.stopLoss);
-                    const rrRatio = parseRiskRewardRatio(riskRewardStr);
-                    finalTP = geminiDirection === 'BUY' ? entry + (riskDist * rrRatio) : entry - (riskDist * rrRatio);
+                  // If trade is associated with a marked zone, validate departure proximity and SL scaling
+                  let proximityValidation: any = null;
+                  if (currentZone && geminiDirection === currentZone.direction) {
+                    proximityValidation = validateZoneProximityAndStopLoss(
+                      geminiDirection as 'BUY' | 'SELL',
+                      entry,
+                      currentZone,
+                      selectedTimeframe,
+                      selectedPair,
+                      marketStructure?.volatilityInformation?.atr
+                    );
+                    if (proximityValidation.isLateEntry) {
+                      console.log(`[GEMINI LATE ENTRY REJECTED] Watcher ID: ${watcher.id} (${selectedPair}): ${proximityValidation.lateReason}`);
+                      parsedResult.satisfies = false;
+                      parsedResult.direction = 'NO_TRADE';
+                      parsedResult.reasoning = proximityValidation.lateReason;
+                    }
                   }
 
-                  const geminiConfRecord = normalizeConfidence(parsedResult.confidenceScore, 'gemini', 'Gemini AI Model');
-                  const finalConfRecord = normalizeConfidence(geminiConfRecord.normalized, 'final_trade', 'Executable Signal');
+                  if (parsedResult.satisfies && parsedResult.direction !== 'NO_TRADE') {
+                    // Resolve structural stop loss using market structure
+                    const candidateSl = proximityValidation?.stopLoss || parsedResult.stopLoss;
+                    const candidateBasis = proximityValidation?.stopLossBasis || parsedResult.stopLossBasis;
+                    const slResult = validateAndResolveStopLoss(
+                      geminiDirection as 'BUY' | 'SELL',
+                      entry,
+                      candidateSl,
+                      candidateBasis,
+                      marketStructure
+                    );
 
-                  logWatcherEvent('Gemini Decision', logCtx, {
-                    'Status': 'APPROVED',
-                    'Direction': geminiDirection,
-                    'Confidence': `${geminiConfRecord.normalized}%`,
-                    'Fallback': 'NO_TRADE'
-                  });
+                    let finalTP = Number(parsedResult.takeProfit);
+                    const riskDist = Math.abs(entry - slResult.stopLoss);
+                    const rrRatio = parseRiskRewardRatio(riskRewardStr);
+                    const isTpValid = !isNaN(finalTP) && finalTP > 0 &&
+                      (geminiDirection === 'BUY' ? finalTP > entry : finalTP < entry) &&
+                      // Ensure TP is proportional to actual tight risk distance (not bloated H4 target)
+                      Math.abs(finalTP - entry) <= (riskDist * rrRatio * 1.35);
 
-                  analysis = {
-                    signal: geminiDirection,
-                    confidence: finalConfRecord.normalized,
-                    entryPrice: entry,
-                    stopLoss: slResult.stopLoss,
-                    takeProfit: finalTP,
-                    tp1: parsedResult.tp1 || finalTP,
-                    tp2: parsedResult.tp2 || null,
-                    tp3: parsedResult.tp3 || null,
-                    stopLossBasis: slResult.stopLossBasis,
-                    structuralLevel: slResult.structuralLevel,
-                    riskReward: riskRewardStr,
-                    reasoning: [parsedResult.reasoning || "Satisfies strategy rules and Gemini validation."]
-                  };
+                    if (!isTpValid) {
+                      finalTP = geminiDirection === 'BUY' ? entry + (riskDist * rrRatio) : entry - (riskDist * rrRatio);
+                    }
+
+                    const geminiConfRecord = normalizeConfidence(parsedResult.confidenceScore, 'gemini', 'Gemini AI Model');
+                    const finalConfRecord = normalizeConfidence(geminiConfRecord.normalized, 'final_trade', 'Executable Signal');
+
+                    logWatcherEvent('Gemini Decision', logCtx, {
+                      'Status': 'APPROVED',
+                      'Direction': geminiDirection,
+                      'Confidence': `${geminiConfRecord.normalized}%`,
+                      'Fallback': 'NO_TRADE'
+                    });
+
+                    analysis = {
+                      signal: geminiDirection,
+                      confidence: finalConfRecord.normalized,
+                      entryPrice: entry,
+                      stopLoss: slResult.stopLoss,
+                      takeProfit: finalTP,
+                      tp1: parsedResult.tp1 || finalTP,
+                      tp2: parsedResult.tp2 || null,
+                      tp3: parsedResult.tp3 || null,
+                      stopLossBasis: slResult.stopLossBasis,
+                      structuralLevel: slResult.structuralLevel,
+                      riskReward: riskRewardStr,
+                      reasoning: [parsedResult.reasoning || "Satisfies strategy rules and Gemini validation."]
+                    };
+                  } else {
+                    geminiDirection = 'NO_TRADE';
+                    logWatcherEvent('Gemini Decision', logCtx, {
+                      'Status': 'REJECTED',
+                      'Direction': 'NO_TRADE',
+                      'Confidence': '0%',
+                      'Fallback': 'NO_TRADE'
+                    });
+
+                    analysis = {
+                      signal: 'NO_TRADE',
+                      confidence: 0,
+                      reasoning: [parsedResult?.reasoning || "Setup rejected due to late entry or invalid structure."]
+                    };
+                  }
                 } else {
                   console.log(`[GEMINI NO_TRADE]\nUser: ${logCtx.userEmail || 'unknown'}\nWatcher: ${watcher.id}\nAction: SKIP_SIGNAL`);
 
@@ -2666,26 +2870,32 @@ Output ONLY valid JSON.
             timeframe: compiledStrategy.compiled_rules.timeframes?.[0],
             minimumRiskReward: compiledStrategy.compiled_rules.risk_reward?.min_ratio
           };
-          let localAnalysis = analyzeMarket(candleData, mappedParsedStrategy);
-          if ((!localAnalysis || localAnalysis.signal === 'NO_TRADE') && currentZone && (currentZone.status === 'ZONE_TAPPED' || currentZone.status === 'CONFIRMED' || lastZoneEval?.isTapped)) {
+          const activeZoneDir = currentZone?.direction;
+          let localAnalysis = analyzeMarket(candleData, mappedParsedStrategy, activeZoneDir);
+          // Strict Zone Consistency & Break and Retest Retrace Rule:
+          // When an active marked zone is present and tapped/confirmed, the trade setup MUST follow currentZone.direction.
+          // Under no circumstance should a BEARISH zone trigger a BUY, nor a BULLISH zone trigger a SELL.
+          if (currentZone && (currentZone.status === 'ZONE_TAPPED' || currentZone.status === 'CONFIRMED' || lastZoneEval?.isTapped)) {
             const signalDir = currentZone.direction;
-            const entry = activeCurrentPrice;
-            const sl = currentZone.invalidationLevel;
-            const risk = Math.abs(entry - sl);
-            const rr = parseRiskRewardRatio(riskRewardStr);
-            const tp = signalDir === 'BUY' ? entry + (risk * rr) : entry - (risk * rr);
-            localAnalysis = {
-              signal: signalDir,
-              confidence: 85,
-              entryPrice: entry,
-              stopLoss: sl,
-              takeProfit: tp,
-              tp1: tp,
-              stopLossBasis: 'STRUCTURAL_ZONE',
-              structuralLevel: sl,
-              riskReward: riskRewardStr,
-              reasoning: [`[Default Confirmation Mode] Price tapped marked ${currentZone.type} [${currentZone.low} - ${currentZone.high}] and confirmed rejection in ${signalDir} direction while holding invalidation (${sl}).`]
-            } as any;
+            if (!localAnalysis || localAnalysis.signal !== signalDir) {
+              const entry = activeCurrentPrice;
+              const sl = currentZone.invalidationLevel;
+              const risk = Math.abs(entry - sl);
+              const rr = parseRiskRewardRatio(riskRewardStr);
+              const tp = signalDir === 'BUY' ? entry + (risk * rr) : entry - (risk * rr);
+              localAnalysis = {
+                signal: signalDir,
+                confidence: 85,
+                entryPrice: entry,
+                stopLoss: sl,
+                takeProfit: tp,
+                tp1: tp,
+                stopLossBasis: 'STRUCTURAL_ZONE',
+                structuralLevel: sl,
+                riskReward: riskRewardStr,
+                reasoning: [`[Break & Retest Confirmation] Price tapped marked ${currentZone.type} [${currentZone.low} - ${currentZone.high}] and confirmed retest in ${signalDir} direction while holding invalidation (${sl}).`]
+              } as any;
+            }
           }
           const localSignal = localAnalysis?.signal || 'NO_TRADE';
           console.log(`[RULE_ONLY DECISION] Direction: ${localSignal}`);
@@ -2719,27 +2929,60 @@ Output ONLY valid JSON.
           );
 
           if (isBreakRetestConfirmed && currentZone) {
-            console.log(`[Break and Retest Confirmed] Zone ${currentZone.type} verified. Triggering trade under break and retest confirmation mode.`);
+            console.log(`[Break and Retest Confirmed] Zone ${currentZone.type} verified. Validating entry proximity and Stop Loss scaling.`);
             const signalDir = currentZone.direction;
-            const entry = activeCurrentPrice;
-            const sl = currentZone.invalidationLevel;
-            const risk = Math.abs(entry - sl);
-            const rr = parseRiskRewardRatio(riskRewardStr);
-            const tp = signalDir === 'BUY' ? entry + (risk * rr) : entry - (risk * rr);
-            analysis = {
-              signal: signalDir,
-              confidence: 85,
-              entryPrice: entry,
-              stopLoss: sl,
-              takeProfit: tp,
-              tp1: tp,
-              stopLossBasis: 'STRUCTURAL_ZONE',
-              structuralLevel: sl,
-              riskReward: riskRewardStr,
-              reasoning: [
-                `[Break & Retest Confirmation] Price tapped marked ${currentZone.type} [${currentZone.low} - ${currentZone.high}] and confirmed retest in ${signalDir} direction holding invalidation level (${sl}).`
-              ]
-            };
+            const proximityValidation = validateZoneProximityAndStopLoss(
+              signalDir,
+              activeCurrentPrice,
+              currentZone,
+              selectedTimeframe,
+              selectedPair,
+              marketStructure?.volatilityInformation?.atr
+            );
+
+            if (proximityValidation.isLateEntry) {
+              console.log(`[LATE ENTRY REJECTED] Watcher ID: ${watcher.id} (${selectedPair}): ${proximityValidation.lateReason}`);
+              analysis = {
+                signal: 'NO_TRADE',
+                confidence: 0,
+                entryPrice: null,
+                stopLoss: null,
+                takeProfit: null,
+                riskReward: null,
+                reasoning: [proximityValidation.lateReason || 'Late entry rejected to prevent chasing market move.']
+              };
+            } else if (proximityValidation.isSlTooWide) {
+              console.log(`[STOP LOSS TOO WIDE] Watcher ID: ${watcher.id} (${selectedPair}): Stop loss distance (${proximityValidation.slDistancePips.toFixed(1)} pips) exceeds maximum allowable limit for ${selectedTimeframe}. Setup rejected.`);
+              analysis = {
+                signal: 'NO_TRADE',
+                confidence: 0,
+                entryPrice: null,
+                stopLoss: null,
+                takeProfit: null,
+                riskReward: null,
+                reasoning: [`Stop loss distance (${proximityValidation.slDistancePips.toFixed(1)} pips) is too wide for ${selectedTimeframe}. Setup rejected.`]
+              };
+            } else {
+              const entry = proximityValidation.entryPrice;
+              const sl = proximityValidation.stopLoss;
+              const risk = Math.abs(entry - sl);
+              const rr = parseRiskRewardRatio(riskRewardStr);
+              const tp = signalDir === 'BUY' ? entry + (risk * rr) : entry - (risk * rr);
+              analysis = {
+                signal: signalDir,
+                confidence: 85,
+                entryPrice: entry,
+                stopLoss: sl,
+                takeProfit: tp,
+                tp1: tp,
+                stopLossBasis: proximityValidation.stopLossBasis,
+                structuralLevel: proximityValidation.structuralLevel,
+                riskReward: riskRewardStr,
+                reasoning: [
+                  `[Break & Retest Confirmation] Price tapped marked ${currentZone.type} [${currentZone.low.toFixed(5)} - ${currentZone.high.toFixed(5)}] and confirmed retest in ${signalDir} direction holding tight structural Stop Loss (${sl.toFixed(5)} - ${proximityValidation.slDistancePips.toFixed(1)} pips).`
+                ]
+              };
+            }
           } else {
             console.log(`[Safety Invariant] Gemini required. Executed: ${geminiCalled ? 'YES' : 'NO'}, Result: ${parsedResult?.direction || (geminiSucceeded ? 'NO_TRADE' : 'ERROR/UNAVAILABLE')}`);
             analysis = {
@@ -2789,26 +3032,50 @@ Output ONLY valid JSON.
             timeframe: compiledStrategy.compiled_rules.timeframes?.[0],
             minimumRiskReward: compiledStrategy.compiled_rules.risk_reward?.min_ratio
           };
-          let localAnalysis = analyzeMarket(candleData, mappedParsedStrategy);
-          if ((!localAnalysis || localAnalysis.signal === 'NO_TRADE') && currentZone && (currentZone.status === 'ZONE_TAPPED' || currentZone.status === 'CONFIRMED' || lastZoneEval?.isTapped)) {
+          const activeZoneDir = currentZone?.direction;
+          let localAnalysis = analyzeMarket(candleData, mappedParsedStrategy, activeZoneDir);
+          // Strict Zone Consistency & Break and Retest Retrace Rule:
+          // When an active marked zone is present and tapped/confirmed, the trade setup MUST follow currentZone.direction.
+          // Under no circumstance should a BEARISH zone trigger a BUY, nor a BULLISH zone trigger a SELL.
+          if (currentZone && (currentZone.status === 'ZONE_TAPPED' || currentZone.status === 'CONFIRMED' || lastZoneEval?.isTapped)) {
             const signalDir = currentZone.direction;
-            const entry = activeCurrentPrice;
-            const sl = currentZone.invalidationLevel;
-            const risk = Math.abs(entry - sl);
-            const rr = parseRiskRewardRatio(riskRewardStr);
-            const tp = signalDir === 'BUY' ? entry + (risk * rr) : entry - (risk * rr);
-            localAnalysis = {
-              signal: signalDir,
-              confidence: 85,
-              entryPrice: entry,
-              stopLoss: sl,
-              takeProfit: tp,
-              tp1: tp,
-              stopLossBasis: 'STRUCTURAL_ZONE',
-              structuralLevel: sl,
-              riskReward: riskRewardStr,
-              reasoning: [`[Default Confirmation Mode] Price tapped marked ${currentZone.type} [${currentZone.low} - ${currentZone.high}] and confirmed rejection in ${signalDir} direction while holding invalidation (${sl}).`]
-            } as any;
+            if (!localAnalysis || localAnalysis.signal !== signalDir) {
+              const proximityValidation = validateZoneProximityAndStopLoss(
+                signalDir,
+                activeCurrentPrice,
+                currentZone,
+                selectedTimeframe,
+                selectedPair,
+                marketStructure?.volatilityInformation?.atr
+              );
+
+              if (proximityValidation.isLateEntry || proximityValidation.isSlTooWide) {
+                console.log(`[LOCAL ENGINE REJECT] Watcher ID: ${watcher.id} (${selectedPair}): ${proximityValidation.lateReason || 'Stop loss too wide for timeframe'}`);
+                localAnalysis = {
+                  signal: 'NO_TRADE',
+                  confidence: 0,
+                  reasoning: [proximityValidation.lateReason || 'Stop loss too wide for timeframe']
+                } as any;
+              } else {
+                const entry = proximityValidation.entryPrice;
+                const sl = proximityValidation.stopLoss;
+                const risk = Math.abs(entry - sl);
+                const rr = parseRiskRewardRatio(riskRewardStr);
+                const tp = signalDir === 'BUY' ? entry + (risk * rr) : entry - (risk * rr);
+                localAnalysis = {
+                  signal: signalDir,
+                  confidence: 85,
+                  entryPrice: entry,
+                  stopLoss: sl,
+                  takeProfit: tp,
+                  tp1: tp,
+                  stopLossBasis: proximityValidation.stopLossBasis,
+                  structuralLevel: proximityValidation.structuralLevel,
+                  riskReward: riskRewardStr,
+                  reasoning: [`[Break & Retest Confirmation] Price tapped marked ${currentZone.type} [${currentZone.low.toFixed(5)} - ${currentZone.high.toFixed(5)}] and confirmed retest in ${signalDir} direction while holding tight structural Stop Loss (${sl.toFixed(5)}).`]
+                } as any;
+              }
+            }
           }
           if (localAnalysis && localAnalysis.signal !== 'NO_TRADE' && localAnalysis.entryPrice) {
             const slResult = calculateStructuralStopLoss(
@@ -2888,7 +3155,9 @@ Output ONLY valid JSON.
           });
 
           if (!qualityResult.passed) {
-            console.log(`[TEMPORARY DISENGAGEMENT] Quality Gate check (${qualityResult.reason}) bypassed. Preserving ${analysis.signal} based solely on break and retest confirmation.`);
+            console.log(`[QUALITY GATE REJECT] Watcher ID: ${watcher.id} (${selectedPair}): Setup rejected by Quality Gate: ${qualityResult.reason} (Score: ${qualityResult.qualityScore})`);
+            analysis.signal = 'NO_TRADE';
+            analysis.reasoning = [`Quality Gate REJECT: ${qualityResult.reason}`];
           }
         }
 
@@ -2911,7 +3180,9 @@ Output ONLY valid JSON.
             });
 
             if (governorResult.status === 'NO_TRADE' || governorResult.status === 'RESTRICTED_SELECTIVITY') {
-              console.log(`[TEMPORARY DISENGAGEMENT] Risk Governor check (${governorResult.explanation || governorResult.status}) bypassed. Preserving ${analysis.signal} based solely on break and retest confirmation.`);
+              console.log(`[RISK GOVERNOR REJECT] Watcher ID: ${watcher.id} (${selectedPair}): Setup rejected by Risk Governor: ${governorResult.explanation || governorResult.status}`);
+              analysis.signal = 'NO_TRADE';
+              analysis.reasoning = [`Risk Governor REJECT: ${governorResult.explanation || governorResult.status}`];
             }
           } catch (govErr) {
             console.error('[Risk Governor Error] Failed to evaluate equity learning governor, proceeding with standard signal pipeline:', govErr);
@@ -2938,8 +3209,10 @@ Output ONLY valid JSON.
 
             console.log(`[Closed-Loop Calibration] Action: ${calibrationResult.recommendedAction}, Evidence: ${calibrationResult.evidenceLevel}, Trades: ${calibrationResult.tradeCount}, Reliability: ${calibrationResult.overallReliability}`);
 
-            if (calibrationResult.recommendedAction === 'NO_TRADE' || calibrationResult.recommendedAction === 'RESTRICT' || calibrationResult.recommendedAction === 'SELECTIVE') {
-              console.log(`[TEMPORARY DISENGAGEMENT] Closed-Loop Calibration (${calibrationResult.recommendedAction}) bypassed. Preserving ${analysis.signal} based solely on break and retest confirmation.`);
+            if (calibrationResult.recommendedAction === 'NO_TRADE' || calibrationResult.recommendedAction === 'RESTRICT') {
+              console.log(`[CALIBRATION REJECT] Watcher ID: ${watcher.id} (${selectedPair}): Setup rejected by Calibration: ${calibrationResult.recommendedAction}`);
+              analysis.signal = 'NO_TRADE';
+              analysis.reasoning = [`Closed-Loop Calibration REJECT: ${calibrationResult.recommendedAction}`];
             }
           } catch (calibErr) {
             console.error('[Closed-Loop Calibration Error] Failed to evaluate closed-loop calibration:', calibErr);
@@ -2968,8 +3241,14 @@ Output ONLY valid JSON.
               sampleSize: adaptiveResult.sampleSize
             });
 
-            if (adaptiveResult.decision === 'REJECT' || adaptiveResult.decision === 'RESTRICT' || analysis.confidence < adaptiveReq.minRequired) {
-              console.log(`[TEMPORARY DISENGAGEMENT] Adaptive Learning/Quality check bypassed. Preserving ${analysis.signal} based solely on break and retest confirmation.`);
+            if (adaptiveResult.decision === 'REJECT') {
+              console.log(`[ADAPTIVE LEARNING REJECT] Watcher ID: ${watcher.id} (${selectedPair}): Setup rejected by Adaptive Learning: ${adaptiveResult.reason}`);
+              analysis.signal = 'NO_TRADE';
+              analysis.reasoning = [`Adaptive Learning REJECT: ${adaptiveResult.reason}`];
+            } else if (analysis.confidence < adaptiveReq.minRequired) {
+              console.log(`[ADAPTIVE QUALITY REJECT] Watcher ID: ${watcher.id} (${selectedPair}): Setup rejected by Adaptive Quality: Confidence ${analysis.confidence}% < ${adaptiveReq.minRequired}%`);
+              analysis.signal = 'NO_TRADE';
+              analysis.reasoning = [`Adaptive Quality REJECT: Confidence ${analysis.confidence}% < ${adaptiveReq.minRequired}%`];
             }
 
             // Adaptive Execution Timing (Stage 3D)
@@ -2989,7 +3268,9 @@ Output ONLY valid JSON.
               });
 
               if (executionResult.status === 'WAIT' || executionResult.status === 'NO_TRADE') {
-                console.log(`[TEMPORARY DISENGAGEMENT] Adaptive Execution Timing check (${executionResult.explanation}) bypassed. Preserving ${analysis.signal} based solely on break and retest confirmation.`);
+                console.log(`[ADAPTIVE TIMING REJECT] Watcher ID: ${watcher.id} (${selectedPair}): Setup rejected by Adaptive Execution Timing: ${executionResult.explanation}`);
+                analysis.signal = 'NO_TRADE';
+                analysis.reasoning = [`Adaptive Timing REJECT: ${executionResult.explanation}`];
               }
             } catch (execErr) {
               console.error('[Adaptive Execution Error] Failed to evaluate adaptive execution timing, proceeding with standard signal pipeline:', execErr);
@@ -3006,8 +3287,53 @@ Output ONLY valid JSON.
         const isWaiting = (analysis.signal !== 'BUY' && analysis.signal !== 'SELL');
 
         if (isWaiting) {
+            const qualityReason = analysis.reasoning?.join('; ') || 'Quality control features rejected setup';
+
+            // If a marked zone was active and tapped/retested, but rejected: clear zone and wait for another zone
+            if (currentZone && (currentZone.status === 'ZONE_TAPPED' || currentZone.status === 'CONFIRMED' || lastZoneEval?.isTapped)) {
+              recordRejectedZone(watcher.id, currentZone, qualityReason);
+              activeZonesMemoryMap.delete(watcher.id);
+
+              console.log(`[ZONE REJECTED BY QUALITY CONTROL] Watcher ID: ${watcher.id} (${selectedPair}): Setup on marked zone [${currentZone.low} - ${currentZone.high}] (${currentZone.type}) was rejected by quality control: ${qualityReason}. Clearing zone to prevent dwelling. Waiting for another zone to appear.`);
+
+              logWatcherEvent('ZONE REJECTED BY QUALITY CONTROL', logCtx, {
+                'Zone Type': currentZone.type,
+                'Zone Bounds': `[${currentZone.low} - ${currentZone.high}]`,
+                'Direction': currentZone.direction,
+                'Reason': qualityReason,
+                'Action': 'WAITING_FOR_ANOTHER_ZONE'
+              });
+
+              await supabase
+                .from("watchers")
+                .update({ 
+                   zone_data: null,
+                   zone_status: 'NO_ZONE',
+                   zone_high: null,
+                   zone_low: null,
+                   zone_type: null,
+                   zone_invalidation_level: null,
+                   zone_tapped_at: null,
+                   last_scan_at: new Date().toISOString(),
+                   last_analyzed_closed_candle_time: latestClosedCandleTime,
+                   updated_at: new Date().toISOString()
+                })
+                .eq("id", watcher.id);
+
+              currentZone = null;
+            } else {
+              await supabase
+                .from("watchers")
+                .update({ 
+                   last_scan_at: new Date().toISOString(),
+                   last_analyzed_closed_candle_time: latestClosedCandleTime,
+                   updated_at: new Date().toISOString()
+                })
+                .eq("id", watcher.id);
+            }
+
             logWatcherEvent('SIGNAL SKIPPED', logCtx, {
-              'Reason': 'No setup found',
+              'Reason': qualityReason,
               'Signal': analysis.signal,
               'Confidence': `${analysis.confidence}%`
             });
@@ -3029,23 +3355,15 @@ Output ONLY valid JSON.
               gemini_used: geminiCalled,
               gemini_result: geminiTextResult || null,
               trade_sent: false,
-              trade_reason: `No trade setup found: signal is ${analysis.signal} and confidence is ${analysis.confidence}%`,
+              trade_reason: `Trade setup rejected: ${qualityReason}`,
               scan_duration_ms: scanDurationMs,
               gemini_duration_ms: geminiDuration,
               decision_snapshot: decisionSnapshot
             });
 
-            await supabase
-              .from("watchers")
-              .update({ 
-                 last_scan_at: new Date().toISOString(),
-                 last_analyzed_closed_candle_time: latestClosedCandleTime,
-                 updated_at: new Date().toISOString()
-              })
-              .eq("id", watcher.id);
-
             watchersProcessedCount++;
             isWatcherSkipped = false;
+            results.push({ userId, symbol, tradeStatus: 'WAITING', result: `Setup rejected: ${qualityReason}` });
             return;
         }
 
@@ -3089,11 +3407,48 @@ ${analysis.stopLossBasis === 'ATR_FALLBACK' ? `ATR: ${marketStructure.volatility
         const brokerExecutionMode = process.env.EXECUTION_MODE || 'THEORETICAL';
 
         if (!posSizeResult.accepted) {
-          console.log(`[TEMPORARY DISENGAGEMENT] Position sizing rejection bypassed (${posSizeResult.skipReason}). Using safe fallback lot size.`);
-          posSizeResult.accepted = true;
-          posSizeResult.calculatedLotSize = posSizeResult.calculatedLotSize || posSizeResult.minLot || 0.01;
-          posSizeResult.exactLotSize = posSizeResult.exactLotSize || posSizeResult.minLot || 0.01;
-          posSizeResult.expectedLoss = posSizeResult.expectedLoss || 10;
+          console.log(`[POSITION SIZING REJECT] Watcher ID: ${watcher.id} (${selectedPair}): Setup rejected by position sizing / risk controls (${posSizeResult.skipReason}).`);
+          analysis.signal = 'NO_TRADE';
+          analysis.reasoning = [`Position Sizing REJECT: ${posSizeResult.skipReason}`];
+
+          if (currentZone) {
+            const rejectReason = `Position sizing rejected: ${posSizeResult.skipReason}`;
+            recordRejectedZone(watcher.id, currentZone, rejectReason);
+            activeZonesMemoryMap.delete(watcher.id);
+            console.log(`[ZONE REJECTED BY QUALITY CONTROL] Watcher ID: ${watcher.id} (${selectedPair}): Setup on marked zone [${currentZone.low} - ${currentZone.high}] (${currentZone.type}) was rejected by position sizing (${posSizeResult.skipReason}). Clearing zone to prevent dwelling. Waiting for another zone to appear.`);
+
+            await supabase
+              .from("watchers")
+              .update({ 
+                 zone_data: null,
+                 zone_status: 'NO_ZONE',
+                 zone_high: null,
+                 zone_low: null,
+                 zone_type: null,
+                 zone_invalidation_level: null,
+                 zone_tapped_at: null,
+                 last_scan_at: new Date().toISOString(),
+                 last_analyzed_closed_candle_time: latestClosedCandleTime,
+                 updated_at: new Date().toISOString()
+              })
+              .eq("id", watcher.id);
+
+            currentZone = null;
+          } else {
+            await supabase
+              .from("watchers")
+              .update({ 
+                 last_scan_at: new Date().toISOString(),
+                 last_analyzed_closed_candle_time: latestClosedCandleTime,
+                 updated_at: new Date().toISOString()
+              })
+              .eq("id", watcher.id);
+          }
+
+          watchersProcessedCount++;
+          isWatcherSkipped = false;
+          results.push({ userId, symbol, tradeStatus: 'WAITING', result: `Position sizing rejected: ${posSizeResult.skipReason}` });
+          return;
         }
         // === STAGE 5 HARDENING: NEWS HARD-PAUSE GATE ===
         const newsGateResult = await defaultEconomicEventService.checkNewsHardPause(selectedPair);
@@ -3134,7 +3489,48 @@ ${analysis.stopLossBasis === 'ATR_FALLBACK' ? `ATR: ${marketStructure.volatility
         });
 
         if (finalValidation.status === 'FINAL_EXECUTION_REJECTED') {
-          console.log(`[TEMPORARY DISENGAGEMENT] Suppressed gate rejection '${finalValidation.rejectionReason}' for Watcher ID: ${watcher.id} (${selectedPair}). Authorizing signal based solely on break and retest confirmation.`);
+          console.log(`[PRE-EXECUTION REJECT] Watcher ID: ${watcher.id} (${selectedPair}): Setup rejected by pre-execution validation: ${finalValidation.rejectionReason}`);
+          analysis.signal = 'NO_TRADE';
+          analysis.reasoning = [`Pre-Execution REJECT: ${finalValidation.rejectionReason}`];
+
+          if (currentZone) {
+            const rejectReason = `Pre-execution validation rejected: ${finalValidation.rejectionReason}`;
+            recordRejectedZone(watcher.id, currentZone, rejectReason);
+            activeZonesMemoryMap.delete(watcher.id);
+            console.log(`[ZONE REJECTED BY QUALITY CONTROL] Watcher ID: ${watcher.id} (${selectedPair}): Setup on marked zone [${currentZone.low} - ${currentZone.high}] (${currentZone.type}) was rejected by pre-execution validation (${finalValidation.rejectionReason}). Clearing zone to prevent dwelling. Waiting for another zone to appear.`);
+
+            await supabase
+              .from("watchers")
+              .update({ 
+                 zone_data: null,
+                 zone_status: 'NO_ZONE',
+                 zone_high: null,
+                 zone_low: null,
+                 zone_type: null,
+                 zone_invalidation_level: null,
+                 zone_tapped_at: null,
+                 last_scan_at: new Date().toISOString(),
+                 last_analyzed_closed_candle_time: latestClosedCandleTime,
+                 updated_at: new Date().toISOString()
+              })
+              .eq("id", watcher.id);
+
+            currentZone = null;
+          } else {
+            await supabase
+              .from("watchers")
+              .update({ 
+                 last_scan_at: new Date().toISOString(),
+                 last_analyzed_closed_candle_time: latestClosedCandleTime,
+                 updated_at: new Date().toISOString()
+              })
+              .eq("id", watcher.id);
+          }
+
+          watchersProcessedCount++;
+          isWatcherSkipped = false;
+          results.push({ userId, symbol, tradeStatus: 'WAITING', result: `Pre-execution rejected: ${finalValidation.rejectionReason}` });
+          return;
         }
 
         // === STAGE 7 HARDENING: BROKER QUOTE INTEGRATION & FRESHNESS ===
