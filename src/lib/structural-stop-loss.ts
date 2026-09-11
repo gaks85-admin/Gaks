@@ -17,28 +17,28 @@ export function getTimeframeMaxSlPips(timeframe?: string, symbol?: string): numb
   const isJpy = sym.includes('JPY');
 
   if (isGold) {
-    if (tf === 'M1' || tf === 'M5') return 35; // $3.50 on Gold
-    if (tf === 'M15') return 50; // $5.00 on Gold
-    if (tf === 'M30') return 75;
-    if (tf === 'H1') return 120;
-    return 250;
+    if (tf === 'M1' || tf === 'M5') return 15; // $1.50 on Gold
+    if (tf === 'M15') return 25; // $2.50 on Gold
+    if (tf === 'M30') return 40;
+    if (tf === 'H1') return 60;
+    return 100;
   }
 
   if (isJpy) {
-    if (tf === 'M1' || tf === 'M5') return 10.0;
-    if (tf === 'M15') return 14.0;
-    if (tf === 'M30') return 20.0;
-    if (tf === 'H1') return 32.0;
-    return 65.0;
+    if (tf === 'M1' || tf === 'M5') return 5.0;
+    if (tf === 'M15') return 8.0;
+    if (tf === 'M30') return 12.0;
+    if (tf === 'H1') return 20.0;
+    return 40.0;
   }
 
   // Major Forex (EURUSD, GBPUSD, etc.)
-  if (tf === 'M1' || tf === 'M5') return 9.5; // Max 9.5 pips on M5
-  if (tf === 'M15') return 13.5; // Max 13.5 pips on M15
-  if (tf === 'M30') return 18.0;
-  if (tf === 'H1') return 28.0;
-  if (tf === 'H4') return 60.0;
-  return 12.0;
+  if (tf === 'M1' || tf === 'M5') return 5.0; // Max 5 pips on M5
+  if (tf === 'M15') return 8.0; // Max 8 pips on M15
+  if (tf === 'M30') return 12.0;
+  if (tf === 'H1') return 18.0;
+  if (tf === 'H4') return 35.0;
+  return 8.0;
 }
 
 /**
@@ -283,7 +283,7 @@ export function calculateStructuralStopLoss(
     }
 
     // 5. ATR Fallback
-    const fallbackDist = Math.min(atr * 1.5, maxSlDistance);
+    const fallbackDist = Math.min(atr * 0.75, maxSlDistance);
     const fallbackSL = entryPrice - fallbackDist;
     return {
       stopLoss: Number(fallbackSL.toFixed(5)),
@@ -380,7 +380,7 @@ export function calculateStructuralStopLoss(
     }
 
     // 5. ATR Fallback
-    const fallbackDist = Math.min(atr * 1.5, maxSlDistance);
+    const fallbackDist = Math.min(atr * 0.75, maxSlDistance);
     const fallbackSL = entryPrice + fallbackDist;
     return {
       stopLoss: Number(fallbackSL.toFixed(5)),

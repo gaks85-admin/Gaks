@@ -464,14 +464,10 @@ export function calculatePositionSize(config: {
 
   let riskDistance = direction === 'SELL' ? config.stopLoss - intendedEntry : intendedEntry - config.stopLoss;
 
-  // 3. Calculate TP
-  const rawProvidedTp = config.takeProfit !== undefined && config.takeProfit !== null ? Number(config.takeProfit) : (config.geminiTp !== undefined && config.geminiTp !== null ? Number(config.geminiTp) : null);
-  const isProvidedTpValid = rawProvidedTp !== null && !isNaN(rawProvidedTp) && rawProvidedTp > 0 &&
-    (direction === 'BUY' ? rawProvidedTp > executedEntry : rawProvidedTp < executedEntry);
-
-  const calculatedTP = isProvidedTpValid
-    ? rawProvidedTp!
-    : (direction === 'SELL' ? intendedEntry - (riskDistance * targetRrRatio) : intendedEntry + (riskDistance * targetRrRatio));
+  // 3. Calculate TP strictly adhering to user's selected Risk:Reward ratio (e.g. 1:2)
+  const calculatedTP = direction === 'SELL'
+    ? intendedEntry - (riskDistance * targetRrRatio)
+    : intendedEntry + (riskDistance * targetRrRatio);
 
   // Check tick difference
   const diff = Math.abs(executedEntry - intendedEntry);
@@ -479,11 +475,11 @@ export function calculatePositionSize(config: {
     console.log(`[Execution Validation] Executed entry (${executedEntry}) differs from intended entry (${intendedEntry}) by ${diff.toFixed(5)} (> 1 tick ${tickSize}). Automatically recomputing TP and SL.`);
   }
 
-  // 5. Recalculate Stop Loss, Take Profit using ONLY the executed entry
+  // 5. Recalculate Stop Loss, Take Profit using ONLY the executed entry and strict RR ratio
   const executedSL = direction === 'SELL' ? executedEntry + riskDistance : executedEntry - riskDistance;
-  const executedTP = isProvidedTpValid
-    ? rawProvidedTp!
-    : (direction === 'SELL' ? executedEntry - (riskDistance * targetRrRatio) : executedEntry + (riskDistance * targetRrRatio));
+  const executedTP = direction === 'SELL'
+    ? executedEntry - (riskDistance * targetRrRatio)
+    : executedEntry + (riskDistance * targetRrRatio);
 
   const stopDistance = direction === 'SELL' ? executedSL - executedEntry : executedEntry - executedSL;
   const tpDistance = direction === 'SELL' ? executedEntry - executedTP : executedTP - executedEntry;
