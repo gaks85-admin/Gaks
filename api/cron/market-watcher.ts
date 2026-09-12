@@ -1591,8 +1591,9 @@ Reason: ${activeValidation.reason}`);
         let maxDailyRiskStr: string;
         let positionMode: 'AUTO_RISK' | 'FIXED_LOT';
         let preferredLotSize: number | undefined;
+        let riskPrefs: any;
         try {
-          const riskPrefs = extractRiskPreferences(prefsRecord, userId);
+          riskPrefs = extractRiskPreferences(prefsRecord, userId);
           accountSize = riskPrefs.accountSize;
           riskPercentage = riskPrefs.riskPercentage;
           riskRewardStr = riskPrefs.riskRewardStr;
@@ -3394,6 +3395,56 @@ Output ONLY valid JSON.
         }
 
         cronTimer.startStage("Position Sizing & Validation");
+
+        // Check Daily Loss Limit
+        const todayStart = new Date();
+        todayStart.setUTCHours(0, 0, 0, 0);
+        const { data: todayTrades } = await supabase
+          .from('trade_learning')
+          .select('net_pnl')
+          .eq('user_id', userId)
+          .gte('closed_at', todayStart.toISOString());
+
+        let totalLossToday = 0;
+        if (todayTrades && todayTrades.length > 0) {
+          for (const t of todayTrades) {
+            const pnl = Number(t.net_pnl);
+            if (!isNaN(pnl) && pnl < 0) {
+              totalLossToday += Math.abs(pnl);
+            }
+          }
+        }
+
+        const maxDailyLossAllowed = riskPrefs.maxDailyLossAmount || 100;
+        if (totalLossToday >= maxDailyLossAllowed) {
+          logWatcherWarn('DAILY LOSS LIMIT', logCtx, `User daily loss limit reached ($${totalLossToday.toFixed(2)} >= $${maxDailyLossAllowed}). Halting new trades for today.`);
+          analysis.signal = 'NO_TRADE';
+          analysis.reasoning = [`Daily Loss Limit Reached: Lost $${totalLossToday.toFixed(2)} today (Limit: $${maxDailyLossAllowed})`];
+          
+          await supabase.from('watcher_evaluations').insert({
+            user_id: userId,
+            watcher_id: watcher.id,
+            symbol,
+            timeframe: selectedTimeframe,
+            strategy_mode: watcher.strategy_mode || 'HYBRID',
+            market_price: Number(candleData[candleData.length - 1]?.close) || 0,
+            decision_score: 0,
+            matched_weight: 0,
+            possible_weight: 100,
+            matched_rules: [],
+            failed_rules: ['DAILY_LOSS_LIMIT_REACHED'],
+            gemini_used: false,
+            trade_sent: false,
+            trade_reason: `Trade setup rejected: Daily loss limit ($${maxDailyLossAllowed}) reached (Today loss: $${totalLossToday.toFixed(2)})`,
+            scan_duration_ms: Date.now() - scanStart
+          });
+
+          watchersProcessedCount++;
+          isWatcherSkipped = false;
+          results.push({ userId, symbol, tradeStatus: 'WAITING', result: `Daily loss limit ($${maxDailyLossAllowed}) reached` });
+          return;
+        }
+
         const executedPrice = Number(candleData[candleData.length - 1]?.close) || Number(analysis.entryPrice) || 0;
         const posSizeResult = calculatePositionSize({
           accountSize: accountSize,

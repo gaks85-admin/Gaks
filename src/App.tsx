@@ -250,6 +250,7 @@ export default function App() {
   const [capital, setCapital] = useState<string>('$1,000');
   const [customCapital, setCustomCapital] = useState<string>('');
   const [preferredRisk, setPreferredRisk] = useState<string>('1%');
+  const [maxDailyLoss, setMaxDailyLoss] = useState<string>('$100');
   const [riskReward, setRiskReward] = useState<string>('1:2');
   const [accountType, setAccountType] = useState<'personal' | 'prop'>('personal');
   const [positionMode, setPositionMode] = useState<'AUTO_RISK' | 'FIXED_LOT'>('AUTO_RISK');
@@ -267,6 +268,7 @@ export default function App() {
     capital: string;
     customCapital: string;
     preferredRisk: string;
+    maxDailyLoss: string;
     riskReward: string;
     accountType: 'personal' | 'prop';
     positionMode: 'AUTO_RISK' | 'FIXED_LOT';
@@ -277,6 +279,7 @@ export default function App() {
     capital: '$1,000',
     customCapital: '',
     preferredRisk: '1%',
+    maxDailyLoss: '$100',
     riskReward: '1:2',
     accountType: 'personal',
     positionMode: 'AUTO_RISK',
@@ -289,6 +292,7 @@ export default function App() {
     if (capital !== initialPrefs.capital) return true;
     if (customCapital !== initialPrefs.customCapital) return true;
     if (preferredRisk !== initialPrefs.preferredRisk) return true;
+    if (maxDailyLoss !== initialPrefs.maxDailyLoss) return true;
     if (riskReward !== initialPrefs.riskReward) return true;
     if (accountType !== initialPrefs.accountType) return true;
     if (positionMode !== initialPrefs.positionMode) return true;
@@ -656,6 +660,9 @@ export default function App() {
       
       const savedRisk = localStorage.getItem('gaks_preferred_risk') || '1%';
       if (savedRisk) setPreferredRisk(savedRisk);
+
+      const savedMaxDaily = localStorage.getItem('gaks_max_daily_loss') || '$100';
+      if (savedMaxDaily) setMaxDailyLoss(savedMaxDaily);
       
       const savedRR = localStorage.getItem('gaks_risk_reward') || '1:2';
       if (savedRR) setRiskReward(savedRR);
@@ -673,8 +680,11 @@ export default function App() {
         capital: savedCapital,
         customCapital: savedCustomCapital,
         preferredRisk: savedRisk,
+        maxDailyLoss: savedMaxDaily,
         riskReward: savedRR,
         accountType: savedAccount as 'personal' | 'prop',
+        positionMode: 'AUTO_RISK',
+        fixedLotSize: '0.01',
         preferredSessions: savedSessions,
         preferredTimeframes: savedTimeframes
       });
@@ -1123,6 +1133,7 @@ export default function App() {
         const capVal = data.capital || '$1,000';
         const customCapVal = data.custom_capital || '';
         const riskVal = data.preferred_risk || '1%';
+        const maxDailyVal = data.max_daily_loss || localStorage.getItem('gaks_max_daily_loss') || '$100';
         const rrVal = data.risk_reward || '1:2';
         
         const rawAccountType = String(data.account_type || 'personal');
@@ -1146,6 +1157,7 @@ export default function App() {
         setCapital(capVal);
         setCustomCapital(customCapVal);
         setPreferredRisk(riskVal);
+        setMaxDailyLoss(String(maxDailyVal));
         setRiskReward(rrVal);
         setAccountType(accountVal as 'personal' | 'prop');
         setPositionMode(modeVal);
@@ -1157,6 +1169,7 @@ export default function App() {
           capital: capVal,
           customCapital: customCapVal,
           preferredRisk: riskVal,
+          maxDailyLoss: String(maxDailyVal),
           riskReward: rrVal,
           accountType: accountVal as 'personal' | 'prop',
           positionMode: modeVal,
@@ -1168,6 +1181,7 @@ export default function App() {
         localStorage.setItem('gaks_capital', capVal);
         localStorage.setItem('gaks_custom_capital', customCapVal);
         localStorage.setItem('gaks_preferred_risk', riskVal);
+        localStorage.setItem('gaks_max_daily_loss', String(maxDailyVal));
         localStorage.setItem('gaks_risk_reward', rrVal);
         localStorage.setItem('gaks_account_type', accountVal);
         localStorage.setItem('gaks_position_mode', modeVal);
@@ -1735,6 +1749,7 @@ export default function App() {
           localStorage.setItem('gaks_capital', capital);
           localStorage.setItem('gaks_custom_capital', customCapital);
           localStorage.setItem('gaks_preferred_risk', preferredRisk);
+          localStorage.setItem('gaks_max_daily_loss', maxDailyLoss);
           localStorage.setItem('gaks_risk_reward', riskReward);
           localStorage.setItem('gaks_account_type', accountType);
           localStorage.setItem('gaks_position_mode', positionMode);
@@ -2368,6 +2383,8 @@ export default function App() {
               setCustomCapital={setCustomCapital}
               preferredRisk={preferredRisk}
               setPreferredRisk={setPreferredRisk}
+              maxDailyLoss={maxDailyLoss}
+              setMaxDailyLoss={setMaxDailyLoss}
               riskReward={riskReward}
               setRiskReward={setRiskReward}
               positionMode={positionMode}

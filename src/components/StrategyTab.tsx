@@ -20,6 +20,8 @@ export interface StrategyTabProps {
   setCustomCapital: (val: string) => void;
   preferredRisk: string;
   setPreferredRisk: (val: string) => void;
+  maxDailyLoss: string;
+  setMaxDailyLoss: (val: string) => void;
   riskReward: string;
   setRiskReward: (val: string) => void;
   positionMode: 'AUTO_RISK' | 'FIXED_LOT';
@@ -54,6 +56,8 @@ export const StrategyTab: React.FC<StrategyTabProps> = ({
   setCustomCapital,
   preferredRisk,
   setPreferredRisk,
+  maxDailyLoss,
+  setMaxDailyLoss,
   riskReward,
   setRiskReward,
   positionMode,
@@ -240,6 +244,22 @@ export const StrategyTab: React.FC<StrategyTabProps> = ({
               placeholder="e.g. 1% or 2.5%"
               className="w-full bg-white dark:bg-zinc-950/60 border border-zinc-200 dark:border-zinc-900 focus:border-zinc-400 dark:focus:border-zinc-700 rounded-2xl px-4 py-3 text-xs font-semibold text-zinc-800 dark:text-white focus:outline-none shadow-sm transition-colors"
             />
+          </div>
+
+          {/* Max Daily Loss Limit Input */}
+          <div className="space-y-2">
+            <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">Max Daily Loss Limit ($)</label>
+            <div className="relative rounded-2xl border border-zinc-200 dark:border-zinc-800 overflow-hidden bg-white dark:bg-zinc-950/60 focus-within:border-zinc-400 dark:focus-within:border-zinc-700 shadow-sm">
+              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-xs font-bold text-zinc-500">$</span>
+              <input
+                type="text"
+                value={maxDailyLoss}
+                onChange={(e) => setMaxDailyLoss(e.target.value)}
+                placeholder="e.g. 100 or 250"
+                className="w-full bg-transparent border-0 py-3 pl-8 pr-4 text-xs font-semibold text-zinc-800 dark:text-white focus:outline-none focus:ring-0"
+              />
+            </div>
+            <p className="text-[11px] text-zinc-400">Trading halts automatically for the day if cumulative losses reach this amount.</p>
           </div>
 
           {/* Position Sizing Mode Selection */}

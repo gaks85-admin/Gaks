@@ -5,6 +5,7 @@ export interface RiskPreferences {
   riskPercentage: number;
   riskRewardStr: string;
   maxDailyRiskStr: string;
+  maxDailyLossAmount: number;
   strategySummary: string;
   dbTimestamp: string;
   positionMode: 'AUTO_RISK' | 'FIXED_LOT';
@@ -207,6 +208,9 @@ export function extractRiskPreferences(prefsRecord: any, userId: string): RiskPr
 
   const riskRewardStr = prefsRecord?.risk_reward || '1:2';
   const maxDailyRiskStr = prefsRecord?.max_daily_risk || prefsRecord?.max_daily_loss || '3 consecutive losses in 24h (Strategy Cap)';
+  const rawMaxDaily = prefsRecord?.max_daily_loss || prefsRecord?.max_daily_risk || prefsRecord?.maxDailyLoss || '100';
+  const cleanedMaxDaily = String(rawMaxDaily).replace(/[^0-9.]/g, "");
+  const maxDailyLossAmount = cleanedMaxDaily ? parseFloat(cleanedMaxDaily) : 100;
   const strategySummary = prefsRecord?.strategy_summary || 'Custom Strategy';
   const dbTimestamp = prefsRecord?.updated_at || prefsRecord?.created_at || 'N/A';
 
@@ -232,6 +236,7 @@ export function extractRiskPreferences(prefsRecord: any, userId: string): RiskPr
     riskPercentage,
     riskRewardStr,
     maxDailyRiskStr,
+    maxDailyLossAmount,
     strategySummary,
     dbTimestamp,
     positionMode,
