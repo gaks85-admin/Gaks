@@ -309,7 +309,7 @@ export default function App() {
     if (sortedTimeframes.some((t, idx) => t !== sortedInitialTimeframes[idx])) return true;
 
     return false;
-  }, [capital, customCapital, preferredRisk, riskReward, accountType, positionMode, fixedLotSize, preferredSessions, preferredTimeframes, initialPrefs]);
+  }, [capital, customCapital, preferredRisk, maxDailyLoss, riskReward, accountType, positionMode, fixedLotSize, preferredSessions, preferredTimeframes, initialPrefs]);
 
   const ADMIN_EMAIL = "gaks6535@gmail.com";
   const isAdmin = useMemo(() => {
