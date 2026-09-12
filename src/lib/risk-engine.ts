@@ -206,15 +206,20 @@ export function extractRiskPreferences(prefsRecord: any, userId: string): RiskPr
     throw new Error(`Account size or risk percentage not defined or invalid in trading preferences for user ${userId}. Never use fallback defaults.`);
   }
 
+  const rawAccountType = String(prefsRecord?.account_type || '');
   const riskRewardStr = prefsRecord?.risk_reward || '1:2';
   const maxDailyRiskStr = prefsRecord?.max_daily_risk || prefsRecord?.max_daily_loss || '3 consecutive losses in 24h (Strategy Cap)';
-  const rawMaxDaily = prefsRecord?.max_daily_loss || prefsRecord?.max_daily_risk || prefsRecord?.maxDailyLoss || '100';
+  
+  let rawMaxDaily = prefsRecord?.max_daily_loss || prefsRecord?.max_daily_risk || prefsRecord?.maxDailyLoss;
+  if (!rawMaxDaily && rawAccountType.includes('|MAXLOSS:')) {
+    const mlMatch = rawAccountType.match(/\|MAXLOSS:([0-9.]+)/);
+    if (mlMatch) rawMaxDaily = mlMatch[1];
+  }
+  if (!rawMaxDaily) rawMaxDaily = '100';
   const cleanedMaxDaily = String(rawMaxDaily).replace(/[^0-9.]/g, "");
   const maxDailyLossAmount = cleanedMaxDaily ? parseFloat(cleanedMaxDaily) : 100;
   const strategySummary = prefsRecord?.strategy_summary || 'Custom Strategy';
   const dbTimestamp = prefsRecord?.updated_at || prefsRecord?.created_at || 'N/A';
-
-  const rawAccountType = String(prefsRecord?.account_type || '');
   let rawMode = prefsRecord?.position_mode || prefsRecord?.position_size_mode;
   if (!rawMode && rawAccountType.includes('MODE:FIXED_LOT')) {
     rawMode = 'FIXED_LOT';

@@ -1133,11 +1133,17 @@ export default function App() {
         const capVal = data.capital || '$1,000';
         const customCapVal = data.custom_capital || '';
         const riskVal = data.preferred_risk || '1%';
-        const maxDailyVal = data.max_daily_loss || localStorage.getItem('gaks_max_daily_loss') || '$100';
         const rrVal = data.risk_reward || '1:2';
         
         const rawAccountType = String(data.account_type || 'personal');
         const accountVal = rawAccountType.startsWith('prop') ? 'prop' : 'personal';
+
+        let maxDailyVal = data.max_daily_loss;
+        if (!maxDailyVal && rawAccountType.includes('|MAXLOSS:')) {
+          const mlMatch = rawAccountType.match(/\|MAXLOSS:([0-9.]+)/);
+          if (mlMatch) maxDailyVal = `${mlMatch[1]}`;
+        }
+        if (!maxDailyVal) maxDailyVal = localStorage.getItem('gaks_max_daily_loss') || '$100';
 
         let modeVal: 'AUTO_RISK' | 'FIXED_LOT' = 'AUTO_RISK';
         if (data.position_mode === 'FIXED_LOT' || data.position_size_mode === 'FIXED_LOT' || rawAccountType.includes('MODE:FIXED_LOT')) {
@@ -1707,7 +1713,7 @@ export default function App() {
       }
     }
 
-    const encodedAccountType = `${accountType}|MODE:${positionMode}|LOT:${fixedLotSize}`;
+    const encodedAccountType = `${accountType}|MODE:${positionMode}|LOT:${fixedLotSize}|MAXLOSS:${maxDailyLoss.replace(/[^0-9.]/g, '')}`;
     
     if (session?.user) {
       try {
