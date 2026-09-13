@@ -1,6 +1,12 @@
 import { createClient } from '@supabase/supabase-js';
 
 const getEnvVar = (key: string): string => {
+  // Static access for common Vite variables to ensure they are replaced at build time
+  if (key === 'VITE_SUPABASE_URL') return import.meta.env.VITE_SUPABASE_URL || '';
+  if (key === 'VITE_SUPABASE_ANON_KEY') return import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+  if (key === 'SUPABASE_URL') return import.meta.env.SUPABASE_URL || '';
+  if (key === 'SUPABASE_ANON_KEY') return import.meta.env.SUPABASE_ANON_KEY || '';
+
   try {
     if (typeof import.meta !== 'undefined' && import.meta && import.meta.env && (import.meta.env as Record<string, string>)[key]) {
       return (import.meta.env as Record<string, string>)[key];
@@ -16,6 +22,8 @@ const getEnvVar = (key: string): string => {
 
 const getSupabaseUrl = (): string => {
   let url = getEnvVar('SUPABASE_URL') || getEnvVar('VITE_SUPABASE_URL');
+  if (!url) return '';
+  
   if (url.endsWith('/rest/v1/')) {
     url = url.slice(0, -9);
   } else if (url.endsWith('/rest/v1')) {

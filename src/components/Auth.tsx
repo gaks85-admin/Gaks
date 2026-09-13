@@ -123,6 +123,12 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
       });
 
       if (error) {
+        console.error("[AUTH LOGIN ERROR]", {
+          name: error?.name,
+          message: error?.message,
+          status: error?.status,
+          code: (error as any)?.code
+        });
         setErrorMessage(error.message);
       } else if (data && data.session) {
         setSuccessMessage('Successfully signed in!');
@@ -134,7 +140,20 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
         setErrorMessage('Unexpected response from auth service.');
       }
     } catch (err: any) {
-      setErrorMessage(err.message || 'An error occurred during sign in.');
+      console.error("[AUTH LOGIN EXCEPTION]", {
+        message: err.message,
+        stack: err.stack,
+        name: err.name
+      });
+      
+      let friendlyMessage = err.message || 'An error occurred during sign in.';
+      
+      // Special handling for browser "Failed to fetch"
+      if (friendlyMessage === 'Failed to fetch') {
+        friendlyMessage = 'Network error: Failed to reach the authentication service. Please check your connection or try again later.';
+      }
+      
+      setErrorMessage(friendlyMessage);
     } finally {
       setIsLoading(false);
     }
