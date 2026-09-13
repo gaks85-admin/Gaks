@@ -108,33 +108,53 @@ async function health_handler(req: any, res: any) {
 
 const SETTINGS_FILE = path.join(process.cwd(), "settings.json");
 
-function loadSettings() {
-  try {
-    if (fs.existsSync(SETTINGS_FILE)) {
-      const data = fs.readFileSync(SETTINGS_FILE, "utf-8");
-      return {
-        defaultStrategy: "Gaks AI Default Strategy",
-        defaultGeminiModel: "gemini-3.5-flash-lite",
-        scanInterval: 15,
-        maintenanceMode: false,
-        executionMode: "HYBRID",
-        ...JSON.parse(data)
-      };
-    }
-  } catch (e) {}
-  return {
+async function loadSettingsFromSupabaseOrFile() {
+  let settings = {
     defaultStrategy: "Gaks AI Default Strategy",
     defaultGeminiModel: "gemini-3.5-flash-lite",
     scanInterval: 15,
     maintenanceMode: false,
     executionMode: "HYBRID"
   };
+
+  try {
+    const supabase = getSupabase();
+    const { data, error } = await supabase.from('system_settings').select('*').eq('id', 'global_config').maybeSingle();
+    if (data && data.settings) {
+      settings = { ...settings, ...data.settings };
+      return settings;
+    }
+  } catch (e) {
+    // Fallback to file
+  }
+
+  try {
+    if (fs.existsSync(SETTINGS_FILE)) {
+      const data = fs.readFileSync(SETTINGS_FILE, "utf-8");
+      settings = { ...settings, ...JSON.parse(data) };
+    }
+  } catch (e) {}
+
+  return settings;
 }
 
-function saveSettings(settings: any) {
+async function saveSettingsToSupabaseAndFile(settings: any) {
+  // Save to file
   try {
     fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2), "utf-8");
   } catch (e) {}
+
+  // Save to Supabase
+  try {
+    const supabase = getSupabase();
+    await supabase.from('system_settings').upsert({
+      id: 'global_config',
+      settings: settings,
+      updated_at: new Date().toISOString()
+    });
+  } catch (e) {
+    console.warn("Failed to persist settings to Supabase table:", e);
+  }
 }
 
 async function settings_handler(req: any, res: any) {
@@ -153,14 +173,14 @@ async function settings_handler(req: any, res: any) {
       return res.status(403).json({ success: false, error: "Unauthorized" });
     }
 
-    let appSettings = loadSettings();
+    let appSettings = await loadSettingsFromSupabaseOrFile();
     if (req.method === 'GET') {
       return res.status(200).json({ success: true, settings: appSettings });
     } else {
       const { settings } = req.body;
       if (!settings) return res.status(400).json({ success: false, error: "Missing settings" });
       appSettings = { ...appSettings, ...settings };
-      saveSettings(appSettings);
+      await saveSettingsToSupabaseAndFile(appSettings);
       return res.status(200).json({ success: true, message: "Settings saved successfully.", settings: appSettings });
     }
   } catch (err: any) {
