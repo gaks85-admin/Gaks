@@ -12,12 +12,7 @@ const getViteEnv = (key: string): string => {
   if (key === 'VITE_SUPABASE_URL') return import.meta.env.VITE_SUPABASE_URL || '';
   if (key === 'VITE_SUPABASE_ANON_KEY') return import.meta.env.VITE_SUPABASE_ANON_KEY || '';
   
-  // @ts-ignore
-  if (key === 'SUPABASE_URL') return import.meta.env.SUPABASE_URL || '';
-  // @ts-ignore
-  if (key === 'SUPABASE_ANON_KEY') return import.meta.env.SUPABASE_ANON_KEY || '';
-
-  // 2. Fallback for Node.js / Server-side environments
+  // 2. Fallback for Node.js / Server-side environments (if any frontend code runs on server)
   try {
     if (typeof process !== 'undefined' && process.env && process.env[key]) {
       return process.env[key]!;
@@ -27,8 +22,8 @@ const getViteEnv = (key: string): string => {
   return '';
 };
 
-const rawUrl = getViteEnv('VITE_SUPABASE_URL') || getViteEnv('SUPABASE_URL');
-const rawKey = getViteEnv('VITE_SUPABASE_ANON_KEY') || getViteEnv('SUPABASE_ANON_KEY');
+const rawUrl = getViteEnv('VITE_SUPABASE_URL');
+const rawKey = getViteEnv('VITE_SUPABASE_ANON_KEY');
 
 // Clean and validate the URL
 const cleanUrl = (url: string): string => {
