@@ -657,10 +657,7 @@ export default async function handler(req: any, res: any) {
       });
     }
 
-    // === GLOBAL EXECUTION MODE (ADMIN-CONTROLLED) ===
-    const globalAdminSettings = await getGlobalExecutionSettings(supabase);
-    const globalExecutionMode: ExecutionMode = globalAdminSettings.executionMode;
-    console.log(`[EXECUTION MODE] Global Scanner Mode: ${globalExecutionMode} (Admin-controlled)`);
+
 
     // 3. Active Watchers Found
     const { data: watchers, error: fetchError } = await supabase
@@ -1156,7 +1153,7 @@ Reason: ${activeValidation.reason}`);
               trade_id: watcher.active_trade_id,
               pair: selectedPair,
               timeframe: selectedTimeframe,
-              strategy_mode: globalExecutionMode,
+              strategy_mode: watcher.strategy_mode || "HYBRID",
               entry_price: entryPrice || 0,
               exit_price: closePrice,
               direction: dir,
@@ -1564,6 +1561,18 @@ Reason: ${activeValidation.reason}`);
 
         const rawStrategyText = prefsRecord?.strategy_text;
 
+        let executionMode: ExecutionMode = 'HYBRID';
+        if (prefsRecord?.account_type) {
+          const amMatch = prefsRecord.account_type.match(/ANALYSIS:([^|]+)/);
+          if (amMatch) {
+            const parsed = amMatch[1];
+            if (parsed === 'RULE_ONLY' || parsed === 'AI_ONLY') {
+              executionMode = parsed as ExecutionMode;
+            }
+          }
+        }
+        console.log(`[ANALYSIS MODE] Watcher: ${watcher.id} | Persisted Mode: ${executionMode}`);
+
         if (!rawStrategyText || !rawStrategyText.trim()) {
           console.log(`[CRON] Strategy text missing for ${userId}`);
           console.log(`LOG: Watcher ${watcher.id} skipped - Strategy text missing for user ${userId}`);
@@ -1621,8 +1630,8 @@ Reason: ${activeValidation.reason}`);
         console.log(`Strategy: ${strategyText ? strategyText.substring(0, 100) + '...' : 'N/A'}`);
         console.log(`[DB Row Comparison] DB capital: "${prefsRecord?.capital || ''}", DB custom_capital: "${prefsRecord?.custom_capital || ''}", DB preferred_risk: "${prefsRecord?.preferred_risk || ''}", DB risk_reward: "${prefsRecord?.risk_reward || ''}"`);
 
-        if (globalExecutionMode !== 'RULE_ONLY' && (!apiKeyRecord || !apiKeyRecord.api_key)) {
-          console.log(`LOG: Watcher ${watcher.id} skipped - Gemini API Key missing (Global mode is ${globalExecutionMode})`);
+        if (executionMode !== 'RULE_ONLY' && (!apiKeyRecord || !apiKeyRecord.api_key)) {
+          console.log(`LOG: Watcher ${watcher.id} skipped - Gemini API Key missing (Execution mode is ${executionMode})`);
           skipped.push({ userId, reason: "Gemini API Key missing" });
           watchersSkippedCount++;
           return;
@@ -1806,7 +1815,7 @@ Reason: ${activeValidation.reason}`);
             user_id: userId,
             pair: selectedPair,
             timeframe: selectedTimeframe,
-            strategy_mode: globalExecutionMode,
+            strategy_mode: executionMode,
             decision_score: 0,
             matched_weight: 0,
             possible_weight: 0,
@@ -1913,7 +1922,7 @@ Reason: ${activeValidation.reason}`);
               watcher_id: watcher.id,
               pair: selectedPair,
               timeframe: selectedTimeframe,
-              strategy_mode: globalExecutionMode,
+              strategy_mode: executionMode,
               decision_score: 0,
               matched_weight: 0,
               possible_weight: 0,
@@ -2045,7 +2054,7 @@ Reason: ${activeValidation.reason}`);
               watcher_id: watcher.id,
               pair: selectedPair,
               timeframe: selectedTimeframe,
-              strategy_mode: globalExecutionMode,
+              strategy_mode: executionMode,
               decision_score: 0,
               matched_weight: 0,
               possible_weight: 0,
@@ -2098,7 +2107,7 @@ Reason: ${activeValidation.reason}`);
                 watcher_id: watcher.id,
                 pair: selectedPair,
                 timeframe: selectedTimeframe,
-                strategy_mode: globalExecutionMode,
+                strategy_mode: executionMode,
                 decision_score: 0,
                 matched_weight: 0,
                 possible_weight: 0,
@@ -2207,7 +2216,7 @@ Reason: ${activeValidation.reason}`);
         let fallbackReason = '';
 
         const recommendation = decisionResult.recommendation; // PASS, LIKELY_PASS, AMBIGUOUS, FAIL
-        const executionMode = globalExecutionMode;
+        // executionMode is computed above from trading_preferences
 
         // =====================================================================
         // DETERMINISTIC PRE-FILTERING GATE (STAGE 2)
@@ -2258,7 +2267,7 @@ Action: LOCAL_NO_TRADE (Gemini API Bypassed - Quota 100% Preserved)
             watcher_id: watcher.id,
             pair: selectedPair,
             timeframe: selectedTimeframe,
-            strategy_mode: globalExecutionMode,
+            strategy_mode: executionMode,
             decision_score: decisionResult.decision_score,
             matched_weight: decisionResult.matched_weight,
             possible_weight: decisionResult.possible_weight,
@@ -2504,7 +2513,7 @@ Reason: Insufficient remaining execution budget (${remainingBeforeGemini}ms rema
                     watcher_id: watcher.id,
                     pair: selectedPair,
                     timeframe: selectedTimeframe,
-                    strategy_mode: globalExecutionMode,
+                    strategy_mode: executionMode,
                     decision_score: decisionResult.decision_score,
                     matched_weight: decisionResult.matched_weight,
                     possible_weight: decisionResult.possible_weight,
@@ -3376,7 +3385,7 @@ Output ONLY valid JSON.
               watcher_id: watcher.id,
               pair: selectedPair,
               timeframe: selectedTimeframe,
-              strategy_mode: globalExecutionMode,
+              strategy_mode: executionMode,
               decision_score: decisionResult.decision_score,
               matched_weight: decisionResult.matched_weight,
               possible_weight: decisionResult.possible_weight,
@@ -3431,7 +3440,7 @@ Output ONLY valid JSON.
             watcher_id: watcher.id,
             symbol,
             timeframe: selectedTimeframe,
-            strategy_mode: globalExecutionMode,
+            strategy_mode: executionMode,
             market_price: Number(candleData[candleData.length - 1]?.close) || 0,
             decision_score: 0,
             matched_weight: 0,
@@ -3690,7 +3699,7 @@ Source: ${brokerQuote.source}`);
                 watcher_id: watcher.id,
                 pair: selectedPair,
                 timeframe: selectedTimeframe,
-                strategy_mode: globalExecutionMode,
+                strategy_mode: executionMode,
                 decision_score: decisionResult.decision_score,
                 matched_weight: decisionResult.matched_weight,
                 possible_weight: decisionResult.possible_weight,
@@ -3768,7 +3777,7 @@ Source: ${brokerQuote.source}`);
                 watcher_id: watcher.id,
                 pair: selectedPair,
                 timeframe: selectedTimeframe,
-                strategy_mode: globalExecutionMode,
+                strategy_mode: executionMode,
                 decision_score: decisionResult.decision_score,
                 matched_weight: decisionResult.matched_weight,
                 possible_weight: decisionResult.possible_weight,
@@ -3916,7 +3925,7 @@ Source: ${brokerQuote.source}`);
             watcher_id: watcher.id,
             pair: selectedPair,
             timeframe: selectedTimeframe,
-            strategy_mode: globalExecutionMode,
+            strategy_mode: executionMode,
             decision_score: decisionResult.decision_score,
             matched_weight: decisionResult.matched_weight,
             possible_weight: decisionResult.possible_weight,
@@ -4018,7 +4027,7 @@ Source: ${brokerQuote.source}`);
             watcher_id: watcher.id,
             pair: selectedPair,
             timeframe: selectedTimeframe,
-            strategy_mode: globalExecutionMode,
+            strategy_mode: executionMode,
             decision_score: decisionResult.decision_score,
             matched_weight: decisionResult.matched_weight,
             possible_weight: decisionResult.possible_weight,
@@ -4086,7 +4095,7 @@ Source: ${brokerQuote.source}`);
           watcher_id: watcher.id,
           pair: selectedPair,
           timeframe: selectedTimeframe,
-          strategy_mode: globalExecutionMode,
+          strategy_mode: executionMode,
           decision_score: decisionResult.decision_score,
           matched_weight: decisionResult.matched_weight,
           possible_weight: decisionResult.possible_weight,

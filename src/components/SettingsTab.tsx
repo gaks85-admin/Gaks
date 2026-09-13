@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { 
+import { Zap, 
   Shield, 
   User as UserIcon, 
   Check, 
@@ -19,6 +19,9 @@ import {
 import { GEMINI_API_KEY_URL, GeminiTestResult, classifyCredentialType } from '../lib/apiKeys.js';
 
 export interface SettingsTabProps {
+  analysisMode: 'HYBRID' | 'RULE_ONLY' | 'AI_ONLY';
+  setAnalysisMode: (val: 'HYBRID' | 'RULE_ONLY' | 'AI_ONLY') => void;
+  savePreferences: () => void;
   profileAvatarUrl: string;
   setProfileAvatarUrl: (val: string) => void;
   profileFullName: string;
@@ -47,6 +50,9 @@ export interface SettingsTabProps {
 }
 
 export const SettingsTab: React.FC<SettingsTabProps> = ({
+  analysisMode,
+  setAnalysisMode,
+  savePreferences,
   profileAvatarUrl,
   setProfileAvatarUrl,
   profileFullName,
@@ -247,6 +253,61 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
               )}
             </button>
           </form>
+        </div>
+
+        
+
+        {/* Execution Mode Configuration */}
+        <div className="bg-zinc-100 dark:bg-zinc-900/50 rounded-2xl border border-zinc-200 dark:border-zinc-800 p-6 shadow-sm">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="w-8 h-8 rounded-full bg-indigo-500/10 flex items-center justify-center">
+              <Zap className="w-4 h-4 text-indigo-500" />
+            </div>
+            <div>
+              <h3 className="text-xs font-bold text-zinc-900 dark:text-white uppercase tracking-widest">Execution Engine Mode</h3>
+              <p className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-1">Control how the Market Watcher processes signals.</p>
+            </div>
+          </div>
+          
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-6">
+            <button
+              onClick={() => setAnalysisMode('RULE_ONLY')}
+              className={`p-4 rounded-xl border text-left transition-all cursor-pointer ${analysisMode === 'RULE_ONLY' ? 'bg-emerald-500/10 border-emerald-500' : 'bg-white dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800'}`}
+            >
+              <div className="flex justify-between items-center mb-2">
+                <span className={`text-xs font-bold uppercase tracking-wider ${analysisMode === 'RULE_ONLY' ? 'text-emerald-600 dark:text-emerald-400' : 'text-zinc-900 dark:text-white'}`}>Rule-Only</span>
+                {analysisMode === 'RULE_ONLY' && <CheckCircle2 className="w-4 h-4 text-emerald-500" />}
+              </div>
+              <p className="text-[11px] text-zinc-500 dark:text-zinc-400">Deterministic rules only. Gemini AI is fully bypassed (0 API usage).</p>
+            </button>
+            <button
+              onClick={() => setAnalysisMode('HYBRID')}
+              className={`p-4 rounded-xl border text-left transition-all cursor-pointer ${analysisMode === 'HYBRID' ? 'bg-sky-500/10 border-sky-500' : 'bg-white dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800'}`}
+            >
+              <div className="flex justify-between items-center mb-2">
+                <span className={`text-xs font-bold uppercase tracking-wider ${analysisMode === 'HYBRID' ? 'text-sky-600 dark:text-sky-400' : 'text-zinc-900 dark:text-white'}`}>Hybrid</span>
+                {analysisMode === 'HYBRID' && <CheckCircle2 className="w-4 h-4 text-sky-500" />}
+              </div>
+              <p className="text-[11px] text-zinc-500 dark:text-zinc-400">Rule engine acts as strict pre-filter; AI verifies passing setups.</p>
+            </button>
+            <button
+              onClick={() => setAnalysisMode('AI_ONLY')}
+              className={`p-4 rounded-xl border text-left transition-all cursor-pointer ${analysisMode === 'AI_ONLY' ? 'bg-purple-500/10 border-purple-500' : 'bg-white dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800'}`}
+            >
+              <div className="flex justify-between items-center mb-2">
+                <span className={`text-xs font-bold uppercase tracking-wider ${analysisMode === 'AI_ONLY' ? 'text-purple-600 dark:text-purple-400' : 'text-zinc-900 dark:text-white'}`}>AI-Only</span>
+                {analysisMode === 'AI_ONLY' && <CheckCircle2 className="w-4 h-4 text-purple-500" />}
+              </div>
+              <p className="text-[11px] text-zinc-500 dark:text-zinc-400">Directly consults Gemini AI for all market bias and trade validation.</p>
+            </button>
+          </div>
+          
+          <button
+            onClick={savePreferences}
+            className="w-full flex items-center justify-center gap-2 px-5 py-3 rounded-full transition-all shadow-md bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 hover:bg-zinc-800 dark:hover:bg-zinc-200 cursor-pointer font-bold text-xs"
+          >
+            <Check className="w-4 h-4" /> Save Configuration
+          </button>
         </div>
 
         {/* AI Configuration / Gemini API Credential Section */}

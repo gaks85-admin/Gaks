@@ -1,5 +1,6 @@
 import express from 'express';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import { createServer as createViteServer } from 'vite';
 
 // Import all API handlers
@@ -18,6 +19,8 @@ import performanceSnapshotHandler from './api/performance/snapshot.ts';
 // @ts-ignore
 import adminHandler from './api/admin.ts';
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 async function startServer() {
   const app = express();
@@ -28,12 +31,12 @@ async function startServer() {
   app.use(express.urlencoded({ extended: true }));
 
   // API Routes mapping
-  app.all('/api/live-rates', (req, res) => liveRatesHandler(req as any, res as any));
+  app.all('/api/live-rates', (req, res) => liveRatesHandler(req, res));
   app.all('/api/cron/market-watcher', (req, res) => marketWatcherCronHandler(req, res));
   app.all('/api/watcher*', (req, res) => watcherHandler(req, res));
   app.all('/api/strategy/summary', (req, res) => strategySummaryHandler(req, res));
-  app.all('/api/telegram-webhook', (req, res) => telegramWebhookHandler(req as any, res as any));
-  app.all('/api/telegram/webhook', (req, res) => telegramWebhookHandler(req as any, res as any));
+  app.all('/api/telegram-webhook', (req, res) => telegramWebhookHandler(req, res));
+  app.all('/api/telegram/webhook', (req, res) => telegramWebhookHandler(req, res));
   app.all('/api/performance/snapshot', (req, res) => performanceSnapshotHandler(req, res));
   app.all('/api/admin*', (req, res) => adminHandler(req, res));
   app.all('/api/*', (req, res) => res.status(404).json({ error: 'API route not found' }));

@@ -253,7 +253,8 @@ export default function App() {
   const [riskReward, setRiskReward] = useState<string>('1:2');
   const [accountType, setAccountType] = useState<'personal' | 'prop'>('personal');
   const [positionMode, setPositionMode] = useState<'AUTO_RISK' | 'FIXED_LOT'>('AUTO_RISK');
-  const [fixedLotSize, setFixedLotSize] = useState<string>('0.01');
+  const [fixedLotSize, setFixedLotSize] = useState<string>("0.01");
+  const [analysisMode, setAnalysisMode] = useState<"HYBRID" | "RULE_ONLY" | "AI_ONLY">("HYBRID");
   const [preferredSessions, setPreferredSessions] = useState<string[]>(['London', 'New York', 'Tokyo']);
   const [preferredTimeframes, setPreferredTimeframes] = useState<string[]>(['M15', 'H1']);
   const [lastSavedStrategyText, setLastSavedStrategyText] = useState<string>('');
@@ -283,6 +284,7 @@ export default function App() {
     accountType: 'personal',
     positionMode: 'AUTO_RISK',
     fixedLotSize: '0.01',
+    analysisMode: 'HYBRID' as 'HYBRID' | 'RULE_ONLY' | 'AI_ONLY',
     preferredSessions: ['London', 'New York', 'Tokyo'],
     preferredTimeframes: ['M15', 'H1']
   });
@@ -296,6 +298,7 @@ export default function App() {
     if (accountType !== initialPrefs.accountType) return true;
     if (positionMode !== initialPrefs.positionMode) return true;
     if (fixedLotSize !== initialPrefs.fixedLotSize) return true;
+    if (analysisMode !== initialPrefs.analysisMode) return true;
     
     if (preferredSessions.length !== initialPrefs.preferredSessions.length) return true;
     const sortedSessions = [...preferredSessions].sort();
@@ -308,7 +311,7 @@ export default function App() {
     if (sortedTimeframes.some((t, idx) => t !== sortedInitialTimeframes[idx])) return true;
 
     return false;
-  }, [capital, customCapital, preferredRisk, maxDailyLoss, riskReward, accountType, positionMode, fixedLotSize, preferredSessions, preferredTimeframes, initialPrefs]);
+  }, [capital, customCapital, preferredRisk, maxDailyLoss, riskReward, accountType, positionMode, fixedLotSize, analysisMode, preferredSessions, preferredTimeframes, initialPrefs]);
 
   const ADMIN_EMAIL = "gaks6535@gmail.com";
   const isAdmin = useMemo(() => {
@@ -684,6 +687,7 @@ export default function App() {
         accountType: savedAccount as 'personal' | 'prop',
         positionMode: 'AUTO_RISK',
         fixedLotSize: '0.01',
+        analysisMode: 'HYBRID',
         preferredSessions: savedSessions,
         preferredTimeframes: savedTimeframes
       });
@@ -1149,6 +1153,14 @@ export default function App() {
           modeVal = 'FIXED_LOT';
         }
 
+        let amVal: 'HYBRID' | 'RULE_ONLY' | 'AI_ONLY' = 'HYBRID';
+        const amMatch = rawAccountType.match(/ANALYSIS:([^|]+)/);
+        if (amMatch) {
+          const parsed = amMatch[1];
+          if (parsed === 'RULE_ONLY' || parsed === 'AI_ONLY') amVal = parsed as any;
+        }
+        setAnalysisMode(amVal);
+
         let lotVal = data.preferred_lot_size || data.fixed_lot_size || data.custom_lot_size;
         if (!lotVal && rawAccountType.includes('|LOT:')) {
           const match = rawAccountType.match(/\|LOT:([0-9.]+)/);
@@ -1179,6 +1191,7 @@ export default function App() {
           accountType: accountVal as 'personal' | 'prop',
           positionMode: modeVal,
           fixedLotSize: String(lotVal),
+          analysisMode: amVal,
           preferredSessions: sessionsVal,
           preferredTimeframes: timeframesVal
         });
@@ -1555,7 +1568,7 @@ export default function App() {
       triggerNotification("Synchronizing local setup with Gaks AI...", "info");
       
       // Save playbooks & preferences to Supabase first so the backend validation doesn't fail on stale cache
-      const encodedAccountType = `${accountType}|MODE:${positionMode}|LOT:${fixedLotSize}|MAXLOSS:${maxDailyLoss.replace(/[^0-9.]/g, '')}`;
+      const encodedAccountType = `${accountType}|MODE:${positionMode}|LOT:${fixedLotSize}|MAXLOSS:${maxDailyLoss.replace(/[^0-9.]/g, '')}|ANALYSIS:${analysisMode}`;
       const { error: playbookErr } = await supabase
         .from('trading_preferences')
         .upsert({
@@ -1714,7 +1727,7 @@ export default function App() {
       }
     }
 
-    const encodedAccountType = `${accountType}|MODE:${positionMode}|LOT:${fixedLotSize}|MAXLOSS:${maxDailyLoss.replace(/[^0-9.]/g, '')}`;
+    const encodedAccountType = `${accountType}|MODE:${positionMode}|LOT:${fixedLotSize}|MAXLOSS:${maxDailyLoss.replace(/[^0-9.]/g, '')}|ANALYSIS:${analysisMode}`;
     
     if (session?.user) {
       try {
@@ -1749,6 +1762,7 @@ export default function App() {
             accountType,
             positionMode,
             fixedLotSize,
+            analysisMode,
             preferredSessions,
             preferredTimeframes
           });
@@ -1779,6 +1793,7 @@ export default function App() {
         accountType,
         positionMode,
         fixedLotSize,
+        analysisMode,
         preferredSessions,
         preferredTimeframes
       });
@@ -2455,6 +2470,9 @@ export default function App() {
               session={session}
               handleUpdateProfile={handleUpdateProfile}
               isProfileUpdating={isProfileUpdating}
+              analysisMode={analysisMode}
+              setAnalysisMode={setAnalysisMode}
+              savePreferences={savePreferences}
               geminiKey={geminiKey}
               setGeminiKey={setGeminiKey}
               geminiKeyExists={geminiKeyExists}

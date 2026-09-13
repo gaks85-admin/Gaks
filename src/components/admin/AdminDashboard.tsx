@@ -1772,7 +1772,7 @@ const SettingsPage = ({ fetchWithAuth, showToast }: { fetchWithAuth: any; showTo
     defaultGeminiModel: "gemini-3.5-flash-lite",
     scanInterval: 15,
     maintenanceMode: false,
-    executionMode: "HYBRID"
+    
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -1872,7 +1872,7 @@ const SettingsPage = ({ fetchWithAuth, showToast }: { fetchWithAuth: any; showTo
 
             <button
               type="button"
-              onClick={() => setSettings((prev: any) => ({ ...prev, executionMode: 'HYBRID' }))}
+              onClick={() => setSettings((prev: any) => ({ ...prev,  }))}
               className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer ${settings.executionMode === 'HYBRID' ? 'bg-sky-500/10 border-sky-500 text-white' : 'bg-zinc-900/50 border-zinc-900 text-zinc-400 hover:text-zinc-200'}`}
             >
               <div className="flex items-center justify-between">
