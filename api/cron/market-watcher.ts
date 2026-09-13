@@ -699,7 +699,7 @@ export default async function handler(req: any, res: any) {
     const cronAnalysisCache = new Map<string, { geminiRes: any; geminiTextResult: string; parsedResult: any; analysis: any }>();
     const quotaExhaustedUsers = new Set<string>();
 
-    const PROCESSING_DEADLINE_MS = 25000;
+    const PROCESSING_DEADLINE_MS = 15000;
     const cronStartedAt = startTime;
     const processingDeadline = cronStartedAt + PROCESSING_DEADLINE_MS;
 
@@ -710,6 +710,20 @@ export default async function handler(req: any, res: any) {
     function remainingProcessingMs(): number {
       return Math.max(0, processingDeadline - Date.now());
     }
+
+    // --- USER CONTEXT CACHE (OPTIMIZATION) ---
+    const userIds = watchers ? Array.from(new Set(watchers.map(w => w.user_id))) : [];
+    const [{ data: allProfiles }, { data: allPrefs }, { data: allTelegram }, { data: allApiKeys }] = await Promise.all([
+      supabase.from('profiles').select('*').in('id', userIds),
+      supabase.from('trading_preferences').select('*').in('user_id', userIds),
+      supabase.from('telegram_connections').select('*').in('user_id', userIds),
+      supabase.from('user_api_keys').select('*').eq('provider', 'gemini').in('user_id', userIds)
+    ]);
+
+    const profileMap = new Map(allProfiles?.map(p => [p.id, p]));
+    const prefsMap = new Map(allPrefs?.map(p => [p.user_id, p]));
+    const telegramMap = new Map(allTelegram?.map(t => [t.user_id, t]));
+    const apiKeysMap = new Map(allApiKeys?.map(k => [k.user_id, k]));
 
     let earlyExit = false;
     let earlyExitReason = "";
@@ -880,31 +894,18 @@ export default async function handler(req: any, res: any) {
           return;
         }
 
-        // Query user profile safely for gemini status
-        let userProfile: any = null;
-        try {
-          const { data: pData } = await supabase
-            .from("profiles")
-            .select("*")
-            .eq("id", userId)
-            .maybeSingle();
-          userProfile = pData || null;
-        } catch (err) {
-          // Safe profile query fallback
-        }
+        // Use cached profile
+        const userProfile = profileMap.get(userId) || null;
 
         logWatcherEvent('WATCHER START', logCtx, `Status: ${watcher.status}`);
 
-        const { data: telegramConn } = await supabase
-          .from("telegram_connections")
-          .select("telegram_chat_id, connected")
-          .eq("user_id", userId)
-          .maybeSingle();
+        // Use cached telegram connection
+        const telegramConn = telegramMap.get(userId);
         const telegramChatId = (telegramConn && telegramConn.connected) ? telegramConn.telegram_chat_id : (watcher.telegram_chat_id || null);
 
         watchersReadyCount++;
 
-        cronTimer.startStage("Watcher Scheduling & Due Check");
+        cronTimer.startStage("Watcher Scheduling & Due Check", watcher?.id);
         let tradeStatus = (watcher.trade_status || 'WAITING').toUpperCase().trim();
       const now = new Date();
       const scanIntervalMinutes = getScanIntervalMinutes(watcher);
@@ -990,7 +991,7 @@ export default async function handler(req: any, res: any) {
       // =====================================================================
       // STAGE 5 IDEMPOTENCY LOCK: CAS update on last_scan_at
       // =====================================================================
-      cronTimer.startStage("CAS Idempotency Lock");
+      cronTimer.startStage("CAS Idempotency Lock", watcher.id);
       const lockTime = now.toISOString();
       let lockQuery = supabase.from("watchers").update({ last_scan_at: lockTime }).eq("id", watcher.id);
       if (watcher.last_scan_at) {
@@ -1014,7 +1015,7 @@ export default async function handler(req: any, res: any) {
       // STATE 3 — COOLDOWN
       // =====================================================================
       if (tradeStatus === 'COOLDOWN') {
-        cronTimer.startStage("State 3 - Cooldown Check");
+        cronTimer.startStage("State 3 - Cooldown Check", watcher.id);
         const cooldownUntilDate = watcher.cooldown_until ? new Date(watcher.cooldown_until) : null;
         const isCooldownExpired = !cooldownUntilDate || (now.getTime() >= cooldownUntilDate.getTime());
 
@@ -1079,7 +1080,7 @@ export default async function handler(req: any, res: any) {
       // =====================================================================
       console.log(`ENTERING ACTIVE`);
       if (tradeStatus === 'ACTIVE') {
-        cronTimer.startStage("State 2 - Active Trade Monitoring");
+        cronTimer.startStage("State 2 - Active Trade Monitoring", watcher.id);
         console.log(`[BRANCH EXECUTED] ACTIVE branch (Price Monitoring Only) for Watcher ID: ${watcher.id}`);
 
         const activeValidation = validateActiveTradeState(watcher);
@@ -1541,7 +1542,7 @@ Reason: ${activeValidation.reason}`);
         return;
       }
 
-      cronTimer.startStage("State 1 - Load Preferences & Strategy");
+      cronTimer.startStage("State 1 - Load Preferences & Strategy", watcher.id);
       console.log(`[BRANCH EXECUTED] WAITING branch for Watcher ID: ${watcher.id}`);
 
       let executionLogs: { time: string; message: string; type: 'info' | 'success' | 'error' | 'warning' }[] = [];
@@ -1558,10 +1559,9 @@ Reason: ${activeValidation.reason}`);
         addLog("Watcher Loaded", "success");
         addLog(`Pair: ${selectedPair}`);
 
-        const [{ data: prefsRecord }, { data: apiKeyRecord }] = await Promise.all([
-          supabase.from("trading_preferences").select("*").eq("user_id", userId).maybeSingle(),
-          supabase.from("user_api_keys").select("*").eq("user_id", userId).eq("provider", "gemini").maybeSingle()
-        ]);
+        // Use cached preferences and API keys
+        const prefsRecord = prefsMap.get(userId);
+        const apiKeyRecord = apiKeysMap.get(userId);
 
         const rawStrategyText = prefsRecord?.strategy_text;
 
@@ -1593,20 +1593,13 @@ Reason: ${activeValidation.reason}`);
         addLog("Strategy Loaded", "success");
         console.log(`LOG: Strategy loaded for ${selectedPair}`);
 
-        // Check Telegram connection
-        const { data: telegramConn } = await supabase
-          .from("telegram_connections")
-          .select("telegram_chat_id, connected")
-          .eq("user_id", userId)
-          .maybeSingle();
-
-        if (!telegramConn || !telegramConn.connected || !telegramConn.telegram_chat_id) {
+        // Check Telegram connection (already used cached above, but let's re-verify)
+        if (!telegramChatId) {
           console.log(`LOG: Watcher ${watcher.id} skipped - Telegram not connected`);
           skipped.push({ userId, reason: "Telegram not connected" });
           watchersSkippedCount++;
           return;
         }
-        const telegramChatId = telegramConn.telegram_chat_id;
 
         let accountSize: number;
         let riskPercentage: number;
@@ -1765,7 +1758,7 @@ Reason: ${activeValidation.reason}`);
 
         // Extract market structure & compile strategy
         addLog("Strategy Compiled", "success");
-        cronTimer.startStage("Market Structure & Strategy Compilation");
+        cronTimer.startStage("Market Structure & Strategy Compilation", watcher.id);
         const compiledStrategy = compileStrategy(strategyText);
         const strategyCompilationConfidenceRecord = normalizeConfidence(
           compiledStrategy.overall_confidence ?? compiledStrategy.confidence,
@@ -1856,7 +1849,7 @@ Reason: ${activeValidation.reason}`);
         // =====================================================================
         // STATEFUL ZONE MARKOUT & TAP CONFIRMATION LIFECYCLE
         // =====================================================================
-        cronTimer.startStage("Stateful Zone Evaluation");
+        cronTimer.startStage("Stateful Zone Evaluation", watcher.id);
         const latestCandle = candleData[candleData.length - 1];
         const activeCurrentPrice = latestCandle?.close || 0;
 
@@ -2152,7 +2145,7 @@ Reason: ${activeValidation.reason}`);
         const pipSize = (cleanSymUpper.includes('JPY') || cleanSymUpper.includes('XAU') || cleanSymUpper.includes('GOLD')) ? 0.01 : 0.0001;
 
         // Run Weighted Decision Engine (Pass 1 to get matched rules)
-        cronTimer.startStage("Decision Engine Evaluation");
+        cronTimer.startStage("Decision Engine Evaluation", watcher.id);
         (marketStructure as any).watcherId = watcher.id;
         (marketStructure as any).pair = selectedPair;
         (marketStructure as any).timeframe = selectedTimeframe;
@@ -2377,7 +2370,7 @@ Reason: ${decisionResult.explanation || (requiresGemini ? 'Passed deterministic 
 `.trim());
 
           if (requiresGemini) {
-            cronTimer.startStage("Gemini AI Execution");
+            cronTimer.startStage("Gemini AI Execution", watcher.id);
 
             // User Gemini Status Gate Check (evaluated only when Gemini is required)
             const geminiStatus = userProfile?.gemini_status || 'READY';
@@ -3167,7 +3160,7 @@ Output ONLY valid JSON.
 
         console.log(`LOG: Signal result for ${selectedPair}: ${analysis.signal} (Confidence: ${analysis.confidence}%)`);
 
-        cronTimer.startStage("Quality Gate & Risk Governor");
+        cronTimer.startStage("Quality Gate & Risk Governor", watcher.id);
         let qualityResult: any = null;
         let governorResult: any = null;
         let calibrationResult: any = null;
@@ -3416,7 +3409,7 @@ Output ONLY valid JSON.
             return;
         }
 
-        cronTimer.startStage("Position Sizing & Validation");
+        cronTimer.startStage("Position Sizing & Validation", watcher.id);
 
         // Check Daily Loss Limit
         const todayStart = new Date();
@@ -3728,7 +3721,7 @@ Source: ${brokerQuote.source}`);
         }
 
         // === STAGE 8: CRASH RECOVERY & IDEMPOTENCY ===
-        cronTimer.startStage("Broker Order & Signal Registration");
+        cronTimer.startStage("Broker Order & Signal Registration", watcher.id);
         const stableClientOrderId = `cl-${watcher.id}-${latestClosedCandleTime.replace(/[:.-]/g, '')}`;
         
         let brokerOrder: BrokerOrder | null = null;
@@ -4057,7 +4050,7 @@ Source: ${brokerQuote.source}`);
         }
 
         // Send ONE Telegram signal with Signal Deduplication Check
-        cronTimer.startStage("Telegram Alert & DB Persistence");
+        cronTimer.startStage("Telegram Alert & DB Persistence", watcher.id);
         let alertSent = false;
         let alertReason = "";
 
@@ -4230,17 +4223,20 @@ Source: ${brokerQuote.source}`);
       }
     }
 
-    for (const watcher of watchers) {
+    // Parallelized processing with concurrency control
+    const CONCURRENCY_LIMIT = 3;
+    await processWithConcurrency(watchers, CONCURRENCY_LIMIT, async (watcher) => {
       if (!hasProcessingTimeRemaining()) {
-        console.warn(`[CRON DEADLINE] Global processing deadline reached (${Date.now() - cronStartedAt}ms elapsed / ${PROCESSING_DEADLINE_MS}ms budget). Halting watcher loop.`);
-        earlyExit = true;
-        earlyExitReason = "PROCESSING_DEADLINE";
-        cronTimer.markEarlyExit();
-        break;
+        if (!earlyExit) {
+          console.warn(`[CRON DEADLINE] Global processing deadline reached (${Date.now() - cronStartedAt}ms elapsed / ${PROCESSING_DEADLINE_MS}ms budget). Halting watcher loop.`);
+          earlyExit = true;
+          earlyExitReason = "PROCESSING_DEADLINE";
+          cronTimer.markEarlyExit();
+        }
+        return;
       }
-
       await processSingleWatcher(watcher);
-    }
+    });
 
     const totalTime = Date.now() - startTime;
     const maxWatcherDuration = cronTimer.getMaxWatcherDurationMs();
