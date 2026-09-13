@@ -1854,25 +1854,44 @@ const SettingsPage = ({ fetchWithAuth, showToast }: { fetchWithAuth: any; showTo
           <div className="flex justify-between items-center">
             <div className="space-y-1">
               <label className="text-xs font-extrabold text-zinc-400 uppercase tracking-wide block">Global Scanner Execution Mode</label>
-              <span className="text-[10px] text-zinc-500 block">Choose whether all market watchers use Gemini AI + Rules or Rule-Only (No AI / zero gateway timeouts).</span>
+              <span className="text-[10px] text-zinc-500 block">Centrally control whether all market watchers execute via Rule-Only, Hybrid, or AI-Only.</span>
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-3 pt-2">
-            <button
-              type="button"
-              onClick={() => setSettings((prev: any) => ({ ...prev, executionMode: 'HYBRID' }))}
-              className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${settings.executionMode === 'HYBRID' ? 'bg-sky-500/10 border-sky-500 text-white' : 'bg-zinc-900/50 border-zinc-900 text-zinc-400 hover:text-zinc-200'}`}
-            >
-              <div className="text-xs font-bold uppercase tracking-wider">Hybrid (AI + Rules)</div>
-              <div className="text-[10px] text-zinc-500 mt-0.5">Gemini evaluates setup at the end</div>
-            </button>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
             <button
               type="button"
               onClick={() => setSettings((prev: any) => ({ ...prev, executionMode: 'RULE_ONLY' }))}
-              className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${settings.executionMode === 'RULE_ONLY' ? 'bg-emerald-500/10 border-emerald-500 text-white' : 'bg-zinc-900/50 border-zinc-900 text-zinc-400 hover:text-zinc-200'}`}
+              className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer ${settings.executionMode === 'RULE_ONLY' ? 'bg-emerald-500/10 border-emerald-500 text-white' : 'bg-zinc-900/50 border-zinc-900 text-zinc-400 hover:text-zinc-200'}`}
             >
-              <div className="text-xs font-bold uppercase tracking-wider">Rule-Only (No AI)</div>
-              <div className="text-[10px] text-zinc-500 mt-0.5">Instant execution, zero timeouts</div>
+              <div className="flex items-center justify-between">
+                <div className="text-xs font-bold uppercase tracking-wider text-emerald-400">Rule-Only</div>
+                {settings.executionMode === 'RULE_ONLY' && <span className="w-2 h-2 rounded-full bg-emerald-400"></span>}
+              </div>
+              <div className="text-[10px] text-zinc-400 mt-1">Deterministic engine only. Gemini bypassed, zero API quota consumed.</div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setSettings((prev: any) => ({ ...prev, executionMode: 'HYBRID' }))}
+              className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer ${settings.executionMode === 'HYBRID' ? 'bg-sky-500/10 border-sky-500 text-white' : 'bg-zinc-900/50 border-zinc-900 text-zinc-400 hover:text-zinc-200'}`}
+            >
+              <div className="flex items-center justify-between">
+                <div className="text-xs font-bold uppercase tracking-wider text-sky-400">Hybrid</div>
+                {settings.executionMode === 'HYBRID' && <span className="w-2 h-2 rounded-full bg-sky-400"></span>}
+              </div>
+              <div className="text-[10px] text-zinc-400 mt-1">Rule engine pre-filter gate first; Gemini confirms qualifying setups.</div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setSettings((prev: any) => ({ ...prev, executionMode: 'AI_ONLY' }))}
+              className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer ${settings.executionMode === 'AI_ONLY' ? 'bg-purple-500/10 border-purple-500 text-white' : 'bg-zinc-900/50 border-zinc-900 text-zinc-400 hover:text-zinc-200'}`}
+            >
+              <div className="flex items-center justify-between">
+                <div className="text-xs font-bold uppercase tracking-wider text-purple-400">AI-Only</div>
+                {settings.executionMode === 'AI_ONLY' && <span className="w-2 h-2 rounded-full bg-purple-400"></span>}
+              </div>
+              <div className="text-[10px] text-zinc-400 mt-1">Direct Gemini AI analysis for each watcher. AI leads trade bias & validation.</div>
             </button>
           </div>
         </div>

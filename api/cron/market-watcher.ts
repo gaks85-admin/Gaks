@@ -62,6 +62,7 @@ import {
 } from '../../src/lib/zone-engine.js';
 import { resolveHigherTimeframeTrend } from '../../src/lib/htf-trend-engine.js';
 import { getMarketSchedule } from '../../src/lib/market-hours.js';
+import { getGlobalExecutionSettings, ExecutionMode } from '../../src/lib/execution-mode-resolver.js';
 
 // In-memory runtime cache for marked zones to guarantee persistence across cron scans
 // even if the Supabase watchers table is temporarily missing the zone columns.
@@ -656,6 +657,11 @@ export default async function handler(req: any, res: any) {
       });
     }
 
+    // === GLOBAL EXECUTION MODE (ADMIN-CONTROLLED) ===
+    const globalAdminSettings = await getGlobalExecutionSettings(supabase);
+    const globalExecutionMode: ExecutionMode = globalAdminSettings.executionMode;
+    console.log(`[EXECUTION MODE] Global Scanner Mode: ${globalExecutionMode} (Admin-controlled)`);
+
     // 3. Active Watchers Found
     const { data: watchers, error: fetchError } = await supabase
       .from("watchers")
@@ -1150,7 +1156,7 @@ Reason: ${activeValidation.reason}`);
               trade_id: watcher.active_trade_id,
               pair: selectedPair,
               timeframe: selectedTimeframe,
-              strategy_mode: watcher.strategy_mode || 'HYBRID',
+              strategy_mode: globalExecutionMode,
               entry_price: entryPrice || 0,
               exit_price: closePrice,
               direction: dir,
@@ -1615,8 +1621,8 @@ Reason: ${activeValidation.reason}`);
         console.log(`Strategy: ${strategyText ? strategyText.substring(0, 100) + '...' : 'N/A'}`);
         console.log(`[DB Row Comparison] DB capital: "${prefsRecord?.capital || ''}", DB custom_capital: "${prefsRecord?.custom_capital || ''}", DB preferred_risk: "${prefsRecord?.preferred_risk || ''}", DB risk_reward: "${prefsRecord?.risk_reward || ''}"`);
 
-        if (!apiKeyRecord || !apiKeyRecord.api_key) {
-          console.log(`LOG: Watcher ${watcher.id} skipped - Gemini API Key missing`);
+        if (globalExecutionMode !== 'RULE_ONLY' && (!apiKeyRecord || !apiKeyRecord.api_key)) {
+          console.log(`LOG: Watcher ${watcher.id} skipped - Gemini API Key missing (Global mode is ${globalExecutionMode})`);
           skipped.push({ userId, reason: "Gemini API Key missing" });
           watchersSkippedCount++;
           return;
@@ -1800,7 +1806,7 @@ Reason: ${activeValidation.reason}`);
             user_id: userId,
             pair: selectedPair,
             timeframe: selectedTimeframe,
-            strategy_mode: compiledStrategy.strategy_mode,
+            strategy_mode: globalExecutionMode,
             decision_score: 0,
             matched_weight: 0,
             possible_weight: 0,
@@ -1907,7 +1913,7 @@ Reason: ${activeValidation.reason}`);
               watcher_id: watcher.id,
               pair: selectedPair,
               timeframe: selectedTimeframe,
-              strategy_mode: compiledStrategy.strategy_mode,
+              strategy_mode: globalExecutionMode,
               decision_score: 0,
               matched_weight: 0,
               possible_weight: 0,
@@ -2039,7 +2045,7 @@ Reason: ${activeValidation.reason}`);
               watcher_id: watcher.id,
               pair: selectedPair,
               timeframe: selectedTimeframe,
-              strategy_mode: compiledStrategy.strategy_mode,
+              strategy_mode: globalExecutionMode,
               decision_score: 0,
               matched_weight: 0,
               possible_weight: 0,
@@ -2092,7 +2098,7 @@ Reason: ${activeValidation.reason}`);
                 watcher_id: watcher.id,
                 pair: selectedPair,
                 timeframe: selectedTimeframe,
-                strategy_mode: compiledStrategy.strategy_mode,
+                strategy_mode: globalExecutionMode,
                 decision_score: 0,
                 matched_weight: 0,
                 possible_weight: 0,
@@ -2201,7 +2207,7 @@ Reason: ${activeValidation.reason}`);
         let fallbackReason = '';
 
         const recommendation = decisionResult.recommendation; // PASS, LIKELY_PASS, AMBIGUOUS, FAIL
-        const executionMode = watcher.strategy_mode || compiledStrategy.detector_validation?.execution_mode || compiledStrategy.strategy_mode || 'RULE_ONLY';
+        const executionMode = globalExecutionMode;
 
         // =====================================================================
         // DETERMINISTIC PRE-FILTERING GATE (STAGE 2)
@@ -2215,11 +2221,10 @@ Reason: ${activeValidation.reason}`);
         const mandatoryPassed = decisionResult.mandatory_rules_passed !== false;
         const meetsQualityThreshold = (decisionResult.decision_score ?? 0) >= PRE_FILTER_MIN_SCORE;
         const isViableRecommendation = recommendation === 'PASS' || recommendation === 'LIKELY_PASS';
-        const isExplicitAiOnly = executionMode === 'AI_ONLY' && (decisionResult.decision_score ?? 0) >= 60;
 
-        const passesDeterministicGate = mandatoryPassed && (
-          (meetsQualityThreshold && isViableRecommendation) || isExplicitAiOnly
-        );
+        // In AI_ONLY mode, we send it to Gemini regardless of strict rule-engine score
+        // In RULE_ONLY and HYBRID, we require passing the rule-engine threshold
+        const passesDeterministicGate = executionMode === 'AI_ONLY' || (mandatoryPassed && meetsQualityThreshold && isViableRecommendation);
 
         if (!passesDeterministicGate) {
           console.log(`
@@ -2253,7 +2258,7 @@ Action: LOCAL_NO_TRADE (Gemini API Bypassed - Quota 100% Preserved)
             watcher_id: watcher.id,
             pair: selectedPair,
             timeframe: selectedTimeframe,
-            strategy_mode: compiledStrategy.strategy_mode,
+            strategy_mode: globalExecutionMode,
             decision_score: decisionResult.decision_score,
             matched_weight: decisionResult.matched_weight,
             possible_weight: decisionResult.possible_weight,
@@ -2499,7 +2504,7 @@ Reason: Insufficient remaining execution budget (${remainingBeforeGemini}ms rema
                     watcher_id: watcher.id,
                     pair: selectedPair,
                     timeframe: selectedTimeframe,
-                    strategy_mode: compiledStrategy.strategy_mode,
+                    strategy_mode: globalExecutionMode,
                     decision_score: decisionResult.decision_score,
                     matched_weight: decisionResult.matched_weight,
                     possible_weight: decisionResult.possible_weight,
@@ -3371,7 +3376,7 @@ Output ONLY valid JSON.
               watcher_id: watcher.id,
               pair: selectedPair,
               timeframe: selectedTimeframe,
-              strategy_mode: compiledStrategy.strategy_mode,
+              strategy_mode: globalExecutionMode,
               decision_score: decisionResult.decision_score,
               matched_weight: decisionResult.matched_weight,
               possible_weight: decisionResult.possible_weight,
@@ -3426,7 +3431,7 @@ Output ONLY valid JSON.
             watcher_id: watcher.id,
             symbol,
             timeframe: selectedTimeframe,
-            strategy_mode: watcher.strategy_mode || 'HYBRID',
+            strategy_mode: globalExecutionMode,
             market_price: Number(candleData[candleData.length - 1]?.close) || 0,
             decision_score: 0,
             matched_weight: 0,
@@ -3685,7 +3690,7 @@ Source: ${brokerQuote.source}`);
                 watcher_id: watcher.id,
                 pair: selectedPair,
                 timeframe: selectedTimeframe,
-                strategy_mode: compiledStrategy.strategy_mode,
+                strategy_mode: globalExecutionMode,
                 decision_score: decisionResult.decision_score,
                 matched_weight: decisionResult.matched_weight,
                 possible_weight: decisionResult.possible_weight,
@@ -3763,7 +3768,7 @@ Source: ${brokerQuote.source}`);
                 watcher_id: watcher.id,
                 pair: selectedPair,
                 timeframe: selectedTimeframe,
-                strategy_mode: compiledStrategy.strategy_mode,
+                strategy_mode: globalExecutionMode,
                 decision_score: decisionResult.decision_score,
                 matched_weight: decisionResult.matched_weight,
                 possible_weight: decisionResult.possible_weight,
@@ -3911,7 +3916,7 @@ Source: ${brokerQuote.source}`);
             watcher_id: watcher.id,
             pair: selectedPair,
             timeframe: selectedTimeframe,
-            strategy_mode: compiledStrategy.strategy_mode,
+            strategy_mode: globalExecutionMode,
             decision_score: decisionResult.decision_score,
             matched_weight: decisionResult.matched_weight,
             possible_weight: decisionResult.possible_weight,
@@ -4013,7 +4018,7 @@ Source: ${brokerQuote.source}`);
             watcher_id: watcher.id,
             pair: selectedPair,
             timeframe: selectedTimeframe,
-            strategy_mode: compiledStrategy.strategy_mode,
+            strategy_mode: globalExecutionMode,
             decision_score: decisionResult.decision_score,
             matched_weight: decisionResult.matched_weight,
             possible_weight: decisionResult.possible_weight,
@@ -4081,7 +4086,7 @@ Source: ${brokerQuote.source}`);
           watcher_id: watcher.id,
           pair: selectedPair,
           timeframe: selectedTimeframe,
-          strategy_mode: compiledStrategy.strategy_mode,
+          strategy_mode: globalExecutionMode,
           decision_score: decisionResult.decision_score,
           matched_weight: decisionResult.matched_weight,
           possible_weight: decisionResult.possible_weight,
