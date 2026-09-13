@@ -1,21 +1,26 @@
 import { createClient } from '@supabase/supabase-js';
 
 const getEnvVar = (key: string): string => {
-  // 1. Check process.env first (Primarily for Node.js/Server-side bundling)
+  // 1. Check process.env first (Node.js/Server-side)
   try {
     if (typeof process !== 'undefined' && process.env && process.env[key]) {
       return process.env[key]!;
     }
   } catch {}
 
-  // 2. Static access for Vite-prefixed or Allowed variables (Client-side)
-  // These are replaced at build-time by Vite
+  // 2. STATIC ACCESS for Vite-prefixed variables (Standard Vite pattern)
+  // These MUST be written as literals for Vite to replace them at build time.
   if (key === 'VITE_SUPABASE_URL') return import.meta.env.VITE_SUPABASE_URL || '';
   if (key === 'VITE_SUPABASE_ANON_KEY') return import.meta.env.VITE_SUPABASE_ANON_KEY || '';
-  if (key === 'SUPABASE_URL') return (import.meta.env as any).SUPABASE_URL || '';
-  if (key === 'SUPABASE_ANON_KEY') return (import.meta.env as any).SUPABASE_ANON_KEY || '';
+  
+  // 3. STATIC ACCESS for SUPABASE_ prefixed variables (Allowed in vite.config.ts)
+  // We use @ts-ignore to allow accessing these without extending the ImportMeta interface.
+  // @ts-ignore
+  if (key === 'SUPABASE_URL') return import.meta.env.SUPABASE_URL || '';
+  // @ts-ignore
+  if (key === 'SUPABASE_ANON_KEY') return import.meta.env.SUPABASE_ANON_KEY || '';
 
-  // 3. Dynamic access fallback for development
+  // 4. Dynamic access fallback (Only works in development or specific build configs)
   try {
     const env = (import.meta as any).env;
     if (env && env[key]) return env[key];

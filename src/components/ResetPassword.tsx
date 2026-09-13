@@ -1,6 +1,6 @@
 // src/components/ResetPassword.tsx
 import React, { useState, useEffect } from 'react';
-import { supabase } from '../supabaseClient';
+import { supabase, isRealSupabaseConfigured } from '../supabaseClient';
 import { Eye, EyeOff, CheckCircle2, AlertCircle, ArrowLeft, KeyRound } from 'lucide-react';
 import { motion } from 'motion/react';
 
@@ -25,8 +25,12 @@ export default function ResetPassword({ onComplete }: ResetPasswordProps) {
 
     const checkSession = async () => {
       try {
-        const { data: { session } } = await supabase.auth.getSession();
+        const { data: { session }, error } = await supabase.auth.getSession();
         
+        if (error) {
+          console.error('Error checking recovery session:', error);
+        }
+
         const hasHashToken = typeof window !== 'undefined' && (
           window.location.hash.includes('access_token') ||
           window.location.hash.includes('type=recovery') ||
@@ -102,7 +106,15 @@ export default function ResetPassword({ onComplete }: ResetPasswordProps) {
       });
 
       if (error) {
-        setErrorMessage(error.message);
+        let errorMessage = error.message;
+        if (errorMessage === 'Failed to fetch' || (error as any).name === 'TypeError') {
+          if (!isRealSupabaseConfigured) {
+            errorMessage = 'Configuration Error: The authentication service URL is not set. Please check your environment variables (VITE_SUPABASE_URL).';
+          } else {
+            errorMessage = 'Network Error: Failed to reach the authentication service. Please check your browser console for diagnostic logs.';
+          }
+        }
+        setErrorMessage(errorMessage);
       } else {
         setSuccessMessage('Password updated successfully! Redirecting to login...');
         

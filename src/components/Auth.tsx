@@ -127,9 +127,19 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
           name: error?.name,
           message: error?.message,
           status: error?.status,
-          code: (error as any)?.code
+          code: (error as any)?.code,
+          supabaseConfigured: isRealSupabaseConfigured
         });
-        setErrorMessage(error.message);
+        
+        let errorMessage = error.message;
+        if (errorMessage === 'Failed to fetch' || (error as any).name === 'TypeError') {
+          if (!isRealSupabaseConfigured) {
+            errorMessage = 'Configuration Error: The authentication service URL is not set. Please check your environment variables (VITE_SUPABASE_URL).';
+          } else {
+            errorMessage = 'Network Error: Failed to reach the authentication service. Please check your browser console for diagnostic logs.';
+          }
+        }
+        setErrorMessage(errorMessage);
       } else if (data && data.session) {
         setSuccessMessage('Successfully signed in!');
         setTimeout(() => {
@@ -202,7 +212,15 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
       });
 
       if (error) {
-        setErrorMessage(error.message);
+        let errorMessage = error.message;
+        if (errorMessage === 'Failed to fetch' || (error as any).name === 'TypeError') {
+          if (!isRealSupabaseConfigured) {
+            errorMessage = 'Configuration Error: The authentication service URL is not set. Please check your environment variables (VITE_SUPABASE_URL).';
+          } else {
+            errorMessage = 'Network Error: Failed to reach the authentication service. Please check your browser console for diagnostic logs.';
+          }
+        }
+        setErrorMessage(errorMessage);
       } else {
         // Transition cleanly to the Email Verification page
         setMode('verification');
@@ -238,7 +256,15 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
       });
 
       if (error) {
-        setErrorMessage(error.message);
+        let errorMessage = error.message;
+        if (errorMessage === 'Failed to fetch' || (error as any).name === 'TypeError') {
+          if (!isRealSupabaseConfigured) {
+            errorMessage = 'Configuration Error: The authentication service URL is not set. Please check your environment variables (VITE_SUPABASE_URL).';
+          } else {
+            errorMessage = 'Network Error: Failed to reach the authentication service. Please check your browser console for diagnostic logs.';
+          }
+        }
+        setErrorMessage(errorMessage);
       } else {
         setSuccessMessage('We have sent a password reset link to your email.');
       }
