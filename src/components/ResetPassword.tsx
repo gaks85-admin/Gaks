@@ -111,7 +111,7 @@ export default function ResetPassword({ onComplete }: ResetPasswordProps) {
           if (!isRealSupabaseConfigured) {
             errorMessage = 'Configuration Error: The authentication service URL is not set. Please check your environment variables (VITE_SUPABASE_URL).';
           } else {
-            errorMessage = 'Network Error: Failed to reach the authentication service. Please check your browser console for diagnostic logs.';
+            errorMessage = 'Network Error: Failed to reach the authentication service. Check your browser console for details.';
           }
         }
         setErrorMessage(errorMessage);

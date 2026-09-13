@@ -136,7 +136,7 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
           if (!isRealSupabaseConfigured) {
             errorMessage = 'Configuration Error: The authentication service URL is not set. Please check your environment variables (VITE_SUPABASE_URL).';
           } else {
-            errorMessage = 'Network Error: Failed to reach the authentication service. Please check your browser console for diagnostic logs.';
+            errorMessage = 'Network Error: Failed to reach the authentication service. This usually means the project URL is incorrect, blocked, or your internet is down. Check your browser console for details.';
           }
         }
         setErrorMessage(errorMessage);
@@ -217,7 +217,7 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
           if (!isRealSupabaseConfigured) {
             errorMessage = 'Configuration Error: The authentication service URL is not set. Please check your environment variables (VITE_SUPABASE_URL).';
           } else {
-            errorMessage = 'Network Error: Failed to reach the authentication service. Please check your browser console for diagnostic logs.';
+            errorMessage = 'Network Error: Failed to reach the authentication service. Check your browser console for details.';
           }
         }
         setErrorMessage(errorMessage);
@@ -261,7 +261,7 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
           if (!isRealSupabaseConfigured) {
             errorMessage = 'Configuration Error: The authentication service URL is not set. Please check your environment variables (VITE_SUPABASE_URL).';
           } else {
-            errorMessage = 'Network Error: Failed to reach the authentication service. Please check your browser console for diagnostic logs.';
+            errorMessage = 'Network Error: Failed to reach the authentication service. Check your browser console for details.';
           }
         }
         setErrorMessage(errorMessage);
