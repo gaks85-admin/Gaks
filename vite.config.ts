@@ -8,7 +8,7 @@ export default defineConfig({
     react(),
     tailwindcss(),
   ],
-  envPrefix: ['VITE_', 'SUPABASE_'],
+  envPrefix: ['VITE_', 'SUPABASE_', 'NEXT_PUBLIC_'],
   server: {
     port: 3000,
     host: '0.0.0.0',
