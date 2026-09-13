@@ -1,6 +1,6 @@
 // src/components/Auth.tsx
 import React, { useState } from 'react';
-import { supabase } from '../supabaseClient';
+import { supabase, isRealSupabaseConfigured } from '../supabaseClient';
 import { Lock, Mail, ArrowLeft, AlertCircle, Eye, EyeOff, CheckCircle2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -143,14 +143,19 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
       console.error("[AUTH LOGIN EXCEPTION]", {
         message: err.message,
         stack: err.stack,
-        name: err.name
+        name: err.name,
+        supabaseConfigured: isRealSupabaseConfigured
       });
       
       let friendlyMessage = err.message || 'An error occurred during sign in.';
       
-      // Special handling for browser "Failed to fetch"
-      if (friendlyMessage === 'Failed to fetch') {
-        friendlyMessage = 'Network error: Failed to reach the authentication service. Please check your connection or try again later.';
+      // Special handling for browser "Failed to fetch" (Network Error)
+      if (friendlyMessage === 'Failed to fetch' || err.name === 'TypeError') {
+        if (!isRealSupabaseConfigured) {
+          friendlyMessage = 'Configuration Error: The authentication service URL is not set. Please check your environment variables (VITE_SUPABASE_URL).';
+        } else {
+          friendlyMessage = 'Network Error: Failed to reach the authentication service. This can happen if your internet is down, or if the Supabase project URL is incorrect/blocked. Please check your browser console for more details.';
+        }
       }
       
       setErrorMessage(friendlyMessage);
