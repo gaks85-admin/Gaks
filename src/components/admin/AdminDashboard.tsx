@@ -1771,7 +1771,8 @@ const SettingsPage = ({ fetchWithAuth, showToast }: { fetchWithAuth: any; showTo
     defaultStrategy: "",
     defaultGeminiModel: "gemini-3.5-flash-lite",
     scanInterval: 15,
-    maintenanceMode: false
+    maintenanceMode: false,
+    executionMode: "HYBRID"
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -1846,6 +1847,34 @@ const SettingsPage = ({ fetchWithAuth, showToast }: { fetchWithAuth: any; showTo
             <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro (Deep Reasoning)</option>
             <option value="gemini-3.6-flash">Gemini 3.6 Flash</option>
           </select>
+        </div>
+
+        {/* Global Execution Mode Toggle */}
+        <div className="p-5 bg-zinc-950 rounded-2xl border border-zinc-900 space-y-3">
+          <div className="flex justify-between items-center">
+            <div className="space-y-1">
+              <label className="text-xs font-extrabold text-zinc-400 uppercase tracking-wide block">Global Scanner Execution Mode</label>
+              <span className="text-[10px] text-zinc-500 block">Choose whether all market watchers use Gemini AI + Rules or Rule-Only (No AI / zero gateway timeouts).</span>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3 pt-2">
+            <button
+              type="button"
+              onClick={() => setSettings((prev: any) => ({ ...prev, executionMode: 'HYBRID' }))}
+              className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${settings.executionMode === 'HYBRID' ? 'bg-sky-500/10 border-sky-500 text-white' : 'bg-zinc-900/50 border-zinc-900 text-zinc-400 hover:text-zinc-200'}`}
+            >
+              <div className="text-xs font-bold uppercase tracking-wider">Hybrid (AI + Rules)</div>
+              <div className="text-[10px] text-zinc-500 mt-0.5">Gemini evaluates setup at the end</div>
+            </button>
+            <button
+              type="button"
+              onClick={() => setSettings((prev: any) => ({ ...prev, executionMode: 'RULE_ONLY' }))}
+              className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${settings.executionMode === 'RULE_ONLY' ? 'bg-emerald-500/10 border-emerald-500 text-white' : 'bg-zinc-900/50 border-zinc-900 text-zinc-400 hover:text-zinc-200'}`}
+            >
+              <div className="text-xs font-bold uppercase tracking-wider">Rule-Only (No AI)</div>
+              <div className="text-[10px] text-zinc-500 mt-0.5">Instant execution, zero timeouts</div>
+            </button>
+          </div>
         </div>
 
         {/* Scan interval */}
