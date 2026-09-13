@@ -64,6 +64,10 @@ import { resolveHigherTimeframeTrend } from '../../src/lib/htf-trend-engine.js';
 import { getMarketSchedule } from '../../src/lib/market-hours.js';
 import { getGlobalExecutionSettings, ExecutionMode } from '../../src/lib/execution-mode-resolver.js';
 
+// TEMPORARY MODE FLAG: Force Market Watcher into RULE_ONLY mode for diagnostic testing.
+// To restore original behavior, set this to null.
+const MARKET_WATCHER_DECISION_MODE_OVERRIDE: ExecutionMode | null = 'RULE_ONLY';
+
 // In-memory runtime cache for marked zones to guarantee persistence across cron scans
 // even if the Supabase watchers table is temporarily missing the zone columns.
 const activeZonesMemoryMap: Map<string, MarkedZone> = (globalThis as any).__activeWatcherZones || new Map<string, MarkedZone>();
@@ -1571,7 +1575,11 @@ Reason: ${activeValidation.reason}`);
             }
           }
         }
-        console.log(`[ANALYSIS MODE] Watcher: ${watcher.id} | Persisted Mode: ${executionMode}`);
+        if (MARKET_WATCHER_DECISION_MODE_OVERRIDE) {
+          executionMode = MARKET_WATCHER_DECISION_MODE_OVERRIDE;
+        }
+        console.log(`[DECISION MODE] ${executionMode}${MARKET_WATCHER_DECISION_MODE_OVERRIDE ? ' (TEMPORARY OVERRIDE)' : ''}`);
+        console.log(`[ANALYSIS MODE] Watcher: ${watcher.id} | Resulting Mode: ${executionMode}`);
 
         if (!rawStrategyText || !rawStrategyText.trim()) {
           console.log(`[CRON] Strategy text missing for ${userId}`);

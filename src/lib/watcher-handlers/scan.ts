@@ -35,6 +35,10 @@ import {
 } from "../zone-engine.js";
 import { resolveHigherTimeframeTrend } from "../htf-trend-engine.js";
 
+// TEMPORARY MODE FLAG: Force Market Watcher into RULE_ONLY mode for diagnostic testing.
+// To restore original behavior, set this to null.
+const MARKET_WATCHER_DECISION_MODE_OVERRIDE: 'RULE_ONLY' | 'HYBRID' | 'AI_ONLY' | null = 'RULE_ONLY';
+
 
 /**
  * Self-contained Supabase client initialization.
@@ -900,7 +904,12 @@ export default async function handler(req: any, res: any) {
     let geminiDuration = 0;
 
     const recommendation = decisionResult.recommendation; // PASS, LIKELY_PASS, AMBIGUOUS, FAIL
-    const executionMode = watcher?.strategy_mode || compiledStrategy.strategy_mode || 'RULE_ONLY';
+    let executionMode = watcher?.strategy_mode || compiledStrategy.strategy_mode || 'RULE_ONLY';
+
+    if (MARKET_WATCHER_DECISION_MODE_OVERRIDE) {
+      executionMode = MARKET_WATCHER_DECISION_MODE_OVERRIDE;
+    }
+    console.log(`[DECISION MODE] ${executionMode}${MARKET_WATCHER_DECISION_MODE_OVERRIDE ? ' (TEMPORARY OVERRIDE)' : ''}`);
 
     // Deterministic Pre-Filtering Gate
     const PRE_FILTER_MIN_SCORE = 75;
