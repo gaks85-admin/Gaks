@@ -1555,6 +1555,7 @@ export default function App() {
       triggerNotification("Synchronizing local setup with Gaks AI...", "info");
       
       // Save playbooks & preferences to Supabase first so the backend validation doesn't fail on stale cache
+      const encodedAccountType = `${accountType}|MODE:${positionMode}|LOT:${fixedLotSize}|MAXLOSS:${maxDailyLoss.replace(/[^0-9.]/g, '')}`;
       const { error: playbookErr } = await supabase
         .from('trading_preferences')
         .upsert({
@@ -1563,8 +1564,9 @@ export default function App() {
           capital: capital,
           custom_capital: customCapital,
           preferred_risk: preferredRisk,
+          max_daily_loss: maxDailyLoss,
           risk_reward: riskReward,
-          account_type: accountType,
+          account_type: encodedAccountType,
           preferred_sessions: preferredSessions,
           preferred_timeframes: preferredTimeframes,
           updated_at: new Date().toISOString()
