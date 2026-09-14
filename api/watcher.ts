@@ -5,6 +5,7 @@ import watcherResolveTradeHandler from '../src/lib/watcher-handlers/resolve-trad
 import watcherReplayHandler from '../src/lib/watcher-handlers/replay.js';
 
 export default async function handler(req: any, res: any) {
+  console.log(`[WATCHER API] Request received: ${req.method} ${req.url}`);
   // CORS configuration
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, PATCH, DELETE");
