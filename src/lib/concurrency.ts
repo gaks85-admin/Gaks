@@ -1,32 +1,33 @@
 /**
- * Executes async tasks over an array of items with controlled concurrency.
- * Ensures per-item failure isolation and maintains order of results.
+ * Simple concurrency controller for processing items in parallel with a limit.
  */
-export async function processWithConcurrency<T, R>(
+export async function processWithConcurrency<T>(
   items: T[],
-  concurrencyLimit: number,
-  workerFn: (item: T, index: number) => Promise<R>
-): Promise<R[]> {
-  const limit = Math.max(1, concurrencyLimit);
-  const results: R[] = new Array(items.length);
-  let currentIndex = 0;
+  limit: number,
+  fn: (item: T) => Promise<void>
+): Promise<void> {
+  const tasks: Promise<void>[] = [];
+  const executing = new Set<Promise<void>>();
 
-  async function worker() {
-    while (currentIndex < items.length) {
-      const index = currentIndex++;
+  for (const item of items) {
+    const p = (async () => {
       try {
-        results[index] = await workerFn(items[index], index);
-      } catch (err: any) {
-        results[index] = {
-          success: false,
-          error: err?.message || String(err),
-          errorCategory: 'UNHANDLED_WORKER_EXCEPTION'
-        } as unknown as R;
+        await fn(item);
+      } catch (err) {
+        console.error('Concurrency task failed:', err);
       }
+    })();
+    
+    tasks.push(p);
+    executing.add(p);
+    
+    const clean = () => executing.delete(p);
+    p.finally(clean);
+
+    if (executing.size >= limit) {
+      await Promise.race(executing);
     }
   }
 
-  const workers = Array.from({ length: Math.min(limit, items.length) }, () => worker());
-  await Promise.all(workers);
-  return results;
+  await Promise.all(tasks);
 }

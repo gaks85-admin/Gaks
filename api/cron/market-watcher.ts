@@ -725,11 +725,6 @@ export default async function handler(req: any, res: any) {
     const telegramMap = new Map(allTelegram?.map(t => [t.user_id, t]));
     const apiKeysMap = new Map(allApiKeys?.map(k => [k.user_id, k]));
 
-    let earlyExit = false;
-    let earlyExitReason = "";
-    let gemini503CountInCron = 0;
-    let geminiTemporarilyUnavailable = false;
-
     const cronCandleCache = new Map<string, Promise<any>>();
     const cronPriceCache = new Map<string, Promise<number | null>>();
     const uniqueMarketDataKeysInCron = new Set<string>();
@@ -739,6 +734,40 @@ export default async function handler(req: any, res: any) {
     let twelveDataTimeoutsInCron = 0;
     let twelveDataInvalidResponsesInCron = 0;
     let twelveDataStaleDataSkipsInCron = 0;
+
+    // --- MARKET DATA PRE-FETCHING (OPTIMIZATION) ---
+    // Identify all unique symbol/timeframe pairs to fetch them in parallel before the loop starts
+    const uniqueRequests = new Set<string>();
+    const requestArgs: any[] = [];
+    
+    if (watchers) {
+      for (const w of watchers) {
+        const symbol = w.selected_pair || w.pair;
+        const timeframe = w.selected_timeframe || w.timeframe;
+        if (symbol && timeframe) {
+          const reqKey = `${symbol}:${timeframe}`;
+          if (!uniqueRequests.has(reqKey)) {
+            uniqueRequests.add(reqKey);
+            requestArgs.push({
+              symbol,
+              timeframe,
+              requiredCount: getRequiredCandleCountForTimeframe(timeframe)
+            });
+          }
+        }
+      }
+    }
+
+    // Parallel fetch of all unique market data requirements
+    if (requestArgs.length > 0) {
+      console.log(`[PRE-FETCH] Fetching market data for ${requestArgs.length} unique pairs...`);
+      await Promise.all(requestArgs.map(args => fetchMarketDataForCron(args).catch(() => null)));
+    }
+
+    let earlyExit = false;
+    let earlyExitReason = "";
+    let gemini503CountInCron = 0;
+    let geminiTemporarilyUnavailable = false;
 
     async function fetchMarketDataForCron(reqArgs: any): Promise<any> {
       const canonical = toCanonicalSymbol(reqArgs.symbol);
@@ -4224,7 +4253,8 @@ Source: ${brokerQuote.source}`);
     }
 
     // Parallelized processing with concurrency control
-    const CONCURRENCY_LIMIT = 3;
+    // Increased limit as Gemini is removed and we are mostly I/O bound
+    const CONCURRENCY_LIMIT = 10;
     await processWithConcurrency(watchers, CONCURRENCY_LIMIT, async (watcher) => {
       if (!hasProcessingTimeRemaining()) {
         if (!earlyExit) {
