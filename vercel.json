@@ -5,10 +5,10 @@
   "outputDirectory": "dist",
   "functions": {
     "api/cron/market-watcher.ts": {
-      "maxDuration": 30
+      "maxDuration": 60
     },
     "api/**/*.ts": {
-      "maxDuration": 30
+      "maxDuration": 60
     }
   },
   "rewrites": [
