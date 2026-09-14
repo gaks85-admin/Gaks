@@ -699,7 +699,7 @@ export default async function handler(req: any, res: any) {
     const cronAnalysisCache = new Map<string, { geminiRes: any; geminiTextResult: string; parsedResult: any; analysis: any }>();
     const quotaExhaustedUsers = new Set<string>();
 
-    const PROCESSING_DEADLINE_MS = 8000;
+    const PROCESSING_DEADLINE_MS = 50000;
     const cronStartedAt = startTime;
     const processingDeadline = cronStartedAt + PROCESSING_DEADLINE_MS;
 
