@@ -1658,7 +1658,15 @@ export default function App() {
       setWatcherSearch("");
     } catch (err: any) {
       console.error("Exception in startAiMarketWatcher:", err);
-      setWatcherErrorMessage(err.message || "An unexpected error occurred during activation.");
+      
+      let friendlyError = err.message || "An unexpected error occurred during activation.";
+      
+      // If it's a TypeError from fetch, it's likely a network/CORS issue
+      if (err instanceof TypeError && err.message === "Failed to fetch") {
+        friendlyError = "Network connection failed or was blocked. Please check your internet and server status.";
+      }
+      
+      setWatcherErrorMessage(friendlyError);
     }
   };
 

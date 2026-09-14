@@ -30,7 +30,16 @@ async function startServer() {
   // API Routes mapping
   app.all('/api/live-rates', (req, res) => liveRatesHandler(req as any, res as any));
   app.all('/api/cron/market-watcher', (req, res) => marketWatcherCronHandler(req, res));
-  app.all('/api/watcher*', (req, res) => watcherHandler(req, res));
+  
+  // Watcher API Routes - Wrapped for async safety
+  app.all('/api/watcher*', async (req, res, next) => {
+    try {
+      await watcherHandler(req, res);
+    } catch (err) {
+      next(err);
+    }
+  });
+
   app.all('/api/strategy/summary', (req, res) => strategySummaryHandler(req, res));
   app.all('/api/telegram-webhook', (req, res) => telegramWebhookHandler(req as any, res as any));
   app.all('/api/telegram/webhook', (req, res) => telegramWebhookHandler(req as any, res as any));
@@ -56,6 +65,27 @@ async function startServer() {
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
+
+  // Global Error Handler for API routes
+  app.use('/api', (err: any, req: any, res: any, next: any) => {
+    const requestId = Math.random().toString(36).substring(7);
+    console.error(`[API ERROR] RequestId: ${requestId} | Path: ${req.path}`, err);
+    
+    if (res.headersSent) {
+      return next(err);
+    }
+
+    // Ensure CORS headers are present even on crash
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, PATCH, DELETE");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With");
+
+    res.status(err.status || 500).json({
+      success: false,
+      error: process.env.NODE_ENV === 'production' ? 'Internal server error' : err.message,
+      requestId
+    });
+  });
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://0.0.0.0:${PORT}`);

@@ -5,15 +5,17 @@ import watcherResolveTradeHandler from '../src/lib/watcher-handlers/resolve-trad
 import watcherReplayHandler from '../src/lib/watcher-handlers/replay.js';
 
 export default async function handler(req: any, res: any) {
-  console.log(`[WATCHER API] Request received: ${req.method} ${req.url}`);
-  // CORS configuration
+  // CORS configuration - MUST be first to prevent "Failed to fetch" on preflight
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, PATCH, DELETE");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With");
 
+  // Handle preflight requests
   if (req.method === "OPTIONS") {
     return res.status(200).end();
   }
+
+  console.log(`[WATCHER API] Request received: ${req.method} ${req.url}`);
 
   const urlPath = req.url || req.path || '';
 
