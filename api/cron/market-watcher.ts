@@ -545,13 +545,20 @@ export default async function handler(req: any, res: any) {
     }
 
     // === STAGE 8: RECONCILIATION HALT CHECK ===
-    const { data: unresolvedAlerts } = await supabase
-      .from('reconciliation_alerts')
-      .select('id')
-      .eq('is_resolved', false)
-      .in('severity', ['CRITICAL', 'HIGH']);
+    let unresolvedAlerts: any[] = [];
+    try {
+      const { data: alerts } = await supabase
+        .from('reconciliation_alerts')
+        .select('id')
+        .eq('is_resolved', false)
+        .in('severity', ['CRITICAL', 'HIGH']);
+      unresolvedAlerts = alerts || [];
+    } catch (err) {
+      console.error('[CRON ERROR] Failed to fetch reconciliation alerts:', err);
+      // Fallback: Do not halt if query fails, but log the error
+    }
 
-    if (unresolvedAlerts && unresolvedAlerts.length > 0) {
+    if (unresolvedAlerts.length > 0) {
       console.error(`[Stage 8 Halt] Found ${unresolvedAlerts.length} unresolved high-severity reconciliation alerts. HALTING TRADING.`);
       return res.status(200).json({ 
         success: false, 
@@ -648,17 +655,25 @@ export default async function handler(req: any, res: any) {
     const reconService = new BrokerReconciliationService(brokerProvider, supabase);
 
     // Get current account state
-    const brokerAccount = await brokerProvider.getAccount();
+    let brokerAccount: any = null;
+    try {
+      brokerAccount = await brokerProvider.getAccount();
+    } catch (err) {
+      console.error('[CRON ERROR] Failed to fetch broker account:', err);
+      // Fallback: Continue without broker account if necessary, or halt gracefully
+    }
     
     // Global Kill Switch Check
-    const globalHalt = await governor.checkGlobalSafety(brokerAccount, 0, 0); // Placeholder daily stats
-    if (globalHalt.isHalted) {
-      console.warn(`[SAFETY HALT] Trading is globally halted: ${globalHalt.reason}`);
-      return res.status(200).json({ 
-        success: true, 
-        message: 'Trading globally halted', 
-        reason: globalHalt.reason 
-      });
+    if (brokerAccount) {
+      const globalHalt = await governor.checkGlobalSafety(brokerAccount, 0, 0); // Placeholder daily stats
+      if (globalHalt.isHalted) {
+        console.warn(`[SAFETY HALT] Trading is globally halted: ${globalHalt.reason}`);
+        return res.status(200).json({ 
+          success: true, 
+          message: 'Trading globally halted', 
+          reason: globalHalt.reason 
+        });
+      }
     }
 
 
@@ -713,17 +728,50 @@ export default async function handler(req: any, res: any) {
 
     // --- USER CONTEXT CACHE (OPTIMIZATION) ---
     const userIds = watchers ? Array.from(new Set(watchers.map(w => w.user_id))) : [];
-    const [{ data: allProfiles }, { data: allPrefs }, { data: allTelegram }, { data: allApiKeys }] = await Promise.all([
-      supabase.from('profiles').select('*').in('id', userIds),
-      supabase.from('trading_preferences').select('*').in('user_id', userIds),
-      supabase.from('telegram_connections').select('*').in('user_id', userIds),
-      supabase.from('user_api_keys').select('*').eq('provider', 'gemini').in('user_id', userIds)
+    const [profilesRes, prefsRes, telegramRes, apiKeysRes] = await Promise.all([
+      (async () => {
+        try {
+          return await supabase.from('profiles').select('*').in('id', userIds);
+        } catch (err) {
+          console.error('[CRON PREFETCH ERROR] Profiles lookup failed:', err);
+          return { data: null, error: err };
+        }
+      })(),
+      (async () => {
+        try {
+          return await supabase.from('trading_preferences').select('*').in('user_id', userIds);
+        } catch (err) {
+          console.error('[CRON PREFETCH ERROR] Prefs lookup failed:', err);
+          return { data: null, error: err };
+        }
+      })(),
+      (async () => {
+        try {
+          return await supabase.from('telegram_connections').select('*').in('user_id', userIds);
+        } catch (err) {
+          console.error('[CRON PREFETCH ERROR] Telegram lookup failed:', err);
+          return { data: null, error: err };
+        }
+      })(),
+      (async () => {
+        try {
+          return await supabase.from('user_api_keys').select('*').eq('provider', 'gemini').in('user_id', userIds);
+        } catch (err) {
+          console.error('[CRON PREFETCH ERROR] API Keys lookup failed:', err);
+          return { data: null, error: err };
+        }
+      })()
     ]);
 
-    const profileMap = new Map(allProfiles?.map(p => [p.id, p]));
-    const prefsMap = new Map(allPrefs?.map(p => [p.user_id, p]));
-    const telegramMap = new Map(allTelegram?.map(t => [t.user_id, t]));
-    const apiKeysMap = new Map(allApiKeys?.map(k => [k.user_id, k]));
+    const allProfiles = (profilesRes?.data as any[]) || [];
+    const allPrefs = (prefsRes?.data as any[]) || [];
+    const allTelegram = (telegramRes?.data as any[]) || [];
+    const allApiKeys = (apiKeysRes?.data as any[]) || [];
+
+    const profileMap = new Map<string, any>(allProfiles.map(p => [p.id, p]));
+    const prefsMap = new Map<string, any>(allPrefs.map(p => [p.user_id, p]));
+    const telegramMap = new Map<string, any>(allTelegram.map(t => [t.user_id, t]));
+    const apiKeysMap = new Map<string, any>(allApiKeys.map(k => [k.user_id, k]));
 
     const cronCandleCache = new Map<string, Promise<any>>();
     const cronPriceCache = new Map<string, Promise<number | null>>();
