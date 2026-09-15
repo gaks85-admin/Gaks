@@ -193,199 +193,202 @@ export function calculateStructuralStopLoss(
   // Buffer: 20% of ATR or 0.05% of entry price, whichever is greater
   const buffer = Math.max(atr * 0.2, entryPrice * 0.0005);
 
+  // Minimum SL distance: 1.5x ATR to avoid getting stopped out by noise
+  const minSlDistance = atr * 1.5;
+
   if (direction === 'BUY') {
     // 0. Marked Zone (Order Block / Demand POI) below entry
     const markedZone = (marketStructure as any)?.markedZone;
+    let finalSl: number | null = null;
+    let finalBasis: StructuralStopLossResult['stopLossBasis'] | null = null;
+    let finalStructural: number | null = null;
+
     if (markedZone && markedZone.direction === 'BUY' && markedZone.invalidationLevel && markedZone.invalidationLevel < entryPrice) {
       const rawDist = entryPrice - markedZone.invalidationLevel;
       if (rawDist <= maxSlDistance) {
-        return {
-          stopLoss: Number(markedZone.invalidationLevel.toFixed(5)),
-          stopLossBasis: markedZone.type?.includes('ORDER_BLOCK') ? 'ORDER_BLOCK' : 'DEMAND_ZONE',
-          structuralLevel: Number(markedZone.low.toFixed(5))
-        };
-      }
-      // If raw invalidation is too wide for timeframe, clamp to zone low - buffer
-      const tightSl = markedZone.low - buffer;
-      if (tightSl < entryPrice && (entryPrice - tightSl) <= maxSlDistance) {
-        return {
-          stopLoss: Number(tightSl.toFixed(5)),
-          stopLossBasis: 'DEMAND_ZONE',
-          structuralLevel: Number(markedZone.low.toFixed(5))
-        };
+        finalSl = markedZone.invalidationLevel;
+        finalBasis = markedZone.type?.includes('ORDER_BLOCK') ? 'ORDER_BLOCK' : 'DEMAND_ZONE';
+        finalStructural = markedZone.low;
+      } else {
+        // If raw invalidation is too wide for timeframe, clamp to zone low - buffer
+        const tightSl = markedZone.low - buffer;
+        if (tightSl < entryPrice && (entryPrice - tightSl) <= maxSlDistance) {
+          finalSl = tightSl;
+          finalBasis = 'DEMAND_ZONE';
+          finalStructural = markedZone.low;
+        }
       }
     }
 
     // 1. Support Zones below entry
-    if (marketStructure?.supportZones && marketStructure.supportZones.length > 0) {
+    if (!finalSl && marketStructure?.supportZones && marketStructure.supportZones.length > 0) {
       const validSupports = marketStructure.supportZones.filter(z => z.priceMin < entryPrice);
       if (validSupports.length > 0) {
-        // Pick nearest support below entry (highest priceMin below entry)
         const nearestSupport = validSupports.reduce((prev, curr) => curr.priceMin > prev.priceMin ? curr : prev);
         const sl = nearestSupport.priceMin - buffer;
         if (sl < entryPrice && sl > 0) {
-          return {
-            stopLoss: Number(sl.toFixed(5)),
-            stopLossBasis: 'SUPPORT_ZONE',
-            structuralLevel: Number(nearestSupport.priceMin.toFixed(5))
-          };
+          finalSl = sl;
+          finalBasis = 'SUPPORT_ZONE';
+          finalStructural = nearestSupport.priceMin;
         }
       }
     }
 
     // 2. Swing Lows below entry
-    if (marketStructure?.swingLows && marketStructure.swingLows.length > 0) {
+    if (!finalSl && marketStructure?.swingLows && marketStructure.swingLows.length > 0) {
       const validLows = marketStructure.swingLows.filter(s => s.price < entryPrice);
       if (validLows.length > 0) {
-        // Pick the recent swing low below entry
         const recentLow = validLows[validLows.length - 1].price;
         const sl = recentLow - buffer;
         if (sl < entryPrice && sl > 0) {
-          return {
-            stopLoss: Number(sl.toFixed(5)),
-            stopLossBasis: 'SWING_LOW',
-            structuralLevel: Number(recentLow.toFixed(5))
-          };
+          finalSl = sl;
+          finalBasis = 'SWING_LOW';
+          finalStructural = recentLow;
         }
       }
     }
 
     // 3. Bullish FVG (Demand Zone) below entry
-    if (marketStructure?.fairValueGaps && marketStructure.fairValueGaps.length > 0) {
+    if (!finalSl && marketStructure?.fairValueGaps && marketStructure.fairValueGaps.length > 0) {
       const validFvgs = marketStructure.fairValueGaps.filter(f => f.type === 'BULLISH_FVG' && f.bottom < entryPrice);
       if (validFvgs.length > 0) {
         const fvg = validFvgs[validFvgs.length - 1];
         const sl = fvg.bottom - buffer;
         if (sl < entryPrice && sl > 0) {
-          return {
-            stopLoss: Number(sl.toFixed(5)),
-            stopLossBasis: 'DEMAND_ZONE',
-            structuralLevel: Number(fvg.bottom.toFixed(5))
-          };
+          finalSl = sl;
+          finalBasis = 'DEMAND_ZONE';
+          finalStructural = fvg.bottom;
         }
       }
     }
 
     // 4. Structural Candle Low (lowest low of recent candles below entry)
-    if (marketStructure?.latestCandles && marketStructure.latestCandles.length > 0) {
+    if (!finalSl && marketStructure?.latestCandles && marketStructure.latestCandles.length > 0) {
       const recentLows = marketStructure.latestCandles.map(c => c.low).filter(l => l < entryPrice);
       if (recentLows.length > 0) {
         const lowestCandleLow = Math.min(...recentLows);
         const sl = lowestCandleLow - buffer;
         if (sl < entryPrice && sl > 0) {
-          return {
-            stopLoss: Number(sl.toFixed(5)),
-            stopLossBasis: 'STRUCTURAL_CANDLE',
-            structuralLevel: Number(lowestCandleLow.toFixed(5))
-          };
+          finalSl = sl;
+          finalBasis = 'STRUCTURAL_CANDLE';
+          finalStructural = lowestCandleLow;
         }
       }
     }
 
-    // 5. ATR Fallback
-    const fallbackDist = Math.min(atr * 0.75, maxSlDistance);
-    const fallbackSL = entryPrice - fallbackDist;
+    // Resolve SL with minimum distance enforcement
+    let stopLoss = finalSl ?? (entryPrice - Math.min(atr * 0.75, maxSlDistance));
+    let basis = finalBasis ?? 'ATR_FALLBACK';
+    
+    // Enforcement: If structural SL is too tight, push it out to minSlDistance
+    if ((entryPrice - stopLoss) < minSlDistance) {
+      const adjustedSl = entryPrice - minSlDistance;
+      console.log(`[SL Logic] Structural SL (${stopLoss.toFixed(5)}) was too tight for volatility. Enforcing min distance 1.5x ATR (${minSlDistance.toFixed(5)}). Adjusted SL: ${adjustedSl.toFixed(5)}`);
+      stopLoss = adjustedSl;
+      // Keep structural basis if it was found, otherwise ATR
+    }
+
     return {
-      stopLoss: Number(fallbackSL.toFixed(5)),
-      stopLossBasis: 'ATR_FALLBACK',
-      structuralLevel: null
+      stopLoss: Number(stopLoss.toFixed(5)),
+      stopLossBasis: basis,
+      structuralLevel: finalStructural ? Number(finalStructural.toFixed(5)) : null
     };
   } else {
     // SELL direction
     // 0. Marked Zone (Order Block / Supply POI) above entry
     const markedZone = (marketStructure as any)?.markedZone;
+    let finalSl: number | null = null;
+    let finalBasis: StructuralStopLossResult['stopLossBasis'] | null = null;
+    let finalStructural: number | null = null;
+
     if (markedZone && markedZone.direction === 'SELL' && markedZone.invalidationLevel && markedZone.invalidationLevel > entryPrice) {
       const rawDist = markedZone.invalidationLevel - entryPrice;
       if (rawDist <= maxSlDistance) {
-        return {
-          stopLoss: Number(markedZone.invalidationLevel.toFixed(5)),
-          stopLossBasis: markedZone.type?.includes('ORDER_BLOCK') ? 'ORDER_BLOCK' : 'SUPPLY_ZONE',
-          structuralLevel: Number(markedZone.high.toFixed(5))
-        };
-      }
-      // If raw invalidation is too wide for timeframe, clamp to zone high + buffer
-      const tightSl = markedZone.high + buffer;
-      if (tightSl > entryPrice && (tightSl - entryPrice) <= maxSlDistance) {
-        return {
-          stopLoss: Number(tightSl.toFixed(5)),
-          stopLossBasis: 'SUPPLY_ZONE',
-          structuralLevel: Number(markedZone.high.toFixed(5))
-        };
+        finalSl = markedZone.invalidationLevel;
+        finalBasis = markedZone.type?.includes('ORDER_BLOCK') ? 'ORDER_BLOCK' : 'SUPPLY_ZONE';
+        finalStructural = markedZone.high;
+      } else {
+        // If raw invalidation is too wide for timeframe, clamp to zone high + buffer
+        const tightSl = markedZone.high + buffer;
+        if (tightSl > entryPrice && (tightSl - entryPrice) <= maxSlDistance) {
+          finalSl = tightSl;
+          finalBasis = 'SUPPLY_ZONE';
+          finalStructural = markedZone.high;
+        }
       }
     }
 
     // 1. Resistance Zones above entry
-    if (marketStructure?.resistanceZones && marketStructure.resistanceZones.length > 0) {
+    if (!finalSl && marketStructure?.resistanceZones && marketStructure.resistanceZones.length > 0) {
       const validResistances = marketStructure.resistanceZones.filter(z => z.priceMax > entryPrice);
       if (validResistances.length > 0) {
-        // Pick nearest resistance above entry (lowest priceMax above entry)
         const nearestResistance = validResistances.reduce((prev, curr) => curr.priceMax < prev.priceMax ? curr : prev);
         const sl = nearestResistance.priceMax + buffer;
         if (sl > entryPrice) {
-          return {
-            stopLoss: Number(sl.toFixed(5)),
-            stopLossBasis: 'RESISTANCE_ZONE',
-            structuralLevel: Number(nearestResistance.priceMax.toFixed(5))
-          };
+          finalSl = sl;
+          finalBasis = 'RESISTANCE_ZONE';
+          finalStructural = nearestResistance.priceMax;
         }
       }
     }
 
     // 2. Swing Highs above entry
-    if (marketStructure?.swingHighs && marketStructure.swingHighs.length > 0) {
+    if (!finalSl && marketStructure?.swingHighs && marketStructure.swingHighs.length > 0) {
       const validHighs = marketStructure.swingHighs.filter(s => s.price > entryPrice);
       if (validHighs.length > 0) {
         const recentHigh = validHighs[validHighs.length - 1].price;
         const sl = recentHigh + buffer;
         if (sl > entryPrice) {
-          return {
-            stopLoss: Number(sl.toFixed(5)),
-            stopLossBasis: 'SWING_HIGH',
-            structuralLevel: Number(recentHigh.toFixed(5))
-          };
+          finalSl = sl;
+          finalBasis = 'SWING_HIGH';
+          finalStructural = recentHigh;
         }
       }
     }
 
     // 3. Bearish FVG (Supply Zone) above entry
-    if (marketStructure?.fairValueGaps && marketStructure.fairValueGaps.length > 0) {
+    if (!finalSl && marketStructure?.fairValueGaps && marketStructure.fairValueGaps.length > 0) {
       const validFvgs = marketStructure.fairValueGaps.filter(f => f.type === 'BEARISH_FVG' && f.top > entryPrice);
       if (validFvgs.length > 0) {
         const fvg = validFvgs[validFvgs.length - 1];
         const sl = fvg.top + buffer;
         if (sl > entryPrice) {
-          return {
-            stopLoss: Number(sl.toFixed(5)),
-            stopLossBasis: 'SUPPLY_ZONE',
-            structuralLevel: Number(fvg.top.toFixed(5))
-          };
+          finalSl = sl;
+          finalBasis = 'SUPPLY_ZONE';
+          finalStructural = fvg.top;
         }
       }
     }
 
     // 4. Structural Candle High (highest high of recent candles above entry)
-    if (marketStructure?.latestCandles && marketStructure.latestCandles.length > 0) {
+    if (!finalSl && marketStructure?.latestCandles && marketStructure.latestCandles.length > 0) {
       const recentHighs = marketStructure.latestCandles.map(c => c.high).filter(h => h > entryPrice);
       if (recentHighs.length > 0) {
         const highestCandleHigh = Math.max(...recentHighs);
         const sl = highestCandleHigh + buffer;
         if (sl > entryPrice) {
-          return {
-            stopLoss: Number(sl.toFixed(5)),
-            stopLossBasis: 'STRUCTURAL_CANDLE',
-            structuralLevel: Number(highestCandleHigh.toFixed(5))
-          };
+          finalSl = sl;
+          finalBasis = 'STRUCTURAL_CANDLE';
+          finalStructural = highestCandleHigh;
         }
       }
     }
 
-    // 5. ATR Fallback
-    const fallbackDist = Math.min(atr * 0.75, maxSlDistance);
-    const fallbackSL = entryPrice + fallbackDist;
+    // Resolve SL with minimum distance enforcement
+    let stopLoss = finalSl ?? (entryPrice + Math.min(atr * 0.75, maxSlDistance));
+    let basis = finalBasis ?? 'ATR_FALLBACK';
+    
+    // Enforcement: If structural SL is too tight, push it out to minSlDistance
+    if ((stopLoss - entryPrice) < minSlDistance) {
+      const adjustedSl = entryPrice + minSlDistance;
+      console.log(`[SL Logic] Structural SL (${stopLoss.toFixed(5)}) was too tight for volatility. Enforcing min distance 1.5x ATR (${minSlDistance.toFixed(5)}). Adjusted SL: ${adjustedSl.toFixed(5)}`);
+      stopLoss = adjustedSl;
+    }
+
     return {
-      stopLoss: Number(fallbackSL.toFixed(5)),
-      stopLossBasis: 'ATR_FALLBACK',
-      structuralLevel: null
+      stopLoss: Number(stopLoss.toFixed(5)),
+      stopLossBasis: basis,
+      structuralLevel: finalStructural ? Number(finalStructural.toFixed(5)) : null
     };
   }
 }

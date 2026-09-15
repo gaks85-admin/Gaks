@@ -31,7 +31,23 @@ CREATE TABLE IF NOT EXISTS public.trade_learning (
     session TEXT,
     volatility TEXT,
     notes TEXT,
-    decision_snapshot JSONB DEFAULT '{}'::jsonb
+    decision_snapshot JSONB DEFAULT '{}'::jsonb,
+    
+    -- Broker & Execution Fields
+    trade_id TEXT,
+    execution_mode TEXT DEFAULT 'THEORETICAL',
+    actual_entry_price NUMERIC,
+    requested_entry_price NUMERIC,
+    entry_slippage_pips NUMERIC,
+    gross_pnl NUMERIC,
+    net_pnl NUMERIC,
+    fees NUMERIC,
+    commission NUMERIC,
+    swap NUMERIC,
+    slippage_pips NUMERIC,
+    realized_r NUMERIC,
+    broker_order_id TEXT,
+    outcome_source TEXT DEFAULT 'THEORETICAL'
 );
 
 -- Ensure decision_snapshot column exists for backward compatibility / existing tables
@@ -88,5 +104,7 @@ CREATE INDEX IF NOT EXISTS idx_trade_learning_created_at ON public.trade_learnin
 CREATE INDEX IF NOT EXISTS idx_trade_learning_outcome ON public.trade_learning(outcome);
 CREATE INDEX IF NOT EXISTS idx_trade_learning_pair ON public.trade_learning(pair);
 CREATE INDEX IF NOT EXISTS idx_trade_learning_timeframe ON public.trade_learning(timeframe);
+CREATE INDEX IF NOT EXISTS idx_trade_learning_trade_id ON public.trade_learning(trade_id);
+CREATE INDEX IF NOT EXISTS idx_trade_learning_execution_mode ON public.trade_learning(execution_mode);
 
 COMMENT ON TABLE public.trade_learning IS 'Stores historical completed trade outcomes and associated execution parameters for statistical learning analytics.';

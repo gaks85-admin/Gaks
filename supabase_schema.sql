@@ -665,14 +665,34 @@ CREATE TABLE IF NOT EXISTS public.trade_learning (
     session TEXT,
     volatility TEXT,
     notes TEXT,
+    decision_snapshot JSONB DEFAULT '{}'::jsonb,
+    
+    -- Broker & Execution Fields
+    trade_id TEXT,
+    execution_mode TEXT DEFAULT 'THEORETICAL',
+    actual_entry_price NUMERIC,
+    requested_entry_price NUMERIC,
+    entry_slippage_pips NUMERIC,
+    gross_pnl NUMERIC,
+    net_pnl NUMERIC,
+    fees NUMERIC,
+    commission NUMERIC,
+    swap NUMERIC,
+    slippage_pips NUMERIC,
+    realized_r NUMERIC,
+    broker_order_id TEXT,
+    outcome_source TEXT DEFAULT 'THEORETICAL',
+    
     execution_source TEXT DEFAULT 'THEORETICAL',
     execution_latency_ms INTEGER,
-    slippage_pips NUMERIC,
     actual_spread NUMERIC,
     commission_paid NUMERIC,
     fees_paid NUMERIC,
     is_reconciled BOOLEAN DEFAULT false
 );
+
+CREATE INDEX IF NOT EXISTS idx_trade_learning_trade_id ON public.trade_learning(trade_id);
+CREATE INDEX IF NOT EXISTS idx_trade_learning_execution_mode ON public.trade_learning(execution_mode);
 
 -- Create the reconciliation_alerts table
 CREATE TABLE IF NOT EXISTS public.reconciliation_alerts (

@@ -353,6 +353,9 @@ export function calculatePositionSize(config: {
   const direction = (config.direction || 'BUY').toUpperCase();
   const userRr = config.riskRewardStr || '1:2';
   const targetRrRatio = parseRiskRewardRatio(userRr);
+  
+  // Enforce a strict minimum 1:1 Risk-Reward ratio for TP placement
+  const effectiveRrRatio = Math.max(targetRrRatio, 1.0);
 
   // Resolve instrument specification
   const spec = resolveInstrumentSpec(config.symbol);
@@ -476,8 +479,8 @@ export function calculatePositionSize(config: {
 
   // 3. Calculate TP strictly adhering to user's selected Risk:Reward ratio (e.g. 1:2)
   const calculatedTP = direction === 'SELL'
-    ? intendedEntry - (riskDistance * targetRrRatio)
-    : intendedEntry + (riskDistance * targetRrRatio);
+    ? intendedEntry - (riskDistance * effectiveRrRatio)
+    : intendedEntry + (riskDistance * effectiveRrRatio);
 
   // Check tick difference
   const diff = Math.abs(executedEntry - intendedEntry);
@@ -488,8 +491,8 @@ export function calculatePositionSize(config: {
   // 5. Recalculate Stop Loss, Take Profit using ONLY the executed entry and strict RR ratio
   const executedSL = direction === 'SELL' ? executedEntry + riskDistance : executedEntry - riskDistance;
   const executedTP = direction === 'SELL'
-    ? executedEntry - (riskDistance * targetRrRatio)
-    : executedEntry + (riskDistance * targetRrRatio);
+    ? executedEntry - (riskDistance * effectiveRrRatio)
+    : executedEntry + (riskDistance * effectiveRrRatio);
 
   const stopDistance = direction === 'SELL' ? executedSL - executedEntry : executedEntry - executedSL;
   const tpDistance = direction === 'SELL' ? executedEntry - executedTP : executedTP - executedEntry;
@@ -503,7 +506,7 @@ export function calculatePositionSize(config: {
     entryPrice: executedEntry,
     stopLoss: executedSL,
     takeProfit: executedTP,
-    minRr: targetRrRatio,
+    minRr: effectiveRrRatio,
     positionMode: config.positionMode,
     lotSize: config.preferredLotSize,
     maxAllowedRisk: riskAmount,
@@ -562,7 +565,7 @@ export function calculatePositionSize(config: {
   }
 
   // Validate RR: actual R:R must satisfy target/minimum RR (within 1% or 0.01 tolerance)
-  const expectedRrNumeric = targetRrRatio;
+  const expectedRrNumeric = effectiveRrRatio;
   const rrValidationPassed = expectedRrNumeric === 0 ? false : (actualRr >= expectedRrNumeric - 0.01);
 
   logRrValidationAudit(
