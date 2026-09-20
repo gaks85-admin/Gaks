@@ -144,7 +144,7 @@ function calculateBuffer(candles: Candle[], currentPrice: number): { atr: number
 }
 
 /**
- * Identifies high-quality Point of Interest (POI) / Marked Zone from market structure and historical candles.
+ * Identifies all valid candidate Point of Interest (POI) / Marked Zones from market structure.
  * 
  * Evaluates in priority:
  * 1. Fresh Fair Value Gaps (Bullish/Bearish FVGs)
@@ -152,14 +152,14 @@ function calculateBuffer(candles: Candle[], currentPrice: number): { atr: number
  * 3. Protected Swing Highs / Swing Lows (Liquidity Levels)
  * 4. Structural Support & Resistance Zones
  */
-export function identifyMarkedZone(
+export function identifyCandidateZones(
   candles: Candle[],
   marketStructure: MarketStructure,
   compiledStrategy?: CompilerOutput | null,
   currentPrice?: number,
   rejectedZones?: RejectedZoneRecord[]
-): MarkedZone | null {
-  if (!candles || candles.length < 5) return null;
+): MarkedZone[] {
+  if (!candles || candles.length < 5) return [];
 
   const sortedCandles = [...candles].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
   const latestCandle = sortedCandles[sortedCandles.length - 1];
@@ -531,7 +531,7 @@ export function identifyMarkedZone(
   }
 
   if (candidateZones.length === 0) {
-    return null;
+    return [];
   }
 
   // =========================================================================
@@ -549,7 +549,7 @@ export function identifyMarkedZone(
   if (followHtfTrend) {
     if (!htfTrend || htfTrend === 'SIDEWAYS' || marketStructure?.htfAllowedDirection === 'NONE') {
       console.log(`[HTF TREND FILTER] ${pair}: ${htfTimeframe} Trend is SIDEWAYS / unclear (${marketStructure?.htfReason || 'consolidation'}). Defaulting to NO TRADE. No zones marked.`);
-      return null;
+      return [];
     }
 
     if (htfTrend === 'BULLISH') {
@@ -558,7 +558,7 @@ export function identifyMarkedZone(
         filteredCandidates = buyCandidates;
       } else {
         console.log(`[HTF TREND FILTER] ${pair}: ${htfTimeframe} Trend is BULLISH. Filtered out ${candidateZones.length} counter-trend SELL zones. Waiting for fresh BUY/Demand zone aligned with HTF trend.`);
-        return null;
+        return [];
       }
     } else if (htfTrend === 'BEARISH') {
       const sellCandidates = candidateZones.filter(z => z.direction === 'SELL');
@@ -566,14 +566,14 @@ export function identifyMarkedZone(
         filteredCandidates = sellCandidates;
       } else {
         console.log(`[HTF TREND FILTER] ${pair}: ${htfTimeframe} Trend is BEARISH. Filtered out ${candidateZones.length} counter-trend BUY zones. Waiting for fresh SELL/Supply zone aligned with HTF trend.`);
-        return null;
+        return [];
       }
     }
   } else {
     // If followHtfTrend is explicitly false, fall back to current timeframe structural trend
     if (trend === 'SIDEWAYS') {
       console.log(`[TREND FILTER] ${pair}: Current timeframe trend is SIDEWAYS / unclear. Defaulting to NO TRADE.`);
-      return null;
+      return [];
     }
     if (trend === 'BEARISH') {
       const sellCandidates = candidateZones.filter(z => z.direction === 'SELL');
@@ -603,24 +603,38 @@ export function identifyMarkedZone(
 
     if (originalCount > 0 && filteredCandidates.length === 0) {
       console.log(`[ZONE QUALITY DISENGAGEMENT] ${pair}: Filtered out ${originalCount} candidate zone(s) that were previously rejected by quality control. Waiting for another zone to appear.`);
-      return null;
+      return [];
     }
   }
 
   // Sort by highest strength and closest proximity
   filteredCandidates.sort((a, b) => b.strength - a.strength);
 
-  const selectedZone = filteredCandidates[0];
-  if (selectedZone) {
-    selectedZone.htfTrend = htfTrend || 'SIDEWAYS';
-    selectedZone.htfTimeframe = htfTimeframe;
-    selectedZone.htfReason = marketStructure?.htfReason;
+  // Return top 5 candidates for curation
+  return filteredCandidates.slice(0, 5).map(z => {
+    z.htfTrend = htfTrend || 'SIDEWAYS';
+    z.htfTimeframe = htfTimeframe;
+    z.htfReason = marketStructure?.htfReason;
     if (htfTrend && htfTrend !== 'SIDEWAYS') {
-      selectedZone.reasoning = `[${htfTimeframe} ${htfTrend} Trend Aligned] ` + selectedZone.reasoning;
+      z.reasoning = `[${htfTimeframe} ${htfTrend} Trend Aligned] ` + z.reasoning;
     }
-  }
+    return z;
+  });
+}
 
-  return selectedZone;
+/**
+ * Identifies high-quality Point of Interest (POI) / Marked Zone from market structure.
+ * Legacy wrapper for identifyCandidateZones that returns only the single best candidate.
+ */
+export function identifyMarkedZone(
+  candles: Candle[],
+  marketStructure: MarketStructure,
+  compiledStrategy?: CompilerOutput | null,
+  currentPrice?: number,
+  rejectedZones?: RejectedZoneRecord[]
+): MarkedZone | null {
+  const candidates = identifyCandidateZones(candles, marketStructure, compiledStrategy, currentPrice, rejectedZones);
+  return candidates[0] || null;
 }
 
 /**

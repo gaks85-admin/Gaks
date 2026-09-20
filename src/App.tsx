@@ -1671,40 +1671,58 @@ export default function App() {
   };
 
   const stopAiMarketWatcher = async () => {
-    if (session?.user) {
-      try {
-        await fetch('/api/watcher/stop', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userId: session.user.id })
-        }).catch(err => console.error("Error calling /api/watcher/stop:", err));
+    if (!session?.user) return;
+    
+    try {
+      // 1. Call the backend stop handler first to clear trade state & notify bot
+      const response = await fetch('/api/watcher/stop', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token || ''}`
+        },
+        body: JSON.stringify({ userId: session.user.id })
+      });
 
-        await supabase
-          .from('watchers')
-          .update({
-            status: 'stopped',
-            trade_status: 'WAITING',
-            entry_price: null,
-            stop_loss: null,
-            take_profit: null,
-            direction: null,
-            opened_at: null,
-            closed_at: null,
-            cooldown_until: null,
-            signal_message_id: null,
-            last_scan_at: null,
-            updated_at: new Date().toISOString()
-          })
-          .eq('user_id', session.user.id);
-      } catch (err) {
-        console.error("Error stopping watcher:", err);
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`Server failed to stop watcher: ${errText}`);
       }
+
+      // 2. Authoritative database update from client (matching local expectations)
+      const { error: dbErr } = await supabase
+        .from('watchers')
+        .update({
+          status: 'stopped',
+          trade_status: 'WAITING',
+          entry_price: null,
+          stop_loss: null,
+          take_profit: null,
+          direction: null,
+          opened_at: null,
+          closed_at: null,
+          cooldown_until: null,
+          signal_message_id: null,
+          last_scan_at: null,
+          updated_at: new Date().toISOString()
+        })
+        .eq('user_id', session.user.id);
+
+      if (dbErr) {
+        throw new Error(`Database update failed: ${dbErr.message}`);
+      }
+
+      // 3. Update local state only after successful sync
+      setIsWatcherActive(false);
+      console.log(`[Watchlist Debug] WATCHERS UPDATED\nPrevious: ${watchlist.length}\nCurrent: 0\nReason: STOP`);
+      setWatchlist([]);
+      localStorage.removeItem('gaks_watchlist');
+      triggerNotification("AI Market Watcher stopped and state synchronized.", "info");
+
+    } catch (err: any) {
+      console.error("Error stopping watcher:", err);
+      triggerNotification(`Failed to stop watcher: ${err.message}`, "info");
     }
-    setIsWatcherActive(false);
-    console.log(`[Watchlist Debug] WATCHERS UPDATED\nPrevious: ${watchlist.length}\nCurrent: 0\nReason: STOP`);
-    setWatchlist([]);
-    localStorage.removeItem('gaks_watchlist');
-    triggerNotification("AI Market Watcher stopped.", "info");
   };
 
   // Load Gemini API Key when session changes
@@ -1904,47 +1922,76 @@ export default function App() {
     triggerNotification(`${cleanSymbol} added to watchlist!`);
   };
 
-  const handleRemovePair = (symbolToRemove: string) => {
+  const handleRemovePair = async (symbolToRemove: string) => {
     const canonical = normalizeSymbol(symbolToRemove);
-    if (isAdmin) {
-      setWatchlist(prev => {
-        const updated = prev.filter(w => normalizeSymbol(w.symbol) !== canonical);
-        localStorage.setItem('gaks_watchlist', JSON.stringify(updated));
-        return updated;
-      });
-      
-      if (session?.user) {
-        fetch('/api/watcher/stop', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userId: session.user.id, selected_pair: symbolToRemove })
-        }).catch(err => console.error("Error calling /api/watcher/stop:", err));
+    const toDisplay = toDisplaySymbol(symbolToRemove);
 
-        supabase
-          .from('watchers')
-          .update({
-            status: 'stopped',
-            trade_status: 'WAITING',
-            entry_price: null,
-            stop_loss: null,
-            take_profit: null,
-            direction: null,
-            opened_at: null,
-            closed_at: null,
-            cooldown_until: null,
-            signal_message_id: null,
-            last_scan_at: null,
-            updated_at: new Date().toISOString()
-          })
-          .eq('user_id', session.user.id)
-          .eq('selected_pair', symbolToRemove)
-          .then();
+    if (isAdmin) {
+      if (session?.user) {
+        try {
+          triggerNotification(`Removing ${toDisplay}...`, 'info');
+
+          // 1. Synchronize with backend
+          const response = await fetch('/api/watcher/stop', {
+            method: 'POST',
+            headers: { 
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${session.access_token || ''}`
+            },
+            body: JSON.stringify({ 
+              userId: session.user.id, 
+              selected_pair: symbolToRemove,
+              action: 'delete' // Treat "Remove" as "Delete" for admin to completely clear record
+            })
+          });
+
+          if (!response.ok) {
+            const errText = await response.text();
+            throw new Error(`Sync failed: ${errText}`);
+          }
+
+          // 2. Direct database update to ensure immediate enforcement
+          const { error: dbErr } = await supabase
+            .from('watchers')
+            .update({
+              status: 'stopped',
+              trade_status: 'WAITING',
+              entry_price: null,
+              stop_loss: null,
+              take_profit: null,
+              direction: null,
+              opened_at: null,
+              closed_at: null,
+              cooldown_until: null,
+              signal_message_id: null,
+              last_scan_at: null,
+              updated_at: new Date().toISOString()
+            })
+            .eq('user_id', session.user.id)
+            .eq('selected_pair', symbolToRemove);
+
+          if (dbErr) {
+            throw new Error(`Database sync failed: ${dbErr.message}`);
+          }
+
+          // 3. Update UI state only on success
+          setWatchlist(prev => {
+            const updated = prev.filter(w => normalizeSymbol(w.symbol) !== canonical);
+            localStorage.setItem('gaks_watchlist', JSON.stringify(updated));
+            return updated;
+          });
+
+          triggerNotification(`${toDisplay} removed from watchlist`, 'info');
+
+        } catch (err: any) {
+          console.error("Error removing pair:", err);
+          triggerNotification(`Failed to remove ${toDisplay}: ${err.message}`, "info");
+        }
       }
     } else {
-      stopAiMarketWatcher();
+      // For standard users, stopping the watcher resets the entire state
+      await stopAiMarketWatcher();
     }
-    
-    triggerNotification(`${toDisplaySymbol(symbolToRemove)} removed from watchlist`, 'info');
   };
 
   const getFullNameForSymbol = (symbol: string): string => {

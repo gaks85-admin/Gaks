@@ -50,6 +50,7 @@ import { resolveAuthoritativeDecision, DecisionGateResult } from '../../src/lib/
 import { processWithConcurrency } from '../../src/lib/concurrency.js';
 import { 
   identifyMarkedZone, 
+  identifyCandidateZones,
   evaluateZoneState, 
   isPriceInOrTappingZone, 
   MarkedZone, 
@@ -60,6 +61,7 @@ import {
   clearRejectedZones,
   RejectedZoneRecord
 } from '../../src/lib/zone-engine.js';
+import { curateZonesWithAI } from '../../src/lib/zone-curator.js';
 import { resolveHigherTimeframeTrend } from '../../src/lib/htf-trend-engine.js';
 import { getMarketSchedule } from '../../src/lib/market-hours.js';
 import { getGlobalExecutionSettings, ExecutionMode } from '../../src/lib/execution-mode-resolver.js';
@@ -1597,9 +1599,11 @@ Reason: ${activeValidation.reason}`);
         try {
           const { data: dbActiveList } = await supabase
             .from("watchers")
-            .select("id, selected_pair, trade_status")
+            .select("id, selected_pair, trade_status, status")
             .eq("user_id", userId)
+            .eq("status", "active")
             .eq("trade_status", "ACTIVE");
+          
           if (dbActiveList && dbActiveList.length > 0) {
             hasActiveTradeOnPair = dbActiveList.some((w: any) => {
               const p = (w.selected_pair || '').replace('/', '').toUpperCase();
@@ -2079,7 +2083,8 @@ Reason: ${activeValidation.reason}`);
         // 2. If NO active zone exists, identify and mark a fresh high-quality structural zone
         // CRITICAL: A trade must hit either TP or stop loss before marking another zone.
         if (!currentZone) {
-          if (tradeStatus === 'ACTIVE' || watcher.trade_status === 'ACTIVE' || watcher.active_trade_id || hasActiveTradeOnPair) {
+          const isActuallyActive = (tradeStatus === 'ACTIVE' || watcher.trade_status === 'ACTIVE' || watcher.active_trade_id || hasActiveTradeOnPair) && watcher.status === 'active';
+          if (isActuallyActive) {
             console.log(`[ZONE MARKING BLOCKED] Watcher ID: ${watcher.id} (${selectedPair}) has an active trade in progress. Must hit TP or SL before marking another zone.`);
             watchersProcessedCount++;
             isWatcherSkipped = false;
@@ -2088,10 +2093,44 @@ Reason: ${activeValidation.reason}`);
           }
 
           const rejectedList = getRejectedZones(watcher.id);
-          const discoveredZone = identifyMarkedZone(candleData, marketStructure, compiledStrategy, activeCurrentPrice, rejectedList);
+          const candidates = identifyCandidateZones(candleData, marketStructure, compiledStrategy, activeCurrentPrice, rejectedList);
+          
+          let discoveredZone: MarkedZone | null = null;
+          let curationReason = '';
+
+          if (candidates.length > 0) {
+            // If we have candidates and the user has a Gemini key, use AI curation
+            const userGeminiKey = await resolveUserGeminiKey(supabase, userId);
+            const isAiCuratable = candidates.length > 1 && userGeminiKey && executionMode !== 'RULE_ONLY';
+
+            if (isAiCuratable) {
+              console.log(`[AI ZONE CURATION] Watcher ID: ${watcher.id} (${selectedPair}): Multiple candidates found (${candidates.length}). Curating with Gemini...`);
+              const curationResult = await curateZonesWithAI(
+                supabase,
+                candidates,
+                marketStructure,
+                watcher.strategy_text || '',
+                userId,
+                selectedPair,
+                candleData
+              );
+              
+              if (curationResult) {
+                discoveredZone = curationResult.winner;
+                curationReason = curationResult.aiReason;
+              }
+            } else {
+              // Fallback to deterministic selection
+              discoveredZone = candidates[0];
+              curationReason = discoveredZone.reasoning;
+            }
+          }
 
           if (discoveredZone) {
-            console.log(`[ZONE MARKED] Watcher ID: ${watcher.id} (${selectedPair}): Identified fresh ${discoveredZone.type} (${discoveredZone.direction}) [${discoveredZone.low} - ${discoveredZone.high}], Invalidation: ${discoveredZone.invalidationLevel}.`);
+            if (curationReason) {
+              discoveredZone.reasoning = `[AI CURATED] ${curationReason}`;
+            }
+            console.log(`[ZONE MARKED] Watcher ID: ${watcher.id} (${selectedPair}): Identified ${discoveredZone.type} (${discoveredZone.direction}) [${discoveredZone.low} - ${discoveredZone.high}].`);
             logWatcherEvent('ZONE MARKED', logCtx, {
               'Zone ID': discoveredZone.id,
               'Zone Type': discoveredZone.type,
