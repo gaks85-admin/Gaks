@@ -203,7 +203,7 @@ const DashboardPage = ({ fetchWithAuth }: { fetchWithAuth: any }) => {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {loading ? (
           [1, 2, 3, 4, 5, 6].map((i) => (
-            <div key={i} className="bg-zinc-50 dark:bg-zinc-950 p-5 rounded-2xl border border-zinc-200 dark:border-zinc-900 animate-pulse space-y-3">
+            <div key={i} className="bg-zinc-100/40 dark:bg-zinc-900/40 p-5 rounded-2xl border border-zinc-200 dark:border-zinc-800 animate-pulse space-y-3">
               <div className="flex justify-between items-start">
                 <div className="space-y-2">
                   <div className="h-3 w-28 bg-zinc-200 dark:bg-zinc-800 rounded"></div>
@@ -216,7 +216,7 @@ const DashboardPage = ({ fetchWithAuth }: { fetchWithAuth: any }) => {
           ))
         ) : (
           statCards.map((card, i) => (
-            <div key={i} className={`bg-zinc-50 dark:bg-zinc-950 p-5 rounded-2xl border flex flex-col justify-between shadow-sm dark:shadow-lg relative overflow-hidden transition-all hover:scale-[1.01] ${card.color.split(' ')[2]}`}>
+            <div key={i} className={`bg-zinc-50 dark:bg-zinc-900/40 p-5 rounded-2xl border flex flex-col justify-between shadow-sm transition-all hover:scale-[1.01] ${card.color.split(' ')[2]}`}>
               <div className="flex justify-between items-start">
                 <div>
                   <span className="text-xs font-bold uppercase tracking-wider text-zinc-500">{card.label}</span>
@@ -2085,12 +2085,12 @@ const LiveLogsPage = ({ fetchWithAuth }: { fetchWithAuth: any }) => {
 
   return (
     <div className="p-6 space-y-6">
-      <div className="flex justify-between items-center pb-2 border-b border-zinc-900">
+      <div className="flex justify-between items-center pb-2 border-b border-zinc-200 dark:border-zinc-900">
         <div>
-          <h3 className="text-lg font-bold text-white font-display">Live Operational Logs</h3>
+          <h3 className="text-lg font-bold text-zinc-950 dark:text-white font-display">Live Operational Logs</h3>
           <p className="text-xs text-zinc-500">Real-time execution trace grouped by cron run. Auto-refreshes every 10s.</p>
         </div>
-        <button onClick={fetchLogs} className="p-2 bg-zinc-900 border border-zinc-800 rounded-lg hover:bg-zinc-800 text-zinc-300 transition-colors">
+        <button onClick={fetchLogs} className="p-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300 transition-colors cursor-pointer">
           <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
         </button>
       </div>
@@ -2101,42 +2101,42 @@ const LiveLogsPage = ({ fetchWithAuth }: { fetchWithAuth: any }) => {
           <p className="text-xs text-zinc-500">Fetching latest execution logs...</p>
         </div>
       ) : logs.length === 0 ? (
-        <div className="p-12 text-center text-zinc-500 border border-dashed border-zinc-900 rounded-2xl bg-zinc-950/20">
+        <div className="p-12 text-center text-zinc-500 border border-dashed border-zinc-200 dark:border-zinc-900 rounded-2xl bg-zinc-50 dark:bg-zinc-950/20">
           <Terminal className="w-8 h-8 mx-auto mb-2 text-zinc-700" />
           <p className="text-xs font-semibold">No execution logs found in Supabase.</p>
         </div>
       ) : (
         <div className="space-y-4">
           {logs.map((run) => (
-            <div key={run.id} className="bg-zinc-950 border border-zinc-900 rounded-2xl overflow-hidden shadow-xl">
-              <div className="px-5 py-3 bg-zinc-900/50 border-b border-zinc-900 flex justify-between items-center">
+            <div key={run.id} className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-900 rounded-2xl overflow-hidden shadow-sm dark:shadow-xl">
+              <div className="px-5 py-3 bg-zinc-50 dark:bg-zinc-900/50 border-b border-zinc-200 dark:border-zinc-900 flex justify-between items-center">
                 <div className="flex items-center gap-3">
-                  <div className={`w-2 h-2 rounded-full ${run.status === 'success' ? 'bg-white' : 'bg-red-500'}`} />
-                  <span className="text-xs font-bold text-zinc-200">{run.pair}</span>
+                  <div className={`w-2 h-2 rounded-full ${run.status === 'success' ? 'bg-zinc-800 dark:bg-white' : 'bg-red-500'}`} />
+                  <span className="text-xs font-bold text-zinc-800 dark:text-zinc-200">{run.pair}</span>
                   <span className="text-[10px] text-zinc-500 font-mono">{new Date(run.run_time).toLocaleString()}</span>
                 </div>
                 <div className="flex items-center gap-4">
                   <div className="text-[10px]">
                     <span className="text-zinc-500">Signal: </span>
-                    <span className={`font-bold ${run.final_signal === 'BUY' ? 'text-zinc-200' : run.final_signal === 'SELL' ? 'text-red-400' : 'text-zinc-400'}`}>
+                    <span className={`font-bold ${run.final_signal === 'BUY' ? 'text-zinc-800 dark:text-zinc-200' : run.final_signal === 'SELL' ? 'text-red-500 dark:text-red-400' : 'text-zinc-400'}`}>
                       {run.final_signal || 'N/A'}
                     </span>
                   </div>
                   <div className="text-[10px]">
                     <span className="text-zinc-500">Score: </span>
-                    <span className="font-bold text-zinc-200">{run.decision_score?.toFixed(1)}%</span>
+                    <span className="font-bold text-zinc-800 dark:text-zinc-200">{run.decision_score?.toFixed(1)}%</span>
                   </div>
                 </div>
               </div>
-              <div className="p-4 bg-black/40 font-mono text-[10px] space-y-1 max-h-60 overflow-y-auto">
+              <div className="p-4 bg-zinc-50/50 dark:bg-black/40 font-mono text-[10px] space-y-1 max-h-60 overflow-y-auto">
                 {run.logs?.map((log: any, idx: number) => (
                   <div key={idx} className="flex gap-3">
-                    <span className="text-zinc-600 shrink-0">[{log.time}]</span>
+                    <span className="text-zinc-400 dark:text-zinc-600 shrink-0">[{log.time}]</span>
                     <span className={`${
-                      log.type === 'success' ? 'text-zinc-300' : 
-                      log.type === 'error' ? 'text-red-500' : 
-                      log.type === 'warning' ? 'text-amber-500' : 
-                      'text-zinc-400'
+                      log.type === 'success' ? 'text-zinc-700 dark:text-zinc-300' : 
+                      log.type === 'error' ? 'text-red-600 dark:text-red-500' : 
+                      log.type === 'warning' ? 'text-amber-600 dark:text-amber-500' : 
+                      'text-zinc-500 dark:text-zinc-400'
                     }`}>
                       {log.message}
                     </span>
@@ -2268,62 +2268,69 @@ export default function AdminDashboard({
   ];
 
   return (
-    <div className="flex h-[90vh] bg-[#080808] border-t border-zinc-900 text-white rounded-t-3xl overflow-hidden mt-2 relative">
-      
-      {/* Sidebar for desktop, drawer for mobile */}
-      <div className={`fixed inset-y-0 left-0 z-40 w-64 bg-white dark:bg-[#0c0c0e] border-r border-zinc-200 dark:border-zinc-900/80 transform transition-transform duration-200 ease-in-out ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 md:relative md:h-full`}>
-        <div className="p-5 border-b border-zinc-900 flex justify-between items-center bg-zinc-950/40">
-          <span className="text-white font-extrabold text-sm flex items-center gap-2 tracking-tight">
-            <Shield className="w-4.5 h-4.5 text-sky-400" /> Administrative Shield
-          </span>
-          <button onClick={() => setIsSidebarOpen(false)} className="md:hidden text-zinc-500 hover:text-white cursor-pointer"><X className="w-4 h-4" /></button>
+    <div className="space-y-6 pb-20 animate-fade-in max-w-7xl mx-auto">
+      {/* Admin Header & Identity */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2 mb-1">
+            <div className="p-1.5 bg-sky-500/10 text-sky-600 dark:text-sky-400 rounded-lg">
+              <Shield className="w-5 h-5" />
+            </div>
+            <h2 className="text-xl font-bold text-zinc-900 dark:text-white font-display uppercase tracking-tight">Administrative Shield</h2>
+          </div>
+          <p className="text-xs text-zinc-500 font-medium leading-relaxed">
+            Authorized: <span className="text-sky-600 dark:text-sky-400 font-bold">{userEmail}</span> • Root Access Level
+          </p>
         </div>
-        <nav className="p-4 space-y-1">
-          {menuItems.map(item => (
-            <button
-              key={item.id}
-              onClick={() => { setActiveAdminTab(item.id as any); setIsSidebarOpen(false); }}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-xs font-bold uppercase tracking-wider transition-colors cursor-pointer ${activeAdminTab === item.id ? 'bg-zinc-900 text-white' : 'text-zinc-500 hover:text-zinc-200 hover:bg-zinc-950/40'}`}
-            >
-              <item.icon className="w-4.5 h-4.5" />
-              {item.label}
-            </button>
-          ))}
-        </nav>
+        
+        <div className="flex items-center gap-2">
+           <button onClick={() => window.location.reload()} className="px-3 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300 transition-all flex items-center gap-2 text-xs font-bold cursor-pointer shadow-sm">
+            <RefreshCw className="w-3.5 h-3.5" />
+            Sync System
+          </button>
+        </div>
       </div>
 
-      {/* Main Content Area */}
-      <div className="flex-1 flex flex-col h-full bg-[#080808] overflow-hidden">
-        {/* Sub-header for mobile sidebar trigger */}
-        <header className="px-6 py-4 border-b border-zinc-900/60 flex items-center justify-between bg-[#080808]/50 md:hidden shrink-0">
-          <button onClick={() => setIsSidebarOpen(true)} className="p-1 text-zinc-400 hover:text-white cursor-pointer"><Menu className="w-5 h-5" /></button>
-          <span className="text-xs font-bold uppercase tracking-widest text-zinc-400">{menuItems.find(m => m.id === activeAdminTab)?.label || activeAdminTab}</span>
-          <div className="w-5" /> {/* Spacer */}
-        </header>
+      {/* Integrated Navigation Pills */}
+      <div className="flex items-center gap-1 p-1 bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl overflow-x-auto no-scrollbar scroll-smooth shadow-inner">
+        {menuItems.map(item => (
+          <button
+            key={item.id}
+            onClick={() => setActiveAdminTab(item.id as any)}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-[11px] font-bold uppercase tracking-wider transition-all whitespace-nowrap cursor-pointer shrink-0 ${
+              activeAdminTab === item.id 
+                ? 'bg-white dark:bg-zinc-800 text-zinc-950 dark:text-white shadow-sm ring-1 ring-zinc-200 dark:ring-zinc-700/50' 
+                : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-300 hover:bg-white/50 dark:hover:bg-zinc-800/50'
+            }`}
+          >
+            <item.icon className={`w-4 h-4 ${activeAdminTab === item.id ? 'text-sky-500' : 'text-zinc-400'}`} />
+            {item.label}
+          </button>
+        ))}
+      </div>
 
-        {/* Scrollable Subpage Frame */}
-        <div className="flex-1 overflow-y-auto pb-16">
-          {activeAdminTab === 'dashboard' && <DashboardPage fetchWithAuth={fetchWithAuth} />}
-          {activeAdminTab === 'learning' && (
-            <div className="p-4 sm:p-6 space-y-6">
-              <LearningPerformanceView 
-                userId={session?.user?.id || userProfile?.id} 
-                authToken={session?.access_token} 
-              />
-            </div>
-          )}
-          {activeAdminTab === 'live-logs' && <LiveLogsPage fetchWithAuth={fetchWithAuth} />}
-          {activeAdminTab === 'users' && <UsersPage fetchWithAuth={fetchWithAuth} showToast={showToast} />}
-          {activeAdminTab === 'notifications' && (
-            <div className="p-6">
-              <AdminUserNotificationSection fetchWithAuth={fetchWithAuth} showToast={showToast} />
-            </div>
-          )}
-          {activeAdminTab === 'watchers' && <WatchersPage fetchWithAuth={fetchWithAuth} showToast={showToast} />}
-          {activeAdminTab === 'signals' && <SignalsPage fetchWithAuth={fetchWithAuth} />}
-          {activeAdminTab === 'health' && <SystemHealthPage fetchWithAuth={fetchWithAuth} />}
-          {activeAdminTab === 'settings' && <SettingsPage fetchWithAuth={fetchWithAuth} showToast={showToast} />}
-        </div>
+      {/* Subpage Content Section */}
+      <div className="bg-white dark:bg-[#0c0c0e]/50 rounded-3xl border border-zinc-200 dark:border-zinc-900/80 shadow-sm backdrop-blur-sm overflow-hidden min-h-[60vh]">
+        {activeAdminTab === 'dashboard' && <DashboardPage fetchWithAuth={fetchWithAuth} />}
+        {activeAdminTab === 'learning' && (
+          <div className="p-4 sm:p-6 space-y-6">
+            <LearningPerformanceView 
+              userId={session?.user?.id || userProfile?.id} 
+              authToken={session?.access_token} 
+            />
+          </div>
+        )}
+        {activeAdminTab === 'live-logs' && <LiveLogsPage fetchWithAuth={fetchWithAuth} />}
+        {activeAdminTab === 'users' && <UsersPage fetchWithAuth={fetchWithAuth} showToast={showToast} />}
+        {activeAdminTab === 'notifications' && (
+          <div className="p-6">
+            <AdminUserNotificationSection fetchWithAuth={fetchWithAuth} showToast={showToast} />
+          </div>
+        )}
+        {activeAdminTab === 'watchers' && <WatchersPage fetchWithAuth={fetchWithAuth} showToast={showToast} />}
+        {activeAdminTab === 'signals' && <SignalsPage fetchWithAuth={fetchWithAuth} />}
+        {activeAdminTab === 'health' && <SystemHealthPage fetchWithAuth={fetchWithAuth} />}
+        {activeAdminTab === 'settings' && <SettingsPage fetchWithAuth={fetchWithAuth} showToast={showToast} />}
       </div>
 
       {/* Floating toast alerts */}
