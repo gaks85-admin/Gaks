@@ -25,6 +25,22 @@ export default function ResetPassword({ onComplete }: ResetPasswordProps) {
 
     const checkSession = async () => {
       try {
+        // 1. Check for errors in the hash fragment (Supabase redirects here on failure)
+        if (typeof window !== 'undefined' && window.location.hash) {
+          const params = new URLSearchParams(window.location.hash.substring(1));
+          const errorCode = params.get('error_code');
+          const errorDesc = params.get('error_description');
+          
+          if (errorCode || errorDesc) {
+            console.warn('[ResetPassword] Detected error in URL hash:', { errorCode, errorDesc });
+            if (mounted) {
+              setErrorMessage(errorDesc || 'The password reset link is invalid or has expired.');
+              setIsCheckingSession(false);
+              return;
+            }
+          }
+        }
+
         const { data: { session }, error } = await supabase.auth.getSession();
         
         if (error) {

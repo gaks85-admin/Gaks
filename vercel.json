@@ -29,6 +29,10 @@
       "destination": "/api/:path*"
     },
     {
+      "source": "/reset-password",
+      "destination": "/index.html"
+    },
+    {
       "source": "/:path*",
       "destination": "/index.html"
     }
