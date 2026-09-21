@@ -1,5 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { 
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, AreaChart, Area
+} from 'recharts';
+import { 
   LayoutDashboard, Users, Eye, Zap, Activity, Settings as SettingsIcon, 
   Shield, Menu, X, Key, MessageSquare, Clock, Heart, Search, RefreshCw, 
   Play, Pause, Trash2, AlertTriangle, CheckCircle2, Power, Terminal, Sliders, Check, ExternalLink, Send, Plus,
@@ -27,6 +30,104 @@ const Toast = ({ message, type, onClose }: { message: string; type: 'success' | 
       <button onClick={onClose} className="ml-2 text-zinc-400 dark:text-zinc-500 hover:text-zinc-950 dark:hover:text-white transition-colors">
         <X className="w-3.5 h-3.5" />
       </button>
+    </div>
+  );
+};
+
+const TradingPerformanceChart = ({ fetchWithAuth }: { fetchWithAuth: any }) => {
+  const [data, setData] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const res = await fetchWithAuth('/api/admin/performance');
+        const json = await res.json();
+        if (json.success) {
+          setData(json.chartData || []);
+        }
+      } catch (err) {
+        console.error("Error fetching performance data:", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchData();
+  }, [fetchWithAuth]);
+
+  if (loading) {
+    return (
+      <div className="h-64 flex items-center justify-center bg-zinc-50 dark:bg-zinc-950 rounded-2xl border border-zinc-200 dark:border-zinc-900 animate-pulse">
+        <RefreshCw className="w-6 h-6 animate-spin text-zinc-400" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-zinc-50 dark:bg-zinc-950 p-6 rounded-2xl border border-zinc-200 dark:border-zinc-900 shadow-sm">
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h4 className="text-sm font-bold text-zinc-950 dark:text-white font-display">Trading Performance</h4>
+          <p className="text-[10px] text-zinc-500">Visualizing Wins vs Losses over the last 30 days</p>
+        </div>
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-1.5">
+            <div className="w-2.5 h-2.5 rounded-full bg-zinc-800 dark:bg-zinc-200"></div>
+            <span className="text-[10px] font-bold text-zinc-500 uppercase">Wins</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <div className="w-2.5 h-2.5 rounded-full bg-rose-500"></div>
+            <span className="text-[10px] font-bold text-zinc-500 uppercase">Losses</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="h-64 w-full">
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={data}>
+            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#27272a" />
+            <XAxis 
+              dataKey="date" 
+              axisLine={false}
+              tickLine={false}
+              tick={{ fill: '#71717a', fontSize: 10, fontWeight: 600 }}
+              tickFormatter={(val) => new Date(val).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}
+              minTickGap={30}
+            />
+            <YAxis 
+              axisLine={false}
+              tickLine={false}
+              tick={{ fill: '#71717a', fontSize: 10, fontWeight: 600 }}
+            />
+            <Tooltip 
+              contentStyle={{ 
+                backgroundColor: '#09090b', 
+                border: '1px solid #27272a', 
+                borderRadius: '12px',
+                fontSize: '11px',
+                fontWeight: 'bold'
+              }}
+              itemStyle={{ padding: '2px 0' }}
+              cursor={{ fill: '#18181b', opacity: 0.4 }}
+            />
+            <Bar 
+              dataKey="wins" 
+              name="Wins" 
+              fill="currentColor" 
+              className="text-zinc-800 dark:text-zinc-200" 
+              radius={[4, 4, 0, 0]} 
+              barSize={20}
+            />
+            <Bar 
+              dataKey="losses" 
+              name="Losses" 
+              fill="#f43f5e" 
+              radius={[4, 4, 0, 0]} 
+              barSize={20}
+            />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
     </div>
   );
 };
@@ -132,6 +233,10 @@ const DashboardPage = ({ fetchWithAuth }: { fetchWithAuth: any }) => {
       </div>
 
       {/* Auxiliary Info */}
+      <div className="mt-6">
+        <TradingPerformanceChart fetchWithAuth={fetchWithAuth} />
+      </div>
+
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
         <div className="bg-zinc-50 dark:bg-zinc-950 p-5 rounded-2xl border border-zinc-200 dark:border-zinc-900/80">
           <h4 className="text-xs font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 mb-4 flex items-center gap-2">

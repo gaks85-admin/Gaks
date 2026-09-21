@@ -256,6 +256,63 @@ async function stats_handler(req: any, res: any) {
   }
 }
 
+async function performance_handler(req: any, res: any) {
+  const supabase = getSupabase();
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Content-Type", "application/json");
+  if (req.method === "OPTIONS") return res.status(200).end();
+
+  try {
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    const startDate = thirtyDaysAgo.toISOString();
+
+    const { data, error } = await supabase
+      .from('trade_learning')
+      .select('created_at, outcome')
+      .gte('created_at', startDate)
+      .order('created_at', { ascending: true });
+
+    if (error) throw error;
+
+    // Aggregate data by date
+    const performanceMap = new Map<string, { date: string; wins: number; losses: number; breakeven: number }>();
+    
+    // Initialize last 30 days with zeros
+    for (let i = 0; i < 30; i++) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const dateStr = d.toISOString().split('T')[0];
+      performanceMap.set(dateStr, { date: dateStr, wins: 0, losses: 0, breakeven: 0 });
+    }
+
+    data?.forEach(trade => {
+      const dateStr = new Date(trade.created_at).toISOString().split('T')[0];
+      const entry = performanceMap.get(dateStr);
+      if (entry) {
+        if (trade.outcome === 'WIN') entry.wins++;
+        else if (trade.outcome === 'LOSS') entry.losses++;
+        else if (trade.outcome === 'BREAKEVEN') entry.breakeven++;
+      } else {
+        // Handle cases older than our initialization loop if any (shouldn't happen with gte)
+        performanceMap.set(dateStr, { 
+          date: dateStr, 
+          wins: trade.outcome === 'WIN' ? 1 : 0, 
+          losses: trade.outcome === 'LOSS' ? 1 : 0, 
+          breakeven: trade.outcome === 'BREAKEVEN' ? 1 : 0 
+        });
+      }
+    });
+
+    const chartData = Array.from(performanceMap.values()).sort((a, b) => a.date.localeCompare(b.date));
+
+    return res.status(200).json({ success: true, chartData });
+  } catch (err: any) {
+    console.error("[Admin Performance Error]:", err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+}
+
 async function users_action_handler(req: any, res: any) {
   return res.status(200).json({ success: true });
 }
@@ -420,6 +477,7 @@ export default async function handler(req: any, res: any) {
 
     if (pathname.endsWith('/logs')) return logs_handler(req, res);
     if (pathname.endsWith('/system-health')) return system_health_handler(req, res);
+    if (pathname.endsWith('/performance')) return performance_handler(req, res);
     if (pathname.endsWith('/stats')) return stats_handler(req, res);
     if (pathname.endsWith('/explainability')) return explainability_handler(req, res);
     if (pathname.endsWith('/users/search')) return users_search_handler(req, res);
