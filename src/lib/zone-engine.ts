@@ -123,23 +123,37 @@ export function generateZoneId(pair: string, type: ZoneType, direction: string):
 /**
  * Calculates ATR and price buffer for zone boundary and invalidation cushioning.
  */
-function calculateBuffer(candles: Candle[], currentPrice: number): { atr: number; buffer: number } {
-  if (!candles || candles.length < 2) {
-    const atrFallback = currentPrice * 0.005;
-    return { atr: atrFallback, buffer: Math.max(atrFallback * 0.2, currentPrice * 0.0005) };
+function calculateBuffer(candles: Candle[], currentPrice: number, pair?: string): { atr: number; buffer: number } {
+  const sym = (pair || '').toUpperCase();
+  const isForex = !sym.includes('XAU') && !sym.includes('GOLD') && !sym.includes('BTC') && !sym.includes('ETH') && currentPrice < 50;
+  const isGold = sym.includes('XAU') || sym.includes('GOLD');
+  const isJpy = sym.includes('JPY');
+
+  let atr = currentPrice * 0.002;
+  if (candles && candles.length >= 2) {
+    let totalTr = 0;
+    for (let i = 1; i < candles.length; i++) {
+      const high = candles[i].high;
+      const low = candles[i].low;
+      const prevClose = candles[i - 1].close;
+      const tr = Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose));
+      totalTr += tr;
+    }
+    atr = totalTr / (candles.length - 1);
   }
 
-  let totalTr = 0;
-  for (let i = 1; i < candles.length; i++) {
-    const high = candles[i].high;
-    const low = candles[i].low;
-    const prevClose = candles[i - 1].close;
-    const tr = Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose));
-    totalTr += tr;
+  let buffer: number;
+  if (isGold) {
+    buffer = Math.min(Math.max(atr * 0.15, 0.40), 2.50);
+  } else if (isJpy) {
+    buffer = Math.min(Math.max(atr * 0.15, 0.02), 0.06);
+  } else if (isForex) {
+    buffer = Math.min(Math.max(atr * 0.15, 0.00015), 0.00030); // 1.5 to 3.0 pips for standard Forex!
+  } else {
+    // Crypto / Indices
+    buffer = Math.min(Math.max(atr * 0.15, currentPrice * 0.0005), currentPrice * 0.002);
   }
 
-  const atr = totalTr / (candles.length - 1);
-  const buffer = Math.max(atr * 0.2, currentPrice * 0.0005);
   return { atr, buffer };
 }
 
@@ -164,10 +178,9 @@ export function identifyCandidateZones(
   const sortedCandles = [...candles].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
   const latestCandle = sortedCandles[sortedCandles.length - 1];
   const activePrice = (currentPrice && currentPrice > 0) ? currentPrice : latestCandle.close;
-  const { atr, buffer } = calculateBuffer(sortedCandles, activePrice);
-
   const trend = marketStructure?.trend || 'SIDEWAYS';
   const pair = marketStructure?.pair || 'MARKET';
+  const { atr, buffer } = calculateBuffer(sortedCandles, activePrice, pair);
 
   // Strategy preference filtering: 100% align with user's configured rules
   const rules = compiledStrategy?.compiled_rules;
@@ -546,8 +559,8 @@ export function identifyCandidateZones(
 
   let filteredCandidates = candidateZones;
 
-  if (followHtfTrend) {
-    if (!htfTrend || htfTrend === 'SIDEWAYS' || marketStructure?.htfAllowedDirection === 'NONE') {
+  if (followHtfTrend && htfTrend) {
+    if (htfTrend === 'SIDEWAYS' || marketStructure?.htfAllowedDirection === 'NONE') {
       console.log(`[HTF TREND FILTER] ${pair}: ${htfTimeframe} Trend is SIDEWAYS / unclear (${marketStructure?.htfReason || 'consolidation'}). Defaulting to NO TRADE. No zones marked.`);
       return [];
     }
@@ -570,7 +583,7 @@ export function identifyCandidateZones(
       }
     }
   } else {
-    // If followHtfTrend is explicitly false, fall back to current timeframe structural trend
+    // If followHtfTrend is explicitly false or htfTrend is not provided, fall back to current timeframe structural trend
     if (trend === 'SIDEWAYS') {
       console.log(`[TREND FILTER] ${pair}: Current timeframe trend is SIDEWAYS / unclear. Defaulting to NO TRADE.`);
       return [];
@@ -1010,6 +1023,7 @@ export function evaluateZoneState(
   // 2. TAP, RETEST, AND CONTINUATION EVALUATION
   // =========================================================================
   const prevCandle = candles && candles.length >= 2 ? candles[candles.length - 2] : undefined;
+  const candleList = (candles && candles.length > 0) ? candles : (latestCandle ? [latestCandle] : []);
 
   // Identify the earliest post-origin candle that tapped into the marked zone
   let tapCandleIndex = -1;
@@ -1018,16 +1032,16 @@ export function evaluateZoneState(
   const originTime = zone.displacementCandleTime || zone.createdCandleTime;
   const originTimestamp = originTime ? new Date(originTime).getTime() : 0;
 
-  if (candles && candles.length > 0) {
-    for (let cIdx = 0; cIdx < candles.length; cIdx++) {
-      const c = candles[cIdx];
+  if (candleList.length > 0) {
+    for (let cIdx = 0; cIdx < candleList.length; cIdx++) {
+      const c = candleList[cIdx];
       if (originTimestamp > 0 && c.timestamp) {
         const cTime = new Date(c.timestamp).getTime();
         if (!isNaN(cTime) && cTime <= originTimestamp) {
           continue; // Do not check candles at or before zone creation
         }
       }
-      if (isPriceInOrTappingZone(zone, c)) {
+      if (isPriceInOrTappingZone(zone, c, currentPrice)) {
         tapCandleIndex = cIdx;
         tapCandle = c;
         break; // First candle that tapped the zone
@@ -1037,8 +1051,8 @@ export function evaluateZoneState(
 
   // Also check if live currentPrice is currently inside/tapping the zone
   const liveTapping = isPriceInOrTappingZone(zone, latestCandle, currentPrice);
-  if (tapCandleIndex === -1 && liveTapping && candles && candles.length > 0) {
-    tapCandleIndex = candles.length - 1;
+  if (tapCandleIndex === -1 && liveTapping) {
+    tapCandleIndex = candleList.length - 1;
     tapCandle = latestCandle;
   }
 
@@ -1051,7 +1065,7 @@ export function evaluateZoneState(
     updatedZone.tapCount = Math.max(zone.tapCount || 1, 1);
 
     // If tap happened on the very latest candle, next candle has not closed yet: stay in ZONE_TAPPED
-    const isLatestCandleTheTap = tapCandleIndex === (candles ? candles.length - 1 : -1);
+    const isLatestCandleTheTap = tapCandleIndex === (candleList.length - 1);
 
     if (isLatestCandleTheTap && tapCandleIndex !== -1) {
       // Evaluate immediate rejection bounce if latest candle closed with a sharp wick rejection

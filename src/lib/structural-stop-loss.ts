@@ -32,13 +32,14 @@ export function getTimeframeMaxSlPips(timeframe?: string, symbol?: string): numb
     return 40.0;
   }
 
-  // Major Forex (EURUSD, GBPUSD, etc.)
-  if (tf === 'M1' || tf === 'M5') return 5.0; // Max 5 pips on M5
-  if (tf === 'M15') return 8.0; // Max 8 pips on M15
-  if (tf === 'M30') return 12.0;
-  if (tf === 'H1') return 18.0;
-  if (tf === 'H4') return 35.0;
-  return 8.0;
+// Major Forex (EURUSD, GBPUSD, etc.)
+  if (tf === 'M1') return 4.0;
+  if (tf === 'M5') return 6.5; // Max 6.5 pips on M5 (tight institutional stop loss)
+  if (tf === 'M15') return 10.0; // Max 10 pips on M15
+  if (tf === 'M30') return 15.0;
+  if (tf === 'H1') return 22.0;
+  if (tf === 'H4') return 40.0;
+  return 10.0;
 }
 
 /**
@@ -120,31 +121,39 @@ export function validateZoneProximityAndStopLoss(
   }
 
   // 2. Resolve tight timeframe-appropriate Stop Loss
-  const buffer = Math.max(effectiveAtr * 0.15, pipSize * 1.5);
-  let resolvedSl = zone.invalidationLevel;
+  // Buffer: tight 1.5 - 2.5 pips for Forex, $0.40 - $2.00 for Gold
+  const buffer = sym.includes('XAU') || sym.includes('GOLD')
+    ? Math.min(Math.max(effectiveAtr * 0.15, 0.40), 2.50)
+    : Math.min(Math.max(effectiveAtr * 0.15, pipSize * 1.5), pipSize * 2.5);
+
   const basis: any = zone.type?.includes('ORDER_BLOCK') ? 'ORDER_BLOCK' : (direction === 'SELL' ? 'SUPPLY_ZONE' : 'DEMAND_ZONE');
 
-  let slDistancePips = Math.abs(currentPrice - resolvedSl) / pipSize;
+  // Directly anchor Stop Loss to the marked structural zone boundary + buffer
+  let resolvedSl = direction === 'SELL' ? (zone.high + buffer) : (zone.low - buffer);
 
-  // If raw invalidation exceeds max allowable SL for timeframe, clamp to tight zone boundary + buffer
-  if (slDistancePips > maxSlPips) {
-    if (direction === 'SELL') {
-      const tightSl = zone.high + buffer;
-      const tightDistancePips = Math.abs(currentPrice - tightSl) / pipSize;
-      if (tightDistancePips <= maxSlPips) {
-        resolvedSl = Number(tightSl.toFixed(5));
-        slDistancePips = tightDistancePips;
+  // If user/zone provided an invalidationLevel within maxSlPips, use it, otherwise tight boundary + buffer
+  if (zone.invalidationLevel) {
+    if (direction === 'SELL' && zone.invalidationLevel > currentPrice) {
+      const invDistPips = (zone.invalidationLevel - currentPrice) / pipSize;
+      if (invDistPips <= maxSlPips) {
+        resolvedSl = Math.min(zone.invalidationLevel, zone.high + buffer * 1.5);
       }
-    } else {
-      const tightSl = zone.low - buffer;
-      const tightDistancePips = Math.abs(currentPrice - tightSl) / pipSize;
-      if (tightDistancePips <= maxSlPips) {
-        resolvedSl = Number(tightSl.toFixed(5));
-        slDistancePips = tightDistancePips;
+    } else if (direction === 'BUY' && zone.invalidationLevel < currentPrice) {
+      const invDistPips = (currentPrice - zone.invalidationLevel) / pipSize;
+      if (invDistPips <= maxSlPips) {
+        resolvedSl = Math.max(zone.invalidationLevel, zone.low - buffer * 1.5);
       }
     }
   }
 
+  // Strict clamp: The SL must never exceed maxSlPips from currentPrice
+  if (direction === 'SELL') {
+    resolvedSl = Math.min(resolvedSl, currentPrice + (maxSlPips * pipSize));
+  } else {
+    resolvedSl = Math.max(resolvedSl, currentPrice - (maxSlPips * pipSize));
+  }
+
+  const slDistancePips = Math.abs(currentPrice - resolvedSl) / pipSize;
   const isSlTooWide = slDistancePips > (maxSlPips * 1.25);
 
   return {
@@ -162,18 +171,20 @@ export function validateZoneProximityAndStopLoss(
  * Deterministically calculates a structural stop loss based on market structure.
  * 
  * Priorities for BUY:
- * 1. Support Zone (priceMin below entry)
- * 2. Swing Low (price below entry)
- * 3. Demand Zone / Bullish FVG (bottom below entry)
- * 4. Structural Candle Low (lowest low of recent candles below entry)
- * 5. ATR Fallback (entry - 1.5 * ATR)
+ * 1. Marked Zone (Order Block / Demand POI) - Tight stop below zone low
+ * 2. Support Zone (priceMin below entry)
+ * 3. Swing Low (price below entry)
+ * 4. Demand Zone / Bullish FVG (bottom below entry)
+ * 5. Structural Candle Low (lowest low of recent candles below entry)
+ * 6. ATR Fallback (entry - 1.5 * ATR)
  * 
  * Priorities for SELL:
- * 1. Resistance Zone (priceMax above entry)
- * 2. Swing High (price above entry)
- * 3. Supply Zone / Bearish FVG (top above entry)
- * 4. Structural Candle High (highest high of recent candles above entry)
- * 5. ATR Fallback (entry + 1.5 * ATR)
+ * 1. Marked Zone (Order Block / Supply POI) - Tight stop above zone high
+ * 2. Resistance Zone (priceMax above entry)
+ * 3. Swing High (price above entry)
+ * 4. Supply Zone / Bearish FVG (top above entry)
+ * 5. Structural Candle High (highest high of recent candles above entry)
+ * 6. ATR Fallback (entry + 1.5 * ATR)
  */
 export function calculateStructuralStopLoss(
   direction: 'BUY' | 'SELL',
@@ -186,15 +197,18 @@ export function calculateStructuralStopLoss(
 
   const tf = (marketStructure as any)?.timeframe || 'M5';
   const sym = (marketStructure as any)?.pair || '';
-  const pipSize = (sym.includes('JPY') || sym.includes('XAU') || sym.includes('GOLD') || entryPrice > 50) ? 0.01 : 0.0001;
+  const isGold = sym.includes('XAU') || sym.includes('GOLD');
+  const pipSize = (sym.includes('JPY') || isGold || entryPrice > 50) ? 0.01 : 0.0001;
   const maxSlPips = getTimeframeMaxSlPips(tf, sym);
   const maxSlDistance = maxSlPips * pipSize;
 
-  // Buffer: 20% of ATR or 0.05% of entry price, whichever is greater
-  const buffer = Math.max(atr * 0.2, entryPrice * 0.0005);
+  // Buffer: tightly calibrated to asset spread and volatility (1.5 - 2.5 pips for Forex)
+  const buffer = isGold
+    ? Math.min(Math.max(atr * 0.15, 0.40), 2.50)
+    : Math.min(Math.max(atr * 0.15, pipSize * 1.5), pipSize * 2.5);
 
-  // Minimum SL distance: 1.5x ATR to avoid getting stopped out by noise
-  const minSlDistance = atr * 1.5;
+  // Minimum SL distance: ensure minimum cushion against spread, but NEVER exceed 60% of maxSlDistance
+  const minSlDistance = Math.min(Math.max(atr * 0.8, pipSize * 2.5), maxSlDistance * 0.6);
 
   if (direction === 'BUY') {
     // 0. Marked Zone (Order Block / Demand POI) below entry
@@ -203,29 +217,32 @@ export function calculateStructuralStopLoss(
     let finalBasis: StructuralStopLossResult['stopLossBasis'] | null = null;
     let finalStructural: number | null = null;
 
-    if (markedZone && markedZone.direction === 'BUY' && markedZone.invalidationLevel && markedZone.invalidationLevel < entryPrice) {
-      const rawDist = entryPrice - markedZone.invalidationLevel;
-      if (rawDist <= maxSlDistance) {
-        finalSl = markedZone.invalidationLevel;
-        finalBasis = markedZone.type?.includes('ORDER_BLOCK') ? 'ORDER_BLOCK' : 'DEMAND_ZONE';
-        finalStructural = markedZone.low;
+    if (markedZone && markedZone.direction === 'BUY') {
+      const zoneFloor = typeof markedZone.low === 'number' ? markedZone.low : (markedZone.invalidationLevel || entryPrice - buffer);
+      const tightSl = zoneFloor - buffer;
+
+      // If markedZone has invalidationLevel, check if it's within timeframe maxSlDistance
+      if (markedZone.invalidationLevel && markedZone.invalidationLevel < entryPrice && (entryPrice - markedZone.invalidationLevel) <= maxSlDistance) {
+        finalSl = Math.max(markedZone.invalidationLevel, tightSl - buffer);
       } else {
-        // If raw invalidation is too wide for timeframe, clamp to zone low - buffer
-        const tightSl = markedZone.low - buffer;
-        if (tightSl < entryPrice && (entryPrice - tightSl) <= maxSlDistance) {
-          finalSl = tightSl;
-          finalBasis = 'DEMAND_ZONE';
-          finalStructural = markedZone.low;
-        }
+        finalSl = tightSl;
       }
+
+      // Hard clamp: Stop loss MUST NOT exceed maxSlDistance from entry
+      if (finalSl >= entryPrice || (entryPrice - finalSl) > maxSlDistance) {
+        finalSl = entryPrice - maxSlDistance;
+      }
+
+      finalBasis = markedZone.type?.includes('ORDER_BLOCK') ? 'ORDER_BLOCK' : 'DEMAND_ZONE';
+      finalStructural = zoneFloor;
     }
 
-    // 1. Support Zones below entry
+    // 1. Support Zones below entry (only if no markedZone)
     if (!finalSl && marketStructure?.supportZones && marketStructure.supportZones.length > 0) {
       const validSupports = marketStructure.supportZones.filter(z => z.priceMin < entryPrice);
       if (validSupports.length > 0) {
         const nearestSupport = validSupports.reduce((prev, curr) => curr.priceMin > prev.priceMin ? curr : prev);
-        const sl = nearestSupport.priceMin - buffer;
+        const sl = Math.max(nearestSupport.priceMin - buffer, entryPrice - maxSlDistance);
         if (sl < entryPrice && sl > 0) {
           finalSl = sl;
           finalBasis = 'SUPPORT_ZONE';
@@ -234,12 +251,12 @@ export function calculateStructuralStopLoss(
       }
     }
 
-    // 2. Swing Lows below entry
+    // 2. Swing Lows below entry (only if no markedZone)
     if (!finalSl && marketStructure?.swingLows && marketStructure.swingLows.length > 0) {
       const validLows = marketStructure.swingLows.filter(s => s.price < entryPrice);
       if (validLows.length > 0) {
         const recentLow = validLows[validLows.length - 1].price;
-        const sl = recentLow - buffer;
+        const sl = Math.max(recentLow - buffer, entryPrice - maxSlDistance);
         if (sl < entryPrice && sl > 0) {
           finalSl = sl;
           finalBasis = 'SWING_LOW';
@@ -253,7 +270,7 @@ export function calculateStructuralStopLoss(
       const validFvgs = marketStructure.fairValueGaps.filter(f => f.type === 'BULLISH_FVG' && f.bottom < entryPrice);
       if (validFvgs.length > 0) {
         const fvg = validFvgs[validFvgs.length - 1];
-        const sl = fvg.bottom - buffer;
+        const sl = Math.max(fvg.bottom - buffer, entryPrice - maxSlDistance);
         if (sl < entryPrice && sl > 0) {
           finalSl = sl;
           finalBasis = 'DEMAND_ZONE';
@@ -267,7 +284,7 @@ export function calculateStructuralStopLoss(
       const recentLows = marketStructure.latestCandles.map(c => c.low).filter(l => l < entryPrice);
       if (recentLows.length > 0) {
         const lowestCandleLow = Math.min(...recentLows);
-        const sl = lowestCandleLow - buffer;
+        const sl = Math.max(lowestCandleLow - buffer, entryPrice - maxSlDistance);
         if (sl < entryPrice && sl > 0) {
           finalSl = sl;
           finalBasis = 'STRUCTURAL_CANDLE';
@@ -280,12 +297,15 @@ export function calculateStructuralStopLoss(
     let stopLoss = finalSl ?? (entryPrice - Math.min(atr * 0.75, maxSlDistance));
     let basis = finalBasis ?? 'ATR_FALLBACK';
     
-    // Enforcement: If structural SL is too tight, push it out to minSlDistance
+    // Enforcement: If structural SL is too tight, ensure minimum cushion, but NEVER exceed maxSlDistance
     if ((entryPrice - stopLoss) < minSlDistance) {
       const adjustedSl = entryPrice - minSlDistance;
-      console.log(`[SL Logic] Structural SL (${stopLoss.toFixed(5)}) was too tight for volatility. Enforcing min distance 1.5x ATR (${minSlDistance.toFixed(5)}). Adjusted SL: ${adjustedSl.toFixed(5)}`);
       stopLoss = adjustedSl;
-      // Keep structural basis if it was found, otherwise ATR
+    }
+
+    // Hard ceiling: Stop loss MUST NOT exceed max allowable distance for the timeframe
+    if ((entryPrice - stopLoss) > maxSlDistance * 1.15) {
+      stopLoss = entryPrice - maxSlDistance;
     }
 
     return {
@@ -301,29 +321,32 @@ export function calculateStructuralStopLoss(
     let finalBasis: StructuralStopLossResult['stopLossBasis'] | null = null;
     let finalStructural: number | null = null;
 
-    if (markedZone && markedZone.direction === 'SELL' && markedZone.invalidationLevel && markedZone.invalidationLevel > entryPrice) {
-      const rawDist = markedZone.invalidationLevel - entryPrice;
-      if (rawDist <= maxSlDistance) {
-        finalSl = markedZone.invalidationLevel;
-        finalBasis = markedZone.type?.includes('ORDER_BLOCK') ? 'ORDER_BLOCK' : 'SUPPLY_ZONE';
-        finalStructural = markedZone.high;
+    if (markedZone && markedZone.direction === 'SELL') {
+      const zoneCeiling = typeof markedZone.high === 'number' ? markedZone.high : (markedZone.invalidationLevel || entryPrice + buffer);
+      const tightSl = zoneCeiling + buffer;
+
+      // If markedZone has invalidationLevel, check if it's within timeframe maxSlDistance
+      if (markedZone.invalidationLevel && markedZone.invalidationLevel > entryPrice && (markedZone.invalidationLevel - entryPrice) <= maxSlDistance) {
+        finalSl = Math.min(markedZone.invalidationLevel, tightSl + buffer);
       } else {
-        // If raw invalidation is too wide for timeframe, clamp to zone high + buffer
-        const tightSl = markedZone.high + buffer;
-        if (tightSl > entryPrice && (tightSl - entryPrice) <= maxSlDistance) {
-          finalSl = tightSl;
-          finalBasis = 'SUPPLY_ZONE';
-          finalStructural = markedZone.high;
-        }
+        finalSl = tightSl;
       }
+
+      // Hard clamp: Stop loss MUST NOT exceed maxSlDistance from entry
+      if (finalSl <= entryPrice || (finalSl - entryPrice) > maxSlDistance) {
+        finalSl = entryPrice + maxSlDistance;
+      }
+
+      finalBasis = markedZone.type?.includes('ORDER_BLOCK') ? 'ORDER_BLOCK' : 'SUPPLY_ZONE';
+      finalStructural = zoneCeiling;
     }
 
-    // 1. Resistance Zones above entry
+    // 1. Resistance Zones above entry (only if no markedZone)
     if (!finalSl && marketStructure?.resistanceZones && marketStructure.resistanceZones.length > 0) {
       const validResistances = marketStructure.resistanceZones.filter(z => z.priceMax > entryPrice);
       if (validResistances.length > 0) {
         const nearestResistance = validResistances.reduce((prev, curr) => curr.priceMax < prev.priceMax ? curr : prev);
-        const sl = nearestResistance.priceMax + buffer;
+        const sl = Math.min(nearestResistance.priceMax + buffer, entryPrice + maxSlDistance);
         if (sl > entryPrice) {
           finalSl = sl;
           finalBasis = 'RESISTANCE_ZONE';
@@ -332,12 +355,12 @@ export function calculateStructuralStopLoss(
       }
     }
 
-    // 2. Swing Highs above entry
+    // 2. Swing Highs above entry (only if no markedZone)
     if (!finalSl && marketStructure?.swingHighs && marketStructure.swingHighs.length > 0) {
       const validHighs = marketStructure.swingHighs.filter(s => s.price > entryPrice);
       if (validHighs.length > 0) {
         const recentHigh = validHighs[validHighs.length - 1].price;
-        const sl = recentHigh + buffer;
+        const sl = Math.min(recentHigh + buffer, entryPrice + maxSlDistance);
         if (sl > entryPrice) {
           finalSl = sl;
           finalBasis = 'SWING_HIGH';
@@ -351,7 +374,7 @@ export function calculateStructuralStopLoss(
       const validFvgs = marketStructure.fairValueGaps.filter(f => f.type === 'BEARISH_FVG' && f.top > entryPrice);
       if (validFvgs.length > 0) {
         const fvg = validFvgs[validFvgs.length - 1];
-        const sl = fvg.top + buffer;
+        const sl = Math.min(fvg.top + buffer, entryPrice + maxSlDistance);
         if (sl > entryPrice) {
           finalSl = sl;
           finalBasis = 'SUPPLY_ZONE';
@@ -365,7 +388,7 @@ export function calculateStructuralStopLoss(
       const recentHighs = marketStructure.latestCandles.map(c => c.high).filter(h => h > entryPrice);
       if (recentHighs.length > 0) {
         const highestCandleHigh = Math.max(...recentHighs);
-        const sl = highestCandleHigh + buffer;
+        const sl = Math.min(highestCandleHigh + buffer, entryPrice + maxSlDistance);
         if (sl > entryPrice) {
           finalSl = sl;
           finalBasis = 'STRUCTURAL_CANDLE';
@@ -378,11 +401,15 @@ export function calculateStructuralStopLoss(
     let stopLoss = finalSl ?? (entryPrice + Math.min(atr * 0.75, maxSlDistance));
     let basis = finalBasis ?? 'ATR_FALLBACK';
     
-    // Enforcement: If structural SL is too tight, push it out to minSlDistance
+    // Enforcement: If structural SL is too tight, ensure minimum cushion, but NEVER exceed maxSlDistance
     if ((stopLoss - entryPrice) < minSlDistance) {
       const adjustedSl = entryPrice + minSlDistance;
-      console.log(`[SL Logic] Structural SL (${stopLoss.toFixed(5)}) was too tight for volatility. Enforcing min distance 1.5x ATR (${minSlDistance.toFixed(5)}). Adjusted SL: ${adjustedSl.toFixed(5)}`);
       stopLoss = adjustedSl;
+    }
+
+    // Hard ceiling: Stop loss MUST NOT exceed max allowable distance for the timeframe
+    if ((stopLoss - entryPrice) > maxSlDistance * 1.15) {
+      stopLoss = entryPrice + maxSlDistance;
     }
 
     return {

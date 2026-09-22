@@ -2875,15 +2875,23 @@ Output ONLY valid JSON.
                       selectedPair,
                       marketStructure?.volatilityInformation?.atr
                     );
-                    if (proximityValidation.isLateEntry) {
+                    if (proximityValidation?.isLateEntry) {
                       console.log(`[GEMINI LATE ENTRY REJECTED] Watcher ID: ${watcher.id} (${selectedPair}): ${proximityValidation.lateReason}`);
                       parsedResult.satisfies = false;
                       parsedResult.direction = 'NO_TRADE';
                       parsedResult.reasoning = proximityValidation.lateReason;
+                    } else if (proximityValidation?.isSlTooWide) {
+                      console.log(`[GEMINI STOP LOSS TOO WIDE] Watcher ID: ${watcher.id} (${selectedPair}): Stop loss distance (${proximityValidation.slDistancePips.toFixed(1)} pips) exceeds maximum allowable limit for ${selectedTimeframe}. Setup rejected.`);
+                      parsedResult.satisfies = false;
+                      parsedResult.direction = 'NO_TRADE';
+                      parsedResult.reasoning = `Stop loss distance (${proximityValidation.slDistancePips.toFixed(1)} pips) is too wide for ${selectedTimeframe}. Setup rejected.`;
                     }
                   }
 
                   if (parsedResult.satisfies && parsedResult.direction !== 'NO_TRADE') {
+                    if (currentZone) {
+                      (marketStructure as any).markedZone = currentZone;
+                    }
                     // Resolve structural stop loss using market structure
                     const candidateSl = proximityValidation?.stopLoss || parsedResult.stopLoss;
                     const candidateBasis = proximityValidation?.stopLossBasis || parsedResult.stopLossBasis;
@@ -3059,6 +3067,9 @@ Output ONLY valid JSON.
           console.log(`[RULE_ONLY DECISION] Direction: ${localSignal}`);
 
           if (localAnalysis && localAnalysis.signal !== 'NO_TRADE' && localAnalysis.entryPrice) {
+            if (currentZone) {
+              (marketStructure as any).markedZone = currentZone;
+            }
             const slResult = calculateStructuralStopLoss(
               localAnalysis.signal as 'BUY' | 'SELL',
               localAnalysis.entryPrice,
@@ -3236,6 +3247,9 @@ Output ONLY valid JSON.
             }
           }
           if (localAnalysis && localAnalysis.signal !== 'NO_TRADE' && localAnalysis.entryPrice) {
+            if (currentZone) {
+              (marketStructure as any).markedZone = currentZone;
+            }
             const slResult = calculateStructuralStopLoss(
               localAnalysis.signal as 'BUY' | 'SELL',
               localAnalysis.entryPrice,
