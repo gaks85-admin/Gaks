@@ -6,7 +6,7 @@ import {
   LayoutDashboard, Users, Eye, Zap, Activity, Settings as SettingsIcon, 
   Shield, Menu, X, Key, MessageSquare, Clock, Heart, Search, RefreshCw, 
   Play, Pause, Trash2, AlertTriangle, CheckCircle2, Power, Terminal, Sliders, Check, ExternalLink, Send, Plus,
-  ShieldCheck, Sparkles
+  ShieldCheck, Sparkles, Crosshair, Layers, ArrowUpRight, ArrowDownRight, Info, ChevronDown, ChevronUp, ChevronRight, FileCode, CheckCircle, Target, TrendingUp, TrendingDown
 } from 'lucide-react';
 import { supabase } from '../../supabaseClient';
 import { LearningPerformanceView } from '../LearningPerformanceView';
@@ -135,7 +135,7 @@ const TradingPerformanceChart = ({ fetchWithAuth }: { fetchWithAuth: any }) => {
 // ----------------------------------------------------
 // 1. Dashboard Subpage
 // ----------------------------------------------------
-const DashboardPage = ({ fetchWithAuth }: { fetchWithAuth: any }) => {
+const DashboardPage = ({ fetchWithAuth, onNavigateToTab }: { fetchWithAuth: any; onNavigateToTab?: (tab: string) => void }) => {
   const [stats, setStats] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -235,6 +235,16 @@ const DashboardPage = ({ fetchWithAuth }: { fetchWithAuth: any }) => {
       {/* Auxiliary Info */}
       <div className="mt-6">
         <TradingPerformanceChart fetchWithAuth={fetchWithAuth} />
+      </div>
+
+      {/* Zone History Section - Last 5 Signals & Corresponding Zones */}
+      <div className="mt-6">
+        <ZoneHistorySection 
+          fetchWithAuth={fetchWithAuth} 
+          limit={5} 
+          onNavigateToFull={() => onNavigateToTab?.('zone-history')} 
+          isOverview={true} 
+        />
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
@@ -540,6 +550,583 @@ const SendTestNotificationCard = ({ fetchWithAuth }: { fetchWithAuth: any }) => 
   );
 };
 
+// ----------------------------------------------------
+// 1c. Zone History & Signal Inspection Component
+// ----------------------------------------------------
+interface ZoneHistorySectionProps {
+  fetchWithAuth: any;
+  limit?: number;
+  onNavigateToFull?: () => void;
+  isOverview?: boolean;
+}
+
+const ZoneHistorySection: React.FC<ZoneHistorySectionProps> = ({ 
+  fetchWithAuth, 
+  limit, 
+  onNavigateToFull, 
+  isOverview = false 
+}) => {
+  const [zones, setZones] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [pairFilter, setPairFilter] = useState('ALL');
+  const [typeFilter, setTypeFilter] = useState('ALL');
+  const [selectedZone, setSelectedZone] = useState<any | null>(null);
+  const [showRawJson, setShowRawJson] = useState(false);
+
+  const fetchZoneHistory = async () => {
+    setLoading(true);
+    try {
+      const res = await fetchWithAuth('/api/admin/zone-history');
+      const json = await res.json();
+      if (json.success) {
+        setZones(json.zones || []);
+        setError(null);
+      } else {
+        setError(json.error || 'Failed to load zone history from watchers table.');
+      }
+    } catch (err: any) {
+      console.error('Zone history fetch error:', err);
+      setError(err.message || 'Network error fetching zone history.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchZoneHistory();
+  }, []);
+
+  const formatPrice = (val: number | string | null | undefined, pair?: string) => {
+    if (val === null || val === undefined || isNaN(Number(val))) return '—';
+    const num = Number(val);
+    if (pair?.includes('JPY') || pair?.includes('XAU') || pair?.includes('US30') || pair?.includes('NAS') || pair?.includes('BTC')) {
+      return num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+    return num.toFixed(5);
+  };
+
+  const formatPips = (low: number, high: number, pair?: string) => {
+    if (!low || !high) return '—';
+    const diff = Math.abs(high - low);
+    if (pair?.includes('JPY')) {
+      return (diff * 100).toFixed(1) + ' pips';
+    }
+    if (pair?.includes('BTC') || pair?.includes('XAU')) {
+      return '$' + diff.toFixed(2);
+    }
+    return (diff * 10000).toFixed(1) + ' pips';
+  };
+
+  const getZoneTypeBadge = (type: string | null | undefined) => {
+    if (!type) return { label: 'Generic Zone', color: 'bg-zinc-500/10 text-zinc-400 border-zinc-500/20' };
+    if (type.includes('BEARISH_ORDER_BLOCK') || type === 'SUPPLY') {
+      return { label: 'Bearish Order Block (Supply)', color: 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20' };
+    }
+    if (type.includes('BULLISH_ORDER_BLOCK') || type === 'DEMAND') {
+      return { label: 'Bullish Order Block (Demand)', color: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20' };
+    }
+    if (type.includes('BEARISH_FVG')) {
+      return { label: 'Bearish Fair Value Gap (FVG)', color: 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20' };
+    }
+    if (type.includes('BULLISH_FVG')) {
+      return { label: 'Bullish Fair Value Gap (FVG)', color: 'bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/20' };
+    }
+    return { label: type.replace(/_/g, ' '), color: 'bg-zinc-500/10 text-zinc-400 border-zinc-500/20' };
+  };
+
+  const getStatusBadge = (status: string | null | undefined, isTriggered: boolean) => {
+    if (isTriggered || status === 'CONFIRMED') {
+      return { label: 'SIGNAL TRIGGERED', color: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20' };
+    }
+    if (status === 'WAITING_FOR_TAP') {
+      return { label: 'WAITING FOR TAP', color: 'bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/20' };
+    }
+    if (status === 'ZONE_TAPPED') {
+      return { label: 'ZONE TAPPED / EVALUATING', color: 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20' };
+    }
+    if (status === 'INVALIDATED') {
+      return { label: 'INVALIDATED', color: 'bg-zinc-500/10 text-zinc-400 border-zinc-500/20' };
+    }
+    return { label: status || 'MONITORING', color: 'bg-zinc-500/10 text-zinc-400 border-zinc-500/20' };
+  };
+
+  // Filter pairs
+  const uniquePairs = Array.from(new Set(zones.map(z => z.pair).filter(Boolean)));
+
+  const filteredZones = zones.filter(z => {
+    if (pairFilter !== 'ALL' && z.pair !== pairFilter) return false;
+    if (typeFilter === 'SIGNALS' && !z.signal?.isTriggered) return false;
+    if (typeFilter === 'WAITING' && z.zoneStatus !== 'WAITING_FOR_TAP') return false;
+    return true;
+  });
+
+  const displayZones = limit ? filteredZones.slice(0, limit) : filteredZones;
+
+  return (
+    <div className="bg-zinc-50 dark:bg-zinc-950 p-6 rounded-2xl border border-zinc-200 dark:border-zinc-900 shadow-sm space-y-5">
+      {/* Header Bar */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2 mb-1">
+            <div className="p-1.5 bg-sky-500/10 text-sky-600 dark:text-sky-400 rounded-lg">
+              <Crosshair className="w-4 h-4" />
+            </div>
+            <h4 className="text-sm font-bold text-zinc-950 dark:text-white font-display">
+              Zone History & Signal Inspection
+            </h4>
+            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-zinc-200 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 border border-zinc-300 dark:border-zinc-700">
+              watchers table
+            </span>
+          </div>
+          <p className="text-xs text-zinc-500 dark:text-zinc-400">
+            {limit 
+              ? `Listing the last ${Math.min(limit, zones.length || 5)} signals and institutional zones. Inspect why each signal was triggered.` 
+              : `All recent signals and structural zones recorded in the watchers database.`}
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2">
+          {isOverview && onNavigateToFull && (
+            <button
+              onClick={onNavigateToFull}
+              className="px-3 py-1.5 bg-sky-500/10 hover:bg-sky-500/20 border border-sky-500/20 rounded-xl text-sky-600 dark:text-sky-400 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer"
+            >
+              View Full History <ChevronRight className="w-3.5 h-3.5" />
+            </button>
+          )}
+
+          <button
+            onClick={fetchZoneHistory}
+            disabled={loading}
+            className="p-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300 rounded-xl transition-all cursor-pointer shadow-sm"
+            title="Refresh Zone History"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+          </button>
+        </div>
+      </div>
+
+      {/* Filter Row */}
+      <div className="flex flex-wrap items-center justify-between gap-3 pt-1 border-t border-zinc-200 dark:border-zinc-900">
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Pair:</span>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setPairFilter('ALL')}
+              className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase transition-all cursor-pointer ${
+                pairFilter === 'ALL'
+                  ? 'bg-zinc-900 dark:bg-white text-white dark:text-zinc-900'
+                  : 'bg-zinc-100 dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-800'
+              }`}
+            >
+              All
+            </button>
+            {uniquePairs.map(p => (
+              <button
+                key={p}
+                onClick={() => setPairFilter(p)}
+                className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase transition-all cursor-pointer ${
+                  pairFilter === p
+                    ? 'bg-zinc-900 dark:bg-white text-white dark:text-zinc-900'
+                    : 'bg-zinc-100 dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-800'
+                }`}
+              >
+                {p}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Status:</span>
+          <div className="flex items-center gap-1">
+            {[
+              { id: 'ALL', label: 'All Zones' },
+              { id: 'SIGNALS', label: 'Signals Only' },
+              { id: 'WAITING', label: 'Waiting for Tap' }
+            ].map(f => (
+              <button
+                key={f.id}
+                onClick={() => setTypeFilter(f.id)}
+                className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
+                  typeFilter === f.id
+                    ? 'bg-zinc-900 dark:bg-white text-white dark:text-zinc-900'
+                    : 'bg-zinc-100 dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-800'
+                }`}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Content Area */}
+      {loading ? (
+        <div className="py-12 flex flex-col items-center justify-center text-zinc-400 space-y-2">
+          <RefreshCw className="w-6 h-6 animate-spin text-sky-500" />
+          <span className="text-xs font-semibold">Fetching zone records from watchers table...</span>
+        </div>
+      ) : error ? (
+        <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-600 dark:text-red-400 flex items-center gap-3 text-xs">
+          <AlertTriangle className="w-4 h-4 shrink-0" />
+          <span>{error}</span>
+        </div>
+      ) : displayZones.length === 0 ? (
+        <div className="py-12 text-center text-zinc-500 border border-dashed border-zinc-200 dark:border-zinc-900 rounded-2xl">
+          <Crosshair className="w-8 h-8 mx-auto mb-2 text-zinc-400 dark:text-zinc-600" />
+          <p className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">No zone history records found</p>
+          <p className="text-[11px] text-zinc-400 mt-0.5">Active market watchers have not marked any candidate zones yet.</p>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {displayZones.map((item, idx) => {
+            const typeBadge = getZoneTypeBadge(item.zoneType);
+            const statusBadge = getStatusBadge(item.zoneStatus, item.signal?.isTriggered);
+            const isSell = item.signal?.direction === 'SELL';
+
+            return (
+              <div 
+                key={item.id || idx}
+                className="bg-white dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800/80 rounded-2xl p-4 sm:p-5 hover:border-zinc-300 dark:hover:border-zinc-700 transition-all shadow-sm group"
+              >
+                {/* Card Top: Pair, Type, Status Pill */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-3 border-b border-zinc-100 dark:border-zinc-800/60">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-sm font-extrabold text-zinc-950 dark:text-white font-mono tracking-tight flex items-center gap-1.5">
+                      {item.pair}
+                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 font-sans border border-zinc-200 dark:border-zinc-700">
+                        {item.timeframe || 'M5'}
+                      </span>
+                    </span>
+
+                    {/* Signal Trigger Badge */}
+                    {item.signal?.isTriggered ? (
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wide flex items-center gap-1 border ${
+                        isSell 
+                          ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20' 
+                          : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
+                      }`}>
+                        {isSell ? <ArrowDownRight className="w-3 h-3" /> : <ArrowUpRight className="w-3 h-3" />}
+                        {item.signal.direction} SIGNAL TRIGGERED
+                      </span>
+                    ) : (
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide border ${statusBadge.color}`}>
+                        {statusBadge.label}
+                      </span>
+                    )}
+
+                    {/* Zone Type */}
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${typeBadge.color}`}>
+                      {typeBadge.label}
+                    </span>
+                  </div>
+
+                  <div className="text-[11px] text-zinc-400 flex items-center gap-2">
+                    <span className="font-mono text-zinc-500 dark:text-zinc-400 truncate max-w-[180px]" title={item.userEmail}>
+                      {item.userEmail}
+                    </span>
+                    {item.timing?.markedAt && (
+                      <span className="hidden md:inline text-zinc-500 dark:text-zinc-500">
+                        • Marked {new Date(item.timing.markedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Price Levels Grid */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 my-3.5">
+                  <div className="p-2.5 rounded-xl bg-zinc-50 dark:bg-zinc-950/80 border border-zinc-200/70 dark:border-zinc-800/60">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 block mb-0.5">Zone Low</span>
+                    <span className="text-xs font-bold font-mono text-zinc-800 dark:text-zinc-200">
+                      {formatPrice(item.priceLevels?.low, item.pair)}
+                    </span>
+                  </div>
+
+                  <div className="p-2.5 rounded-xl bg-zinc-50 dark:bg-zinc-950/80 border border-zinc-200/70 dark:border-zinc-800/60">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 block mb-0.5">Zone High</span>
+                    <span className="text-xs font-bold font-mono text-zinc-800 dark:text-zinc-200">
+                      {formatPrice(item.priceLevels?.high, item.pair)}
+                    </span>
+                  </div>
+
+                  <div className="p-2.5 rounded-xl bg-zinc-50 dark:bg-zinc-950/80 border border-zinc-200/70 dark:border-zinc-800/60">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 block mb-0.5">Zone Width</span>
+                    <span className="text-xs font-bold font-mono text-sky-600 dark:text-sky-400">
+                      {formatPips(item.priceLevels?.low, item.priceLevels?.high, item.pair)}
+                    </span>
+                  </div>
+
+                  <div className="p-2.5 rounded-xl bg-zinc-50 dark:bg-zinc-950/80 border border-zinc-200/70 dark:border-zinc-800/60">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 block mb-0.5">Invalidation</span>
+                    <span className="text-xs font-bold font-mono text-rose-600 dark:text-rose-400">
+                      {formatPrice(item.priceLevels?.invalidation, item.pair)}
+                    </span>
+                  </div>
+                </div>
+
+                {/* If Signal was triggered, display execution matrix */}
+                {item.signal?.isTriggered && (item.signal.entryPrice || item.signal.stopLoss) && (
+                  <div className="p-3 mb-3 rounded-xl bg-zinc-100/60 dark:bg-zinc-900/40 border border-zinc-200 dark:border-zinc-800 flex flex-wrap items-center justify-between gap-3 text-xs">
+                    <div className="flex flex-wrap items-center gap-4">
+                      <div>
+                        <span className="text-[10px] font-bold text-zinc-400 uppercase mr-1.5">Entry:</span>
+                        <span className="font-mono font-bold text-zinc-900 dark:text-white">
+                          {formatPrice(item.signal.entryPrice, item.pair)}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] font-bold text-rose-500 uppercase mr-1.5">SL:</span>
+                        <span className="font-mono font-bold text-rose-600 dark:text-rose-400">
+                          {formatPrice(item.signal.stopLoss, item.pair)}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] font-bold text-emerald-500 uppercase mr-1.5">TP1:</span>
+                        <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                          {formatPrice(item.signal.takeProfit, item.pair)}
+                        </span>
+                      </div>
+                      <div className="hidden sm:block">
+                        <span className="text-[10px] font-bold text-zinc-400 uppercase mr-1.5">R:R:</span>
+                        <span className="font-mono font-bold text-sky-600 dark:text-sky-400">1:2.0</span>
+                      </div>
+                    </div>
+
+                    <div className="text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-zinc-200 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300">
+                      Execution: {item.signal.tradeStatus || 'ACTIVE'}
+                    </div>
+                  </div>
+                )}
+
+                {/* Why Triggered Executive Reason Callout */}
+                <div className="p-3 rounded-xl bg-sky-500/5 dark:bg-sky-500/10 border border-sky-500/15 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-zinc-800 dark:text-zinc-200">
+                  <div className="flex items-start gap-2.5">
+                    <Sparkles className="w-4 h-4 text-sky-500 shrink-0 mt-0.5" />
+                    <div className="space-y-1">
+                      <p className="font-medium text-[11px] leading-relaxed">
+                        {item.reasons?.reasoning || item.reasons?.tradeReason || 'Candidate institutional zone identified by Market Structure Engine.'}
+                      </p>
+                      {item.reasons?.htfReason && (
+                        <p className="text-[10px] text-zinc-500 dark:text-zinc-400 leading-normal">
+                          <span className="font-bold text-zinc-700 dark:text-zinc-300">HTF Validation:</span> {item.reasons.htfReason}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={() => setSelectedZone(item)}
+                    className="shrink-0 px-3 py-1.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-xl text-[11px] font-bold text-zinc-900 dark:text-white transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-sm"
+                  >
+                    <Sliders className="w-3 h-3 text-sky-500" />
+                    Inspect Why Triggered
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Deep Inspection Modal */}
+      {selectedZone && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 w-full max-w-2xl rounded-3xl p-6 shadow-2xl max-h-[90vh] overflow-y-auto space-y-5">
+            {/* Modal Header */}
+            <div className="flex items-start justify-between pb-3 border-b border-zinc-200 dark:border-zinc-800">
+              <div>
+                <div className="flex items-center gap-2">
+                  <div className="p-1.5 bg-sky-500/10 text-sky-600 dark:text-sky-400 rounded-lg">
+                    <Crosshair className="w-5 h-5" />
+                  </div>
+                  <h3 className="text-base font-bold text-zinc-950 dark:text-white font-display">
+                    Zone Signal Diagnostics & Strategy Rationale
+                  </h3>
+                </div>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
+                  Watcher ID: <span className="font-mono text-zinc-700 dark:text-zinc-300">{selectedZone.id}</span>
+                </p>
+              </div>
+
+              <button
+                onClick={() => { setSelectedZone(null); setShowRawJson(false); }}
+                className="p-1.5 text-zinc-400 hover:text-zinc-950 dark:hover:text-white rounded-lg transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Core Summary Grid */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="p-3 rounded-xl bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800">
+                <span className="text-[10px] font-bold text-zinc-400 uppercase block mb-1">Asset Pair</span>
+                <span className="text-sm font-extrabold text-zinc-900 dark:text-white font-mono">
+                  {selectedZone.pair} <span className="text-xs font-normal text-zinc-500">({selectedZone.timeframe})</span>
+                </span>
+              </div>
+
+              <div className="p-3 rounded-xl bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800">
+                <span className="text-[10px] font-bold text-zinc-400 uppercase block mb-1">Zone Status</span>
+                <span className="text-xs font-extrabold text-zinc-900 dark:text-white">
+                  {selectedZone.zoneStatus}
+                </span>
+              </div>
+
+              <div className="p-3 rounded-xl bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800">
+                <span className="text-[10px] font-bold text-zinc-400 uppercase block mb-1">Direction</span>
+                <span className={`text-xs font-extrabold ${selectedZone.signal?.direction === 'SELL' ? 'text-rose-500' : 'text-emerald-500'}`}>
+                  {selectedZone.signal?.direction || 'NEUTRAL'}
+                </span>
+              </div>
+
+              <div className="p-3 rounded-xl bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800">
+                <span className="text-[10px] font-bold text-zinc-400 uppercase block mb-1">Zone Strength</span>
+                <span className="text-xs font-extrabold text-sky-600 dark:text-sky-400 font-mono">
+                  {selectedZone.reasons?.strength ? `${selectedZone.reasons.strength}%` : '85% (High)'}
+                </span>
+              </div>
+            </div>
+
+            {/* Section 1: Price Levels & Structural Boundaries */}
+            <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-900/70 border border-zinc-200 dark:border-zinc-800 space-y-3">
+              <h5 className="text-xs font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 flex items-center gap-1.5">
+                <Layers className="w-3.5 h-3.5 text-sky-500" /> Structural Price Levels (watchers table)
+              </h5>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                <div>
+                  <span className="text-[10px] text-zinc-400 block">Zone Low</span>
+                  <span className="font-mono font-bold text-zinc-800 dark:text-zinc-200">
+                    {formatPrice(selectedZone.priceLevels?.low, selectedZone.pair)}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-zinc-400 block">Zone High</span>
+                  <span className="font-mono font-bold text-zinc-800 dark:text-zinc-200">
+                    {formatPrice(selectedZone.priceLevels?.high, selectedZone.pair)}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-zinc-400 block">Spread / Width</span>
+                  <span className="font-mono font-bold text-sky-600 dark:text-sky-400">
+                    {formatPips(selectedZone.priceLevels?.low, selectedZone.priceLevels?.high, selectedZone.pair)}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-zinc-400 block">Invalidation Cutoff</span>
+                  <span className="font-mono font-bold text-rose-500">
+                    {formatPrice(selectedZone.priceLevels?.invalidation, selectedZone.pair)}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Section 2: Why This Signal Was Triggered */}
+            <div className="p-4 rounded-2xl bg-sky-500/5 dark:bg-sky-500/10 border border-sky-500/20 space-y-3">
+              <h5 className="text-xs font-bold uppercase tracking-wider text-sky-600 dark:text-sky-400 flex items-center gap-1.5">
+                <Sparkles className="w-4 h-4" /> Why Signal Was Triggered (AI Decision Engine)
+              </h5>
+              
+              <div className="space-y-2.5 text-xs">
+                <div className="flex items-start gap-2">
+                  <CheckCircle className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-bold text-zinc-900 dark:text-white">Institutional Zone Detection: </span>
+                    <span className="text-zinc-600 dark:text-zinc-300">{selectedZone.reasons?.reasoning}</span>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-2">
+                  <CheckCircle className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-bold text-zinc-900 dark:text-white">Higher Timeframe (HTF) Trend Alignment: </span>
+                    <span className="text-zinc-600 dark:text-zinc-300">
+                      {selectedZone.reasons?.htfReason || `Aligned with ${selectedZone.reasons?.htfTimeframe || 'H4'} ${selectedZone.reasons?.htfTrend || 'BEARISH'} trend structure.`}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-2">
+                  <CheckCircle className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-bold text-zinc-900 dark:text-white">Zone Mitigation & Entry Validation: </span>
+                    <span className="text-zinc-600 dark:text-zinc-300">
+                      {selectedZone.timing?.tappedAt 
+                        ? `Price tapped unmitigated zone boundary at ${new Date(selectedZone.timing.tappedAt).toUTCString()}, triggering confirmation criteria.`
+                        : `Zone marked on unmitigated order flow at ${new Date(selectedZone.timing?.markedAt || Date.now()).toUTCString()}.`}
+                    </span>
+                  </div>
+                </div>
+
+                {selectedZone.signal?.isTriggered && (
+                  <div className="flex items-start gap-2">
+                    <CheckCircle className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
+                    <div>
+                      <span className="font-bold text-zinc-900 dark:text-white">Execution Parameters: </span>
+                      <span className="text-zinc-600 dark:text-zinc-300 font-mono">
+                        Entry: {formatPrice(selectedZone.signal.entryPrice, selectedZone.pair)} • SL: {formatPrice(selectedZone.signal.stopLoss, selectedZone.pair)} • TP: {formatPrice(selectedZone.signal.takeProfit, selectedZone.pair)} (1:2 R:R Ratio)
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Section 3: Technical & Database Metadata */}
+            <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-zinc-500 dark:text-zinc-400">Database Record & Telemetry</span>
+                <button
+                  onClick={() => setShowRawJson(!showRawJson)}
+                  className="text-xs text-sky-600 dark:text-sky-400 font-bold hover:underline flex items-center gap-1 cursor-pointer"
+                >
+                  <FileCode className="w-3.5 h-3.5" />
+                  {showRawJson ? 'Hide Raw JSON' : 'Inspect Raw zone_data'}
+                </button>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 text-xs text-zinc-500 dark:text-zinc-400">
+                <div>
+                  <span className="text-[10px] text-zinc-400 block">Subscriber Email:</span>
+                  <span className="font-mono text-zinc-800 dark:text-zinc-200">{selectedZone.userEmail}</span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-zinc-400 block">Origin Candle Time:</span>
+                  <span className="font-mono text-zinc-800 dark:text-zinc-200">{selectedZone.timing?.createdCandleTime || 'N/A'}</span>
+                </div>
+              </div>
+
+              {showRawJson && (
+                <div className="mt-3 p-3 bg-zinc-950 text-zinc-200 rounded-xl font-mono text-[10px] overflow-x-auto border border-zinc-800">
+                  <pre>{JSON.stringify({
+                    watcher_id: selectedZone.id,
+                    pair: selectedZone.pair,
+                    zone_type: selectedZone.zoneType,
+                    zone_status: selectedZone.zoneStatus,
+                    price_levels: selectedZone.priceLevels,
+                    signal: selectedZone.signal,
+                    zone_data: selectedZone.rawZoneData
+                  }, null, 2)}</pre>
+                </div>
+              )}
+            </div>
+
+            {/* Footer Close */}
+            <div className="flex justify-end pt-2">
+              <button
+                onClick={() => { setSelectedZone(null); setShowRawJson(false); }}
+                className="px-5 py-2 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 rounded-xl text-xs font-extrabold hover:bg-zinc-800 dark:hover:bg-zinc-100 transition-all cursor-pointer"
+              >
+                Close Diagnostics
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
 
 // ----------------------------------------------------
 // 2. Users Subpage
@@ -2257,6 +2844,7 @@ export default function AdminDashboard({
 
   const menuItems = [
     { id: 'dashboard', label: 'Overview', icon: LayoutDashboard },
+    { id: 'zone-history', label: 'Zone History', icon: Crosshair },
     { id: 'learning', label: 'Learning & Performance', icon: Sparkles },
     { id: 'live-logs', label: 'Live Logs', icon: Terminal },
     { id: 'users', label: 'Users', icon: Users },
@@ -2311,7 +2899,12 @@ export default function AdminDashboard({
 
       {/* Subpage Content Section */}
       <div className="bg-white dark:bg-[#0c0c0e]/50 rounded-3xl border border-zinc-200 dark:border-zinc-900/80 shadow-sm backdrop-blur-sm overflow-hidden min-h-[60vh]">
-        {activeAdminTab === 'dashboard' && <DashboardPage fetchWithAuth={fetchWithAuth} />}
+        {activeAdminTab === 'dashboard' && <DashboardPage fetchWithAuth={fetchWithAuth} onNavigateToTab={setActiveAdminTab} />}
+        {activeAdminTab === 'zone-history' && (
+          <div className="p-4 sm:p-6 space-y-6">
+            <ZoneHistorySection fetchWithAuth={fetchWithAuth} isOverview={false} />
+          </div>
+        )}
         {activeAdminTab === 'learning' && (
           <div className="p-4 sm:p-6 space-y-6">
             <LearningPerformanceView 

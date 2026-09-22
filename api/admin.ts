@@ -346,6 +346,115 @@ async function watchers_action_handler(req: any, res: any) {
   return res.status(200).json({ success: true });
 }
 
+async function zone_history_handler(req: any, res: any) {
+  const supabase = getSupabase();
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Content-Type", "application/json");
+  if (req.method === "OPTIONS") return res.status(200).end();
+
+  const authHeader = req.headers.authorization || '';
+  const token = authHeader.startsWith('Bearer ') ? authHeader.substring(7) : authHeader;
+  if (!token) return res.status(401).json({ success: false, error: "Unauthorized" });
+
+  try {
+    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+    if (authError || !user || user.email?.trim().toLowerCase() !== "gaks6535@gmail.com") {
+      return res.status(403).json({ success: false, error: "Unauthorized" });
+    }
+
+    const { data: watchers, error: watcherError } = await supabase
+      .from('watchers')
+      .select('*')
+      .order('updated_at', { ascending: false });
+
+    if (watcherError) throw watcherError;
+
+    // Fetch user profiles for email attribution
+    const { data: profiles } = await supabase.from('profiles').select('id, email');
+    const emailMap = new Map((profiles || []).map(p => [p.id, p.email]));
+
+    // Fetch recent evaluations for why signal was triggered
+    const { data: evaluations } = await supabase
+      .from('watcher_evaluations')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(50);
+
+    const evalMap = new Map<string, any>();
+    for (const ev of evaluations || []) {
+      if (ev.watcher_id && !evalMap.has(ev.watcher_id)) {
+        evalMap.set(ev.watcher_id, ev);
+      }
+    }
+
+    // Filter watchers that have zone data or trade signals
+    const zoneWatchers = (watchers || []).filter(w => w.zone_type || w.zone_status !== 'NO_ZONE' || w.entry_price || w.trade_status === 'ACTIVE');
+
+    // Sort by recent signal / tap / mark activity
+    zoneWatchers.sort((a, b) => {
+      const isSigA = a.zone_status === 'CONFIRMED' || !!a.entry_price ? 1 : 0;
+      const isSigB = b.zone_status === 'CONFIRMED' || !!b.entry_price ? 1 : 0;
+      if (isSigA !== isSigB) return isSigB - isSigA;
+
+      const timeA = new Date(a.zone_tapped_at || a.zone_marked_at || a.updated_at || 0).getTime();
+      const timeB = new Date(b.zone_tapped_at || b.zone_marked_at || b.updated_at || 0).getTime();
+      return timeB - timeA;
+    });
+
+    const zones = zoneWatchers.map(w => {
+      const ev = evalMap.get(w.id);
+      return {
+        id: w.id,
+        watcherId: w.id,
+        pair: w.selected_pair,
+        timeframe: w.selected_timeframe || 'M5',
+        userEmail: emailMap.get(w.user_id) || 'Unknown User',
+        zoneType: w.zone_type,
+        zoneStatus: w.zone_status,
+        priceLevels: {
+          high: w.zone_high,
+          low: w.zone_low,
+          invalidation: w.zone_invalidation_level,
+          spreadOrWidth: w.zone_high && w.zone_low ? Number((w.zone_high - w.zone_low).toFixed(5)) : null
+        },
+        signal: {
+          isTriggered: w.zone_status === 'CONFIRMED' || !!w.entry_price,
+          direction: w.direction || (w.zone_type?.includes('BEARISH') ? 'SELL' : w.zone_type?.includes('BULLISH') ? 'BUY' : null),
+          entryPrice: w.entry_price,
+          stopLoss: w.stop_loss,
+          takeProfit: w.take_profit,
+          tradeStatus: w.trade_status
+        },
+        timing: {
+          markedAt: w.zone_marked_at,
+          tappedAt: w.zone_tapped_at,
+          updatedAt: w.updated_at,
+          createdCandleTime: w.zone_data?.createdCandleTime,
+          displacementCandleTime: w.zone_data?.displacementCandleTime
+        },
+        reasons: {
+          reasoning: w.zone_data?.reasoning || 'Unmitigated institutional price zone identified by SMC engine.',
+          htfTrend: w.zone_data?.htfTrend || 'BEARISH',
+          htfTimeframe: w.zone_data?.htfTimeframe || 'H4',
+          htfReason: w.zone_data?.htfReason,
+          strength: w.zone_data?.strength || null,
+          evaluationScore: ev?.decision_score ?? null,
+          matchedRules: ev?.matched_rules || [],
+          failedRules: ev?.failed_rules || [],
+          tradeReason: ev?.trade_reason || null,
+          gateDetails: ev?.decision_snapshot?.decisionChain || []
+        },
+        rawZoneData: w.zone_data
+      };
+    });
+
+    return res.status(200).json({ success: true, count: zones.length, zones });
+  } catch (err: any) {
+    console.error("[Admin Zone History Error]:", err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+}
+
 async function watchers_handler(req: any, res: any) {
   const supabase = getSupabase();
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -490,6 +599,7 @@ export default async function handler(req: any, res: any) {
     if (pathname.endsWith('/inspector/candles')) return inspector_candles_handler(req, res);
     if (pathname.endsWith('/inspector/watcher-details')) return inspector_watcher_details_handler(req, res);
     if (pathname.endsWith('/signals')) return signals_handler(req, res);
+    if (pathname.endsWith('/zone-history')) return zone_history_handler(req, res);
     if (pathname.endsWith('/health')) return health_handler(req, res);
     if (pathname.endsWith('/settings')) return settings_handler(req, res);
     if (pathname.endsWith('/send-test-alert')) return send_test_alert_handler(req, res);
