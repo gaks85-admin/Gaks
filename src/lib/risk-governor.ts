@@ -14,6 +14,8 @@ export interface RiskGovernorInput {
     configuredCapital: number;
     estimatedEquity: number;
     estimatedDrawdownPercent: number;
+    dailyPnL?: number;
+    maxDailyLossAmount?: number;
   };
   candidate: {
     pair: string;
@@ -37,6 +39,8 @@ export interface RiskGovernorResult {
     consecutiveLosses: number;
     drawdownPercent: number;
     sampleSizeTier: string;
+    dailyPnL?: number;
+    maxDailyLossAmount?: number;
   };
   sampleSizeSufficient: boolean;
 }
@@ -47,8 +51,8 @@ export const GOVERNOR_THRESHOLDS = {
   MIN_TRADES_WEAK: 10,
   NEGATIVE_EXPECTANCY_RESTRICT: -0.05,
   NEGATIVE_EXPECTANCY_NO_TRADE: -0.20,
-  CONSECUTIVE_LOSSES_RESTRICT: 3,
-  CONSECUTIVE_LOSSES_NO_TRADE: 5,
+  CONSECUTIVE_LOSSES_RESTRICT: 2,
+  CONSECUTIVE_LOSSES_NO_TRADE: 3,
   DRAWDOWN_RESTRICT_PERCENT: 10.0,
   DRAWDOWN_NO_TRADE_PERCENT: 25.0,
   PAIR_NEGATIVE_EXPECTANCY_THRESHOLD: -0.10,
@@ -65,12 +69,21 @@ export function evaluateRiskGovernor(input: RiskGovernorInput): RiskGovernorResu
   const reasonCodes: string[] = [];
   let status: GovernorStatus = 'NORMAL';
 
+  // 0. Daily Loss Limit Check (New Critical Requirement)
+  const dailyPnL = equityState.dailyPnL ?? 0;
+  const maxDailyLoss = equityState.maxDailyLossAmount ?? 100;
+
+  if (dailyPnL < 0 && Math.abs(dailyPnL) >= maxDailyLoss) {
+    status = 'NO_TRADE';
+    reasonCodes.push('DAILY_LOSS_LIMIT_EXCEEDED');
+  }
+
   const totalTrades = metrics.totalTrades || 0;
   const sampleSizeSufficient = totalTrades >= GOVERNOR_THRESHOLDS.MIN_TRADES_ELIGIBLE;
   const hasWeakSample = totalTrades >= GOVERNOR_THRESHOLDS.MIN_TRADES_WEAK;
 
-  // Rule A — Insufficient data
-  if (!hasWeakSample) {
+  // Rule A — Insufficient data (Don't bypass daily loss check even if history is short)
+  if (!hasWeakSample && status !== 'NO_TRADE') {
     return {
       status: 'NORMAL',
       reasonCodes: ['INSUFFICIENT_HISTORY_NORMAL'],
@@ -80,7 +93,9 @@ export function evaluateRiskGovernor(input: RiskGovernorInput): RiskGovernorResu
         expectancyR: metrics.expectancyR,
         consecutiveLosses: metrics.consecutiveLosses,
         drawdownPercent: equityState.estimatedDrawdownPercent,
-        sampleSizeTier: metrics.sampleSizeTier
+        sampleSizeTier: metrics.sampleSizeTier,
+        dailyPnL,
+        maxDailyLossAmount: maxDailyLoss
       },
       sampleSizeSufficient: false
     };
@@ -156,7 +171,9 @@ Status: ${metrics.expectancyR < 0 ? 'NEGATIVE_EXPECTANCY' : 'HEALTHY'}
 Configured Capital: $${equityState.configuredCapital}
 Estimated Equity: $${equityState.estimatedEquity}
 Estimated Drawdown: ${equityState.estimatedDrawdownPercent}%
-Status: ${equityState.estimatedDrawdownPercent > 10 ? 'ELEVATED_DRAWDOWN' : 'NORMAL'}
+Daily PnL: $${dailyPnL.toFixed(2)}
+Max Daily Loss: $${maxDailyLoss.toFixed(2)}
+Status: ${equityState.estimatedDrawdownPercent > 10 || (dailyPnL < 0 && Math.abs(dailyPnL) >= maxDailyLoss * 0.8) ? 'ELEVATED_RISK' : 'NORMAL'}
 
 [Risk Governor]
 Status: ${status}
@@ -172,7 +189,9 @@ Sample Size: ${totalTrades} (${metrics.sampleSizeTier})`);
       expectancyR: metrics.expectancyR,
       consecutiveLosses: metrics.consecutiveLosses,
       drawdownPercent: equityState.estimatedDrawdownPercent,
-      sampleSizeTier: metrics.sampleSizeTier
+      sampleSizeTier: metrics.sampleSizeTier,
+      dailyPnL,
+      maxDailyLossAmount: maxDailyLoss
     },
     sampleSizeSufficient
   };

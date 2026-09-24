@@ -41,7 +41,7 @@ import { checkSignalDeduplication } from '../../src/lib/signal-deduplication.js'
 import { resolveUserGeminiKey, classifyAndRedactGeminiError } from '../../src/lib/gemini-key-resolver.js';
 import { executeBoundedGeminiCall, runGeminiRequest as runGeminiWrapperRequest, GEMINI_MARKET_WATCHER_MODEL } from '../../src/lib/geminiWrapper.js';
 import { validateActiveTradeState, isWatcherDue } from '../../src/lib/trade-validator.js';
-import { computeEquityAnalytics, deriveEquityState, fetchUserCompletedTrades } from '../../src/lib/equity-learning-engine.js';
+import { computeEquityAnalytics, deriveEquityState, fetchUserCompletedTrades, computeDailyPnL } from '../../src/lib/equity-learning-engine.js';
 import { evaluateRiskGovernor } from '../../src/lib/risk-governor.js';
 import { evaluateAdaptiveLearning, fetchCompletedTradesForAdaptiveLearning } from '../../src/lib/adaptive-learning-engine.js';
 import { evaluateAdaptiveExecution } from '../../src/lib/adaptive-execution-engine.js';
@@ -3338,10 +3338,16 @@ Output ONLY valid JSON.
           try {
             const completedTrades = await fetchUserCompletedTrades(supabase, userId);
             const equityMetrics = computeEquityAnalytics(completedTrades);
+            const dailyPnL = computeDailyPnL(completedTrades, accountSize);
             const equityState = deriveEquityState(accountSize, equityMetrics);
+            
             governorResult = evaluateRiskGovernor({
               metrics: equityMetrics,
-              equityState,
+              equityState: {
+                ...equityState,
+                dailyPnL,
+                maxDailyLossAmount: riskPrefs.maxDailyLossAmount
+              },
               candidate: {
                 pair: selectedPair,
                 timeframe: selectedTimeframe,

@@ -13,7 +13,7 @@ import { validateMarketDataIntegrity } from "../market-integrity.js";
 import { normalizeConfidence } from "../confidence-engine.js";
 import { resolveUserGeminiKey, classifyAndRedactGeminiError } from "../gemini-key-resolver.js";
 import { executeBoundedGeminiCall, GEMINI_MARKET_WATCHER_MODEL } from "../geminiWrapper.js";
-import { computeEquityAnalytics, deriveEquityState, fetchUserCompletedTrades } from "../equity-learning-engine.js";
+import { computeEquityAnalytics, deriveEquityState, fetchUserCompletedTrades, computeDailyPnL } from "../equity-learning-engine.js";
 import { evaluateRiskGovernor } from "../risk-governor.js";
 import { evaluateAdaptiveLearning, fetchCompletedTradesForAdaptiveLearning } from "../adaptive-learning-engine.js";
 import { evaluateQualityGate, calculateAdaptiveQualityRequirement } from "../quality-gate.js";
@@ -1472,10 +1472,16 @@ Reason: ${adaptiveReq.reason}
       try {
         const completedTrades = await fetchUserCompletedTrades(supabase, userId);
         const equityMetrics = computeEquityAnalytics(completedTrades);
+        const dailyPnL = computeDailyPnL(completedTrades, accountSize);
         const equityState = deriveEquityState(accountSize, equityMetrics);
+        
         governorResult = evaluateRiskGovernor({
           metrics: equityMetrics,
-          equityState,
+          equityState: {
+            ...equityState,
+            dailyPnL,
+            maxDailyLossAmount: riskPrefs.maxDailyLossAmount
+          },
           candidate: {
             pair: symbol,
             timeframe: selectedTimeframe,

@@ -392,3 +392,41 @@ export function deriveEquityState(configuredCapital: number, metrics: EquityMetr
     consecutiveWins: metrics.consecutiveWins
   };
 }
+
+/**
+ * Computes realized PnL for the current day (server time).
+ */
+export function computeDailyPnL(trades: any[], configuredCapital: number = 1000): number {
+  if (!Array.isArray(trades) || trades.length === 0) return 0;
+  
+  const today = new Date().setHours(0, 0, 0, 0);
+  const todayTrades = trades.filter(t => {
+    const tradeDate = new Date(t.created_at || t.closed_at).getTime();
+    return tradeDate >= today;
+  });
+
+  const riskUnit = configuredCapital * 0.01;
+
+  return todayTrades.reduce((acc, t) => {
+    // Priority: net_pnl -> gross_pnl -> actual_pnl -> computed from realized_r
+    let pnl = Number(t.net_pnl ?? t.gross_pnl ?? t.actual_pnl);
+    
+    if (isNaN(pnl) || !Number.isFinite(pnl)) {
+      const rVal = Number(t.realized_r ?? t.rr_achieved ?? t.pnl_r);
+      if (!isNaN(rVal) && Number.isFinite(rVal)) {
+        pnl = rVal * riskUnit;
+      } else {
+        // Fallback for LOSS if R is missing (assume -1R)
+        const outcome = String(t.outcome || '').toUpperCase();
+        if (outcome === 'LOSS') {
+          pnl = -riskUnit;
+        } else if (outcome === 'WIN') {
+          pnl = riskUnit * 2; // Conservative 2R estimate for WIN if missing
+        } else {
+          pnl = 0;
+        }
+      }
+    }
+    return acc + pnl;
+  }, 0);
+}
