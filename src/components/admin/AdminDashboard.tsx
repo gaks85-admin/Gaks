@@ -64,66 +64,69 @@ const TradingPerformanceChart = ({ fetchWithAuth }: { fetchWithAuth: any }) => {
   }
 
   return (
-    <div className="bg-zinc-50 dark:bg-zinc-950 p-6 rounded-2xl border border-zinc-200 dark:border-zinc-900 shadow-sm">
-      <div className="flex items-center justify-between mb-6">
+    <div className="bg-zinc-50 dark:bg-[#0c0c0e]/40 p-6 rounded-3xl border border-zinc-200 dark:border-zinc-900 shadow-sm">
+      <div className="flex items-center justify-between mb-8">
         <div>
-          <h4 className="text-sm font-bold text-zinc-950 dark:text-white font-display">Trading Performance</h4>
-          <p className="text-[10px] text-zinc-500">Visualizing Wins vs Losses over the last 30 days</p>
+          <h4 className="text-[15px] font-bold text-zinc-950 dark:text-white font-sans tracking-tight">Trading Performance History</h4>
+          <p className="text-[11px] text-zinc-500 font-medium">Daily win/loss distribution across all AI-managed accounts</p>
         </div>
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-1.5">
-            <div className="w-2.5 h-2.5 rounded-full bg-zinc-800 dark:bg-zinc-200"></div>
-            <span className="text-[10px] font-bold text-zinc-500 uppercase">Wins</span>
+        <div className="flex items-center gap-5">
+          <div className="flex items-center gap-2">
+            <div className="w-2.5 h-2.5 rounded-full bg-zinc-950 dark:bg-white shadow-[0_0_8px_rgba(255,255,255,0.3)]"></div>
+            <span className="text-[10px] font-bold text-zinc-600 dark:text-zinc-400 uppercase tracking-widest">Wins</span>
           </div>
-          <div className="flex items-center gap-1.5">
-            <div className="w-2.5 h-2.5 rounded-full bg-rose-500"></div>
-            <span className="text-[10px] font-bold text-zinc-500 uppercase">Losses</span>
+          <div className="flex items-center gap-2">
+            <div className="w-2.5 h-2.5 rounded-full bg-rose-500/80"></div>
+            <span className="text-[10px] font-bold text-zinc-600 dark:text-zinc-400 uppercase tracking-widest">Losses</span>
           </div>
         </div>
       </div>
 
-      <div className="h-64 w-full">
+      <div className="h-72 w-full">
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={data}>
-            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#27272a" />
+            <CartesianGrid strokeDasharray="4 4" vertical={false} stroke="currentColor" className="text-zinc-200 dark:text-zinc-800/40" />
             <XAxis 
               dataKey="date" 
               axisLine={false}
               tickLine={false}
-              tick={{ fill: '#71717a', fontSize: 10, fontWeight: 600 }}
+              tick={{ fill: '#71717a', fontSize: 10, fontWeight: 700 }}
               tickFormatter={(val) => new Date(val).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}
               minTickGap={30}
+              dy={10}
             />
             <YAxis 
               axisLine={false}
               tickLine={false}
-              tick={{ fill: '#71717a', fontSize: 10, fontWeight: 600 }}
+              tick={{ fill: '#71717a', fontSize: 10, fontWeight: 700 }}
+              dx={-10}
             />
             <Tooltip 
+              cursor={{ fill: 'rgba(0,0,0,0.05)', radius: [8, 8, 0, 0] }}
               contentStyle={{ 
-                backgroundColor: '#09090b', 
+                backgroundColor: '#000', 
                 border: '1px solid #27272a', 
-                borderRadius: '12px',
+                borderRadius: '16px',
                 fontSize: '11px',
-                fontWeight: 'bold'
+                padding: '12px'
               }}
-              itemStyle={{ padding: '2px 0' }}
-              cursor={{ fill: '#18181b', opacity: 0.4 }}
+              itemStyle={{ fontWeight: 'bold', color: '#fff' }}
+              labelStyle={{ color: '#71717a', marginBottom: '4px', fontWeight: '800', textTransform: 'uppercase', fontSize: '9px' }}
             />
             <Bar 
               dataKey="wins" 
               name="Wins" 
               fill="currentColor" 
-              className="text-zinc-800 dark:text-zinc-200" 
-              radius={[4, 4, 0, 0]} 
-              barSize={20}
+              className="text-zinc-950 dark:text-white" 
+              radius={[6, 6, 0, 0]} 
+              barSize={24}
             />
             <Bar 
               dataKey="losses" 
               name="Losses" 
-              fill="#f43f5e" 
-              radius={[4, 4, 0, 0]} 
-              barSize={20}
+              fill="rgba(244, 63, 94, 0.7)" 
+              radius={[6, 6, 0, 0]} 
+              barSize={24}
             />
           </BarChart>
         </ResponsiveContainer>
@@ -171,12 +174,12 @@ const DashboardPage = ({ fetchWithAuth, onNavigateToTab }: { fetchWithAuth: any;
   }, []);
 
   const statCards = [
-    { label: "Total Active Watchers", value: stats?.activeWatchers || 0, desc: "Scanners actively running in background", icon: Eye, color: "text-zinc-900 dark:text-zinc-200 bg-zinc-100 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700" },
-    { label: "Total Pairs Being Monitored", value: stats?.totalPairsMonitored || 0, desc: "Unique currency and crypto trading pairs", icon: Activity, color: "text-blue-400 bg-blue-500/10 border-blue-500/20" },
-    { label: "Total Signals Sent", value: stats?.totalSignalsSent || 0, desc: "Total alerts processed historically", icon: Zap, color: "text-purple-400 bg-purple-500/10 border-purple-500/20" },
-    { label: "Last Scan Time", value: stats?.lastCronRun ? new Date(stats.lastCronRun).toLocaleTimeString() : "Never", desc: stats?.lastCronRun ? new Date(stats.lastCronRun).toLocaleDateString() : "No scan executed yet", icon: Clock, color: "text-amber-400 bg-amber-500/10 border-amber-500/20" },
-    { label: "Total Registered Users", value: stats?.totalUsers || 0, desc: "Users in profiles database", icon: Users, color: "text-zinc-400 bg-zinc-800/10 border-zinc-800/20" },
-    { label: "Telegram Connected Users", value: stats?.telegramConnected || 0, desc: "Profiles with push alerts active", icon: MessageSquare, color: "text-sky-400 bg-sky-500/10 border-sky-500/20" },
+    { label: "Total Active Watchers", value: stats?.activeWatchers || 0, desc: "Scanners actively running in background", icon: Eye, color: "text-zinc-950 dark:text-white bg-zinc-100 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700" },
+    { label: "Pairs Being Monitored", value: stats?.totalPairsMonitored || 0, desc: "Unique currency and crypto pairs", icon: Activity, color: "text-zinc-950 dark:text-white bg-zinc-100 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700" },
+    { label: "Signals Sent", value: stats?.totalSignalsSent || 0, desc: "Total alerts processed historically", icon: Zap, color: "text-zinc-950 dark:text-white bg-zinc-100 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700" },
+    { label: "Last Scan Time", value: stats?.lastCronRun ? new Date(stats.lastCronRun).toLocaleTimeString() : "Never", desc: stats?.lastCronRun ? new Date(stats.lastCronRun).toLocaleDateString() : "No scan executed yet", icon: Clock, color: "text-zinc-950 dark:text-white bg-zinc-100 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700" },
+    { label: "Registered Users", value: stats?.totalUsers || 0, desc: "Users in profiles database", icon: Users, color: "text-zinc-950 dark:text-white bg-zinc-100 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700" },
+    { label: "Telegram Connected", value: stats?.telegramConnected || 0, desc: "Profiles with push alerts active", icon: MessageSquare, color: "text-zinc-950 dark:text-white bg-zinc-100 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700" },
   ];
 
   return (
@@ -2856,23 +2859,23 @@ export default function AdminDashboard({
   ];
 
   return (
-    <div className="space-y-6 pb-20 animate-fade-in max-w-7xl mx-auto">
+    <div className="space-y-8 pb-20 animate-fade-in">
       {/* Admin Header & Identity */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2 mb-1">
-            <div className="p-1.5 bg-sky-500/10 text-sky-600 dark:text-sky-400 rounded-lg">
-              <Shield className="w-5 h-5" />
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6 px-4">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 rounded-xl shadow-sm">
+              <Shield className="w-5 h-5 stroke-[2.5]" />
             </div>
-            <h2 className="text-xl font-bold text-zinc-900 dark:text-white font-display uppercase tracking-tight">Administrative Shield</h2>
+            <h2 className="text-xl font-bold text-zinc-950 dark:text-white font-sans tracking-tight uppercase">Admin Shield</h2>
           </div>
-          <p className="text-xs text-zinc-500 font-medium leading-relaxed">
-            Authorized: <span className="text-sky-600 dark:text-sky-400 font-bold">{userEmail}</span> • Root Access Level
+          <p className="text-[11px] text-zinc-500 font-medium pl-1">
+            Root access authorized for <span className="text-zinc-950 dark:text-zinc-300 font-bold">{userEmail}</span>
           </p>
         </div>
         
-        <div className="flex items-center gap-2">
-           <button onClick={() => window.location.reload()} className="px-3 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300 transition-all flex items-center gap-2 text-xs font-bold cursor-pointer shadow-sm">
+        <div className="flex items-center gap-3">
+           <button onClick={() => window.location.reload()} className="px-4 py-2.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-950 dark:text-white transition-all flex items-center gap-2.5 text-[11px] font-bold cursor-pointer shadow-sm">
             <RefreshCw className="w-3.5 h-3.5" />
             Sync System
           </button>
@@ -2898,7 +2901,7 @@ export default function AdminDashboard({
       </div>
 
       {/* Subpage Content Section */}
-      <div className="bg-white dark:bg-[#0c0c0e]/50 rounded-3xl border border-zinc-200 dark:border-zinc-900/80 shadow-sm backdrop-blur-sm overflow-hidden min-h-[60vh]">
+      <div className="bg-white dark:bg-[#0c0c0e]/30 rounded-[32px] border border-zinc-200 dark:border-zinc-900/80 shadow-sm backdrop-blur-sm overflow-hidden min-h-[60vh]">
         {activeAdminTab === 'dashboard' && <DashboardPage fetchWithAuth={fetchWithAuth} onNavigateToTab={setActiveAdminTab} />}
         {activeAdminTab === 'zone-history' && (
           <div className="p-4 sm:p-6 space-y-6">
