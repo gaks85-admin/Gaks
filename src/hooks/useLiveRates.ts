@@ -10,14 +10,14 @@ export interface ForexPair {
   status?: 'active' | 'unavailable';
 }
 
-export function useLiveRates() {
+export function useLiveRates(interval = '1h', range = '5d') {
   const [rates, setRates] = useState<ForexPair[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const fetchRates = useCallback(async () => {
     try {
-      const response = await fetch('/api/live-rates');
+      const response = await fetch(`/api/live-rates?interval=${interval}&range=${range}`);
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -43,12 +43,12 @@ export function useLiveRates() {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [interval, range]);
 
   useEffect(() => {
     fetchRates();
-    const interval = setInterval(fetchRates, 10000); // 10 seconds auto-refresh
-    return () => clearInterval(interval);
+    const intervalId = setInterval(fetchRates, 20000); // 20 seconds auto-refresh to match server cache
+    return () => clearInterval(intervalId);
   }, [fetchRates]);
 
   return { rates, isLoading, error, refetch: fetchRates };

@@ -41,7 +41,7 @@ interface LiveRatesCache {
   data: any;
   timestamp: number;
 }
-let liveRatesCache: LiveRatesCache | null = null;
+const liveRatesCacheMap = new Map<string, LiveRatesCache>();
 const CACHE_TTL_MS = 20 * 1000; // 20 seconds
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -55,12 +55,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).end();
   }
 
+  const interval = (req.query.interval as string) || '1h';
+  const range = (req.query.range as string) || '5d';
+  const cacheKey = `${interval}_${range}`;
+
   const now = Date.now();
-  if (liveRatesCache && (now - liveRatesCache.timestamp) < CACHE_TTL_MS) {
+  const cached = liveRatesCacheMap.get(cacheKey);
+  if (cached && (now - cached.timestamp) < CACHE_TTL_MS) {
     return res.status(200).json({
-      ...liveRatesCache.data,
+      ...cached.data,
       cached: true,
-      cacheAgeMs: now - liveRatesCache.timestamp
+      cacheAgeMs: now - cached.timestamp
     });
   }
 
@@ -89,7 +94,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const displaySymbol = toDisplaySymbol(sym);
 
         try {
-          const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooSymbol)}?interval=1h&range=5d`;
+          const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooSymbol)}?interval=${interval}&range=${range}`;
           const fetchRes = await fetch(url, {
             headers: {
               'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
@@ -164,13 +169,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // If all or most pairs failed due to Yahoo rate limit (429/403) and we have cache, serve stale cache
     const availablePairs = pairsData.filter(p => p && p.status !== 'unavailable');
-    if (availablePairs.length === 0 && liveRatesCache) {
+    if (availablePairs.length === 0 && cached) {
       console.warn('[Live Rates] Yahoo rate limited or unavailable for all symbols. Serving stale cached rates.');
       return res.status(200).json({
-        ...liveRatesCache.data,
+        ...cached.data,
         cached: true,
         stale: true,
-        cacheAgeMs: now - liveRatesCache.timestamp
+        cacheAgeMs: now - cached.timestamp
       });
     }
 
@@ -180,19 +185,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       pairs: pairsData
     };
 
-    liveRatesCache = {
+    liveRatesCacheMap.set(cacheKey, {
       data: responsePayload,
       timestamp: Date.now()
-    };
+    });
 
     return res.status(200).json(responsePayload);
 
   } catch (error: any) {
     console.error('[Live Rates] Endpoint Error:', error);
-    if (liveRatesCache) {
+    if (cached) {
       console.warn('[Live Rates] Returning stale cached rates after endpoint exception.');
       return res.status(200).json({
-        ...liveRatesCache.data,
+        ...cached.data,
         cached: true,
         stale: true
       });

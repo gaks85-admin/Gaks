@@ -727,8 +727,10 @@ export default function App() {
     return `${dayName}, ${monthName} ${dayNum}, ${hours < 10 ? '0' + hours : hours}:${minutesStr} ${ampm}`;
   }, [currentTime]);
 
+  const [sparklineTimeframe, setSparklineTimeframe] = useState<{interval: string, range: string, label: string}>({ interval: '1h', range: '5d', label: 'H1' });
+
   // Forex live rates fetched from Express API (with public er-api.com USD rate mapping)
-  const { rates: liveRates, isLoading: isRatesLoading, error: ratesError, refetch: refetchRates } = useLiveRates();
+  const { rates: liveRates, isLoading: isRatesLoading, error: ratesError, refetch: refetchRates } = useLiveRates(sparklineTimeframe.interval, sparklineTimeframe.range);
 
   // Sync live rates into the monitored watchlist for real-time price updates
   useEffect(() => {
@@ -2189,9 +2191,32 @@ export default function App() {
 
               {/* Live Rates Card Deck */}
               <div className="space-y-3.5">
-                <div className="space-y-0.5">
-                  <h2 className="text-[19px] sm:text-[21px] font-semibold tracking-[-0.025em] text-zinc-950 dark:text-white font-sans">Live Rates</h2>
-                  <p className="text-[13px] text-zinc-500 font-normal tracking-normal">Major forex pairs</p>
+                <div className="flex justify-between items-end">
+                  <div className="space-y-0.5">
+                    <h2 className="text-[19px] sm:text-[21px] font-semibold tracking-[-0.025em] text-zinc-950 dark:text-white font-sans">Live Rates</h2>
+                    <p className="text-[13px] text-zinc-500 font-normal tracking-normal">Major forex pairs</p>
+                  </div>
+                  
+                  {/* Quick-switch timeframe toggle */}
+                  <div className="flex bg-zinc-100 dark:bg-zinc-900/50 p-1 rounded-xl border border-zinc-200 dark:border-zinc-800/60">
+                    {[
+                      { label: 'M15', interval: '15m', range: '5d' },
+                      { label: 'H1', interval: '1h', range: '5d' },
+                      { label: 'H4', interval: '1h', range: '14d' }
+                    ].map((tf) => (
+                      <button
+                        key={tf.label}
+                        onClick={() => setSparklineTimeframe(tf)}
+                        className={`px-3 py-1 text-[11px] font-bold rounded-lg transition-all ${
+                          sparklineTimeframe.label === tf.label
+                            ? 'bg-white dark:bg-zinc-800 text-zinc-950 dark:text-white shadow-sm'
+                            : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'
+                        }`}
+                      >
+                        {tf.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
                 <div className="space-y-3.5">
