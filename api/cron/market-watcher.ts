@@ -121,17 +121,18 @@ export async function syncProfitGoal(supabase: any, userId: string, currentEquit
     const deadline = new Date(goal.deadline);
     const isExpired = deadline < now;
     const isReached = currentEquity >= goal.target_amount;
+    const isActuallyNewProgress = currentEquity > goal.start_amount;
 
     let updates: any = {
       current_amount: currentEquity,
       updated_at: now.toISOString()
     };
 
-    if (isReached && goal.status !== 'COMPLETED') {
+    if (isReached && goal.status !== 'COMPLETED' && isActuallyNewProgress) {
       updates.status = 'COMPLETED';
       updates.notified = true;
       if (telegramChatId) {
-        await sendTelegramMessage(telegramChatId, `🏆 *Profit Goal Achieved!*\n\nCongratulations! Your account equity has reached $${currentEquity.toLocaleString()}, meeting your target of $${goal.target_amount.toLocaleString()}.`);
+        await sendTelegramMessage(telegramChatId, `🏆 *Profit Goal Achieved!*\n\nCongratulations! Your account equity has reached $${currentEquity.toLocaleString()}, meeting your target of $${goal.target_amount.toLocaleString()}.\n\n*Progress:* You grew the account from $${goal.start_amount.toLocaleString()} to $${currentEquity.toLocaleString()}.\n*Status:* Challenge Completed.\n*Note:* Trading is now paused for this challenge to secure your profits. You can start a new challenge from the dashboard.`);
       }
     } else if (isExpired && goal.status === 'ACTIVE') {
       updates.status = 'AWAITING_DECISION';

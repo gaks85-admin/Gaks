@@ -178,7 +178,7 @@ export const ProfitGoalOptimizer: React.FC<ProfitGoalOptimizerProps> = ({
 
     try {
       // 1. Cancel any existing active goal
-      if (activeGoal && activeGoal.status === 'ACTIVE') {
+      if (activeGoal && (activeGoal.status === 'ACTIVE' || activeGoal.status === 'AWAITING_DECISION')) {
         const { error: cancelErr } = await supabase
           .from('profit_goals')
           .update({ status: 'CANCELLED' })
@@ -202,13 +202,20 @@ export const ProfitGoalOptimizer: React.FC<ProfitGoalOptimizerProps> = ({
       setIsApplying(false);
       return;
     }
+
+    if (goalAmount <= capitalNum) {
+      if (!window.confirm(`Your target ($${goalAmount.toLocaleString()}) is currently below or equal to your current balance ($${capitalNum.toLocaleString()}). The challenge will complete immediately. Are you sure?`)) {
+        setIsApplying(false);
+        return;
+      }
+    }
     
     // 2. Insert new goal
       const { data, error } = await supabase
         .from('profit_goals')
         .insert({
           user_id: userId,
-          target_amount: capitalNum + goalAmount,
+          target_amount: goalAmount,
           start_amount: capitalNum,
           current_amount: capitalNum,
           status: 'ACTIVE',
@@ -523,17 +530,18 @@ export const ProfitGoalOptimizer: React.FC<ProfitGoalOptimizerProps> = ({
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div className="space-y-4">
           <div className="space-y-2">
-            <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">Profit Target (above ${capitalNum.toLocaleString()})</label>
+            <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">Target Account Balance (Goal)</label>
             <div className="relative rounded-2xl border border-zinc-200 dark:border-zinc-800 overflow-hidden bg-white dark:bg-zinc-950/60 focus-within:border-indigo-500 dark:focus-within:border-indigo-500 shadow-sm transition-all">
               <span className="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-bold text-zinc-400">$</span>
               <input
                 type="number"
                 value={profitGoal}
                 onChange={(e) => setProfitGoal(e.target.value)}
-                placeholder="e.g. 500"
+                placeholder={`e.g. ${(capitalNum + 500).toLocaleString()}`}
                 className="w-full bg-transparent border-0 py-3 pl-8 pr-4 text-sm font-bold text-zinc-900 dark:text-white focus:outline-none focus:ring-0"
               />
             </div>
+            <p className="text-[10px] text-zinc-400">Current Balance: ${capitalNum.toLocaleString()}</p>
           </div>
 
           <div className="space-y-2">
