@@ -4,6 +4,8 @@ import { Strategy } from '../types';
 import ProfitGoalOptimizer from './ProfitGoalOptimizer';
 
 export interface StrategyTabProps {
+  userId: string;
+  supabase: any;
   strategies: Strategy[];
   selectedStrategyId: string;
   activeStrategyId: string;
@@ -40,6 +42,8 @@ export interface StrategyTabProps {
 }
 
 export const StrategyTab: React.FC<StrategyTabProps> = ({
+  userId,
+  supabase,
   strategies,
   selectedStrategyId,
   activeStrategyId,
@@ -191,6 +195,8 @@ export const StrategyTab: React.FC<StrategyTabProps> = ({
 
       {/* AI Profit Goal Optimizer - NEW */}
       <ProfitGoalOptimizer 
+        userId={userId}
+        supabase={supabase}
         currentCapital={capital === 'Custom' ? customCapital : capital}
         onApplySettings={(settings) => {
           setPreferredRisk(settings.preferredRisk);

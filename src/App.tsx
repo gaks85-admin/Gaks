@@ -2468,6 +2468,8 @@ export default function App() {
           {/* ==================== TAB 2: STRATEGY ==================== */}
           {activeTab === 'strategy' && (
             <StrategyTab
+              userId={session?.user?.id || ''}
+              supabase={supabase}
               strategies={strategies}
               selectedStrategyId={selectedStrategyId}
               activeStrategyId={activeStrategyId}

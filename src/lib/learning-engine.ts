@@ -275,11 +275,89 @@ export async function recordCompletedTrade(
     // Clear stats cache so new trades are immediately integrated
     clearStatsCache();
 
+    // 6. Update Profit Goal Progress
+    try {
+      await updateProfitGoalProgress(client, params.user_id, payload);
+    } catch (goalErr) {
+      console.warn('[Learning Engine] Failed to update profit goal progress:', goalErr);
+    }
+
     console.log(`[Learning Engine] Trade successfully recorded in ${Date.now() - start}ms`);
     return data;
   } catch (err: any) {
     console.error('[Learning Engine] Failed to record completed trade:', err.message);
     return null;
+  }
+}
+
+/**
+ * Updates the active profit goal for a user based on the outcome of a completed trade.
+ */
+async function updateProfitGoalProgress(supabase: any, userId: string, trade: any) {
+  if (!userId) return;
+
+  try {
+    // 1. Fetch active profit goal
+    const { data: goal, error: fetchErr } = await supabase
+      .from('profit_goals')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('status', 'ACTIVE')
+      .order('created_at', { ascending: false })
+      .maybeSingle();
+
+    if (fetchErr || !goal) return;
+
+    // 2. Calculate PnL for this trade
+    let pnl = 0;
+    if (trade.net_pnl !== undefined && trade.net_pnl !== null) {
+      pnl = Number(trade.net_pnl);
+    } else if (trade.gross_pnl !== undefined && trade.gross_pnl !== null) {
+      pnl = Number(trade.gross_pnl);
+    } else {
+      // Estimate PnL if not explicitly provided (Theoretically)
+      const outcome = (trade.outcome || '').toUpperCase();
+      const realizedR = trade.realized_r !== undefined && trade.realized_r !== null ? Number(trade.realized_r) : 0;
+      
+      // Use actual risk percentage from settings if available, default to 1%
+      const riskPercentStr = goal.settings_applied?.riskPerTrade || '1%';
+      const riskPercent = parseFloat(riskPercentStr.replace('%', '')) / 100 || 0.01;
+      
+      // If we have realizedR, we can estimate based on risk of start capital
+      if (realizedR !== 0) {
+        pnl = (Number(goal.start_amount) * riskPercent) * realizedR;
+      } else if (outcome === 'WIN' || outcome === 'BROKER_REALIZED_WIN') {
+        pnl = Number(goal.start_amount) * riskPercent * 2; // Estimate 2R win
+      } else if (outcome === 'LOSS' || outcome === 'BROKER_REALIZED_LOSS') {
+        pnl = -(Number(goal.start_amount) * riskPercent); // Estimate 1R loss
+      }
+    }
+
+    const newAmount = Number(goal.current_amount) + pnl;
+    let newStatus = goal.status;
+    
+    // Check if goal reached
+    if (newAmount >= Number(goal.target_amount)) {
+      newStatus = 'COMPLETED';
+    } else {
+      // Check if deadline passed
+      if (goal.deadline && new Date(goal.deadline).getTime() < Date.now()) {
+        newStatus = 'FAILED';
+      }
+    }
+
+    // 3. Update goal in DB
+    await supabase
+      .from('profit_goals')
+      .update({
+        current_amount: newAmount,
+        status: newStatus,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', goal.id);
+
+  } catch (err) {
+    console.error('[Learning Engine] updateProfitGoalProgress error:', err);
   }
 }
 

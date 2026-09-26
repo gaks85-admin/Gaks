@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Target, TrendingUp, ShieldAlert, Zap, ArrowRight, BrainCircuit, Check } from 'lucide-react';
+import { Target, TrendingUp, ShieldAlert, Zap, ArrowRight, BrainCircuit, Check, Trophy, AlertCircle, XCircle } from 'lucide-react';
 
 interface RecommendedSettings {
   riskPerTrade: string;
@@ -9,7 +9,20 @@ interface RecommendedSettings {
   expectedWinRate: number;
 }
 
+interface ProfitGoal {
+  id: string;
+  target_amount: number;
+  start_amount: number;
+  current_amount: number;
+  status: 'ACTIVE' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
+  timeframe: string;
+  deadline: string;
+  settings_applied: any;
+}
+
 interface ProfitGoalOptimizerProps {
+  userId: string;
+  supabase: any;
   currentCapital: string;
   onApplySettings: (settings: {
     preferredRisk: string;
@@ -19,6 +32,8 @@ interface ProfitGoalOptimizerProps {
 }
 
 export const ProfitGoalOptimizer: React.FC<ProfitGoalOptimizerProps> = ({
+  userId,
+  supabase,
   currentCapital,
   onApplySettings
 }) => {
@@ -27,8 +42,59 @@ export const ProfitGoalOptimizer: React.FC<ProfitGoalOptimizerProps> = ({
   const [recommendation, setRecommendation] = useState<RecommendedSettings | null>(null);
   const [isCalculating, setIsCalculating] = useState(false);
   const [applied, setApplied] = useState(false);
+  const [activeGoal, setActiveGoal] = useState<ProfitGoal | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
   const capitalNum = parseFloat(currentCapital.replace(/[^0-9.]/g, '')) || 1000;
+
+  useEffect(() => {
+    if (userId && supabase) {
+      fetchActiveGoal();
+    }
+  }, [userId, supabase]);
+
+  const fetchActiveGoal = async () => {
+    setIsLoading(true);
+    try {
+      // Fetch either ACTIVE or recently COMPLETED/FAILED goals that haven't been notified
+      const { data, error } = await supabase
+        .from('profit_goals')
+        .select('*')
+        .eq('user_id', userId)
+        .in('status', ['ACTIVE', 'COMPLETED', 'FAILED'])
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (!error && data) {
+        // If it's COMPLETED or FAILED but already notified, don't show it as the primary view
+        if ((data.status === 'COMPLETED' || data.status === 'FAILED') && data.notified) {
+          setActiveGoal(null);
+        } else {
+          setActiveGoal(data);
+        }
+      } else {
+        setActiveGoal(null);
+      }
+    } catch (err) {
+      console.error('Error fetching profit goal:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleDismissGoal = async () => {
+    if (!activeGoal || !supabase) return;
+    try {
+      await supabase
+        .from('profit_goals')
+        .update({ notified: true })
+        .eq('id', activeGoal.id);
+      setActiveGoal(null);
+    } catch (err) {
+      console.error('Error dismissing goal:', err);
+    }
+  };
 
   const calculateSettings = () => {
     setIsCalculating(true);
@@ -42,11 +108,6 @@ export const ProfitGoalOptimizer: React.FC<ProfitGoalOptimizerProps> = ({
         return;
       }
 
-      // Logic:
-      // Goal = Capital * RiskPerTrade * RR * WinRate * TradesPerPeriod - Capital * RiskPerTrade * (1-WinRate) * TradesPerPeriod
-      // Simplified for recommendation:
-      // We aim for a realistic 40-50% win rate and 1:2 or 1:3 RR.
-      
       const targetPercent = (goal / capitalNum) * 100;
       let risk = 1;
       let rr = "1:2";
@@ -54,23 +115,19 @@ export const ProfitGoalOptimizer: React.FC<ProfitGoalOptimizerProps> = ({
       let winRate = 50;
 
       if (targetPercent > 20) {
-        // Aggressive goal
         risk = 2.5;
         rr = "1:3";
         winRate = 45;
       } else if (targetPercent > 10) {
-        // Moderate goal
         risk = 1.5;
         rr = "1:2.5";
         winRate = 48;
       } else {
-        // Conservative goal
         risk = 0.5;
         rr = "1:2";
         winRate = 50;
       }
 
-      // Max daily loss should be ~2-3x the single trade risk
       const dailyLoss = (capitalNum * (risk / 100) * 2.5).toFixed(0);
 
       setRecommendation({
@@ -84,17 +141,200 @@ export const ProfitGoalOptimizer: React.FC<ProfitGoalOptimizerProps> = ({
     }, 800);
   };
 
-  const handleApply = () => {
-    if (recommendation) {
+  const handleApply = async () => {
+    if (recommendation && userId && supabase) {
+      // Apply to UI/App State
       onApplySettings({
         preferredRisk: recommendation.riskPerTrade,
         maxDailyLoss: recommendation.maxDailyLoss,
         riskReward: recommendation.minRR
       });
-      setApplied(true);
-      setTimeout(() => setApplied(false), 3000);
+
+      // Save to Database
+      try {
+        // Cancel any existing active goal
+        if (activeGoal) {
+          await supabase
+            .from('profit_goals')
+            .update({ status: 'CANCELLED' })
+            .eq('id', activeGoal.id);
+        }
+
+        const deadline = new Date();
+        if (timeframe === 'weekly') {
+          deadline.setDate(deadline.getDate() + 7);
+        } else {
+          deadline.setMonth(deadline.getMonth() + 1);
+        }
+
+        const goalAmount = parseFloat(profitGoal);
+        const { data, error } = await supabase
+          .from('profit_goals')
+          .insert({
+            user_id: userId,
+            target_amount: capitalNum + goalAmount,
+            start_amount: capitalNum,
+            current_amount: capitalNum,
+            status: 'ACTIVE',
+            timeframe: timeframe,
+            deadline: deadline.toISOString(),
+            settings_applied: recommendation
+          })
+          .select()
+          .single();
+
+        if (!error && data) {
+          setActiveGoal(data);
+          setApplied(true);
+          setTimeout(() => {
+            setApplied(false);
+            setRecommendation(null);
+            setProfitGoal('');
+          }, 3000);
+        }
+      } catch (err) {
+        console.error('Error saving profit goal:', err);
+      }
     }
   };
+
+  const handleCancelGoal = async () => {
+    if (!activeGoal || !supabase) return;
+    if (!window.confirm('Are you sure you want to cancel your current profit goal?')) return;
+
+    try {
+      await supabase
+        .from('profit_goals')
+        .update({ status: 'CANCELLED' })
+        .eq('id', activeGoal.id);
+      setActiveGoal(null);
+    } catch (err) {
+      console.error('Error cancelling goal:', err);
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <div className="p-12 rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-[#0c0c0e]/40 flex items-center justify-center">
+        <RefreshCw className="w-5 h-5 text-zinc-400 animate-spin" />
+      </div>
+    );
+  }
+
+  // If a goal is active or recently completed, show the status view
+  if (activeGoal) {
+    const totalTarget = activeGoal.target_amount - activeGoal.start_amount;
+    const currentProfit = activeGoal.current_amount - activeGoal.start_amount;
+    const progressPercent = Math.max(0, Math.min(100, (currentProfit / totalTarget) * 100));
+    const isAhead = currentProfit > 0;
+    
+    if (activeGoal.status === 'COMPLETED') {
+      return (
+        <div className="p-8 rounded-3xl border border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/10 text-center space-y-4 shadow-xl shadow-emerald-500/10 animate-in zoom-in-95 duration-500">
+          <div className="w-16 h-16 rounded-full bg-emerald-500 flex items-center justify-center mx-auto shadow-lg shadow-emerald-500/40">
+            <Trophy className="w-8 h-8 text-white" />
+          </div>
+          <div className="space-y-2">
+            <h3 className="text-xl font-bold text-zinc-900 dark:text-white">Goal Achieved!</h3>
+            <p className="text-sm text-zinc-600 dark:text-zinc-400">
+              Congratulations! You've reached your target of <span className="font-bold text-emerald-600 dark:text-emerald-400">${activeGoal.target_amount.toLocaleString()}</span>.
+            </p>
+          </div>
+          <button 
+            onClick={handleDismissGoal}
+            className="px-8 py-3 rounded-2xl bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 text-xs font-bold shadow-lg hover:scale-[1.02] active:scale-[0.98] transition-all"
+          >
+            Start New Challenge
+          </button>
+        </div>
+      );
+    }
+
+    if (activeGoal.status === 'FAILED') {
+      return (
+        <div className="p-8 rounded-3xl border border-rose-500/30 bg-rose-50 dark:bg-rose-500/10 text-center space-y-4 shadow-xl shadow-rose-500/10 animate-in zoom-in-95 duration-500">
+          <div className="w-16 h-16 rounded-full bg-rose-500 flex items-center justify-center mx-auto shadow-lg shadow-rose-500/40">
+            <AlertCircle className="w-8 h-8 text-white" />
+          </div>
+          <div className="space-y-2">
+            <h3 className="text-xl font-bold text-zinc-900 dark:text-white">Challenge Ended</h3>
+            <p className="text-sm text-zinc-600 dark:text-zinc-400">
+              The deadline for your profit goal has passed. Don't worry, every loss is a lesson. Let's analyze and try again.
+            </p>
+          </div>
+          <button 
+            onClick={handleDismissGoal}
+            className="px-8 py-3 rounded-2xl bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 text-xs font-bold shadow-lg hover:scale-[1.02] active:scale-[0.98] transition-all"
+          >
+            Analyze & Re-configure
+          </button>
+        </div>
+      );
+    }
+
+    return (
+      <div className="p-6 rounded-3xl border border-indigo-500/20 bg-indigo-50/30 dark:bg-indigo-500/5 space-y-6 shadow-sm animate-in fade-in zoom-in-95 duration-300">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-indigo-500 flex items-center justify-center shadow-lg shadow-indigo-500/20">
+              <Trophy className="w-5 h-5 text-white" />
+            </div>
+            <div className="space-y-0.5">
+              <h3 className="text-sm font-bold text-zinc-950 dark:text-white uppercase tracking-tight">Active Profit Challenge</h3>
+              <p className="text-[11px] text-zinc-500">Targeting ${activeGoal.target_amount.toLocaleString()} by {new Date(activeGoal.deadline).toLocaleDateString()}</p>
+            </div>
+          </div>
+          <button 
+            onClick={handleCancelGoal}
+            className="p-2 text-zinc-400 hover:text-rose-500 transition-colors"
+            title="Cancel Goal"
+          >
+            <XCircle className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="space-y-3">
+          <div className="flex items-end justify-between">
+            <div className="space-y-1">
+              <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Progress</span>
+              <div className="flex items-baseline gap-1.5">
+                <span className={`text-2xl font-bold ${isAhead ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+                  {isAhead ? '+' : ''}${currentProfit.toFixed(2)}
+                </span>
+                <span className="text-xs text-zinc-500 font-medium">/ ${totalTarget.toLocaleString()} goal</span>
+              </div>
+            </div>
+            <div className="text-right">
+              <span className="text-xs font-bold text-indigo-600 dark:text-indigo-400">{progressPercent.toFixed(1)}%</span>
+            </div>
+          </div>
+
+          <div className="w-full bg-zinc-200 dark:bg-zinc-800 h-3 rounded-full overflow-hidden">
+            <div 
+              className={`h-full transition-all duration-1000 ease-out ${isAhead ? 'bg-indigo-500 shadow-[0_0_12px_rgba(99,102,241,0.5)]' : 'bg-rose-500'}`}
+              style={{ width: `${progressPercent}%` }}
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4 pt-2">
+            <div className="p-3 rounded-2xl bg-white/50 dark:bg-zinc-950/40 border border-zinc-200/50 dark:border-zinc-800/50">
+              <p className="text-[10px] font-bold text-zinc-400 uppercase mb-1">Time Remaining</p>
+              <p className="text-xs font-bold text-zinc-900 dark:text-white">
+                {Math.ceil((new Date(activeGoal.deadline).getTime() - Date.now()) / (1000 * 60 * 60 * 24))} Days
+              </p>
+            </div>
+            <div className="p-3 rounded-2xl bg-white/50 dark:bg-zinc-950/40 border border-zinc-200/50 dark:border-zinc-800/50">
+              <p className="text-[10px] font-bold text-zinc-400 uppercase mb-1">Status</p>
+              <div className="flex items-center gap-1.5">
+                <div className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse" />
+                <p className="text-xs font-bold text-indigo-600 dark:text-indigo-400 uppercase">Tracking</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6 rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-[#0c0c0e]/40 space-y-6 shadow-sm">
@@ -104,17 +344,17 @@ export const ProfitGoalOptimizer: React.FC<ProfitGoalOptimizerProps> = ({
             <BrainCircuit className="w-5 h-5 text-indigo-500" />
             AI Profit Goal Optimizer
           </h3>
-          <p className="text-xs text-zinc-500">Tell the AI your goal, and it will calculate the safest path to get there.</p>
+          <p className="text-xs text-zinc-500">Set a target. The AI handles the math and tracks your progress.</p>
         </div>
         <div className="px-2.5 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-[10px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider">
-          New Feature
+          Performance Challenge
         </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div className="space-y-4">
           <div className="space-y-2">
-            <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">I want to profit</label>
+            <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">Profit Target (above ${capitalNum.toLocaleString()})</label>
             <div className="relative rounded-2xl border border-zinc-200 dark:border-zinc-800 overflow-hidden bg-white dark:bg-zinc-950/60 focus-within:border-indigo-500 dark:focus-within:border-indigo-500 shadow-sm transition-all">
               <span className="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-bold text-zinc-400">$</span>
               <input
@@ -128,7 +368,7 @@ export const ProfitGoalOptimizer: React.FC<ProfitGoalOptimizerProps> = ({
           </div>
 
           <div className="space-y-2">
-            <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">Every</label>
+            <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">Target Timeframe</label>
             <div className="flex gap-2">
               {(['weekly', 'monthly'] as const).map((t) => (
                 <button
@@ -156,7 +396,7 @@ export const ProfitGoalOptimizer: React.FC<ProfitGoalOptimizerProps> = ({
             ) : (
               <Zap className="w-4 h-4 fill-current" />
             )}
-            <span>{isCalculating ? 'Analyzing Market Math...' : 'Generate Best Settings'}</span>
+            <span>{isCalculating ? 'AI Math Simulation...' : 'Generate Settings & Start'}</span>
           </button>
         </div>
 
@@ -167,7 +407,7 @@ export const ProfitGoalOptimizer: React.FC<ProfitGoalOptimizerProps> = ({
                 <Target className="w-6 h-6 text-zinc-300" />
               </div>
               <div className="space-y-1">
-                <p className="text-xs font-bold text-zinc-400">Settings Pending</p>
+                <p className="text-xs font-bold text-zinc-400">Challenge Ready</p>
                 <p className="text-[10px] text-zinc-500 max-w-[180px]">Input your target to see AI-optimized risk configurations.</p>
               </div>
             </div>
@@ -175,7 +415,7 @@ export const ProfitGoalOptimizer: React.FC<ProfitGoalOptimizerProps> = ({
             <div className="h-full p-5 rounded-3xl bg-white dark:bg-zinc-900 border border-indigo-500/30 shadow-xl shadow-indigo-500/5 space-y-5 animate-in fade-in slide-in-from-right-4">
               <div className="flex items-center gap-2 text-indigo-600 dark:text-indigo-400">
                 <TrendingUp className="w-4 h-4" />
-                <span className="text-[11px] font-bold uppercase tracking-wider">AI Recommendation</span>
+                <span className="text-[11px] font-bold uppercase tracking-wider">AI Challenge Configuration</span>
               </div>
 
               <div className="grid grid-cols-2 gap-4">
@@ -214,11 +454,11 @@ export const ProfitGoalOptimizer: React.FC<ProfitGoalOptimizerProps> = ({
                   {applied ? (
                     <>
                       <Check className="w-3.5 h-3.5 stroke-[3]" />
-                      <span>Settings Applied!</span>
+                      <span>Challenge Started!</span>
                     </>
                   ) : (
                     <>
-                      <span>Apply These Settings</span>
+                      <span>Start Challenge</span>
                       <ArrowRight className="w-3.5 h-3.5" />
                     </>
                   )}
