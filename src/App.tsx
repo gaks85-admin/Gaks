@@ -2503,6 +2503,7 @@ export default function App() {
               toggleTimeframe={toggleTimeframe}
               isPrefsDirty={isPrefsDirty}
               savePreferences={savePreferences}
+              triggerNotification={triggerNotification}
             />
           )}
 

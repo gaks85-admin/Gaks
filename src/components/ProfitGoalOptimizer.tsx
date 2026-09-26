@@ -23,6 +23,7 @@ interface ProfitGoal {
 interface ProfitGoalOptimizerProps {
   userId: string;
   supabase: any;
+  triggerNotification?: (msg: string, type?: 'success' | 'info') => void;
   currentCapital: string;
   onApplySettings: (settings: {
     preferredRisk: string;
@@ -34,6 +35,7 @@ interface ProfitGoalOptimizerProps {
 export const ProfitGoalOptimizer: React.FC<ProfitGoalOptimizerProps> = ({
   userId,
   supabase,
+  triggerNotification,
   currentCapital,
   onApplySettings
 }) => {
@@ -41,6 +43,7 @@ export const ProfitGoalOptimizer: React.FC<ProfitGoalOptimizerProps> = ({
   const [timeframe, setTimeframe] = useState<'weekly' | 'monthly'>('monthly');
   const [recommendation, setRecommendation] = useState<RecommendedSettings | null>(null);
   const [isCalculating, setIsCalculating] = useState(false);
+  const [isApplying, setIsApplying] = useState(false);
   const [applied, setApplied] = useState(false);
   const [activeGoal, setActiveGoal] = useState<ProfitGoal | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -56,6 +59,11 @@ export const ProfitGoalOptimizer: React.FC<ProfitGoalOptimizerProps> = ({
   const fetchActiveGoal = async () => {
     setIsLoading(true);
     try {
+      if (!userId || !supabase) {
+        setIsLoading(false);
+        return;
+      }
+
       // Fetch either ACTIVE or recently COMPLETED/FAILED goals that haven't been notified
       const { data, error } = await supabase
         .from('profit_goals')
@@ -91,12 +99,18 @@ export const ProfitGoalOptimizer: React.FC<ProfitGoalOptimizerProps> = ({
         .update({ notified: true })
         .eq('id', activeGoal.id);
       setActiveGoal(null);
+      if (triggerNotification) triggerNotification("Goal dismissed.", "info");
     } catch (err) {
       console.error('Error dismissing goal:', err);
     }
   };
 
   const calculateSettings = () => {
+    if (!profitGoal || parseFloat(profitGoal) <= 0) {
+      if (triggerNotification) triggerNotification("Please enter a valid profit goal.", "info");
+      return;
+    }
+
     setIsCalculating(true);
     setApplied(false);
     
@@ -138,63 +152,93 @@ export const ProfitGoalOptimizer: React.FC<ProfitGoalOptimizerProps> = ({
         expectedWinRate: winRate
       });
       setIsCalculating(false);
+      if (triggerNotification) triggerNotification("AI settings generated!", "success");
     }, 800);
   };
 
   const handleApply = async () => {
-    if (recommendation && userId && supabase) {
-      // Apply to UI/App State
+    if (!recommendation) {
+      if (triggerNotification) triggerNotification("No recommendation to apply.", "info");
+      return;
+    }
+
+    if (!userId || !supabase) {
+      if (triggerNotification) triggerNotification("Authentication required to start challenge.", "info");
+      console.error("Missing userId or supabase", { userId, hasSupabase: !!supabase });
+      return;
+    }
+
+    setIsApplying(true);
+
+    try {
+      // 1. Cancel any existing active goal
+      if (activeGoal && activeGoal.status === 'ACTIVE') {
+        const { error: cancelErr } = await supabase
+          .from('profit_goals')
+          .update({ status: 'CANCELLED' })
+          .eq('id', activeGoal.id);
+        
+        if (cancelErr) {
+          console.warn("Could not cancel previous goal:", cancelErr.message);
+        }
+      }
+
+      const deadline = new Date();
+      if (timeframe === 'weekly') {
+        deadline.setDate(deadline.getDate() + 7);
+      } else {
+        deadline.setMonth(deadline.getMonth() + 1);
+      }
+
+      const goalAmount = parseFloat(profitGoal);
+      
+      // 2. Insert new goal
+      const { data, error } = await supabase
+        .from('profit_goals')
+        .insert({
+          user_id: userId,
+          target_amount: capitalNum + goalAmount,
+          start_amount: capitalNum,
+          current_amount: capitalNum,
+          status: 'ACTIVE',
+          timeframe: timeframe,
+          deadline: deadline.toISOString(),
+          settings_applied: recommendation,
+          notified: false
+        })
+        .select()
+        .single();
+
+      if (error) {
+        console.error('Database Error starting challenge:', error);
+        if (triggerNotification) triggerNotification(`DB Error: ${error.message}`, "info");
+        setIsApplying(false);
+        return;
+      }
+
+      // 3. Apply to UI/App State (Local State)
       onApplySettings({
         preferredRisk: recommendation.riskPerTrade,
         maxDailyLoss: recommendation.maxDailyLoss,
         riskReward: recommendation.minRR
       });
 
-      // Save to Database
-      try {
-        // Cancel any existing active goal
-        if (activeGoal) {
-          await supabase
-            .from('profit_goals')
-            .update({ status: 'CANCELLED' })
-            .eq('id', activeGoal.id);
-        }
-
-        const deadline = new Date();
-        if (timeframe === 'weekly') {
-          deadline.setDate(deadline.getDate() + 7);
-        } else {
-          deadline.setMonth(deadline.getMonth() + 1);
-        }
-
-        const goalAmount = parseFloat(profitGoal);
-        const { data, error } = await supabase
-          .from('profit_goals')
-          .insert({
-            user_id: userId,
-            target_amount: capitalNum + goalAmount,
-            start_amount: capitalNum,
-            current_amount: capitalNum,
-            status: 'ACTIVE',
-            timeframe: timeframe,
-            deadline: deadline.toISOString(),
-            settings_applied: recommendation
-          })
-          .select()
-          .single();
-
-        if (!error && data) {
-          setActiveGoal(data);
-          setApplied(true);
-          setTimeout(() => {
-            setApplied(false);
-            setRecommendation(null);
-            setProfitGoal('');
-          }, 3000);
-        }
-      } catch (err) {
-        console.error('Error saving profit goal:', err);
+      if (data) {
+        setActiveGoal(data);
+        setApplied(true);
+        if (triggerNotification) triggerNotification("Performance Challenge Started!", "success");
+        
+        setTimeout(() => {
+          setApplied(false);
+          setRecommendation(null);
+          setProfitGoal('');
+        }, 3000);
       }
+    } catch (err: any) {
+      console.error('Exception saving profit goal:', err);
+      if (triggerNotification) triggerNotification(`Error: ${err.message || 'Unknown error'}`, "info");
+    } finally {
+      setIsApplying(false);
     }
   };
 
@@ -445,13 +489,16 @@ export const ProfitGoalOptimizer: React.FC<ProfitGoalOptimizerProps> = ({
                 
                 <button
                   onClick={handleApply}
+                  disabled={isApplying || applied}
                   className={`w-full py-2.5 rounded-xl text-[11px] font-bold transition-all flex items-center justify-center gap-2 ${
                     applied
                       ? 'bg-emerald-500 text-white'
-                      : 'bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 hover:bg-zinc-800'
+                      : 'bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 hover:bg-zinc-800 disabled:opacity-50 disabled:cursor-not-allowed'
                   }`}
                 >
-                  {applied ? (
+                  {isApplying ? (
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  ) : applied ? (
                     <>
                       <Check className="w-3.5 h-3.5 stroke-[3]" />
                       <span>Challenge Started!</span>

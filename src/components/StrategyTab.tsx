@@ -39,6 +39,7 @@ export interface StrategyTabProps {
   toggleTimeframe: (tf: string) => void;
   isPrefsDirty: boolean;
   savePreferences: () => void;
+  triggerNotification: (msg: string, type?: 'success' | 'info') => void;
 }
 
 export const StrategyTab: React.FC<StrategyTabProps> = ({
@@ -77,6 +78,7 @@ export const StrategyTab: React.FC<StrategyTabProps> = ({
   toggleTimeframe,
   isPrefsDirty,
   savePreferences,
+  triggerNotification,
 }) => {
   const selectedStrat = strategies.find(s => s.id === selectedStrategyId) || GAKS_DEFAULT_STRATEGY;
   const currentStrategyText = selectedStrat.text || '';
@@ -197,6 +199,7 @@ export const StrategyTab: React.FC<StrategyTabProps> = ({
       <ProfitGoalOptimizer 
         userId={userId}
         supabase={supabase}
+        triggerNotification={triggerNotification}
         currentCapital={capital === 'Custom' ? customCapital : capital}
         onApplySettings={(settings) => {
           setPreferredRisk(settings.preferredRisk);
