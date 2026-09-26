@@ -8,7 +8,11 @@ export function getSupabase(): SupabaseClient {
     const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
     
     if (!url || !key) {
-      throw new Error('Supabase configuration missing: SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be defined.');
+      console.warn('Supabase configuration missing: SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be defined.');
+      // Return a dummy client that doesn't throw but won't work, avoiding top-level crashes
+      return createClient('https://placeholder.supabase.co', 'placeholder', {
+        auth: { persistSession: false, autoRefreshToken: false }
+      });
     }
 
     supabaseInstance = createClient(url, key, {

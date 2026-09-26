@@ -74,7 +74,12 @@ export const ProfitGoalOptimizer: React.FC<ProfitGoalOptimizerProps> = ({
         .limit(1)
         .maybeSingle();
 
-      if (!error && data) {
+      if (error) {
+        console.error('Error fetching profit goal:', error);
+        if (error.code === 'PGRST116' || error.message?.includes('does not exist')) {
+          if (triggerNotification) triggerNotification("Database schema update required for Profit Goals. Please run the migration.", "info");
+        }
+      } else if (data) {
         // If it's COMPLETED or FAILED but already notified, don't show it as the primary view
         if ((data.status === 'COMPLETED' || data.status === 'FAILED') && data.notified) {
           setActiveGoal(null);
@@ -116,9 +121,10 @@ export const ProfitGoalOptimizer: React.FC<ProfitGoalOptimizerProps> = ({
     
     // Simulate AI calculation
     setTimeout(() => {
-      const goal = parseFloat(profitGoal) || 0;
-      if (goal <= 0) {
+      const goal = parseFloat(profitGoal);
+      if (isNaN(goal) || goal <= 0) {
         setIsCalculating(false);
+        if (triggerNotification) triggerNotification("Invalid profit goal amount.", "info");
         return;
       }
 
@@ -190,9 +196,14 @@ export const ProfitGoalOptimizer: React.FC<ProfitGoalOptimizerProps> = ({
         deadline.setMonth(deadline.getMonth() + 1);
       }
 
-      const goalAmount = parseFloat(profitGoal);
-      
-      // 2. Insert new goal
+    const goalAmount = parseFloat(profitGoal);
+    if (isNaN(goalAmount)) {
+      if (triggerNotification) triggerNotification("Invalid profit goal amount.", "info");
+      setIsApplying(false);
+      return;
+    }
+    
+    // 2. Insert new goal
       const { data, error } = await supabase
         .from('profit_goals')
         .insert({
@@ -254,6 +265,23 @@ export const ProfitGoalOptimizer: React.FC<ProfitGoalOptimizerProps> = ({
       setActiveGoal(null);
     } catch (err) {
       console.error('Error cancelling goal:', err);
+    }
+  };
+
+  const checkTableExists = async () => {
+    try {
+      const { error } = await supabase.from('profit_goals').select('count', { count: 'exact', head: true });
+      if (error) {
+        if (error.code === 'PGRST116' || error.message?.includes('does not exist')) {
+          if (triggerNotification) triggerNotification("Database table 'profit_goals' is missing. Please run the migration.", "info");
+        } else {
+          if (triggerNotification) triggerNotification(`DB Connection Error: ${error.message}`, "info");
+        }
+      } else {
+        if (triggerNotification) triggerNotification("Database connection healthy. Table ready.", "success");
+      }
+    } catch (err: any) {
+      if (triggerNotification) triggerNotification(`Connection Check Failed: ${err.message}`, "info");
     }
   };
 
@@ -390,8 +418,18 @@ export const ProfitGoalOptimizer: React.FC<ProfitGoalOptimizerProps> = ({
           </h3>
           <p className="text-xs text-zinc-500">Set a target. The AI handles the math and tracks your progress.</p>
         </div>
-        <div className="px-2.5 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-[10px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider">
-          Performance Challenge
+        <div className="flex items-center gap-3">
+          {userId === '5543c7b2-3867-4638-89c0-622830f6a27e' || userId?.startsWith('admin') || true && (
+            <button 
+              onClick={checkTableExists}
+              className="text-[9px] font-bold text-zinc-400 hover:text-zinc-600 transition-colors uppercase tracking-widest"
+            >
+              DB Status
+            </button>
+          )}
+          <div className="px-2.5 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-[10px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider">
+            Performance Challenge
+          </div>
         </div>
       </div>
 
@@ -440,7 +478,7 @@ export const ProfitGoalOptimizer: React.FC<ProfitGoalOptimizerProps> = ({
             ) : (
               <Zap className="w-4 h-4 fill-current" />
             )}
-            <span>{isCalculating ? 'AI Math Simulation...' : 'Generate Settings & Start'}</span>
+            <span>{isCalculating ? 'AI Math Simulation...' : 'Generate AI Risk Settings'}</span>
           </button>
         </div>
 
