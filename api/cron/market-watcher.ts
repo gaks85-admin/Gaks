@@ -100,6 +100,57 @@ export function getScanIntervalMinutes(watcher: any): number {
   return 5;
 }
 
+/**
+ * Syncs the user's profit goal with their current account equity.
+ * Handles auto-completion, expiry notifications, and blocking status.
+ */
+export async function syncProfitGoal(supabase: any, userId: string, currentEquity: number, telegramChatId?: string | null) {
+  try {
+    const { data: goal, error } = await supabase
+      .from('profit_goals')
+      .select('*')
+      .eq('user_id', userId)
+      .in('status', ['ACTIVE', 'AWAITING_DECISION'])
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error || !goal) return null;
+
+    const now = new Date();
+    const deadline = new Date(goal.deadline);
+    const isExpired = deadline < now;
+    const isReached = currentEquity >= goal.target_amount;
+
+    let updates: any = {
+      current_amount: currentEquity,
+      updated_at: now.toISOString()
+    };
+
+    if (isReached && goal.status !== 'COMPLETED') {
+      updates.status = 'COMPLETED';
+      updates.notified = true;
+      if (telegramChatId) {
+        await sendTelegramMessage(telegramChatId, `🏆 *Profit Goal Achieved!*\n\nCongratulations! Your account equity has reached $${currentEquity.toLocaleString()}, meeting your target of $${goal.target_amount.toLocaleString()}.`);
+      }
+    } else if (isExpired && goal.status === 'ACTIVE') {
+      updates.status = 'AWAITING_DECISION';
+      if (!goal.notified_expiry) {
+        updates.notified_expiry = true;
+        if (telegramChatId) {
+          await sendTelegramMessage(telegramChatId, `⚠️ *Profit Goal Deadline Reached*\n\nYour challenge deadline has passed, but the target hasn't been reached yet.\n\n*Current Equity:* $${currentEquity.toLocaleString()}\n*Target:* $${goal.target_amount.toLocaleString()}\n\nPlease visit the dashboard to *Extend Time* or *Skip Challenge*. Trading is paused until you decide.`);
+        }
+      }
+    }
+
+    await supabase.from('profit_goals').update(updates).eq('id', goal.id);
+    return { ...goal, ...updates };
+  } catch (err) {
+    console.error('[Profit Goal Sync Error]', err);
+    return null;
+  }
+}
+
 export function buildDecisionSnapshot(decisionResult: any, histResult: any, compiledStrategy: any) {
   return {
     decision_score: decisionResult?.decision_score ?? null,
@@ -932,7 +983,7 @@ export default async function handler(req: any, res: any) {
       console.log(`LOG: Processing ${watchers.length} active watcher(s) sequentially with strict 25s global deadline...`);
     }
 
-    async function processSingleWatcher(watcher: any) {
+    async function processSingleWatcher(watcher: any, brokerAccount?: any) {
       let isWatcherSkipped = true;
       let geminiInvoked = false;
       let geminiSucceeded = false;
@@ -982,6 +1033,23 @@ export default async function handler(req: any, res: any) {
         // Use cached telegram connection
         const telegramConn = telegramMap.get(userId);
         const telegramChatId = (telegramConn && telegramConn.connected) ? telegramConn.telegram_chat_id : (watcher.telegram_chat_id || null);
+
+        // --- PROFIT GOAL SYNC & PROTECTION ---
+        if (brokerAccount?.equity) {
+          const profitGoal = await syncProfitGoal(supabase, userId, brokerAccount.equity, telegramChatId);
+          if (profitGoal && profitGoal.status === 'AWAITING_DECISION') {
+            console.log(`[PROFIT GOAL PROTECTION] Watcher ${watcher.id} paused - User needs to decide on expired goal.`);
+            skipped.push({ userId, reason: "Profit goal expired. Awaiting user decision (Extend/Skip)." });
+            watchersSkippedCount++;
+            return;
+          }
+          if (profitGoal && profitGoal.status === 'COMPLETED') {
+             console.log(`[PROFIT GOAL COMPLETED] Goal reached. Trading paused for this challenge.`);
+             skipped.push({ userId, reason: "Profit goal reached. Challenge completed." });
+             watchersSkippedCount++;
+             return;
+          }
+        }
 
         watchersReadyCount++;
 
@@ -4403,7 +4471,7 @@ Source: ${brokerQuote.source}`);
         }
         return;
       }
-      await processSingleWatcher(watcher);
+      await processSingleWatcher(watcher, brokerAccount);
     });
 
     const totalTime = Date.now() - startTime;

@@ -14,7 +14,7 @@ interface ProfitGoal {
   target_amount: number;
   start_amount: number;
   current_amount: number;
-  status: 'ACTIVE' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
+  status: 'ACTIVE' | 'COMPLETED' | 'FAILED' | 'CANCELLED' | 'AWAITING_DECISION';
   timeframe: string;
   deadline: string;
   settings_applied: any;
@@ -69,7 +69,7 @@ export const ProfitGoalOptimizer: React.FC<ProfitGoalOptimizerProps> = ({
         .from('profit_goals')
         .select('*')
         .eq('user_id', userId)
-        .in('status', ['ACTIVE', 'COMPLETED', 'FAILED'])
+        .in('status', ['ACTIVE', 'COMPLETED', 'FAILED', 'AWAITING_DECISION'])
         .order('updated_at', { ascending: false })
         .limit(1)
         .maybeSingle();
@@ -268,6 +268,61 @@ export const ProfitGoalOptimizer: React.FC<ProfitGoalOptimizerProps> = ({
     }
   };
 
+  const handleExtendTime = async () => {
+    if (!activeGoal || !supabase) return;
+    setIsApplying(true);
+    try {
+      const newDeadline = new Date(activeGoal.deadline);
+      if (activeGoal.timeframe === 'weekly') {
+        newDeadline.setDate(newDeadline.getDate() + 7);
+      } else {
+        newDeadline.setMonth(newDeadline.getMonth() + 1);
+      }
+
+      const { data, error } = await supabase
+        .from('profit_goals')
+        .update({ 
+          status: 'ACTIVE', 
+          deadline: newDeadline.toISOString(),
+          notified_expiry: false 
+        })
+        .eq('id', activeGoal.id)
+        .select()
+        .single();
+
+      if (error) throw error;
+      setActiveGoal(data);
+      if (triggerNotification) triggerNotification("Deadline extended! Trading resumed.", "success");
+    } catch (err: any) {
+      console.error('Error extending deadline:', err);
+      if (triggerNotification) triggerNotification(`Error: ${err.message}`, "info");
+    } finally {
+      setIsApplying(false);
+    }
+  };
+
+  const handleSkipChallenge = async () => {
+    if (!activeGoal || !supabase) return;
+    if (!window.confirm('Are you sure you want to skip this challenge? It will be marked as CANCELLED.')) return;
+    
+    setIsApplying(true);
+    try {
+      const { error } = await supabase
+        .from('profit_goals')
+        .update({ status: 'CANCELLED' })
+        .eq('id', activeGoal.id);
+
+      if (error) throw error;
+      setActiveGoal(null);
+      if (triggerNotification) triggerNotification("Challenge skipped.", "info");
+    } catch (err: any) {
+      console.error('Error skipping challenge:', err);
+      if (triggerNotification) triggerNotification(`Error: ${err.message}`, "info");
+    } finally {
+      setIsApplying(false);
+    }
+  };
+
   const checkTableExists = async () => {
     try {
       const { error } = await supabase.from('profit_goals').select('count', { count: 'exact', head: true });
@@ -340,6 +395,38 @@ export const ProfitGoalOptimizer: React.FC<ProfitGoalOptimizerProps> = ({
           >
             Analyze & Re-configure
           </button>
+        </div>
+      );
+    }
+
+    if (activeGoal.status === 'AWAITING_DECISION') {
+      return (
+        <div className="p-8 rounded-3xl border border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 text-center space-y-4 shadow-xl shadow-amber-500/10 animate-in zoom-in-95 duration-500">
+          <div className="w-16 h-16 rounded-full bg-amber-500 flex items-center justify-center mx-auto shadow-lg shadow-amber-500/40">
+            <ShieldAlert className="w-8 h-8 text-white" />
+          </div>
+          <div className="space-y-2">
+            <h3 className="text-xl font-bold text-zinc-900 dark:text-white">Deadline Reached</h3>
+            <p className="text-sm text-zinc-600 dark:text-zinc-400">
+              Your target hasn't been met yet. Trading is paused. Would you like to extend the timeframe or skip this challenge?
+            </p>
+          </div>
+          <div className="flex gap-3 justify-center">
+            <button 
+              onClick={handleExtendTime}
+              disabled={isApplying}
+              className="px-6 py-2.5 rounded-xl bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 text-xs font-bold shadow-lg hover:scale-[1.02] active:scale-[0.98] transition-all disabled:opacity-50"
+            >
+              Extend Time (+1 {activeGoal.timeframe === 'weekly' ? 'Week' : 'Month'})
+            </button>
+            <button 
+              onClick={handleSkipChallenge}
+              disabled={isApplying}
+              className="px-6 py-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 text-xs font-bold shadow-sm hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-all disabled:opacity-50"
+            >
+              Skip Challenge
+            </button>
+          </div>
         </div>
       );
     }

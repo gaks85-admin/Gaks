@@ -784,6 +784,60 @@ FOR ALL
 USING (true)
 WITH CHECK (true);
 
+-- =========================================================================
+-- PROFIT GOALS SCHEMA
+-- =========================================================================
+
+CREATE TABLE IF NOT EXISTS public.profit_goals (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    target_amount NUMERIC NOT NULL,
+    start_amount NUMERIC NOT NULL,
+    current_amount NUMERIC NOT NULL,
+    status TEXT NOT NULL DEFAULT 'ACTIVE' CONSTRAINT chk_profit_goal_status CHECK (status IN ('ACTIVE', 'COMPLETED', 'FAILED', 'CANCELLED', 'AWAITING_DECISION')),
+    timeframe TEXT,
+    deadline TIMESTAMPTZ NOT NULL,
+    settings_applied JSONB,
+    notified BOOLEAN DEFAULT FALSE,
+    notified_expiry BOOLEAN DEFAULT FALSE
+);
+
+-- Enable Row Level Security (RLS) for profit_goals
+ALTER TABLE public.profit_goals ENABLE ROW LEVEL SECURITY;
+
+-- Create Policies for profit_goals
+CREATE POLICY "Users can read own profit goals"
+  ON public.profit_goals
+  FOR SELECT
+  USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can insert own profit goals"
+  ON public.profit_goals
+  FOR INSERT
+  WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can update own profit goals"
+  ON public.profit_goals
+  FOR UPDATE
+  USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can delete own profit goals"
+  ON public.profit_goals
+  FOR DELETE
+  USING (auth.uid() = user_id);
+
+-- Performance indexes
+CREATE INDEX IF NOT EXISTS idx_profit_goals_user_id ON public.profit_goals(user_id);
+CREATE INDEX IF NOT EXISTS idx_profit_goals_status ON public.profit_goals(status);
+
+-- Automatic update trigger for tracking the updated_at timestamp
+CREATE OR REPLACE TRIGGER update_profit_goals_modtime
+  BEFORE UPDATE ON public.profit_goals
+  FOR EACH ROW
+  EXECUTE FUNCTION public.handle_watchers_updated_at();
+
 
 
 
