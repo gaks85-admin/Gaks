@@ -3,6 +3,7 @@ import { recordCompletedTrade, getUserWinRateStats } from '../learning-engine.js
 import { validateActiveTradeState } from '../trade-validator.js';
 import { calculateUnrealizedPnlR, evaluateActiveTradeExit, calculatePipsDistance } from '../active-trade-monitor.js';
 import { buildTelegramTradeOutcomeMessage } from '../telegram-formatter.js';
+import { diagnoseLossOutcome, LossPostMortem } from '../trade-post-mortem-engine.js';
 
 async function sendTelegramMessage(chatId: string | number, text: string): Promise<boolean> {
   const token = process.env.TELEGRAM_BOT_TOKEN;
@@ -152,6 +153,37 @@ export default async function handler(req: any, res: any) {
       console.warn("Could not fetch latest evaluation for resolution:", e);
     }
 
+    // 2b. If loss or SL hit, execute AI Loss Post-Mortem Diagnosis
+    let lossPostMortem: LossPostMortem | null = null;
+    if (outcome === 'LOSS') {
+      try {
+        lossPostMortem = diagnoseLossOutcome({
+          pair: watcher.selected_pair,
+          timeframe: watcher.selected_timeframe || 'H1',
+          direction: direction,
+          entryPrice: entryPrice,
+          stopLoss: stopLoss,
+          takeProfit: takeProfit,
+          exitPrice: finalExitPrice,
+          openedAt: watcher.opened_at,
+          closedAt: new Date().toISOString(),
+          matchedRules: latestEval?.matched_rules || [],
+          failedRules: latestEval?.failed_rules || []
+        });
+      } catch (pmErr) {
+        console.warn("[Post-Mortem Engine] Failed to diagnose loss:", pmErr);
+      }
+    }
+
+    const decisionSnapshotWithPM = {
+      ...(latestEval?.decision_snapshot || {}),
+      ...(lossPostMortem ? { loss_post_mortem: lossPostMortem } : {})
+    };
+
+    const notesWithPM = notes || (lossPostMortem 
+      ? `Manual resolution: ${resolutionType || 'SL_HIT'} at ${finalExitPrice}. AI Post-Mortem: ${lossPostMortem.rootCauseTitle} - ${lossPostMortem.preventiveAdjustment}`
+      : `Manual resolution: ${resolutionType || 'MANUAL_CLOSE'} at price ${finalExitPrice}`);
+
     // 3. Record completed trade
     await recordCompletedTrade(supabase, {
       user_id: userId,
@@ -175,8 +207,8 @@ export default async function handler(req: any, res: any) {
       matched_rules: latestEval?.matched_rules || [],
       failed_rules: latestEval?.failed_rules || [],
       gemini_used: latestEval?.gemini_used || false,
-      notes: notes || `Manual resolution: ${resolutionType || 'MANUAL_CLOSE'} at price ${finalExitPrice}`,
-      decision_snapshot: latestEval?.decision_snapshot || null
+      notes: notesWithPM,
+      decision_snapshot: decisionSnapshotWithPM
     });
 
     // 4. Send Telegram outcome alert with updated win rate if connected
@@ -207,7 +239,8 @@ export default async function handler(req: any, res: any) {
           winRate: stats.winRate,
           pairTotalTrades: stats.pairTotalTrades,
           pairWins: stats.pairWins,
-          pairWinRate: stats.pairWinRate
+          pairWinRate: stats.pairWinRate,
+          lossPostMortem
         });
         await sendTelegramMessage(conn.telegram_chat_id, outcomeMsg);
       }

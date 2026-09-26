@@ -24,6 +24,7 @@ import { calculateHistoricalProbability, recordCompletedTrade, getUserWinRateSta
 import { validateActiveTradeState } from "../trade-validator.js";
 import { buildActiveTradeTelemetry, evaluateActiveTradeExit, calculatePipsDistance } from "../active-trade-monitor.js";
 import { buildTelegramTradeOutcomeMessage } from "../telegram-formatter.js";
+import { diagnoseLossOutcome, LossPostMortem } from "../trade-post-mortem-engine.js";
 import { 
   identifyMarkedZone, 
   evaluateZoneState, 
@@ -436,6 +437,35 @@ export default async function handler(req: any, res: any) {
 
         const activeTradeId = watcher.active_trade_id || watcher.last_signal_data?.trade_id || null;
 
+        // Perform AI Loss Post-Mortem Diagnosis
+        let lossPostMortem: LossPostMortem | null = null;
+        try {
+          lossPostMortem = diagnoseLossOutcome({
+            pair: symbol,
+            timeframe: watcher.selected_timeframe || 'H1',
+            direction: dir,
+            entryPrice: entryPrice,
+            stopLoss: stopLoss,
+            takeProfit: takeProfit,
+            exitPrice: currentPrice,
+            openedAt: watcher.opened_at,
+            closedAt: new Date().toISOString(),
+            matchedRules: latestEval?.matched_rules || [],
+            failedRules: latestEval?.failed_rules || []
+          });
+        } catch (pmErr) {
+          console.warn("[Post-Mortem Engine] Failed to diagnose loss in scan.ts:", pmErr);
+        }
+
+        const decisionSnapshotWithPM = {
+          ...(latestEval?.decision_snapshot || {}),
+          ...(lossPostMortem ? { loss_post_mortem: lossPostMortem } : {})
+        };
+
+        const notesWithPM = lossPostMortem 
+          ? `Trade closed via SL. Exit: ${currentPrice}. AI Post-Mortem: ${lossPostMortem.rootCauseTitle} - ${lossPostMortem.preventiveAdjustment}`
+          : `Trade closed via SL. Exit Price: ${currentPrice}`;
+
         await recordCompletedTrade(supabase, {
           user_id: userId,
           watcher_id: watcher.id,
@@ -458,8 +488,8 @@ export default async function handler(req: any, res: any) {
           matched_rules: latestEval?.matched_rules || [],
           failed_rules: latestEval?.failed_rules || [],
           gemini_used: latestEval?.gemini_used || false,
-          notes: `Trade closed via SL. Exit Price: ${currentPrice}`,
-          decision_snapshot: latestEval?.decision_snapshot || null
+          notes: notesWithPM,
+          decision_snapshot: decisionSnapshotWithPM
         });
 
         // Send Telegram alert with trade outcome and real-time win rate
@@ -490,7 +520,8 @@ export default async function handler(req: any, res: any) {
               winRate: stats.winRate,
               pairTotalTrades: stats.pairTotalTrades,
               pairWins: stats.pairWins,
-              pairWinRate: stats.pairWinRate
+              pairWinRate: stats.pairWinRate,
+              lossPostMortem
             });
             await sendTelegramMessage(conn.telegram_chat_id, slMsg);
           }

@@ -13,7 +13,10 @@ import {
   Clock, 
   Crosshair, 
   BarChart3, 
-  PieChart 
+  PieChart,
+  Brain,
+  AlertOctagon,
+  Target
 } from 'lucide-react';
 import { PerformanceSnapshot, PerformanceBreakdownItem } from '../lib/performance-snapshot';
 import { LearningStatus } from '../lib/learning-status';
@@ -28,7 +31,7 @@ export const LearningPerformanceView: React.FC<LearningPerformanceViewProps> = (
   const [error, setError] = useState<string | null>(null);
   const [snapshot, setSnapshot] = useState<PerformanceSnapshot | null>(null);
   const [learningStatus, setLearningStatus] = useState<LearningStatus | null>(null);
-  const [activeTab, setActiveTab] = useState<'pairs' | 'setups' | 'timeframes' | 'directions' | 'regimes' | 'execution'>('pairs');
+  const [activeTab, setActiveTab] = useState<'pairs' | 'setups' | 'timeframes' | 'directions' | 'regimes' | 'execution' | 'sl-diagnostics'>('pairs');
 
   const fetchPerformanceData = async () => {
     if (!authToken) {
@@ -129,7 +132,8 @@ export const LearningPerformanceView: React.FC<LearningPerformanceViewProps> = (
     activeTab === 'setups' ? snapshot.breakdownBySetup :
     activeTab === 'timeframes' ? snapshot.breakdownByTimeframe :
     activeTab === 'directions' ? snapshot.breakdownByDirection :
-    activeTab === 'regimes' ? snapshot.breakdownByRegime : snapshot.breakdownByExecutionTiming;
+    activeTab === 'regimes' ? snapshot.breakdownByRegime : 
+    activeTab === 'execution' ? snapshot.breakdownByExecutionTiming : {};
 
   const breakdownKeys = Object.keys(currentBreakdownMap);
 
@@ -269,6 +273,12 @@ export const LearningPerformanceView: React.FC<LearningPerformanceViewProps> = (
                 <span>{insight}</span>
               </div>
             ))}
+            {learningStatus.lossPostMortemInsights?.map((insight, idx) => (
+              <div key={`l-${idx}`} className="flex items-start gap-2 text-xs text-zinc-600 dark:text-zinc-400">
+                <AlertOctagon className="w-3.5 h-3.5 text-rose-500 shrink-0 mt-0.5" />
+                <span>{insight}</span>
+              </div>
+            ))}
           </div>
 
           <div className="pt-2 border-t border-zinc-200/60 dark:border-zinc-800/60 text-[11px] text-zinc-500 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
@@ -295,67 +305,226 @@ export const LearningPerformanceView: React.FC<LearningPerformanceViewProps> = (
               {tab}
             </button>
           ))}
+          <button
+            onClick={() => setActiveTab('sl-diagnostics')}
+            className={`px-3 py-1.5 text-xs font-semibold rounded-xl transition-all flex items-center gap-1.5 ${
+              activeTab === 'sl-diagnostics'
+                ? 'bg-rose-500 text-white shadow-sm'
+                : 'text-rose-500/80 hover:text-rose-500 hover:bg-rose-500/10'
+            }`}
+          >
+            <Brain className="w-3.5 h-3.5" /> Stop Loss Post-Mortem
+          </button>
         </div>
 
-        {/* Breakdown Items Table / List */}
-        <div className="p-5 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-[#0c0c0e]/60 space-y-3">
-          <div className="text-xs font-semibold text-zinc-900 dark:text-white flex items-center justify-between">
-            <span className="capitalize">{activeTab} Performance Breakdown</span>
-            <span className="text-[11px] text-zinc-500 font-normal">{breakdownKeys.length} categories tracked</span>
-          </div>
+        {/* SL Diagnostics Dedicated Tab View */}
+        {activeTab === 'sl-diagnostics' ? (
+          <div className="space-y-4">
+            {/* Top Diagnostic Summary Cards */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+              <div className="p-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-[#0c0c0e]/60 space-y-1">
+                <div className="text-xs text-zinc-500 flex items-center justify-between">
+                  <span>Diagnosed Losses</span>
+                  <AlertOctagon className="w-3.5 h-3.5 text-rose-500" />
+                </div>
+                <div className="text-2xl font-bold text-zinc-900 dark:text-white">
+                  {snapshot.lossDiagnostics?.totalLossesAnalyzed || snapshot.losses}
+                </div>
+                <div className="text-[11px] text-zinc-500">
+                  Avg SL: {snapshot.lossDiagnostics?.averageSlDistancePips || 0} pips
+                </div>
+              </div>
 
-          {breakdownKeys.length === 0 ? (
-            <div className="text-center py-6 text-xs text-zinc-500">
-              No completed trade data recorded for {activeTab} yet.
+              <div className="p-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-[#0c0c0e]/60 space-y-1">
+                <div className="text-xs text-zinc-500 flex items-center justify-between">
+                  <span>Target Hits (TP)</span>
+                  <Target className="w-3.5 h-3.5 text-emerald-500" />
+                </div>
+                <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">
+                  {snapshot.lossDiagnostics?.totalWins || snapshot.wins}
+                </div>
+                <div className="text-[11px] text-zinc-500">
+                  Win/Loss: {snapshot.winRate}% win rate
+                </div>
+              </div>
+
+              <div className="p-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-[#0c0c0e]/60 space-y-1">
+                <div className="text-xs text-zinc-500">Near-TP Reversals</div>
+                <div className="text-2xl font-bold text-amber-500">
+                  {snapshot.lossDiagnostics?.nearTpReversalsCount || 0}
+                </div>
+                <div className="text-[11px] text-zinc-500">
+                  Reversed after +1.0R progress
+                </div>
+              </div>
+
+              <div className="p-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-[#0c0c0e]/60 space-y-1">
+                <div className="text-xs text-zinc-500">Premature Entries</div>
+                <div className="text-2xl font-bold text-indigo-500">
+                  {snapshot.lossDiagnostics?.prematureEntriesCount || 0}
+                </div>
+                <div className="text-[11px] text-zinc-500">
+                  Adverse move right after entry
+                </div>
+              </div>
             </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead>
-                  <tr className="border-b border-zinc-200 dark:border-zinc-800 text-zinc-400 font-medium text-[11px]">
-                    <th className="pb-2">Category</th>
-                    <th className="pb-2 text-center">Trades</th>
-                    <th className="pb-2 text-center">Win Rate</th>
-                    <th className="pb-2 text-center">Expectancy</th>
-                    <th className="pb-2 text-center">Realized R</th>
-                    <th className="pb-2 text-center">Evidence Tier</th>
-                    <th className="pb-2 text-right">Status</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-zinc-200/60 dark:divide-zinc-800/60">
-                  {breakdownKeys.map(key => {
-                    const item = currentBreakdownMap[key];
-                    return (
-                      <tr key={key} className="hover:bg-zinc-50/50 dark:hover:bg-zinc-900/50">
-                        <td className="py-2.5 font-semibold text-zinc-900 dark:text-white">{item.key}</td>
-                        <td className="py-2.5 text-center text-zinc-600 dark:text-zinc-300">
-                          {item.sampleSize} ({item.wins}W / {item.losses}L)
-                        </td>
-                        <td className="py-2.5 text-center text-zinc-900 dark:text-white font-medium">
-                          {item.winRate}%
-                        </td>
-                        <td className={`py-2.5 text-center font-medium ${item.expectancyR >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
-                          {item.expectancyR >= 0 ? `+${item.expectancyR}` : item.expectancyR}R
-                        </td>
-                        <td className={`py-2.5 text-center font-medium ${item.realizedR >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
-                          {item.realizedR >= 0 ? `+${item.realizedR}` : item.realizedR}R
-                        </td>
-                        <td className="py-2.5 text-center">
-                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border ${getTierColor(item.evidenceTier)}`}>
-                            {item.evidenceTier}
+
+            {/* Why Trades Hit SL Breakdown */}
+            <div className="p-5 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-[#0c0c0e]/60 space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-semibold text-zinc-900 dark:text-white flex items-center gap-2">
+                    <Brain className="w-4 h-4 text-rose-500" />
+                    Why Trades Hit Stop Loss Instead of Take Profit
+                  </h3>
+                  <p className="text-xs text-zinc-500 mt-0.5">
+                    The AI categorizes every loss by market root cause to calibrate entry timing, stop buffers, and profit-locking.
+                  </p>
+                </div>
+              </div>
+
+              {(!snapshot.lossDiagnostics?.topFailureCauses || snapshot.lossDiagnostics.topFailureCauses.length === 0) ? (
+                <div className="text-center py-6 text-xs text-zinc-500">
+                  No Stop Loss events recorded yet. The AI will populate failure attribution and lessons learned as trades complete.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {snapshot.lossDiagnostics.topFailureCauses.map(item => (
+                    <div key={item.cause} className="space-y-1">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="font-medium text-zinc-800 dark:text-zinc-200">{item.title}</span>
+                        <span className="text-zinc-500 font-mono">{item.count} trades ({item.percentage}%)</span>
+                      </div>
+                      <div className="w-full bg-zinc-100 dark:bg-zinc-800 h-2 rounded-full overflow-hidden">
+                        <div
+                          className="bg-rose-500 h-full rounded-full transition-all"
+                          style={{ width: `${Math.max(5, item.percentage)}%` }}
+                        ></div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Key Actionable Lessons Learned by AI */}
+            {snapshot.lossDiagnostics?.keyActionableLessons && snapshot.lossDiagnostics.keyActionableLessons.length > 0 && (
+              <div className="p-5 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-[#0c0c0e]/60 space-y-3">
+                <div className="flex items-center gap-2">
+                  <Shield className="w-4 h-4 text-emerald-500" />
+                  <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">AI Preventive Safeguards Active</h3>
+                </div>
+                <div className="space-y-2">
+                  {snapshot.lossDiagnostics.keyActionableLessons.map((lesson, idx) => (
+                    <div key={idx} className="flex items-start gap-2 text-xs text-zinc-700 dark:text-zinc-300">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0 mt-0.5" />
+                      <span>{lesson}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Recent Post-Mortems List */}
+            {snapshot.lossDiagnostics?.recentPostMortems && snapshot.lossDiagnostics.recentPostMortems.length > 0 && (
+              <div className="p-5 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-[#0c0c0e]/60 space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">Recent Stop Loss Post-Mortems</h3>
+                  <span className="text-[11px] text-zinc-500">Latest trade diagnoses</span>
+                </div>
+                <div className="space-y-2.5">
+                  {snapshot.lossDiagnostics.recentPostMortems.map((pm, idx) => (
+                    <div key={idx} className="p-3 rounded-xl border border-zinc-200/80 dark:border-zinc-800/80 bg-zinc-50/50 dark:bg-zinc-900/50 space-y-1.5 text-xs">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-zinc-900 dark:text-white">{pm.pair}</span>
+                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${pm.direction === 'BUY' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'bg-rose-500/10 text-rose-600 dark:text-rose-400'}`}>
+                            {pm.direction}
                           </span>
-                        </td>
-                        <td className="py-2.5 text-right font-medium text-zinc-500">
-                          {item.performanceState}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20">
+                            {pm.rootCauseTitle}
+                          </span>
+                        </div>
+                        <span className="text-[10px] text-zinc-400 font-mono">
+                          MFE: +{pm.mfeR}R | SL: {pm.slPips} pips
+                        </span>
+                      </div>
+                      <p className="text-zinc-600 dark:text-zinc-400 text-[11px]">
+                        {pm.summary}
+                      </p>
+                      {pm.lesson && (
+                        <div className="pt-1 text-[11px] text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-1.5">
+                          <Shield className="w-3 h-3 shrink-0" />
+                          <span>AI Adaptation: {pm.lesson}</span>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        ) : (
+          /* Standard Breakdown Items Table */
+          <div className="p-5 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-[#0c0c0e]/60 space-y-3">
+            <div className="text-xs font-semibold text-zinc-900 dark:text-white flex items-center justify-between">
+              <span className="capitalize">{activeTab} Performance Breakdown</span>
+              <span className="text-[11px] text-zinc-500 font-normal">{breakdownKeys.length} categories tracked</span>
             </div>
-          )}
-        </div>
+
+            {breakdownKeys.length === 0 ? (
+              <div className="text-center py-6 text-xs text-zinc-500">
+                No completed trade data recorded for {activeTab} yet.
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead>
+                    <tr className="border-b border-zinc-200 dark:border-zinc-800 text-zinc-400 font-medium text-[11px]">
+                      <th className="pb-2">Category</th>
+                      <th className="pb-2 text-center">Trades</th>
+                      <th className="pb-2 text-center">Win Rate</th>
+                      <th className="pb-2 text-center">Expectancy</th>
+                      <th className="pb-2 text-center">Realized R</th>
+                      <th className="pb-2 text-center">Evidence Tier</th>
+                      <th className="pb-2 text-right">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-zinc-200/60 dark:divide-zinc-800/60">
+                    {breakdownKeys.map(key => {
+                      const item = currentBreakdownMap[key];
+                      return (
+                        <tr key={key} className="hover:bg-zinc-50/50 dark:hover:bg-zinc-900/50">
+                          <td className="py-2.5 font-semibold text-zinc-900 dark:text-white">{item.key}</td>
+                          <td className="py-2.5 text-center text-zinc-600 dark:text-zinc-300">
+                            {item.sampleSize} ({item.wins}W / {item.losses}L)
+                          </td>
+                          <td className="py-2.5 text-center text-zinc-900 dark:text-white font-medium">
+                            {item.winRate}%
+                          </td>
+                          <td className={`py-2.5 text-center font-medium ${item.expectancyR >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+                            {item.expectancyR >= 0 ? `+${item.expectancyR}` : item.expectancyR}R
+                          </td>
+                          <td className={`py-2.5 text-center font-medium ${item.realizedR >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+                            {item.realizedR >= 0 ? `+${item.realizedR}` : item.realizedR}R
+                          </td>
+                          <td className="py-2.5 text-center">
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border ${getTierColor(item.evidenceTier)}`}>
+                              {item.evidenceTier}
+                            </span>
+                          </td>
+                          <td className="py-2.5 text-right font-medium text-zinc-500">
+                            {item.performanceState}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
     </div>

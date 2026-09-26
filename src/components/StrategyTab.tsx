@@ -1,6 +1,7 @@
 import React from 'react';
 import { AlertTriangle, Check, Trash2, RefreshCw } from 'lucide-react';
 import { Strategy } from '../types';
+import ProfitGoalOptimizer from './ProfitGoalOptimizer';
 
 export interface StrategyTabProps {
   strategies: Strategy[];
@@ -187,6 +188,16 @@ export const StrategyTab: React.FC<StrategyTabProps> = ({
         </div>
 
       </div>
+
+      {/* AI Profit Goal Optimizer - NEW */}
+      <ProfitGoalOptimizer 
+        currentCapital={capital === 'Custom' ? customCapital : capital}
+        onApplySettings={(settings) => {
+          setPreferredRisk(settings.preferredRisk);
+          setMaxDailyLoss(settings.maxDailyLoss);
+          setRiskReward(settings.riskReward);
+        }}
+      />
 
       {/* Trading Preferences Card */}
       <div className="p-6 rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-[#0c0c0e]/80 space-y-6 shadow-sm">

@@ -3,6 +3,7 @@ const defaultSupabase = getSupabase();
 import { fetchUserCompletedTrades, computeEquityAnalytics, deriveEquityState } from './equity-learning-engine.js';
 import { filterValidCompletedTrades, computeMetricsForSubset } from './adaptive-learning-engine.js';
 import { evaluateRiskGovernor, GovernorStatus } from './risk-governor.js';
+import { aggregateLossDiagnostics, LossDiagnosticsSummary } from './trade-post-mortem-engine.js';
 
 export type EvidenceTier = 'INSUFFICIENT' | 'WEAK' | 'MODERATE' | 'STRONG';
 export type PerformanceState = 'HEALTHY' | 'NEUTRAL' | 'DETERIORATING' | 'POOR' | 'INSUFFICIENT_DATA';
@@ -81,6 +82,7 @@ export interface PerformanceSnapshot {
   
   executionMetrics: ExecutionTimingMetrics;
   riskGovernorVisibility: RiskGovernorVisibility;
+  lossDiagnostics?: LossDiagnosticsSummary;
 }
 
 /**
@@ -312,6 +314,7 @@ export async function getUserPerformanceSnapshot(
     breakdownByRegime,
     breakdownByExecutionTiming,
     executionMetrics,
-    riskGovernorVisibility
+    riskGovernorVisibility,
+    lossDiagnostics: aggregateLossDiagnostics(completedTrades)
   };
 }

@@ -22,6 +22,7 @@ import { recordEvaluation } from '../../src/lib/explainability-engine.js';
 import { defaultMarketDataService, getMarketDataStats, getRequiredCandleCountForTimeframe } from '../../src/lib/market-data-service.js';
 import { calculateHistoricalProbability, recordCompletedTrade, getUserWinRateStats } from '../../src/lib/learning-engine.js';
 import { calculatePipsDistance, calculateUnrealizedPnlR } from '../../src/lib/active-trade-monitor.js';
+import { diagnoseLossOutcome, LossPostMortem, checkRecentSlMitigationForPair } from '../../src/lib/trade-post-mortem-engine.js';
 import { BrokerReconciliationService } from '../../src/lib/broker-reconciliation-service.js';
 import { SafetyGovernor, defaultSafetyLimits } from '../../src/lib/safety-governor.js';
 import { SupervisedMicrolotGovernor, DEFAULT_MICROLOT_LIMITS } from '../../src/lib/microlot-governor.js';
@@ -1478,6 +1479,35 @@ Reason: ${activeValidation.reason}`);
 
           const activeTradeIdSL = watcher.active_trade_id || watcher.last_signal_data?.trade_id || watcher.last_signal_data?.tradeId || null;
 
+          // Perform AI Loss Post-Mortem Diagnosis
+          let lossPostMortem: LossPostMortem | null = null;
+          try {
+            lossPostMortem = diagnoseLossOutcome({
+              pair: selectedPair,
+              timeframe: selectedTimeframe,
+              direction: dir,
+              entryPrice: entryPrice || 0,
+              stopLoss: stopLoss,
+              takeProfit: takeProfit,
+              exitPrice: currentPrice,
+              openedAt: watcher.opened_at,
+              closedAt: new Date().toISOString(),
+              matchedRules: latestEval?.matched_rules || [],
+              failedRules: latestEval?.failed_rules || []
+            });
+          } catch (pmErr) {
+            console.warn("[Post-Mortem Engine] Failed to diagnose loss in market-watcher.ts:", pmErr);
+          }
+
+          const decisionSnapshotWithPM = {
+            ...(latestEval?.decision_snapshot || {}),
+            ...(lossPostMortem ? { loss_post_mortem: lossPostMortem } : {})
+          };
+
+          const notesWithPM = lossPostMortem
+            ? `Trade closed via SL. Exit: ${currentPrice}. AI Post-Mortem: ${lossPostMortem.rootCauseTitle} - ${lossPostMortem.preventiveAdjustment}`
+            : `Trade closed via SL. Exit Price: ${currentPrice}`;
+
           await recordCompletedTrade(supabase, {
             user_id: userId,
             watcher_id: watcher.id,
@@ -1501,14 +1531,14 @@ Reason: ${activeValidation.reason}`);
             failed_rules: latestEval?.failed_rules || [],
             gemini_used: latestEval?.gemini_used || false,
             gemini_confidence: null,
-            market_snapshot: {},
+            market_snapshot: lossPostMortem ? { loss_post_mortem: lossPostMortem } : {},
             session: null,
             volatility: 'MEDIUM',
-            notes: `Trade closed via SL. Exit Price: ${currentPrice}`,
-            decision_snapshot: latestEval?.decision_snapshot || null
+            notes: notesWithPM,
+            decision_snapshot: decisionSnapshotWithPM
           });
 
-          // Send Telegram alert with trade outcome and real-time win rate
+          // Send Telegram alert with trade outcome, real-time win rate, and AI loss post-mortem
           if (telegramChatId) {
             try {
               const stats = await getUserWinRateStats(supabase, userId, selectedPair);
@@ -1530,7 +1560,8 @@ Reason: ${activeValidation.reason}`);
                 winRate: stats.winRate,
                 pairTotalTrades: stats.pairTotalTrades,
                 pairWins: stats.pairWins,
-                pairWinRate: stats.pairWinRate
+                pairWinRate: stats.pairWinRate,
+                lossPostMortem
               });
               await sendTelegramMessage(telegramChatId, slMsg);
               telegramMessagesSentCount++;

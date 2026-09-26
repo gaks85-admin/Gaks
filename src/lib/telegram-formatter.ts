@@ -214,6 +214,14 @@ export interface TradeOutcomeTelegramPayload {
   pairTotalTrades?: number;
   pairWins?: number;
   pairWinRate?: number;
+  lossPostMortem?: {
+    rootCauseTitle: string;
+    summary: string;
+    mfeR?: number;
+    slDistancePips?: number;
+    keyLessons?: string[];
+    preventiveAdjustment?: string;
+  } | null;
 }
 
 export function buildTelegramTradeOutcomeMessage(payload: TradeOutcomeTelegramPayload): string {
@@ -241,6 +249,20 @@ export function buildTelegramTradeOutcomeMessage(payload: TradeOutcomeTelegramPa
 
   const resultLine = `${pipsFormatted} (${rFormatted})`;
 
+  // SL Post-Mortem Diagnostics Section
+  let postMortemSection = '';
+  if (!isWin && payload.lossPostMortem) {
+    const pm = payload.lossPostMortem;
+    const mfeStr = pm.mfeR !== undefined && pm.mfeR > 0 ? `+${pm.mfeR.toFixed(1)}R` : '0.0R';
+    postMortemSection = 
+      `\n\n━━━━━━━━━━━━\n\n` +
+      `🧠 AI POST-MORTEM (WHY SL HIT)\n` +
+      `• Root Cause — ${pm.rootCauseTitle}\n` +
+      `• Max Favorable Excursion — ${mfeStr}\n` +
+      `• Analysis — ${pm.summary}\n` +
+      (pm.preventiveAdjustment ? `• AI Adaptation — ${pm.preventiveAdjustment}` : '');
+  }
+
   let statsSection = '';
   if (payload.totalTrades && payload.totalTrades > 0) {
     const overallWinRateStr = payload.winRate !== undefined 
@@ -264,6 +286,7 @@ export function buildTelegramTradeOutcomeMessage(payload: TradeOutcomeTelegramPa
     `EXIT — ${formatPrice(payload.exitPrice, payload.pair)}\n` +
     `RESULT — ${resultLine}\n` +
     `OUTCOME — ${isWin ? 'WIN ✅' : 'LOSS ❌'}` +
+    `${postMortemSection}` +
     `${statsSection}\n\n` +
     `⚡ Gaks AI`
   );

@@ -11,6 +11,7 @@ export interface LearningStatus {
   directionInsights: string[];
   regimeInsights: string[];
   executionInsights: string[];
+  lossPostMortemInsights: string[];
   governorInsight: string;
   adaptiveHierarchyInsight: string;
 }
@@ -116,7 +117,29 @@ export async function getLearningStatus(
     executionInsights.push(`Execution timing gate issued WAIT status ${execM.waitCount} times, protecting capital when entry timing was unfavorable.`);
   }
 
-  // 8. Governor Insight
+  // 8. Loss Post-Mortem & SL Diagnostic Insights
+  const lossPostMortemInsights: string[] = [];
+  const lossDiag = snapshot.lossDiagnostics;
+  if (lossDiag && lossDiag.totalLossesAnalyzed > 0) {
+    lossPostMortemInsights.push(`Total Stop Loss exits diagnosed: ${lossDiag.totalLossesAnalyzed} trades (Average SL distance: ${lossDiag.averageSlDistancePips} pips).`);
+    if (lossDiag.topFailureCauses.length > 0) {
+      const top = lossDiag.topFailureCauses[0];
+      lossPostMortemInsights.push(`Primary cause of Stop Loss hits: ${top.title} (${top.percentage}% of all losses, ${top.count} trades).`);
+    }
+    if (lossDiag.nearTpReversalsCount > 0) {
+      lossPostMortemInsights.push(`${lossDiag.nearTpReversalsCount} trades reached significant profit (>60% of distance to TP) before reversing into Stop Loss. Profit-locking breakeven safeguards recommended.`);
+    }
+    if (lossDiag.tightSlHitsCount > 0) {
+      lossPostMortemInsights.push(`${lossDiag.tightSlHitsCount} trades suffered from excessively tight SL placement inside intra-session market noise.`);
+    }
+    lossDiag.keyActionableLessons.forEach(lesson => {
+      lossPostMortemInsights.push(`AI Preventive Lesson: ${lesson}`);
+    });
+  } else {
+    lossPostMortemInsights.push('No Stop Loss exits diagnosed yet. The AI will automatically perform root-cause post-mortems on any future losses.');
+  }
+
+  // 9. Governor Insight
   let governorInsight = '';
   const govVis = snapshot.riskGovernorVisibility;
   if (govVis.status === 'NO_TRADE') {
@@ -127,7 +150,7 @@ export async function getLearningStatus(
     governorInsight = `Risk Governor is operating in NORMAL mode across all candidate evaluations (${tradeCount} total completed trades evaluated).`;
   }
 
-  // 9. Adaptive Hierarchy Insight
+  // 10. Adaptive Hierarchy Insight
   let adaptiveHierarchyInsight = '';
   if (tradeCount >= 20) {
     adaptiveHierarchyInsight = 'Adaptive learning hierarchy level in use: PAIR+TF+SETUP+DIRECTION+REGIME (Full specific scope matched).';
@@ -150,6 +173,7 @@ export async function getLearningStatus(
     directionInsights,
     regimeInsights,
     executionInsights,
+    lossPostMortemInsights,
     governorInsight,
     adaptiveHierarchyInsight
   };
