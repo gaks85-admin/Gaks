@@ -21,6 +21,8 @@ import { WatchlistItem } from '../types';
 import { normalizeSymbol } from '../../lib/market-utils';
 import { getMarketStatusBadge } from '../lib/market-hours';
 
+import { TradeHistory } from './TradeHistory';
+
 export interface ActiveTradeData {
   watcherId?: string;
   tradeId?: string | null;
@@ -75,6 +77,7 @@ export interface WatcherTabProps {
   } | null;
   onResolveTrade?: (watcherId: string, resolutionType: 'TP_HIT' | 'SL_HIT' | 'BREAKEVEN' | 'MANUAL_CLOSE', exitPrice?: number) => Promise<void>;
   isResolvingTrade?: boolean;
+  userId?: string;
 }
 
 export const WatcherTab: React.FC<WatcherTabProps> = ({
@@ -106,6 +109,7 @@ export const WatcherTab: React.FC<WatcherTabProps> = ({
   watcherZone,
   onResolveTrade,
   isResolvingTrade = false,
+  userId,
 }) => {
   // Derive telemetry if activeTrade is available
   const activeTelemetry = React.useMemo(() => {
@@ -472,8 +476,8 @@ export const WatcherTab: React.FC<WatcherTabProps> = ({
             </div>
           </div>
 
-          {/* Manual Outcome Resolution Controls */}
-          {onResolveTrade && activeTrade.watcherId && (
+          {/* Manual Outcome Resolution Controls (Admin Only) */}
+          {isAdmin && onResolveTrade && activeTrade.watcherId && (
             <div className="pt-2 border-t border-emerald-500/20 dark:border-emerald-500/10 flex flex-wrap items-center justify-between gap-2">
               <span className="text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
                 Manual broker sync actions:
@@ -851,6 +855,13 @@ export const WatcherTab: React.FC<WatcherTabProps> = ({
           </div>
         )}
       </div>
+
+      {/* Resolved Trade History Section (Admin Only) */}
+      {isAdmin && userId && (
+        <div className="pt-8 border-t border-zinc-100 dark:border-zinc-900">
+          <TradeHistory userId={userId} />
+        </div>
+      )}
 
     </div>
   );

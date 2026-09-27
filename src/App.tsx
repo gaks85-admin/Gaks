@@ -2167,17 +2167,19 @@ export default function App() {
                   <RefreshCw className={`w-4 h-4 stroke-[1.8] ${isRefreshing ? 'animate-spin' : ''}`} />
                   <span>Refresh</span>
                 </button>
-                <button
-                  onClick={handleQuickAnalyze}
-                  className="h-11 sm:h-12 flex-1 flex items-center justify-center gap-2 px-5 rounded-full bg-zinc-950 dark:bg-white text-[14px] sm:text-[15px] font-semibold tracking-[-0.01em] text-white dark:text-black hover:bg-zinc-800 dark:hover:bg-zinc-100 transition-all cursor-pointer shadow-md"
-                >
-                  <Zap className="w-4 h-4 stroke-[2] fill-current opacity-10 dark:fill-black/10" />
-                  <span>Quick Analyze</span>
-                </button>
+                {isAdmin && (
+                  <button
+                    onClick={handleQuickAnalyze}
+                    className="h-11 sm:h-12 flex-1 flex items-center justify-center gap-2 px-5 rounded-full bg-zinc-950 dark:bg-white text-[14px] sm:text-[15px] font-semibold tracking-[-0.01em] text-white dark:text-black hover:bg-zinc-800 dark:hover:bg-zinc-100 transition-all cursor-pointer shadow-md"
+                  >
+                    <Zap className="w-4 h-4 stroke-[2] fill-current opacity-10 dark:fill-black/10" />
+                    <span>Quick Analyze</span>
+                  </button>
+                )}
               </div>
 
-              {/* AI Quick Scan recommendation result if present */}
-              {analysisResult && (
+              {/* AI Quick Scan recommendation result if present (Admin Only) */}
+              {isAdmin && analysisResult && (
                 <div className="p-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/30 flex gap-3.5 items-start">
                   <div className="p-2 rounded-xl bg-amber-500/10 text-amber-500 dark:text-amber-400 shrink-0">
                     <Sparkles className="w-4 h-4" />
@@ -2504,6 +2506,7 @@ export default function App() {
               isPrefsDirty={isPrefsDirty}
               savePreferences={savePreferences}
               triggerNotification={triggerNotification}
+              isAdmin={isAdmin}
             />
           )}
 
@@ -2538,6 +2541,7 @@ export default function App() {
               watcherZone={watcherZone}
               onResolveTrade={handleResolveTrade}
               isResolvingTrade={isResolvingTrade}
+              userId={session?.user?.id}
             />
           )}
 

@@ -40,6 +40,7 @@ export interface StrategyTabProps {
   isPrefsDirty: boolean;
   savePreferences: () => void;
   triggerNotification: (msg: string, type?: 'success' | 'info') => void;
+  isAdmin?: boolean;
 }
 
 export const StrategyTab: React.FC<StrategyTabProps> = ({
@@ -79,6 +80,7 @@ export const StrategyTab: React.FC<StrategyTabProps> = ({
   isPrefsDirty,
   savePreferences,
   triggerNotification,
+  isAdmin = false,
 }) => {
   const selectedStrat = strategies.find(s => s.id === selectedStrategyId) || GAKS_DEFAULT_STRATEGY;
   const currentStrategyText = selectedStrat.text || '';
@@ -195,18 +197,20 @@ export const StrategyTab: React.FC<StrategyTabProps> = ({
 
       </div>
 
-      {/* AI Profit Goal Optimizer - NEW */}
-      <ProfitGoalOptimizer 
-        userId={userId}
-        supabase={supabase}
-        triggerNotification={triggerNotification}
-        currentCapital={capital === 'Custom' ? customCapital : capital}
-        onApplySettings={(settings) => {
-          setPreferredRisk(settings.preferredRisk);
-          setMaxDailyLoss(settings.maxDailyLoss);
-          setRiskReward(settings.riskReward);
-        }}
-      />
+      {isAdmin && (
+        <ProfitGoalOptimizer 
+          userId={userId}
+          supabase={supabase}
+          triggerNotification={triggerNotification}
+          currentCapital={capital === 'Custom' ? customCapital : capital}
+          isAdmin={isAdmin}
+          onApplySettings={(settings) => {
+            setPreferredRisk(settings.preferredRisk);
+            setMaxDailyLoss(settings.maxDailyLoss);
+            setRiskReward(settings.riskReward);
+          }}
+        />
+      )}
 
       {/* Trading Preferences Card */}
       <div className="p-6 rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-[#0c0c0e]/80 space-y-6 shadow-sm">

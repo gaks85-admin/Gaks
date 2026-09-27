@@ -30,6 +30,7 @@ interface ProfitGoalOptimizerProps {
     maxDailyLoss: string;
     riskReward: string;
   }) => void;
+  isAdmin?: boolean;
 }
 
 export const ProfitGoalOptimizer: React.FC<ProfitGoalOptimizerProps> = ({
@@ -37,7 +38,8 @@ export const ProfitGoalOptimizer: React.FC<ProfitGoalOptimizerProps> = ({
   supabase,
   triggerNotification,
   currentCapital,
-  onApplySettings
+  onApplySettings,
+  isAdmin = false,
 }) => {
   const [profitGoal, setProfitGoal] = useState<string>('');
   const [timeframe, setTimeframe] = useState<'weekly' | 'monthly'>('monthly');
@@ -513,7 +515,7 @@ export const ProfitGoalOptimizer: React.FC<ProfitGoalOptimizerProps> = ({
           <p className="text-xs text-zinc-500">Set a target. The AI handles the math and tracks your progress.</p>
         </div>
         <div className="flex items-center gap-3">
-          {userId === '5543c7b2-3867-4638-89c0-622830f6a27e' || userId?.startsWith('admin') || true && (
+          {isAdmin && (
             <button 
               onClick={checkTableExists}
               className="text-[9px] font-bold text-zinc-400 hover:text-zinc-600 transition-colors uppercase tracking-widest"
