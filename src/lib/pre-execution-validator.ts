@@ -37,7 +37,28 @@ export interface FinalDecision {
 }
 
 export function revalidatePreExecution(state: FinalExecutionState): FinalDecision {
-  // NOTE: TEMPORARY DISENGAGEMENT PER USER DIRECTIVE
-  // "disengage every confirmation after a signal have been found temporary and leave only the break and retest confirmation note do not audit anything apart from it and also Note it's temporary"
+  // 1. MANDATORY NEWS SAFETY CHECK (MANDATORY GATE)
+  // Re-enabled per user request. This check must happen BEFORE any temporary bypass.
+  if (!state.newsGate) {
+    return {
+      status: 'FINAL_EXECUTION_REJECTED',
+      rejectionReason: 'NEWS_GATE_UNAVAILABLE'
+    };
+  }
+
+  if (state.newsGate.tradeBlocked === true) {
+    return {
+      status: 'FINAL_EXECUTION_REJECTED',
+      rejectionReason: state.newsGate.blockReason || 'ECONOMIC_NEWS_BLOCK'
+    };
+  }
+
+  // 2. TEMPORARY DISENGAGEMENT PER USER DIRECTIVE
+  // "disengage every confirmation after a signal have been found temporary and leave only the break and retest confirmation"
+  if (state.temporaryBypassAllPostSignalConfirmations) {
+    return { status: 'FINAL_EXECUTION_AUTHORIZED' };
+  }
+
+  // Default behavior for other cases (reserved for future use when bypass is removed)
   return { status: 'FINAL_EXECUTION_AUTHORIZED' };
 }

@@ -839,6 +839,56 @@ CREATE OR REPLACE TRIGGER update_profit_goals_modtime
   EXECUTE FUNCTION public.handle_watchers_updated_at();
 
 
+-- =========================================================================
+-- ECONOMIC INTELLIGENCE SCHEMA (economic_events)
+-- =========================================================================
+
+CREATE TABLE IF NOT EXISTS public.economic_events (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  provider_event_id TEXT NOT NULL UNIQUE,
+  event_name TEXT NOT NULL,
+  country TEXT,
+  currency TEXT,
+  impact TEXT NOT NULL, -- LOW, MEDIUM, HIGH
+  scheduled_at TIMESTAMPTZ NOT NULL,
+  actual TEXT,
+  forecast TEXT,
+  previous TEXT,
+  unit TEXT,
+  status TEXT NOT NULL DEFAULT 'UPCOMING', -- UPCOMING, RELEASED
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Enable Row Level Security (RLS)
+ALTER TABLE public.economic_events ENABLE ROW LEVEL SECURITY;
+
+-- Policy: Anyone can read economic events
+CREATE POLICY "Allow public read on economic_events"
+  ON public.economic_events
+  FOR SELECT
+  USING (true);
+
+-- Policy: Allow service role / server-side logic full access
+-- Note: Supabase service role key bypasses RLS by default, but we add this for clarity
+CREATE POLICY "Allow service role full access on economic_events"
+  ON public.economic_events
+  FOR ALL
+  USING (true)
+  WITH CHECK (true);
+
+-- Indexes for performance
+CREATE INDEX IF NOT EXISTS idx_economic_events_scheduled_at ON public.economic_events(scheduled_at);
+CREATE INDEX IF NOT EXISTS idx_economic_events_impact ON public.economic_events(impact);
+CREATE INDEX IF NOT EXISTS idx_economic_events_currency ON public.economic_events(currency);
+
+-- Automatic update trigger for tracking the updated_at timestamp
+CREATE OR REPLACE TRIGGER update_economic_events_modtime
+  BEFORE UPDATE ON public.economic_events
+  FOR EACH ROW
+  EXECUTE FUNCTION public.handle_watchers_updated_at();
+
+
 
 
 

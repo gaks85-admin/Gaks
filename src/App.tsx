@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useLiveRates } from './hooks/useLiveRates';
 import { supabase } from './supabaseClient';
 import { getGeminiKey, saveGeminiKey, deleteGeminiKey, testGeminiKey, GeminiTestResult, GeminiTestStatus, parseGeminiError, classifyCredentialType } from './lib/apiKeys';
+import { getPropFirmSettings, savePropFirmSettings, PropFirmSettings } from './lib/prop-firm-service';
 import { toCanonicalSymbol, toDisplaySymbol, normalizeSymbol } from '../lib/market-utils';
 import { parseUserStrategy } from "./lib/strategy-parser";
 import { compileStrategy } from './lib/strategy-compiler';
@@ -251,7 +252,7 @@ export default function App() {
   const [preferredRisk, setPreferredRisk] = useState<string>('1%');
   const [maxDailyLoss, setMaxDailyLoss] = useState<string>('$100');
   const [riskReward, setRiskReward] = useState<string>('1:2');
-  const [accountType, setAccountType] = useState<'personal' | 'prop'>('personal');
+  const [accountType, setAccountType] = useState<'personal' | 'prop' | null>(null);
   const [positionMode, setPositionMode] = useState<'AUTO_RISK' | 'FIXED_LOT'>('AUTO_RISK');
   const [fixedLotSize, setFixedLotSize] = useState<string>("0.01");
   const [analysisMode, setAnalysisMode] = useState<"HYBRID" | "RULE_ONLY" | "AI_ONLY">("HYBRID");
@@ -260,6 +261,55 @@ export default function App() {
   const [lastSavedStrategyText, setLastSavedStrategyText] = useState<string>('');
   const strategyTextareaRef = useRef<HTMLTextAreaElement>(null);
   const prevSelectedId = useRef<string>('default');
+
+  // Prop Firm Form States
+  const [propFirmName, setPropFirmName] = useState('');
+  const [propFirmAccountPhase, setPropFirmAccountPhase] = useState('Phase 1');
+  const [propFirmAccountSize, setPropFirmAccountSize] = useState('100000');
+  const [propFirmProfitTarget, setPropFirmProfitTarget] = useState('8');
+  const [propFirmProfitTargetType, setPropFirmProfitTargetType] = useState<'PERCENTAGE' | 'AMOUNT'>('PERCENTAGE');
+  const [propFirmDailyLossLimit, setPropFirmDailyLossLimit] = useState('5');
+  const [propFirmDailyLossLimitType, setPropFirmDailyLossLimitType] = useState<'PERCENTAGE' | 'AMOUNT'>('PERCENTAGE');
+  const [propFirmDailyLossCalcBasis, setPropFirmDailyLossCalcBasis] = useState<'BALANCE' | 'EQUITY'>('BALANCE');
+  const [propFirmDailyResetTime, setPropFirmDailyResetTime] = useState('00:00');
+  const [propFirmDailyResetTimezone, setPropFirmDailyResetTimezone] = useState('UTC');
+  const [propFirmMaxDrawdown, setPropFirmMaxDrawdown] = useState('10');
+  const [propFirmDrawdownType, setPropFirmDrawdownType] = useState<'STATIC' | 'TRAILING'>('STATIC');
+  const [propFirmDrawdownCalcBasis, setPropFirmDrawdownCalcBasis] = useState<'BALANCE' | 'EQUITY'>('BALANCE');
+  const [propFirmRiskPerTrade, setPropFirmRiskPerTrade] = useState('1');
+  const [propFirmRiskPerTradeType, setPropFirmRiskPerTradeType] = useState<'PERCENTAGE' | 'AMOUNT'>('PERCENTAGE');
+  const [propFirmMaxTradesPerDay, setPropFirmMaxTradesPerDay] = useState('');
+  const [propFirmNewsRestriction, setPropFirmNewsRestriction] = useState(false);
+  const [propFirmNewsBufferBefore, setPropFirmNewsBufferBefore] = useState('5');
+  const [propFirmNewsBufferAfter, setPropFirmNewsBufferAfter] = useState('5');
+
+  useEffect(() => {
+    if (accountType === 'prop' && session?.user) {
+      getPropFirmSettings(supabase, session.user.id).then(pfData => {
+        if (pfData) {
+          if (pfData.firm_name !== null) setPropFirmName(pfData.firm_name);
+          if (pfData.account_phase !== null) setPropFirmAccountPhase(pfData.account_phase);
+          if (pfData.account_size !== null) setPropFirmAccountSize(String(pfData.account_size));
+          if (pfData.profit_target !== null) setPropFirmProfitTarget(String(pfData.profit_target));
+          if (pfData.profit_target_type) setPropFirmProfitTargetType(pfData.profit_target_type);
+          if (pfData.daily_loss_limit !== null) setPropFirmDailyLossLimit(String(pfData.daily_loss_limit));
+          if (pfData.daily_loss_limit_type) setPropFirmDailyLossLimitType(pfData.daily_loss_limit_type);
+          if (pfData.daily_loss_calculation_basis) setPropFirmDailyLossCalcBasis(pfData.daily_loss_calculation_basis);
+          if (pfData.daily_reset_time) setPropFirmDailyResetTime(pfData.daily_reset_time);
+          if (pfData.daily_reset_timezone) setPropFirmDailyResetTimezone(pfData.daily_reset_timezone);
+          if (pfData.maximum_drawdown !== null) setPropFirmMaxDrawdown(String(pfData.maximum_drawdown));
+          if (pfData.drawdown_type) setPropFirmDrawdownType(pfData.drawdown_type);
+          if (pfData.drawdown_calculation_basis) setPropFirmDrawdownCalcBasis(pfData.drawdown_calculation_basis);
+          if (pfData.risk_per_trade !== null) setPropFirmRiskPerTrade(String(pfData.risk_per_trade));
+          if (pfData.risk_per_trade_type) setPropFirmRiskPerTradeType(pfData.risk_per_trade_type);
+          if (pfData.maximum_trades_per_day !== null) setPropFirmMaxTradesPerDay(String(pfData.maximum_trades_per_day));
+          if (pfData.news_restriction_enabled !== undefined) setPropFirmNewsRestriction(pfData.news_restriction_enabled);
+          if (pfData.news_buffer_before_minutes !== undefined) setPropFirmNewsBufferBefore(String(pfData.news_buffer_before_minutes));
+          if (pfData.news_buffer_after_minutes !== undefined) setPropFirmNewsBufferAfter(String(pfData.news_buffer_after_minutes));
+        }
+      });
+    }
+  }, [accountType, session?.user]);
 
   // Strategy Editor ref
   // (height controlled via fixed CSS viewport with overflow-y-auto)
@@ -270,9 +320,10 @@ export default function App() {
     preferredRisk: string;
     maxDailyLoss: string;
     riskReward: string;
-    accountType: 'personal' | 'prop';
+    accountType: 'personal' | 'prop' | null;
     positionMode: 'AUTO_RISK' | 'FIXED_LOT';
     fixedLotSize: string;
+    analysisMode?: 'HYBRID' | 'RULE_ONLY' | 'AI_ONLY';
     preferredSessions: string[];
     preferredTimeframes: string[];
   }>({
@@ -281,7 +332,7 @@ export default function App() {
     preferredRisk: '1%',
     maxDailyLoss: '$100',
     riskReward: '1:2',
-    accountType: 'personal',
+    accountType: null,
     positionMode: 'AUTO_RISK',
     fixedLotSize: '0.01',
     analysisMode: 'HYBRID' as 'HYBRID' | 'RULE_ONLY' | 'AI_ONLY',
@@ -669,8 +720,10 @@ export default function App() {
       const savedRR = localStorage.getItem('gaks_risk_reward') || '1:2';
       if (savedRR) setRiskReward(savedRR);
       
-      const savedAccount = localStorage.getItem('gaks_account_type') || 'personal';
-      if (savedAccount === 'personal' || savedAccount === 'prop') setAccountType(savedAccount as 'personal' | 'prop');
+      const savedAccount = localStorage.getItem('gaks_account_type');
+      if (savedAccount === 'personal' || savedAccount === 'prop') {
+        setAccountType(savedAccount as 'personal' | 'prop');
+      }
       
       const savedSessions = localStorage.getItem('gaks_sessions') ? JSON.parse(localStorage.getItem('gaks_sessions')!) : ['London', 'New York', 'Tokyo'];
       if (savedSessions) setPreferredSessions(savedSessions);
@@ -684,7 +737,7 @@ export default function App() {
         preferredRisk: savedRisk,
         maxDailyLoss: savedMaxDaily,
         riskReward: savedRR,
-        accountType: savedAccount as 'personal' | 'prop',
+        accountType: (savedAccount === 'personal' || savedAccount === 'prop') ? (savedAccount as 'personal' | 'prop') : null,
         positionMode: 'AUTO_RISK',
         fixedLotSize: '0.01',
         analysisMode: 'HYBRID',
@@ -1140,12 +1193,17 @@ export default function App() {
         const riskVal = data.preferred_risk || '1%';
         const rrVal = data.risk_reward || '1:2';
         
-        const rawAccountType = String(data.account_type || 'personal');
-        const accountVal = rawAccountType.startsWith('prop') ? 'prop' : 'personal';
+        const rawAccountType = data.account_type;
+        let accountVal: 'personal' | 'prop' | null = null;
+        
+        if (rawAccountType) {
+          const rawStr = String(rawAccountType);
+          accountVal = rawStr.startsWith('prop') ? 'prop' : 'personal';
+        }
 
         let maxDailyVal = data.max_daily_loss;
-        if (!maxDailyVal && rawAccountType.includes('|MAXLOSS:')) {
-          const mlMatch = rawAccountType.match(/\|MAXLOSS:([0-9.]+)/);
+        if (rawAccountType && String(rawAccountType).includes('|MAXLOSS:')) {
+          const mlMatch = String(rawAccountType).match(/\|MAXLOSS:([0-9.]+)/);
           if (mlMatch) maxDailyVal = `${mlMatch[1]}`;
         }
         if (!maxDailyVal) maxDailyVal = localStorage.getItem('gaks_max_daily_loss') || '$100';
@@ -1178,11 +1236,34 @@ export default function App() {
         setPreferredRisk(riskVal);
         setMaxDailyLoss(String(maxDailyVal));
         setRiskReward(rrVal);
-        setAccountType(accountVal as 'personal' | 'prop');
+        setAccountType(accountVal);
         setPositionMode(modeVal);
         setFixedLotSize(String(lotVal));
         if (data.preferred_sessions) setPreferredSessions(data.preferred_sessions);
         if (data.preferred_timeframes) setPreferredTimeframes(data.preferred_timeframes);
+
+        const pfData = await getPropFirmSettings(supabase, userId);
+        if (pfData) {
+          if (pfData.firm_name !== null) setPropFirmName(pfData.firm_name);
+          if (pfData.account_phase !== null) setPropFirmAccountPhase(pfData.account_phase);
+          if (pfData.account_size !== null) setPropFirmAccountSize(String(pfData.account_size));
+          if (pfData.profit_target !== null) setPropFirmProfitTarget(String(pfData.profit_target));
+          if (pfData.profit_target_type) setPropFirmProfitTargetType(pfData.profit_target_type);
+          if (pfData.daily_loss_limit !== null) setPropFirmDailyLossLimit(String(pfData.daily_loss_limit));
+          if (pfData.daily_loss_limit_type) setPropFirmDailyLossLimitType(pfData.daily_loss_limit_type);
+          if (pfData.daily_loss_calculation_basis) setPropFirmDailyLossCalcBasis(pfData.daily_loss_calculation_basis);
+          if (pfData.daily_reset_time) setPropFirmDailyResetTime(pfData.daily_reset_time);
+          if (pfData.daily_reset_timezone) setPropFirmDailyResetTimezone(pfData.daily_reset_timezone);
+          if (pfData.maximum_drawdown !== null) setPropFirmMaxDrawdown(String(pfData.maximum_drawdown));
+          if (pfData.drawdown_type) setPropFirmDrawdownType(pfData.drawdown_type);
+          if (pfData.drawdown_calculation_basis) setPropFirmDrawdownCalcBasis(pfData.drawdown_calculation_basis);
+          if (pfData.risk_per_trade !== null) setPropFirmRiskPerTrade(String(pfData.risk_per_trade));
+          if (pfData.risk_per_trade_type) setPropFirmRiskPerTradeType(pfData.risk_per_trade_type);
+          if (pfData.maximum_trades_per_day !== null) setPropFirmMaxTradesPerDay(String(pfData.maximum_trades_per_day));
+          if (pfData.news_restriction_enabled !== undefined) setPropFirmNewsRestriction(pfData.news_restriction_enabled);
+          if (pfData.news_buffer_before_minutes !== undefined) setPropFirmNewsBufferBefore(String(pfData.news_buffer_before_minutes));
+          if (pfData.news_buffer_after_minutes !== undefined) setPropFirmNewsBufferAfter(String(pfData.news_buffer_after_minutes));
+        }
 
         setInitialPrefs({
           capital: capVal,
@@ -1190,7 +1271,7 @@ export default function App() {
           preferredRisk: riskVal,
           maxDailyLoss: String(maxDailyVal),
           riskReward: rrVal,
-          accountType: accountVal as 'personal' | 'prop',
+          accountType: accountVal,
           positionMode: modeVal,
           fixedLotSize: String(lotVal),
           analysisMode: amVal,
@@ -1570,7 +1651,7 @@ export default function App() {
       triggerNotification("Synchronizing local setup with Gaks AI...", "info");
       
       // Save playbooks & preferences to Supabase first so the backend validation doesn't fail on stale cache
-      const encodedAccountType = `${accountType}|MODE:${positionMode}|LOT:${fixedLotSize}|MAXLOSS:${maxDailyLoss.replace(/[^0-9.]/g, '')}|ANALYSIS:${analysisMode}`;
+      const encodedAccountType = accountType ? `${accountType}|MODE:${positionMode}|LOT:${fixedLotSize}|MAXLOSS:${maxDailyLoss.replace(/[^0-9.]/g, '')}|ANALYSIS:${analysisMode}` : `personal|MODE:${positionMode}|LOT:${fixedLotSize}|MAXLOSS:${maxDailyLoss.replace(/[^0-9.]/g, '')}|ANALYSIS:${analysisMode}`;
       const { error: playbookErr } = await supabase
         .from('trading_preferences')
         .upsert({
@@ -1754,8 +1835,52 @@ export default function App() {
         return;
       }
     }
+    if (accountType === 'prop') {
+      if (!propFirmName.trim()) {
+        triggerNotification("Please enter a Prop Firm Name.", "info");
+        return;
+      }
+      if (!propFirmAccountPhase.trim()) {
+        triggerNotification("Please enter an Account Phase.", "info");
+        return;
+      }
+      const parsedSize = parseFloat(propFirmAccountSize);
+      if (isNaN(parsedSize) || parsedSize <= 0) {
+        triggerNotification("Please enter a valid Account Size greater than 0.", "info");
+        return;
+      }
+      const parsedDailyLoss = parseFloat(propFirmDailyLossLimit);
+      if (isNaN(parsedDailyLoss) || parsedDailyLoss < 0) {
+        triggerNotification("Please enter a valid Daily Loss Limit (>= 0).", "info");
+        return;
+      }
+      const parsedDrawdown = parseFloat(propFirmMaxDrawdown);
+      if (isNaN(parsedDrawdown) || parsedDrawdown < 0) {
+        triggerNotification("Please enter a valid Maximum Drawdown (>= 0).", "info");
+        return;
+      }
+      const parsedRisk = parseFloat(propFirmRiskPerTrade);
+      if (isNaN(parsedRisk) || parsedRisk <= 0) {
+        triggerNotification("Please enter a valid Risk Per Trade greater than 0.", "info");
+        return;
+      }
+      if (propFirmProfitTarget) {
+        const parsedTarget = parseFloat(propFirmProfitTarget);
+        if (isNaN(parsedTarget) || parsedTarget < 0) {
+          triggerNotification("Please enter a valid Profit Target (>= 0).", "info");
+          return;
+        }
+      }
+      if (propFirmMaxTradesPerDay) {
+        const parsedMaxTrades = parseInt(propFirmMaxTradesPerDay, 10);
+        if (isNaN(parsedMaxTrades) || parsedMaxTrades < 0) {
+          triggerNotification("Please enter a valid Maximum Trades Per Day (>= 0).", "info");
+          return;
+        }
+      }
+    }
 
-    const encodedAccountType = `${accountType}|MODE:${positionMode}|LOT:${fixedLotSize}|MAXLOSS:${maxDailyLoss.replace(/[^0-9.]/g, '')}|ANALYSIS:${analysisMode}`;
+    const encodedAccountType = accountType ? `${accountType}|MODE:${positionMode}|LOT:${fixedLotSize}|MAXLOSS:${maxDailyLoss.replace(/[^0-9.]/g, '')}|ANALYSIS:${analysisMode}` : `personal|MODE:${positionMode}|LOT:${fixedLotSize}|MAXLOSS:${maxDailyLoss.replace(/[^0-9.]/g, '')}|ANALYSIS:${analysisMode}`;
     
     if (session?.user) {
       try {
@@ -1781,6 +1906,36 @@ export default function App() {
           triggerNotification("Could not save preferences. Please try again.", "info");
         } else {
           console.log(`[Preferences Sync]\nUser ID: ${session.user.id}\nOperation: UPSERT\nStatus: SUCCESS`);
+          
+          if (accountType === 'prop') {
+            const propPayload: Partial<PropFirmSettings> = {
+              firm_name: propFirmName.trim(),
+              account_phase: propFirmAccountPhase.trim(),
+              account_size: parseFloat(propFirmAccountSize) || 0,
+              profit_target: propFirmProfitTarget ? parseFloat(propFirmProfitTarget) : null,
+              profit_target_type: propFirmProfitTargetType,
+              daily_loss_limit: parseFloat(propFirmDailyLossLimit) || 0,
+              daily_loss_limit_type: propFirmDailyLossLimitType,
+              daily_loss_calculation_basis: propFirmDailyLossCalcBasis,
+              daily_reset_time: propFirmDailyResetTime.trim() || null,
+              daily_reset_timezone: propFirmDailyResetTimezone.trim() || null,
+              maximum_drawdown: parseFloat(propFirmMaxDrawdown) || 0,
+              drawdown_type: propFirmDrawdownType,
+              drawdown_calculation_basis: propFirmDrawdownCalcBasis,
+              risk_per_trade: parseFloat(propFirmRiskPerTrade) || 0,
+              risk_per_trade_type: propFirmRiskPerTradeType,
+              maximum_trades_per_day: propFirmMaxTradesPerDay ? parseInt(propFirmMaxTradesPerDay, 10) : null,
+              news_restriction_enabled: propFirmNewsRestriction,
+              news_buffer_before_minutes: parseInt(propFirmNewsBufferBefore, 10) || 5,
+              news_buffer_after_minutes: parseInt(propFirmNewsBufferAfter, 10) || 5,
+            };
+
+            const propRes = await savePropFirmSettings(supabase, session.user.id, propPayload);
+            if (!propRes.success) {
+              triggerNotification(`Preferences saved, but Prop Firm settings failed: ${propRes.error || 'Unknown error'}`, "info");
+              return;
+            }
+          }
           
           setInitialPrefs({
             capital,
@@ -2499,6 +2654,44 @@ export default function App() {
               setFixedLotSize={setFixedLotSize}
               accountType={accountType}
               setAccountType={setAccountType}
+              propFirmName={propFirmName}
+              setPropFirmName={setPropFirmName}
+              propFirmAccountPhase={propFirmAccountPhase}
+              setPropFirmAccountPhase={setPropFirmAccountPhase}
+              propFirmAccountSize={propFirmAccountSize}
+              setPropFirmAccountSize={setPropFirmAccountSize}
+              propFirmProfitTarget={propFirmProfitTarget}
+              setPropFirmProfitTarget={setPropFirmProfitTarget}
+              propFirmProfitTargetType={propFirmProfitTargetType}
+              setPropFirmProfitTargetType={setPropFirmProfitTargetType}
+              propFirmDailyLossLimit={propFirmDailyLossLimit}
+              setPropFirmDailyLossLimit={setPropFirmDailyLossLimit}
+              propFirmDailyLossLimitType={propFirmDailyLossLimitType}
+              setPropFirmDailyLossLimitType={setPropFirmDailyLossLimitType}
+              propFirmDailyLossCalcBasis={propFirmDailyLossCalcBasis}
+              setPropFirmDailyLossCalcBasis={setPropFirmDailyLossCalcBasis}
+              propFirmDailyResetTime={propFirmDailyResetTime}
+              setPropFirmDailyResetTime={setPropFirmDailyResetTime}
+              propFirmDailyResetTimezone={propFirmDailyResetTimezone}
+              setPropFirmDailyResetTimezone={setPropFirmDailyResetTimezone}
+              propFirmMaxDrawdown={propFirmMaxDrawdown}
+              setPropFirmMaxDrawdown={setPropFirmMaxDrawdown}
+              propFirmDrawdownType={propFirmDrawdownType}
+              setPropFirmDrawdownType={setPropFirmDrawdownType}
+              propFirmDrawdownCalcBasis={propFirmDrawdownCalcBasis}
+              setPropFirmDrawdownCalcBasis={setPropFirmDrawdownCalcBasis}
+              propFirmRiskPerTrade={propFirmRiskPerTrade}
+              setPropFirmRiskPerTrade={setPropFirmRiskPerTrade}
+              propFirmRiskPerTradeType={propFirmRiskPerTradeType}
+              setPropFirmRiskPerTradeType={setPropFirmRiskPerTradeType}
+              propFirmMaxTradesPerDay={propFirmMaxTradesPerDay}
+              setPropFirmMaxTradesPerDay={setPropFirmMaxTradesPerDay}
+              propFirmNewsRestriction={propFirmNewsRestriction}
+              setPropFirmNewsRestriction={setPropFirmNewsRestriction}
+              propFirmNewsBufferBefore={propFirmNewsBufferBefore}
+              setPropFirmNewsBufferBefore={setPropFirmNewsBufferBefore}
+              propFirmNewsBufferAfter={propFirmNewsBufferAfter}
+              setPropFirmNewsBufferAfter={setPropFirmNewsBufferAfter}
               preferredSessions={preferredSessions}
               toggleSession={toggleSession}
               preferredTimeframes={preferredTimeframes}

@@ -578,12 +578,46 @@ async function send_test_alert_handler(req: any, res: any) {
   return res.status(200).json({ success: true });
 }
 
+import { defaultEconomicEventService } from '../src/lib/economic-event-service.js';
+
+async function sync_economic_events_handler(req: any, res: any) {
+  const supabase = getSupabase();
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Content-Type", "application/json");
+  if (req.method === "OPTIONS") return res.status(200).end();
+
+  const authHeader = req.headers.authorization || '';
+  const token = authHeader.startsWith('Bearer ') ? authHeader.substring(7) : authHeader;
+  if (!token) return res.status(401).json({ success: false, error: "Unauthorized" });
+
+  try {
+    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+    if (authError || !user || user.email?.trim().toLowerCase() !== "gaks6535@gmail.com") {
+      return res.status(403).json({ success: false, error: "Unauthorized" });
+    }
+
+    const { from, to } = req.query;
+    console.log(`[Admin] Triggering manual economic event sync. From: ${from || 'default'}, To: ${to || 'default'}`);
+    
+    // Use the admin's service role client for the sync
+    defaultEconomicEventService.setWindows(60, 30); // Use defaults
+    
+    await defaultEconomicEventService.syncEvents(from as string, to as string);
+    
+    return res.status(200).json({ success: true, message: 'Economic events sync completed successfully.' });
+  } catch (err: any) {
+    console.error("[Admin Economic Sync Error]:", err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+}
+
 export default async function handler(req: any, res: any) {
   try {
     const matchedPath = req.headers['x-matched-path'] || req.headers['x-original-url'] || req.url || '';
     const parsedUrl = new URL(matchedPath, 'http://localhost');
     const pathname = parsedUrl.pathname || '';
 
+    if (pathname.endsWith('/sync-economic-events')) return sync_economic_events_handler(req, res);
     if (pathname.endsWith('/logs')) return logs_handler(req, res);
     if (pathname.endsWith('/system-health')) return system_health_handler(req, res);
     if (pathname.endsWith('/performance')) return performance_handler(req, res);

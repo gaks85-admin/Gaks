@@ -1,18 +1,28 @@
 import { validateExecutionFreshness, FreshnessRequest } from './execution-freshness.js';
-import { EconomicEventService, EconomicEventProvider } from './economic-event-service.js';
+import { EconomicEventService } from './economic-event-service.js';
+import { EconomicEventProvider, EconomicEvent } from './providers/economic-calendar-provider.js';
 import { revalidatePreExecution } from './pre-execution-validator.js';
 
 class MockEconomicEventProvider implements EconomicEventProvider {
-  async getUpcomingEvents(currency: string) {
-    if (currency === 'EUR') {
-      return [{
-        id: 'test-event',
-        eventName: 'ECB Rate Decision',
-        currency: 'EUR',
-        impact: 'HIGH' as const,
-        eventTime: Date.now() + 15 * 60000 // 15 mins from now
-      }];
-    }
+  async getUpcomingEvents(from: string, to: string): Promise<EconomicEvent[]> {
+    // Note: The service logic now filters by currency and time window from DB
+    // But this mock will be used by the provider interface
+    return [{
+      providerEventId: 'test-event',
+      eventName: 'ECB Rate Decision',
+      country: 'Euro Area',
+      currency: 'EUR',
+      impact: 'HIGH',
+      scheduledAt: new Date(Date.now() + 15 * 60000).toISOString(),
+      actual: null,
+      forecast: '4.5%',
+      previous: '4.5%',
+      unit: '%',
+      status: 'UPCOMING'
+    }];
+  }
+
+  async getRecentEvents(from: string, to: string): Promise<EconomicEvent[]> {
     return [];
   }
 }
@@ -58,7 +68,33 @@ export async function runStage5Tests() {
   assert(driftFreshness.rejectionReason === 'ENTRY_PRICE_DRIFT', "Entry drift should be rejected");
 
   // 2. Economic Event Gate
-  const econService = new EconomicEventService(new MockEconomicEventProvider());
+  const mockEvents = [{
+    event_name: 'ECB Rate Decision',
+    currency: 'EUR',
+    impact: 'HIGH',
+    scheduled_at: new Date(Date.now() + 15 * 60000).toISOString()
+  }];
+
+  const mockSupabase = {
+    from: () => ({
+      select: () => ({
+        in: (col: string, vals: string[]) => {
+          const hasEur = vals.includes('EUR');
+          return {
+            eq: () => ({
+              gte: () => ({
+                lte: () => ({
+                  order: () => Promise.resolve({ data: hasEur ? mockEvents : [], error: null })
+                })
+              })
+            })
+          };
+        }
+      })
+    })
+  };
+
+  const econService = new EconomicEventService(new MockEconomicEventProvider(), mockSupabase);
   const eurEvent = await econService.checkNewsHardPause('EUR/USD');
   assert(eurEvent.tradeBlocked && eurEvent.blockReason?.includes('NEWS_HARD_PAUSE'), "News hard pause should block EUR/USD 15 mins before ECB");
 
