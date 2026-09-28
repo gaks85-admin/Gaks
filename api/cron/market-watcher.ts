@@ -63,6 +63,7 @@ import {
   RejectedZoneRecord
 } from '../../src/lib/zone-engine.js';
 import { curateZonesWithAI } from '../../src/lib/zone-curator.js';
+import { evaluateWatcherPropFirmGate, resolvePersistedAccountType, syncPropFirmStateForActiveWatcher } from '../../src/lib/prop-firm-watcher-gate.js';
 import { resolveHigherTimeframeTrend } from '../../src/lib/htf-trend-engine.js';
 import { getMarketSchedule } from '../../src/lib/market-hours.js';
 import { getGlobalExecutionSettings, ExecutionMode } from '../../src/lib/execution-mode-resolver.js';
@@ -589,8 +590,8 @@ export default async function handler(req: any, res: any) {
       return res.status(200).end();
     }
 
-    if (req.method !== 'POST') {
-      return res.status(405).json({ success: false, error: "Method Not Allowed. Use POST." });
+    if (req.method !== 'POST' && req.method !== 'GET') {
+      return res.status(405).json({ success: false, error: "Method Not Allowed. Use POST or GET." });
     }
 
     // === STAGE 8: GLOBAL KILL SWITCH ===
@@ -654,7 +655,7 @@ export default async function handler(req: any, res: any) {
     }
 
     // Protect the endpoint using a CRON_SECRET
-    const authHeader = req.headers.authorization || req.headers['authorization'];
+    const authHeader = req.headers.authorization || req.headers['authorization'] || req.headers['x-cron-secret'] || (req.query && req.query.secret ? `Bearer ${req.query.secret}` : null);
     
     const cleanCronSecret = cronSecretRaw ? cronSecretRaw.trim().replace(/^['"]|['"]$/g, '').trim() : "";
 
@@ -668,34 +669,29 @@ export default async function handler(req: any, res: any) {
       });
     }
 
-    // 2. Require Bearer authentication (401 if missing, invalid format, or token mismatch)
+    // 2. Require Bearer or valid token authentication (401 if missing, invalid format, or token mismatch)
     if (!authHeader) {
-      console.warn("[CRON SECURITY REJECTED] Missing Authorization header.");
+      console.warn("[CRON SECURITY REJECTED] Missing Authorization header or secret.");
       return res.status(401).json({
         success: false,
         error: "Unauthorized",
-        reason: "Authorization header is missing."
+        reason: "Authorization header or secret parameter is missing."
       });
     }
 
     const trimmedHeader = String(authHeader).trim();
-    if (!trimmedHeader.toLowerCase().startsWith("bearer ")) {
-      console.warn("[CRON SECURITY REJECTED] Authorization header does not use Bearer scheme.");
-      return res.status(401).json({
-        success: false,
-        error: "Unauthorized",
-        reason: "Authorization header must use Bearer scheme."
-      });
+    let token = trimmedHeader;
+    if (trimmedHeader.toLowerCase().startsWith("bearer ")) {
+      token = trimmedHeader.substring(7).trim();
     }
-
-    const token = trimmedHeader.substring(7).trim().replace(/^['"]|['"]$/g, '').trim();
+    token = token.replace(/^['"]|['"]$/g, '').trim();
 
     if (!token || token !== cleanCronSecret) {
       console.warn("[CRON SECURITY REJECTED] Invalid or mismatched Bearer token provided.");
       return res.status(401).json({
         success: false,
         error: "Unauthorized",
-        reason: "Invalid or mismatched Bearer token."
+        reason: "Invalid or mismatched token."
       });
     }
 
@@ -1382,6 +1378,14 @@ Reason: ${activeValidation.reason}`);
           'Direction': dir
         });
 
+        await syncPropFirmStateForActiveWatcher({
+          supabase,
+          userId,
+          rawAccountType: prefsMap.get(userId)?.account_type,
+          symbol: selectedPair,
+          currentMarketPrice: currentPrice
+        });
+
         let isTP = false;
         let isSL = false;
 
@@ -1519,6 +1523,14 @@ Reason: ${activeValidation.reason}`);
           } else {
             console.log(`[COOLDOWN UPDATE SUCCESS] Watcher ID: ${watcher.id} successfully updated to trade_status = COOLDOWN in Supabase.`);
           }
+
+          await syncPropFirmStateForActiveWatcher({
+            supabase,
+            userId,
+            rawAccountType: prefsMap.get(userId)?.account_type,
+            symbol: selectedPair,
+            currentMarketPrice: currentPrice
+          });
 
           watchersProcessedCount++;
           isWatcherSkipped = false;
@@ -3647,53 +3659,57 @@ Output ONLY valid JSON.
 
         cronTimer.startStage("Position Sizing & Validation", watcher.id);
 
-        // Check Daily Loss Limit
-        const todayStart = new Date();
-        todayStart.setUTCHours(0, 0, 0, 0);
-        const { data: todayTrades } = await supabase
-          .from('trade_learning')
-          .select('net_pnl')
-          .eq('user_id', userId)
-          .gte('closed_at', todayStart.toISOString());
+        const persistedAccountType = resolvePersistedAccountType(prefsRecord?.account_type);
 
-        let totalLossToday = 0;
-        if (todayTrades && todayTrades.length > 0) {
-          for (const t of todayTrades) {
-            const pnl = Number(t.net_pnl);
-            if (!isNaN(pnl) && pnl < 0) {
-              totalLossToday += Math.abs(pnl);
+        // Check Personal Account Daily Loss Limit (Personal accounts only; Prop Firm accounts use PropFirmRuleEngine)
+        if (persistedAccountType === 'personal') {
+          const todayStart = new Date();
+          todayStart.setUTCHours(0, 0, 0, 0);
+          const { data: todayTrades } = await supabase
+            .from('trade_learning')
+            .select('net_pnl')
+            .eq('user_id', userId)
+            .gte('closed_at', todayStart.toISOString());
+
+          let totalLossToday = 0;
+          if (todayTrades && todayTrades.length > 0) {
+            for (const t of todayTrades) {
+              const pnl = Number(t.net_pnl);
+              if (!isNaN(pnl) && pnl < 0) {
+                totalLossToday += Math.abs(pnl);
+              }
             }
           }
-        }
 
-        const maxDailyLossAllowed = riskPrefs.maxDailyLossAmount || 100;
-        if (totalLossToday >= maxDailyLossAllowed) {
-          logWatcherWarn('DAILY LOSS LIMIT', logCtx, `User daily loss limit reached ($${totalLossToday.toFixed(2)} >= $${maxDailyLossAllowed}). Halting new trades for today.`);
-          analysis.signal = 'NO_TRADE';
-          analysis.reasoning = [`Daily Loss Limit Reached: Lost $${totalLossToday.toFixed(2)} today (Limit: $${maxDailyLossAllowed})`];
-          
-          await supabase.from('watcher_evaluations').insert({
-            user_id: userId,
-            watcher_id: watcher.id,
-            symbol,
-            timeframe: selectedTimeframe,
-            strategy_mode: executionMode,
-            market_price: Number(candleData[candleData.length - 1]?.close) || 0,
-            decision_score: 0,
-            matched_weight: 0,
-            possible_weight: 100,
-            matched_rules: [],
-            failed_rules: ['DAILY_LOSS_LIMIT_REACHED'],
-            gemini_used: false,
-            trade_sent: false,
-            trade_reason: `Trade setup rejected: Daily loss limit ($${maxDailyLossAllowed}) reached (Today loss: $${totalLossToday.toFixed(2)})`,
-            scan_duration_ms: Date.now() - scanStart
-          });
+          const maxDailyLossAllowed = riskPrefs.maxDailyLossAmount || 100;
+          if (totalLossToday >= maxDailyLossAllowed) {
+            logWatcherWarn('DAILY LOSS LIMIT', logCtx, `User daily loss limit reached ($${totalLossToday.toFixed(2)} >= $${maxDailyLossAllowed}). Halting new trades for today.`);
+            analysis.signal = 'NO_TRADE';
+            analysis.reasoning = [`Daily Loss Limit Reached: Lost $${totalLossToday.toFixed(2)} today (Limit: $${maxDailyLossAllowed})`];
+            
+            await supabase.from('watcher_evaluations').insert({
+              user_id: userId,
+              watcher_id: watcher.id,
+              symbol,
+              timeframe: selectedTimeframe,
+              strategy_mode: executionMode,
+              market_price: Number(candleData[candleData.length - 1]?.close) || 0,
+              decision_score: 0,
+              matched_weight: 0,
+              possible_weight: 100,
+              matched_rules: [],
+              failed_rules: ['DAILY_LOSS_LIMIT_REACHED'],
+              gemini_used: false,
+              trade_sent: false,
+              trade_reason: `Trade setup rejected: Daily loss limit ($${maxDailyLossAllowed}) reached (Today loss: $${totalLossToday.toFixed(2)})`,
+              scan_duration_ms: Date.now() - scanStart
+            });
 
-          watchersProcessedCount++;
-          isWatcherSkipped = false;
-          results.push({ userId, symbol, tradeStatus: 'WAITING', result: `Daily loss limit ($${maxDailyLossAllowed}) reached` });
-          return;
+            watchersProcessedCount++;
+            isWatcherSkipped = false;
+            results.push({ userId, symbol, tradeStatus: 'WAITING', result: `Daily loss limit ($${maxDailyLossAllowed}) reached` });
+            return;
+          }
         }
 
         const executedPrice = Number(candleData[candleData.length - 1]?.close) || Number(analysis.entryPrice) || 0;
@@ -3858,6 +3874,111 @@ ${analysis.stopLossBasis === 'ATR_FALLBACK' ? `ATR: ${marketStructure.volatility
           watchersProcessedCount++;
           isWatcherSkipped = false;
           results.push({ userId, symbol, tradeStatus: 'WAITING', result: `Pre-execution rejected: ${finalValidation.rejectionReason}` });
+          return;
+        }
+
+        // === PROP FIRM V1 — PHASE 3: LIVE PROP FIRM RULE ENGINE GATE ===
+        const proposedTradeRisk =
+          typeof posSizeResult.expectedLoss === 'number' &&
+          Number.isFinite(posSizeResult.expectedLoss) &&
+          posSizeResult.expectedLoss > 0
+            ? posSizeResult.expectedLoss
+            : posSizeResult.riskAmount;
+
+        const propFirmGateOutcome = await evaluateWatcherPropFirmGate({
+          supabase,
+          userId,
+          symbol: selectedPair,
+          rawAccountType: prefsRecord?.account_type,
+          proposedTradeRisk,
+          currentMarketPrice: executedPrice
+        });
+
+        if (propFirmGateOutcome.evaluated) {
+          decisionSnapshot = {
+            ...decisionSnapshot,
+            propFirmEvaluation: {
+              accountType: propFirmGateOutcome.accountType,
+              allowed: propFirmGateOutcome.allowed,
+              blockReason: propFirmGateOutcome.blockReason,
+              firmName: propFirmGateOutcome.firmName,
+              accountPhase: propFirmGateOutcome.accountPhase,
+              resetBoundaryUtc: propFirmGateOutcome.resetBoundaryUtc,
+              checks: propFirmGateOutcome.decision?.checks || []
+            }
+          };
+        }
+
+        if (!propFirmGateOutcome.allowed) {
+          const propBlockReason = propFirmGateOutcome.blockReason || 'Blocked by Prop Firm Rule Engine.';
+          analysis.signal = 'NO_TRADE';
+          analysis.reasoning = [`[PropFirmGate] ${propBlockReason}`];
+
+          if (currentZone) {
+            const rejectReason = `Prop Firm Gate rejected: ${propBlockReason}`;
+            recordRejectedZone(watcher.id, currentZone, rejectReason);
+            activeZonesMemoryMap.delete(watcher.id);
+            console.log(`[ZONE REJECTED BY PROP FIRM GATE] Watcher ID: ${watcher.id} (${selectedPair}): Setup on marked zone [${currentZone.low} - ${currentZone.high}] (${currentZone.type}) was rejected by Prop Firm Gate (${propBlockReason}). Clearing zone to prevent dwelling.`);
+
+            await supabase
+              .from("watchers")
+              .update({
+                zone_data: null,
+                zone_status: 'NO_ZONE',
+                zone_high: null,
+                zone_low: null,
+                zone_type: null,
+                zone_invalidation_level: null,
+                zone_tapped_at: null,
+                last_scan_at: new Date().toISOString(),
+                last_analyzed_closed_candle_time: latestClosedCandleTime,
+                updated_at: new Date().toISOString()
+              })
+              .eq("id", watcher.id);
+
+            currentZone = null;
+          } else {
+            await supabase
+              .from("watchers")
+              .update({
+                last_scan_at: new Date().toISOString(),
+                last_analyzed_closed_candle_time: latestClosedCandleTime,
+                updated_at: new Date().toISOString()
+              })
+              .eq("id", watcher.id);
+          }
+
+          const failedPropRules = (propFirmGateOutcome.decision?.checks || [])
+            .filter(c => c.status === 'BLOCK' || c.status === 'CONFIG_ERROR' || c.status === 'UNAVAILABLE')
+            .map(c => `PROP_FIRM_${c.rule}_${c.status}`);
+
+          const scanDurationMs = Date.now() - scanStart;
+          await recordEvaluation(supabase, {
+            user_id: userId,
+            watcher_id: watcher.id,
+            pair: selectedPair,
+            timeframe: selectedTimeframe,
+            strategy_mode: executionMode,
+            decision_score: decisionResult.decision_score,
+            matched_weight: decisionResult.matched_weight,
+            possible_weight: decisionResult.possible_weight,
+            recommendation: decisionResult.recommendation,
+            mandatory_rules_passed: decisionResult.mandatory_rules_passed,
+            matched_rules: decisionResult.matched_rules,
+            failed_rules: [...(decisionResult.failed_rules || []), ...(failedPropRules.length > 0 ? failedPropRules : ['PROP_FIRM_GATE_BLOCKED'])],
+            gemini_used: geminiCalled,
+            gemini_result: geminiTextResult || null,
+            trade_sent: false,
+            trade_reason: `PROP_FIRM_GATE_BLOCKED: ${propBlockReason}`,
+            scan_duration_ms: scanDurationMs,
+            gemini_duration_ms: geminiDuration,
+            execution_source: brokerExecutionMode,
+            decision_snapshot: decisionSnapshot
+          });
+
+          watchersProcessedCount++;
+          isWatcherSkipped = false;
+          results.push({ userId, symbol, tradeStatus: 'WAITING', result: `Prop Firm Gate blocked: ${propBlockReason}` });
           return;
         }
 
@@ -4362,6 +4483,11 @@ Source: ${brokerQuote.source}`);
           stop_loss: analysis.stopLoss,
           take_profit: analysis.takeProfit,
           direction: analysis.signal,
+          lot_size: posSizeResult?.calculatedLotSize ?? null,
+          expected_loss: posSizeResult?.expectedLoss ?? null,
+          risk_amount: posSizeResult?.riskAmount ?? null,
+          contract_size: posSizeResult?.contractSize ?? null,
+          last_signal_data: signal ?? null,
           zone_status: 'CONFIRMED',
           opened_at: new Date().toISOString(),
           closed_at: null,
@@ -4375,6 +4501,29 @@ Source: ${brokerQuote.source}`);
           .update(activePayload)
           .eq("id", watcher.id)
           .select();
+
+        // Fallback 0: If optional position sizing / last_signal_data columns are not yet migrated, retry without them
+        if (
+          activeUpdateErr &&
+          (activeUpdateErr.message?.includes('lot_size') ||
+            activeUpdateErr.message?.includes('expected_loss') ||
+            activeUpdateErr.message?.includes('risk_amount') ||
+            activeUpdateErr.message?.includes('contract_size') ||
+            activeUpdateErr.message?.includes('last_signal_data'))
+        ) {
+          delete activePayload.lot_size;
+          delete activePayload.expected_loss;
+          delete activePayload.risk_amount;
+          delete activePayload.contract_size;
+          delete activePayload.last_signal_data;
+          const fallbackRes = await supabase
+            .from("watchers")
+            .update(activePayload)
+            .eq("id", watcher.id)
+            .select();
+          activeUpdateRows = fallbackRes.data;
+          activeUpdateErr = fallbackRes.error;
+        }
 
         // Fallback 1: If zone_status column is rejected by schema, retry without it
         if (activeUpdateErr && activeUpdateErr.message?.includes('zone_status')) {

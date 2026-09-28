@@ -35,6 +35,7 @@ import {
   clearRejectedZones
 } from "../zone-engine.js";
 import { resolveHigherTimeframeTrend } from "../htf-trend-engine.js";
+import { evaluateWatcherPropFirmGate, WatcherPropFirmGateOutcome } from "../prop-firm-watcher-gate.js";
 
 // TEMPORARY MODE FLAG: Force Market Watcher into RULE_ONLY mode for diagnostic testing.
 // To restore original behavior, set this to null.
@@ -1609,6 +1610,47 @@ ${analysis.stopLossBasis === 'ATR_FALLBACK' ? `ATR: ${marketStructure.volatility
       }
     }
 
+    // === PROP FIRM V1 — PHASE 3: LIVE PROP FIRM RULE ENGINE GATE ===
+    let propFirmGateOutcome: WatcherPropFirmGateOutcome | null = null;
+    if (analysis.signal === 'BUY' || analysis.signal === 'SELL') {
+      const proposedTradeRisk =
+        typeof posSizeResult?.expectedLoss === 'number' &&
+        Number.isFinite(posSizeResult.expectedLoss) &&
+        posSizeResult.expectedLoss > 0
+          ? posSizeResult.expectedLoss
+          : (typeof posSizeResult?.riskAmount === 'number' ? posSizeResult.riskAmount : NaN);
+
+      const currentScanPrice =
+        Number(candleData[candleData.length - 1]?.close) || Number(analysis.entryPrice) || null;
+
+      propFirmGateOutcome = await evaluateWatcherPropFirmGate({
+        supabase,
+        userId,
+        symbol,
+        rawAccountType: prefsRecord?.account_type,
+        proposedTradeRisk,
+        currentMarketPrice: currentScanPrice
+      });
+
+      if (!propFirmGateOutcome.allowed) {
+        const propBlockReason = propFirmGateOutcome.blockReason || 'Blocked by Prop Firm Rule Engine.';
+        analysis.signal = 'NO_TRADE';
+        (analysis as any).accepted = false;
+        (analysis as any).skipReason = propBlockReason;
+        riskResult = { accepted: false, skipReason: propBlockReason };
+        const propMsg = `[PropFirmGate] ${propBlockReason}`;
+        if (analysis.reasoning) {
+          if (Array.isArray(analysis.reasoning)) {
+            analysis.reasoning.push(propMsg);
+          } else {
+            analysis.reasoning = [analysis.reasoning, propMsg];
+          }
+        } else {
+          analysis.reasoning = [propMsg];
+        }
+      }
+    }
+
     const candidateTradeId = `TR-${watcher.id}-${Date.now()}`;
     const gatesList: DecisionGateResult[] = [
       {
@@ -1716,8 +1758,21 @@ ${analysis.stopLossBasis === 'ATR_FALLBACK' ? `ATR: ${marketStructure.volatility
       gates: gatesList
     });
 
-    const decisionSnapshot = {
-      attribution
+    const decisionSnapshot: Record<string, any> = {
+      attribution,
+      ...(propFirmGateOutcome?.evaluated
+        ? {
+            propFirmEvaluation: {
+              accountType: propFirmGateOutcome.accountType,
+              allowed: propFirmGateOutcome.allowed,
+              blockReason: propFirmGateOutcome.blockReason,
+              firmName: propFirmGateOutcome.firmName,
+              accountPhase: propFirmGateOutcome.accountPhase,
+              resetBoundaryUtc: propFirmGateOutcome.resetBoundaryUtc,
+              checks: propFirmGateOutcome.decision?.checks || []
+            }
+          }
+        : {})
     };
 
     // NOTE: TEMPORARY DISENGAGEMENT PER USER DIRECTIVE

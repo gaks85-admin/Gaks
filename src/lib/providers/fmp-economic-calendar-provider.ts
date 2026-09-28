@@ -1,5 +1,5 @@
-import { EconomicEvent, EconomicEventProvider, EconomicEventImpact, EconomicEventStatus } from './economic-calendar-provider';
-import { getCurrencyForCountry } from '../utils/currency-mapping';
+import { EconomicEvent, EconomicEventProvider, EconomicEventImpact, EconomicEventStatus } from './economic-calendar-provider.js';
+import { getCurrencyForCountry } from '../utils/currency-mapping.js';
 
 interface FmpEconomicEvent {
   event: string;

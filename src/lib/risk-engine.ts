@@ -58,6 +58,204 @@ export interface InstrumentSpec {
   source: string;
 }
 
+export interface InstrumentContractConfig {
+  symbol: string;
+  isValid: boolean;
+  assetClass: 'Forex' | 'Gold' | 'Indices' | 'Crypto';
+  baseCurrency: string;
+  quoteCurrency: string;
+  contractSize: number;
+  tickSize: number;
+  minLot: number;
+  lotStep: number;
+  conversionMode: 'USD_QUOTE' | 'USD_BASE' | 'CROSS';
+  quoteToUsdRate: number;
+  conversionPair?: string;
+  conversionPairDirection?: 'DIRECT' | 'INVERSE';
+}
+
+const KNOWN_FX_CURRENCIES = new Set([
+  'USD', 'EUR', 'GBP', 'JPY', 'CHF', 'CAD', 'AUD', 'NZD',
+  'SGD', 'HKD', 'NOK', 'SEK', 'MXN', 'ZAR', 'TRY', 'PLN', 'DKK', 'CNH'
+]);
+
+const DIRECT_USD_QUOTE_CURRENCIES = new Set(['EUR', 'GBP', 'AUD', 'NZD']);
+
+export function getInstrumentContractConfig(
+  symbol: string,
+  referencePrice?: number,
+  crossQuotePrice?: number
+): InstrumentContractConfig {
+  const cleanSym = (symbol || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+  let isValid = false;
+  let assetClass: 'Forex' | 'Gold' | 'Indices' | 'Crypto' = 'Forex';
+  let baseCurrency = '';
+  let quoteCurrency = 'USD';
+  let contractSize = 0;
+  let minLot = 0.01;
+  let lotStep = 0.01;
+  let tickSize = 0.0001;
+
+  if (
+    cleanSym === 'BTCUSD' ||
+    cleanSym === 'BTCUSDT' ||
+    cleanSym === 'ETHUSD' ||
+    cleanSym === 'ETHUSDT' ||
+    cleanSym === 'SOLUSD' ||
+    cleanSym === 'SOLUSDT' ||
+    cleanSym === 'XRPUSD' ||
+    cleanSym === 'XRPUSDT' ||
+    cleanSym === 'ADAUSD' ||
+    cleanSym === 'BNBUSD' ||
+    cleanSym === 'DOGEUSD' ||
+    cleanSym === 'AVAXUSD' ||
+    cleanSym === 'LINKUSD' ||
+    cleanSym === 'LTCUSD'
+  ) {
+    isValid = true;
+    assetClass = 'Crypto';
+    baseCurrency = cleanSym.replace(/USDT?$/, '');
+    quoteCurrency = 'USD';
+    contractSize = 1;
+    minLot = 0.01;
+    lotStep = 0.01;
+    tickSize = 0.01;
+  } else if (
+    cleanSym === 'XAUUSD' ||
+    cleanSym === 'GOLD' ||
+    cleanSym === 'XAGUSD' ||
+    cleanSym === 'SILVER'
+  ) {
+    isValid = true;
+    assetClass = 'Gold';
+    baseCurrency = cleanSym.includes('XAG') || cleanSym.includes('SILVER') ? 'XAG' : 'XAU';
+    quoteCurrency = 'USD';
+    contractSize = baseCurrency === 'XAG' ? 5000 : 100;
+    minLot = 0.01;
+    lotStep = 0.01;
+    tickSize = 0.01;
+  } else if (
+    cleanSym === 'NAS100' ||
+    cleanSym === 'USTEC' ||
+    cleanSym === 'NDX' ||
+    cleanSym === 'US30' ||
+    cleanSym === 'DJI' ||
+    cleanSym === 'SPX500' ||
+    cleanSym === 'SPX' ||
+    cleanSym === 'US500' ||
+    cleanSym === 'QQQ' ||
+    cleanSym === 'DIA' ||
+    cleanSym === 'SPY' ||
+    cleanSym === 'GER30' ||
+    cleanSym === 'GER40' ||
+    cleanSym === 'DE30' ||
+    cleanSym === 'DE40' ||
+    cleanSym === 'DAX' ||
+    cleanSym === 'UK100' ||
+    cleanSym === 'UKX' ||
+    cleanSym === 'JP225' ||
+    cleanSym === 'AUS200'
+  ) {
+    isValid = true;
+    assetClass = 'Indices';
+    baseCurrency = cleanSym;
+    if (cleanSym === 'GER30' || cleanSym === 'GER40' || cleanSym === 'DE30' || cleanSym === 'DE40' || cleanSym === 'DAX') {
+      quoteCurrency = 'EUR';
+    } else if (cleanSym === 'UK100' || cleanSym === 'UKX') {
+      quoteCurrency = 'GBP';
+    } else if (cleanSym === 'JP225') {
+      quoteCurrency = 'JPY';
+    } else if (cleanSym === 'AUS200') {
+      quoteCurrency = 'AUD';
+    } else {
+      quoteCurrency = 'USD';
+    }
+    contractSize = 1;
+    minLot = 0.01;
+    lotStep = 0.01;
+    tickSize = 0.1;
+  } else if (cleanSym.length === 6) {
+    const base = cleanSym.slice(0, 3);
+    const quote = cleanSym.slice(3, 6);
+    if (KNOWN_FX_CURRENCIES.has(base) && KNOWN_FX_CURRENCIES.has(quote) && base !== quote) {
+      isValid = true;
+      assetClass = 'Forex';
+      baseCurrency = base;
+      quoteCurrency = quote;
+      contractSize = 100000;
+      minLot = 0.01;
+      lotStep = 0.01;
+      tickSize = quote === 'JPY' ? 0.01 : 0.0001;
+    }
+  }
+
+  if (!isValid) {
+    return {
+      symbol,
+      isValid: false,
+      assetClass: 'Forex',
+      baseCurrency: '',
+      quoteCurrency: '',
+      contractSize: 0,
+      tickSize: 0,
+      minLot: 0,
+      lotStep: 0,
+      conversionMode: 'CROSS',
+      quoteToUsdRate: NaN
+    };
+  }
+
+  let conversionMode: 'USD_QUOTE' | 'USD_BASE' | 'CROSS' = 'USD_QUOTE';
+  let quoteToUsdRate = 1.0;
+  let conversionPair: string | undefined;
+  let conversionPairDirection: 'DIRECT' | 'INVERSE' | undefined;
+
+  if (quoteCurrency === 'USD') {
+    conversionMode = 'USD_QUOTE';
+    quoteToUsdRate = 1.0;
+  } else if (baseCurrency === 'USD') {
+    conversionMode = 'USD_BASE';
+    quoteToUsdRate =
+      typeof referencePrice === 'number' && Number.isFinite(referencePrice) && referencePrice > 0
+        ? 1 / referencePrice
+        : NaN;
+  } else {
+    conversionMode = 'CROSS';
+    if (DIRECT_USD_QUOTE_CURRENCIES.has(quoteCurrency)) {
+      conversionPair = `${quoteCurrency}USD`;
+      conversionPairDirection = 'DIRECT';
+      quoteToUsdRate =
+        typeof crossQuotePrice === 'number' && Number.isFinite(crossQuotePrice) && crossQuotePrice > 0
+          ? crossQuotePrice
+          : NaN;
+    } else {
+      conversionPair = `USD${quoteCurrency}`;
+      conversionPairDirection = 'INVERSE';
+      quoteToUsdRate =
+        typeof crossQuotePrice === 'number' && Number.isFinite(crossQuotePrice) && crossQuotePrice > 0
+          ? 1 / crossQuotePrice
+          : NaN;
+    }
+  }
+
+  return {
+    symbol,
+    isValid,
+    assetClass,
+    baseCurrency,
+    quoteCurrency,
+    contractSize,
+    tickSize,
+    minLot,
+    lotStep,
+    conversionMode,
+    quoteToUsdRate,
+    conversionPair,
+    conversionPairDirection
+  };
+}
+
 export function resolveInstrumentSpec(symbol: string): InstrumentSpec {
   const cleanSym = (symbol || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 

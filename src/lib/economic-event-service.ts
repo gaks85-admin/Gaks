@@ -1,8 +1,8 @@
 import { createClient } from '@supabase/supabase-js';
-import { supabase } from '../supabaseClient';
-import { EconomicEvent, EconomicEventProvider } from './providers/economic-calendar-provider';
-import { FmpEconomicCalendarProvider } from './providers/fmp-economic-calendar-provider';
-import { FinanceCalendarProvider } from './providers/finance-calendar-provider';
+import { getSupabase } from '../../lib/supabase-server.js';
+import { EconomicEvent, EconomicEventProvider } from './providers/economic-calendar-provider.js';
+import { FmpEconomicCalendarProvider } from './providers/fmp-economic-calendar-provider.js';
+import { FinanceCalendarProvider } from './providers/finance-calendar-provider.js';
 
 export interface EconomicEventResult {
   eventDetected: boolean;
@@ -36,7 +36,7 @@ export class EconomicEventService {
           auth: { persistSession: false, autoRefreshToken: false }
         });
       } else {
-        this.supabaseClient = supabase;
+        this.supabaseClient = getSupabase();
       }
     }
 

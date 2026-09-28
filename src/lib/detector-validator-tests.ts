@@ -1,4 +1,4 @@
-import { validateDetectors, ExecutionMode } from './detector-capability-validator';
+import { validateDetectors, ExecutionMode } from './detector-capability-validator.js';
 
 function runTests() {
   const tests = [

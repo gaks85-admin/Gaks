@@ -91,3 +91,69 @@ CREATE OR REPLACE TRIGGER update_prop_firm_settings_modtime
   EXECUTE FUNCTION public.handle_watchers_updated_at();
 
 COMMENT ON TABLE public.prop_firm_settings IS 'Stores user-specific Prop Firm evaluation and funded account configuration rules (one row per user).';
+
+-- Phase 4A: Authoritative High-Water Mark (HWM) persistence columns
+ALTER TABLE public.prop_firm_settings
+  ADD COLUMN IF NOT EXISTS high_watermark_balance NUMERIC,
+  ADD COLUMN IF NOT EXISTS high_watermark_equity NUMERIC;
+
+UPDATE public.prop_firm_settings
+SET
+  high_watermark_balance = COALESCE(high_watermark_balance, account_size),
+  high_watermark_equity = COALESCE(high_watermark_equity, account_size)
+WHERE account_size IS NOT NULL AND account_size > 0;
+
+-- Phase 4B: Database-level monotonic HWM enforcement trigger and atomic RPC
+CREATE OR REPLACE FUNCTION public.enforce_monotonic_prop_firm_hwm()
+RETURNS TRIGGER AS $$
+BEGIN
+  IF OLD.account_size IS NOT DISTINCT FROM NEW.account_size
+     AND OLD.firm_name IS NOT DISTINCT FROM NEW.firm_name
+     AND OLD.account_phase IS NOT DISTINCT FROM NEW.account_phase THEN
+    NEW.high_watermark_balance := GREATEST(
+      COALESCE(OLD.high_watermark_balance, OLD.account_size, 0),
+      COALESCE(NEW.high_watermark_balance, OLD.high_watermark_balance, OLD.account_size, 0)
+    );
+    NEW.high_watermark_equity := GREATEST(
+      COALESCE(OLD.high_watermark_equity, OLD.account_size, 0),
+      COALESCE(NEW.high_watermark_equity, OLD.high_watermark_equity, OLD.account_size, 0)
+    );
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS enforce_monotonic_prop_firm_hwm_trigger ON public.prop_firm_settings;
+CREATE TRIGGER enforce_monotonic_prop_firm_hwm_trigger
+  BEFORE UPDATE ON public.prop_firm_settings
+  FOR EACH ROW
+  EXECUTE FUNCTION public.enforce_monotonic_prop_firm_hwm();
+
+CREATE OR REPLACE FUNCTION public.sync_prop_firm_high_watermarks(
+  p_user_id UUID,
+  p_candidate_balance NUMERIC,
+  p_candidate_equity NUMERIC
+)
+RETURNS TABLE (
+  high_watermark_balance NUMERIC,
+  high_watermark_equity NUMERIC
+) AS $$
+BEGIN
+  RETURN QUERY
+  UPDATE public.prop_firm_settings AS pfs
+  SET
+    high_watermark_balance = GREATEST(
+      COALESCE(pfs.high_watermark_balance, pfs.account_size, 0),
+      COALESCE(p_candidate_balance, 0)
+    ),
+    high_watermark_equity = GREATEST(
+      COALESCE(pfs.high_watermark_equity, pfs.account_size, 0),
+      COALESCE(p_candidate_equity, 0)
+    ),
+    updated_at = NOW()
+  WHERE pfs.user_id = p_user_id
+  RETURNING pfs.high_watermark_balance, pfs.high_watermark_equity;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+
