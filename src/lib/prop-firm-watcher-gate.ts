@@ -425,14 +425,21 @@ export function resolvePersistedAccountType(rawAccountType?: string | null): Per
     return null;
   }
 
+  // 1. Explicit ACCT_TYPE key tag (e.g. "EXECUTION:HYBRID|ACCT_TYPE:prop")
   const acctMatch = trimmed.match(/ACCT_TYPE:([^|]+)/i);
   if (acctMatch) {
     const val = acctMatch[1].trim().toLowerCase();
-    if (val === 'personal') return 'personal';
-    if (val === 'prop' || val === 'prop_firm' || val === 'prop firm') return 'prop';
+    if (val === 'personal' || val === 'personal account') return 'personal';
+    if (val === 'prop' || val === 'prop_firm' || val === 'prop firm' || val === 'prop firm account') return 'prop';
     return null;
   }
 
+  // 2. Pipe-delimited token format (e.g. "prop|MODE:AUTO_RISK|LOT:0.01|MAXLOSS:1|ANALYSIS:HYBRID")
+  const firstToken = trimmed.split('|')[0].trim().toLowerCase();
+  if (firstToken === 'personal' || firstToken === 'personal account') return 'personal';
+  if (firstToken === 'prop' || firstToken === 'prop_firm' || firstToken === 'prop firm' || firstToken === 'prop firm account') return 'prop';
+
+  // 3. Direct string matching
   const lower = trimmed.toLowerCase();
   if (lower === 'personal' || lower === 'personal account') return 'personal';
   if (lower === 'prop' || lower === 'prop_firm' || lower === 'prop firm' || lower === 'prop firm account') return 'prop';

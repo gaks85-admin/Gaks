@@ -283,29 +283,119 @@ export default function App() {
   const [propFirmNewsBufferBefore, setPropFirmNewsBufferBefore] = useState('5');
   const [propFirmNewsBufferAfter, setPropFirmNewsBufferAfter] = useState('5');
 
+  // Baseline snapshots for change detection (isPrefsDirty)
+  const [initialPropFirmPrefs, setInitialPropFirmPrefs] = useState<{
+    propFirmName: string;
+    propFirmAccountPhase: string;
+    propFirmAccountSize: string;
+    propFirmProfitTarget: string;
+    propFirmProfitTargetType: 'PERCENTAGE' | 'AMOUNT';
+    propFirmDailyLossLimit: string;
+    propFirmDailyLossLimitType: 'PERCENTAGE' | 'AMOUNT';
+    propFirmDailyLossCalcBasis: 'BALANCE' | 'EQUITY';
+    propFirmDailyResetTime: string;
+    propFirmDailyResetTimezone: string;
+    propFirmMaxDrawdown: string;
+    propFirmDrawdownType: 'STATIC' | 'TRAILING';
+    propFirmDrawdownCalcBasis: 'BALANCE' | 'EQUITY';
+    propFirmRiskPerTrade: string;
+    propFirmRiskPerTradeType: 'PERCENTAGE' | 'AMOUNT';
+    propFirmMaxTradesPerDay: string;
+    propFirmNewsRestriction: boolean;
+    propFirmNewsBufferBefore: string;
+    propFirmNewsBufferAfter: string;
+  }>({
+    propFirmName: '',
+    propFirmAccountPhase: 'Phase 1',
+    propFirmAccountSize: '100000',
+    propFirmProfitTarget: '8',
+    propFirmProfitTargetType: 'PERCENTAGE',
+    propFirmDailyLossLimit: '5',
+    propFirmDailyLossLimitType: 'PERCENTAGE',
+    propFirmDailyLossCalcBasis: 'BALANCE',
+    propFirmDailyResetTime: '00:00',
+    propFirmDailyResetTimezone: 'UTC',
+    propFirmMaxDrawdown: '10',
+    propFirmDrawdownType: 'STATIC',
+    propFirmDrawdownCalcBasis: 'BALANCE',
+    propFirmRiskPerTrade: '1',
+    propFirmRiskPerTradeType: 'PERCENTAGE',
+    propFirmMaxTradesPerDay: '',
+    propFirmNewsRestriction: false,
+    propFirmNewsBufferBefore: '5',
+    propFirmNewsBufferAfter: '5'
+  });
+
+  const applyPropFirmSettings = (pfData: PropFirmSettings | null) => {
+    if (!pfData) return;
+    const firmName = pfData.firm_name !== null && pfData.firm_name !== undefined ? String(pfData.firm_name) : '';
+    const accountPhase = pfData.account_phase !== null && pfData.account_phase !== undefined ? String(pfData.account_phase) : 'Phase 1';
+    const accountSize = pfData.account_size !== null && pfData.account_size !== undefined ? String(pfData.account_size) : '100000';
+    const profitTarget = pfData.profit_target !== null && pfData.profit_target !== undefined ? String(pfData.profit_target) : '8';
+    const profitTargetType = (pfData.profit_target_type || 'PERCENTAGE') as 'PERCENTAGE' | 'AMOUNT';
+    const dailyLossLimit = pfData.daily_loss_limit !== null && pfData.daily_loss_limit !== undefined ? String(pfData.daily_loss_limit) : '5';
+    const dailyLossLimitType = (pfData.daily_loss_limit_type || 'PERCENTAGE') as 'PERCENTAGE' | 'AMOUNT';
+    const dailyLossCalcBasis = (pfData.daily_loss_calculation_basis || 'BALANCE') as 'BALANCE' | 'EQUITY';
+    const dailyResetTime = pfData.daily_reset_time ? String(pfData.daily_reset_time) : '00:00';
+    const dailyResetTimezone = pfData.daily_reset_timezone ? String(pfData.daily_reset_timezone) : 'UTC';
+    const maxDrawdown = pfData.maximum_drawdown !== null && pfData.maximum_drawdown !== undefined ? String(pfData.maximum_drawdown) : '10';
+    const drawdownType = (pfData.drawdown_type || 'STATIC') as 'STATIC' | 'TRAILING';
+    const drawdownCalcBasis = (pfData.drawdown_calculation_basis || 'BALANCE') as 'BALANCE' | 'EQUITY';
+    const riskPerTrade = pfData.risk_per_trade !== null && pfData.risk_per_trade !== undefined ? String(pfData.risk_per_trade) : '1';
+    const riskPerTradeType = (pfData.risk_per_trade_type || 'PERCENTAGE') as 'PERCENTAGE' | 'AMOUNT';
+    const maxTradesPerDay = pfData.maximum_trades_per_day !== null && pfData.maximum_trades_per_day !== undefined ? String(pfData.maximum_trades_per_day) : '';
+    const newsRestriction = pfData.news_restriction_enabled !== undefined ? Boolean(pfData.news_restriction_enabled) : false;
+    const newsBufferBefore = pfData.news_buffer_before_minutes !== undefined ? String(pfData.news_buffer_before_minutes) : '5';
+    const newsBufferAfter = pfData.news_buffer_after_minutes !== undefined ? String(pfData.news_buffer_after_minutes) : '5';
+
+    setPropFirmName(firmName);
+    setPropFirmAccountPhase(accountPhase);
+    setPropFirmAccountSize(accountSize);
+    setPropFirmProfitTarget(profitTarget);
+    setPropFirmProfitTargetType(profitTargetType);
+    setPropFirmDailyLossLimit(dailyLossLimit);
+    setPropFirmDailyLossLimitType(dailyLossLimitType);
+    setPropFirmDailyLossCalcBasis(dailyLossCalcBasis);
+    setPropFirmDailyResetTime(dailyResetTime);
+    setPropFirmDailyResetTimezone(dailyResetTimezone);
+    setPropFirmMaxDrawdown(maxDrawdown);
+    setPropFirmDrawdownType(drawdownType);
+    setPropFirmDrawdownCalcBasis(drawdownCalcBasis);
+    setPropFirmRiskPerTrade(riskPerTrade);
+    setPropFirmRiskPerTradeType(riskPerTradeType);
+    setPropFirmMaxTradesPerDay(maxTradesPerDay);
+    setPropFirmNewsRestriction(newsRestriction);
+    setPropFirmNewsBufferBefore(newsBufferBefore);
+    setPropFirmNewsBufferAfter(newsBufferAfter);
+
+    setInitialPropFirmPrefs({
+      propFirmName: firmName,
+      propFirmAccountPhase: accountPhase,
+      propFirmAccountSize: accountSize,
+      propFirmProfitTarget: profitTarget,
+      propFirmProfitTargetType: profitTargetType,
+      propFirmDailyLossLimit: dailyLossLimit,
+      propFirmDailyLossLimitType: dailyLossLimitType,
+      propFirmDailyLossCalcBasis: dailyLossCalcBasis,
+      propFirmDailyResetTime: dailyResetTime,
+      propFirmDailyResetTimezone: dailyResetTimezone,
+      propFirmMaxDrawdown: maxDrawdown,
+      propFirmDrawdownType: drawdownType,
+      propFirmDrawdownCalcBasis: drawdownCalcBasis,
+      propFirmRiskPerTrade: riskPerTrade,
+      propFirmRiskPerTradeType: riskPerTradeType,
+      propFirmMaxTradesPerDay: maxTradesPerDay,
+      propFirmNewsRestriction: newsRestriction,
+      propFirmNewsBufferBefore: newsBufferBefore,
+      propFirmNewsBufferAfter: newsBufferAfter
+    });
+  };
+
   useEffect(() => {
     if (accountType === 'prop' && session?.user) {
       getPropFirmSettings(supabase, session.user.id).then(pfData => {
         if (pfData) {
-          if (pfData.firm_name !== null) setPropFirmName(pfData.firm_name);
-          if (pfData.account_phase !== null) setPropFirmAccountPhase(pfData.account_phase);
-          if (pfData.account_size !== null) setPropFirmAccountSize(String(pfData.account_size));
-          if (pfData.profit_target !== null) setPropFirmProfitTarget(String(pfData.profit_target));
-          if (pfData.profit_target_type) setPropFirmProfitTargetType(pfData.profit_target_type);
-          if (pfData.daily_loss_limit !== null) setPropFirmDailyLossLimit(String(pfData.daily_loss_limit));
-          if (pfData.daily_loss_limit_type) setPropFirmDailyLossLimitType(pfData.daily_loss_limit_type);
-          if (pfData.daily_loss_calculation_basis) setPropFirmDailyLossCalcBasis(pfData.daily_loss_calculation_basis);
-          if (pfData.daily_reset_time) setPropFirmDailyResetTime(pfData.daily_reset_time);
-          if (pfData.daily_reset_timezone) setPropFirmDailyResetTimezone(pfData.daily_reset_timezone);
-          if (pfData.maximum_drawdown !== null) setPropFirmMaxDrawdown(String(pfData.maximum_drawdown));
-          if (pfData.drawdown_type) setPropFirmDrawdownType(pfData.drawdown_type);
-          if (pfData.drawdown_calculation_basis) setPropFirmDrawdownCalcBasis(pfData.drawdown_calculation_basis);
-          if (pfData.risk_per_trade !== null) setPropFirmRiskPerTrade(String(pfData.risk_per_trade));
-          if (pfData.risk_per_trade_type) setPropFirmRiskPerTradeType(pfData.risk_per_trade_type);
-          if (pfData.maximum_trades_per_day !== null) setPropFirmMaxTradesPerDay(String(pfData.maximum_trades_per_day));
-          if (pfData.news_restriction_enabled !== undefined) setPropFirmNewsRestriction(pfData.news_restriction_enabled);
-          if (pfData.news_buffer_before_minutes !== undefined) setPropFirmNewsBufferBefore(String(pfData.news_buffer_before_minutes));
-          if (pfData.news_buffer_after_minutes !== undefined) setPropFirmNewsBufferAfter(String(pfData.news_buffer_after_minutes));
+          applyPropFirmSettings(pfData);
         }
       });
     }
@@ -341,6 +431,7 @@ export default function App() {
   });
 
   const isPrefsDirty = useMemo(() => {
+    // 1. Trading Preferences dirty check
     if (capital !== initialPrefs.capital) return true;
     if (customCapital !== initialPrefs.customCapital) return true;
     if (preferredRisk !== initialPrefs.preferredRisk) return true;
@@ -361,8 +452,38 @@ export default function App() {
     const sortedInitialTimeframes = [...initialPrefs.preferredTimeframes].sort();
     if (sortedTimeframes.some((t, idx) => t !== sortedInitialTimeframes[idx])) return true;
 
+    // 2. Prop Firm Settings dirty check (evaluated when accountType === 'prop')
+    if (accountType === 'prop') {
+      if (propFirmName.trim() !== initialPropFirmPrefs.propFirmName.trim()) return true;
+      if (propFirmAccountPhase.trim() !== initialPropFirmPrefs.propFirmAccountPhase.trim()) return true;
+      if (propFirmAccountSize.trim() !== initialPropFirmPrefs.propFirmAccountSize.trim()) return true;
+      if (propFirmProfitTarget.trim() !== initialPropFirmPrefs.propFirmProfitTarget.trim()) return true;
+      if (propFirmProfitTargetType !== initialPropFirmPrefs.propFirmProfitTargetType) return true;
+      if (propFirmDailyLossLimit.trim() !== initialPropFirmPrefs.propFirmDailyLossLimit.trim()) return true;
+      if (propFirmDailyLossLimitType !== initialPropFirmPrefs.propFirmDailyLossLimitType) return true;
+      if (propFirmDailyLossCalcBasis !== initialPropFirmPrefs.propFirmDailyLossCalcBasis) return true;
+      if (propFirmDailyResetTime.trim() !== initialPropFirmPrefs.propFirmDailyResetTime.trim()) return true;
+      if (propFirmDailyResetTimezone.trim() !== initialPropFirmPrefs.propFirmDailyResetTimezone.trim()) return true;
+      if (propFirmMaxDrawdown.trim() !== initialPropFirmPrefs.propFirmMaxDrawdown.trim()) return true;
+      if (propFirmDrawdownType !== initialPropFirmPrefs.propFirmDrawdownType) return true;
+      if (propFirmDrawdownCalcBasis !== initialPropFirmPrefs.propFirmDrawdownCalcBasis) return true;
+      if (propFirmRiskPerTrade.trim() !== initialPropFirmPrefs.propFirmRiskPerTrade.trim()) return true;
+      if (propFirmRiskPerTradeType !== initialPropFirmPrefs.propFirmRiskPerTradeType) return true;
+      if (propFirmMaxTradesPerDay.trim() !== initialPropFirmPrefs.propFirmMaxTradesPerDay.trim()) return true;
+      if (propFirmNewsRestriction !== initialPropFirmPrefs.propFirmNewsRestriction) return true;
+      if (propFirmNewsBufferBefore.trim() !== initialPropFirmPrefs.propFirmNewsBufferBefore.trim()) return true;
+      if (propFirmNewsBufferAfter.trim() !== initialPropFirmPrefs.propFirmNewsBufferAfter.trim()) return true;
+    }
+
     return false;
-  }, [capital, customCapital, preferredRisk, maxDailyLoss, riskReward, accountType, positionMode, fixedLotSize, analysisMode, preferredSessions, preferredTimeframes, initialPrefs]);
+  }, [
+    capital, customCapital, preferredRisk, maxDailyLoss, riskReward, accountType, positionMode, fixedLotSize, analysisMode, preferredSessions, preferredTimeframes, initialPrefs,
+    propFirmName, propFirmAccountPhase, propFirmAccountSize, propFirmProfitTarget, propFirmProfitTargetType,
+    propFirmDailyLossLimit, propFirmDailyLossLimitType, propFirmDailyLossCalcBasis, propFirmDailyResetTime,
+    propFirmDailyResetTimezone, propFirmMaxDrawdown, propFirmDrawdownType, propFirmDrawdownCalcBasis,
+    propFirmRiskPerTrade, propFirmRiskPerTradeType, propFirmMaxTradesPerDay, propFirmNewsRestriction,
+    propFirmNewsBufferBefore, propFirmNewsBufferAfter, initialPropFirmPrefs
+  ]);
 
   const ADMIN_EMAIL = "gaks6535@gmail.com";
   const isAdmin = useMemo(() => {
@@ -1244,25 +1365,7 @@ export default function App() {
 
         const pfData = await getPropFirmSettings(supabase, userId);
         if (pfData) {
-          if (pfData.firm_name !== null) setPropFirmName(pfData.firm_name);
-          if (pfData.account_phase !== null) setPropFirmAccountPhase(pfData.account_phase);
-          if (pfData.account_size !== null) setPropFirmAccountSize(String(pfData.account_size));
-          if (pfData.profit_target !== null) setPropFirmProfitTarget(String(pfData.profit_target));
-          if (pfData.profit_target_type) setPropFirmProfitTargetType(pfData.profit_target_type);
-          if (pfData.daily_loss_limit !== null) setPropFirmDailyLossLimit(String(pfData.daily_loss_limit));
-          if (pfData.daily_loss_limit_type) setPropFirmDailyLossLimitType(pfData.daily_loss_limit_type);
-          if (pfData.daily_loss_calculation_basis) setPropFirmDailyLossCalcBasis(pfData.daily_loss_calculation_basis);
-          if (pfData.daily_reset_time) setPropFirmDailyResetTime(pfData.daily_reset_time);
-          if (pfData.daily_reset_timezone) setPropFirmDailyResetTimezone(pfData.daily_reset_timezone);
-          if (pfData.maximum_drawdown !== null) setPropFirmMaxDrawdown(String(pfData.maximum_drawdown));
-          if (pfData.drawdown_type) setPropFirmDrawdownType(pfData.drawdown_type);
-          if (pfData.drawdown_calculation_basis) setPropFirmDrawdownCalcBasis(pfData.drawdown_calculation_basis);
-          if (pfData.risk_per_trade !== null) setPropFirmRiskPerTrade(String(pfData.risk_per_trade));
-          if (pfData.risk_per_trade_type) setPropFirmRiskPerTradeType(pfData.risk_per_trade_type);
-          if (pfData.maximum_trades_per_day !== null) setPropFirmMaxTradesPerDay(String(pfData.maximum_trades_per_day));
-          if (pfData.news_restriction_enabled !== undefined) setPropFirmNewsRestriction(pfData.news_restriction_enabled);
-          if (pfData.news_buffer_before_minutes !== undefined) setPropFirmNewsBufferBefore(String(pfData.news_buffer_before_minutes));
-          if (pfData.news_buffer_after_minutes !== undefined) setPropFirmNewsBufferAfter(String(pfData.news_buffer_after_minutes));
+          applyPropFirmSettings(pfData);
         }
 
         setInitialPrefs({
@@ -1941,6 +2044,7 @@ export default function App() {
             capital,
             customCapital,
             preferredRisk,
+            maxDailyLoss,
             riskReward,
             accountType,
             positionMode,
@@ -1948,6 +2052,28 @@ export default function App() {
             analysisMode,
             preferredSessions,
             preferredTimeframes
+          });
+
+          setInitialPropFirmPrefs({
+            propFirmName,
+            propFirmAccountPhase,
+            propFirmAccountSize,
+            propFirmProfitTarget,
+            propFirmProfitTargetType,
+            propFirmDailyLossLimit,
+            propFirmDailyLossLimitType,
+            propFirmDailyLossCalcBasis,
+            propFirmDailyResetTime,
+            propFirmDailyResetTimezone,
+            propFirmMaxDrawdown,
+            propFirmDrawdownType,
+            propFirmDrawdownCalcBasis,
+            propFirmRiskPerTrade,
+            propFirmRiskPerTradeType,
+            propFirmMaxTradesPerDay,
+            propFirmNewsRestriction,
+            propFirmNewsBufferBefore,
+            propFirmNewsBufferAfter
           });
 
           localStorage.setItem('gaks_capital', capital);
@@ -1972,6 +2098,7 @@ export default function App() {
         capital,
         customCapital,
         preferredRisk,
+        maxDailyLoss,
         riskReward,
         accountType,
         positionMode,
@@ -1979,6 +2106,28 @@ export default function App() {
         analysisMode,
         preferredSessions,
         preferredTimeframes
+      });
+
+      setInitialPropFirmPrefs({
+        propFirmName,
+        propFirmAccountPhase,
+        propFirmAccountSize,
+        propFirmProfitTarget,
+        propFirmProfitTargetType,
+        propFirmDailyLossLimit,
+        propFirmDailyLossLimitType,
+        propFirmDailyLossCalcBasis,
+        propFirmDailyResetTime,
+        propFirmDailyResetTimezone,
+        propFirmMaxDrawdown,
+        propFirmDrawdownType,
+        propFirmDrawdownCalcBasis,
+        propFirmRiskPerTrade,
+        propFirmRiskPerTradeType,
+        propFirmMaxTradesPerDay,
+        propFirmNewsRestriction,
+        propFirmNewsBufferBefore,
+        propFirmNewsBufferAfter
       });
 
       localStorage.setItem('gaks_capital', capital);
