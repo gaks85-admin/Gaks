@@ -84,11 +84,21 @@ CREATE POLICY "Service role full access prop firm settings"
 -- Performance index on user_id
 CREATE INDEX IF NOT EXISTS idx_prop_firm_settings_user_id ON public.prop_firm_settings(user_id);
 
+-- Trigger function for updated_at timestamp
+CREATE OR REPLACE FUNCTION public.handle_prop_firm_settings_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
 -- Trigger for updated_at timestamp
-CREATE OR REPLACE TRIGGER update_prop_firm_settings_modtime
+DROP TRIGGER IF EXISTS update_prop_firm_settings_modtime ON public.prop_firm_settings;
+CREATE TRIGGER update_prop_firm_settings_modtime
   BEFORE UPDATE ON public.prop_firm_settings
   FOR EACH ROW
-  EXECUTE FUNCTION public.handle_watchers_updated_at();
+  EXECUTE FUNCTION public.handle_prop_firm_settings_updated_at();
 
 COMMENT ON TABLE public.prop_firm_settings IS 'Stores user-specific Prop Firm evaluation and funded account configuration rules (one row per user).';
 
