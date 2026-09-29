@@ -779,7 +779,7 @@ export default async function handler(req: any, res: any) {
 
     // --- USER CONTEXT CACHE (OPTIMIZATION) ---
     const userIds = watchers ? Array.from(new Set(watchers.map(w => w.user_id))) : [];
-    const [profilesRes, prefsRes, telegramRes, apiKeysRes] = await Promise.all([
+    const [profilesRes, prefsRes, telegramRes, apiKeysRes, propFirmRes] = await Promise.all([
       (async () => {
         try {
           return await supabase.from('profiles').select('*').in('id', userIds);
@@ -811,6 +811,14 @@ export default async function handler(req: any, res: any) {
           console.error('[CRON PREFETCH ERROR] API Keys lookup failed:', err);
           return { data: null, error: err };
         }
+      })(),
+      (async () => {
+        try {
+          return await supabase.from('prop_firm_settings').select('*').in('user_id', userIds);
+        } catch (err) {
+          console.error('[CRON PREFETCH ERROR] Prop Firm Settings lookup failed:', err);
+          return { data: null, error: err };
+        }
       })()
     ]);
 
@@ -818,11 +826,13 @@ export default async function handler(req: any, res: any) {
     const allPrefs = (prefsRes?.data as any[]) || [];
     const allTelegram = (telegramRes?.data as any[]) || [];
     const allApiKeys = (apiKeysRes?.data as any[]) || [];
+    const allPropFirm = (propFirmRes?.data as any[]) || [];
 
     const profileMap = new Map<string, any>(allProfiles.map(p => [p.id, p]));
     const prefsMap = new Map<string, any>(allPrefs.map(p => [p.user_id, p]));
     const telegramMap = new Map<string, any>(allTelegram.map(t => [t.user_id, t]));
     const apiKeysMap = new Map<string, any>(allApiKeys.map(k => [k.user_id, k]));
+    const propFirmMap = new Map<string, any>(allPropFirm.map(p => [p.user_id, p]));
 
     const cronCandleCache = new Map<string, Promise<any>>();
     const cronPriceCache = new Map<string, Promise<number | null>>();
@@ -1794,35 +1804,99 @@ Reason: ${activeValidation.reason}`);
           return;
         }
 
+        const rawAccountType = prefsRecord?.account_type;
+        const resolvedAccountType = resolvePersistedAccountType(rawAccountType);
+
         let accountSize: number;
         let riskPercentage: number;
         let riskRewardStr: string;
         let maxDailyRiskStr: string;
-        let positionMode: 'AUTO_RISK' | 'FIXED_LOT';
+        let maxDailyLossAmount: number = 100;
+        let positionMode: 'AUTO_RISK' | 'FIXED_LOT' = 'AUTO_RISK';
         let preferredLotSize: number | undefined;
-        let riskPrefs: any;
-        try {
-          riskPrefs = extractRiskPreferences(prefsRecord, userId);
-          accountSize = riskPrefs.accountSize;
-          riskPercentage = riskPrefs.riskPercentage;
-          riskRewardStr = riskPrefs.riskRewardStr;
-          maxDailyRiskStr = riskPrefs.maxDailyRiskStr;
-          positionMode = riskPrefs.positionMode;
-          preferredLotSize = riskPrefs.preferredLotSize;
-        } catch (prefsErr: any) {
-          console.log(`LOG: Watcher ${watcher.id} skipped - ${prefsErr.message}`);
-          skipped.push({ userId, reason: prefsErr.message });
+
+        if (resolvedAccountType === 'prop') {
+          const propFirmSettings = propFirmMap.get(userId);
+          if (!propFirmSettings) {
+            console.log(`[ACCOUNT CONFIG] Watcher ${watcher.id} skipped - Prop firm settings missing for user ${userId} (PROP_FIRM_SETTINGS_UNAVAILABLE)`);
+            skipped.push({ userId, reason: "PROP_FIRM_SETTINGS_UNAVAILABLE" });
+            watchersSkippedCount++;
+            return;
+          }
+
+          accountSize = Number(propFirmSettings.account_size);
+          if (!Number.isFinite(accountSize) || accountSize <= 0) {
+            console.log(`[ACCOUNT CONFIG] Watcher ${watcher.id} skipped - Invalid Prop Firm account_size (${propFirmSettings.account_size})`);
+            skipped.push({ userId, reason: "INVALID_PROP_FIRM_ACCOUNT_SIZE" });
+            watchersSkippedCount++;
+            return;
+          }
+
+          const rawRiskPerTrade = Number(propFirmSettings.risk_per_trade);
+          if (propFirmSettings.risk_per_trade_type === 'PERCENTAGE') {
+            riskPercentage = rawRiskPerTrade;
+          } else {
+            riskPercentage = (rawRiskPerTrade / accountSize) * 100;
+          }
+
+          if (!Number.isFinite(riskPercentage) || riskPercentage <= 0) {
+            console.log(`[ACCOUNT CONFIG] Watcher ${watcher.id} skipped - Invalid Prop Firm risk_per_trade (${propFirmSettings.risk_per_trade})`);
+            skipped.push({ userId, reason: "INVALID_PROP_FIRM_RISK_PER_TRADE" });
+            watchersSkippedCount++;
+            return;
+          }
+
+          riskRewardStr = prefsRecord?.risk_reward || '1:2';
+          maxDailyRiskStr = propFirmSettings.daily_loss_limit !== null && propFirmSettings.daily_loss_limit !== undefined
+            ? `${propFirmSettings.daily_loss_limit}%`
+            : '5%';
+          maxDailyLossAmount = propFirmSettings.daily_loss_limit_type === 'PERCENTAGE'
+            ? (accountSize * Number(propFirmSettings.daily_loss_limit || 5)) / 100
+            : Number(propFirmSettings.daily_loss_limit || 500);
+          positionMode = 'AUTO_RISK';
+          preferredLotSize = undefined;
+
+          console.log(`\n[ACCOUNT CONFIG]`);
+          console.log(`Type: PROP FIRM`);
+          console.log(`Firm: ${propFirmSettings.firm_name || 'Generic'}`);
+          console.log(`Phase: ${propFirmSettings.account_phase || 'Phase 1'}`);
+          console.log(`Account Size: $${accountSize.toLocaleString()}`);
+          console.log(`Risk Per Trade: ${riskPercentage}%`);
+          console.log(`Daily Loss Limit: ${propFirmSettings.daily_loss_limit ?? 'N/A'}${propFirmSettings.daily_loss_limit_type === 'PERCENTAGE' ? '%' : '$'} (${propFirmSettings.daily_loss_calculation_basis || 'BALANCE'})`);
+          console.log(`Max Drawdown: ${propFirmSettings.maximum_drawdown ?? 'N/A'}${propFirmSettings.drawdown_type === 'TRAILING' ? '% (TRAILING)' : '% (STATIC)'}`);
+          console.log(`Strategy: ${strategyText ? strategyText.substring(0, 100) + '...' : 'N/A'}`);
+        } else if (resolvedAccountType === 'personal') {
+          let riskPrefs: any;
+          try {
+            riskPrefs = extractRiskPreferences(prefsRecord, userId);
+            accountSize = riskPrefs.accountSize;
+            riskPercentage = riskPrefs.riskPercentage;
+            riskRewardStr = riskPrefs.riskRewardStr;
+            maxDailyRiskStr = riskPrefs.maxDailyRiskStr;
+            maxDailyLossAmount = riskPrefs.maxDailyLossAmount || 100;
+            positionMode = riskPrefs.positionMode;
+            preferredLotSize = riskPrefs.preferredLotSize;
+          } catch (prefsErr: any) {
+            console.log(`LOG: Watcher ${watcher.id} skipped - ${prefsErr.message}`);
+            skipped.push({ userId, reason: prefsErr.message });
+            watchersSkippedCount++;
+            return;
+          }
+
+          console.log(`\n[ACCOUNT CONFIG]`);
+          console.log(`Type: PERSONAL`);
+          console.log(`Account Size: $${accountSize}`);
+          console.log(`Risk: ${riskPercentage}%`);
+          console.log(`Risk Reward: ${riskRewardStr}`);
+          console.log(`Max Daily Risk: ${maxDailyRiskStr}`);
+          console.log(`Position Mode: ${positionMode}`);
+          console.log(`Strategy: ${strategyText ? strategyText.substring(0, 100) + '...' : 'N/A'}`);
+        } else {
+          console.log(`[ACCOUNT CONFIG] Watcher ${watcher.id} skipped - Account type is unconfigured or invalid (${rawAccountType})`);
+          skipped.push({ userId, reason: "ACCOUNT_TYPE_UNCONFIGURED" });
           watchersSkippedCount++;
           return;
         }
-
-        console.log(`Trading Preferences Loaded\n`);
-        console.log(`Account Size: $${accountSize}`);
-        console.log(`Risk %: ${riskPercentage}%`);
-        console.log(`Risk Reward: ${riskRewardStr}`);
-        console.log(`Max Daily Risk: ${maxDailyRiskStr}`);
-        console.log(`Strategy: ${strategyText ? strategyText.substring(0, 100) + '...' : 'N/A'}`);
-        console.log(`[DB Row Comparison] DB capital: "${prefsRecord?.capital || ''}", DB custom_capital: "${prefsRecord?.custom_capital || ''}", DB preferred_risk: "${prefsRecord?.preferred_risk || ''}", DB risk_reward: "${prefsRecord?.risk_reward || ''}"`);
 
         if (executionMode !== 'RULE_ONLY' && (!apiKeyRecord || !apiKeyRecord.api_key)) {
           console.log(`LOG: Watcher ${watcher.id} skipped - Gemini API Key missing (Execution mode is ${executionMode})`);
@@ -3458,7 +3532,7 @@ Output ONLY valid JSON.
               equityState: {
                 ...equityState,
                 dailyPnL,
-                maxDailyLossAmount: riskPrefs.maxDailyLossAmount
+                maxDailyLossAmount: maxDailyLossAmount
               },
               candidate: {
                 pair: selectedPair,
@@ -3681,7 +3755,7 @@ Output ONLY valid JSON.
             }
           }
 
-          const maxDailyLossAllowed = riskPrefs.maxDailyLossAmount || 100;
+          const maxDailyLossAllowed = maxDailyLossAmount || 100;
           if (totalLossToday >= maxDailyLossAllowed) {
             logWatcherWarn('DAILY LOSS LIMIT', logCtx, `User daily loss limit reached ($${totalLossToday.toFixed(2)} >= $${maxDailyLossAllowed}). Halting new trades for today.`);
             analysis.signal = 'NO_TRADE';
@@ -3796,6 +3870,14 @@ ${analysis.stopLossBasis === 'ATR_FALLBACK' ? `ATR: ${marketStructure.volatility
         }
         // === STAGE 5 HARDENING: NEWS HARD-PAUSE GATE ===
         const newsGateResult = await defaultEconomicEventService.checkNewsHardPause(selectedPair);
+
+        if (!newsGateResult) {
+          console.log(`\n[ECONOMIC NEWS GATE]\nSymbol: ${selectedPair}\nStatus: UNAVAILABLE\nAction: FAIL CLOSED\n`);
+        } else if (newsGateResult.tradeBlocked) {
+          console.log(`\n[ECONOMIC NEWS GATE]\nSymbol: ${selectedPair}\nStatus: BLOCKED\nEvent: ${newsGateResult.eventName || 'N/A'}\nCurrency: ${newsGateResult.currency || 'N/A'}\nScheduled: ${newsGateResult.scheduledAt || 'N/A'}\nBuffer: 30m before / 30m after\nReason: ${newsGateResult.blockReason || 'HIGH impact event'}\n`);
+        } else {
+          console.log(`\n[ECONOMIC NEWS GATE]\nSymbol: ${selectedPair}\nStatus: CLEAR\nRelevant Event: None\nBuffer: 30m before / 30m after\n`);
+        }
 
         const marketCandleTimestampMs = new Date(tsResult.candles[tsResult.candles.length - 1]?.timestamp || Date.now()).getTime();
 

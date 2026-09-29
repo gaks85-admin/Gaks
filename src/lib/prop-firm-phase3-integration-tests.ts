@@ -10,7 +10,7 @@ import {
   calculateSingleOpenWatcherFloatingPnl,
   computeAggregateOpenTradesFloatingPnl
 } from './prop-firm-watcher-gate.js';
-import { getInstrumentContractConfig } from './risk-engine.js';
+import { getInstrumentContractConfig, calculatePositionSize } from './risk-engine.js';
 
 export interface Phase3IntegrationTestResult {
   id: number;
@@ -1173,6 +1173,199 @@ export async function runPhase3PropFirmIntegrationTests(): Promise<Phase3Integra
     return {
       passed,
       details: `multiAvailable=${multiEval.available}, multiTotal=${multiEval.totalFloatingPnl}, riskAmountOnlyBlocked=${!riskAmountOnlyEval.available}`
+    };
+  });
+
+  // 24. Prop Firm Position Sizing Authority (FTMO $100k / 0.5% vs legacy $10 / 20%)
+  await runTest(24, 'Prop Firm Position Sizing: Authoritative $100k / 0.5% derives exact lot size without legacy influence', async () => {
+    // Sizing under Prop Firm parameters ($100k account, 0.5% risk = $500 risk budget)
+    const propSizing = calculatePositionSize({
+      accountSize: 100000,
+      riskPercentage: 0.5,
+      entryPrice: 4122.59,
+      executedEntry: 4122.59,
+      stopLoss: 4142.33,
+      geminiTp: 4083.11,
+      symbol: 'XAUUSD',
+      direction: 'SELL',
+      riskRewardStr: '1:2',
+      positionMode: 'AUTO_RISK'
+    });
+
+    // If legacy $10 / 20% had been used, risk budget would be $2.00 (below min lot -> rejected)
+    const legacySizing = calculatePositionSize({
+      accountSize: 10,
+      riskPercentage: 20,
+      entryPrice: 4122.59,
+      executedEntry: 4122.59,
+      stopLoss: 4142.33,
+      geminiTp: 4083.11,
+      symbol: 'XAUUSD',
+      direction: 'SELL',
+      riskRewardStr: '1:2',
+      positionMode: 'AUTO_RISK'
+    });
+
+    const passed =
+      propSizing.accepted === true &&
+      propSizing.riskAmount === 500 &&
+      propSizing.calculatedLotSize === 0.25 &&
+      propSizing.expectedLoss > 490 && propSizing.expectedLoss <= 500 &&
+      legacySizing.accepted === false &&
+      legacySizing.riskAmount === 2;
+
+    return {
+      passed,
+      details: `propAccepted=${propSizing.accepted}, propLot=${propSizing.calculatedLotSize}, propExpectedLoss=$${propSizing.expectedLoss}, legacyAccepted=${legacySizing.accepted}`
+    };
+  });
+
+  // 25. Personal Account Position Sizing Isolation
+  await runTest(25, 'Personal Account: Uses trading_preferences without prop firm enforcement', async () => {
+    const rawAccountType = 'personal|MODE:AUTO_RISK|LOT:0.01|MAXLOSS:1|ANALYSIS:HYBRID';
+    const resolvedType = resolvePersistedAccountType(rawAccountType);
+
+    const personalSizing = calculatePositionSize({
+      accountSize: 5000,
+      riskPercentage: 1.0,
+      entryPrice: 1.1000,
+      executedEntry: 1.1000,
+      stopLoss: 1.0950,
+      geminiTp: 1.1100,
+      symbol: 'EURUSD',
+      direction: 'BUY',
+      riskRewardStr: '1:2',
+      positionMode: 'AUTO_RISK'
+    });
+
+    const gateOutcome = await evaluateWatcherPropFirmGate({
+      supabase: null,
+      userId: 'user-personal-1',
+      symbol: 'EURUSD',
+      rawAccountType,
+      proposedTradeRisk: personalSizing.expectedLoss,
+      currentMarketPrice: 1.1000
+    });
+
+    const passed =
+      resolvedType === 'personal' &&
+      personalSizing.accepted === true &&
+      gateOutcome.evaluated === false &&
+      gateOutcome.accountType === 'personal' &&
+      gateOutcome.allowed === true;
+
+    return {
+      passed,
+      details: `resolvedType=${resolvedType}, personalSizingAccepted=${personalSizing.accepted}, gateEvaluated=${gateOutcome.evaluated}, gateAllowed=${gateOutcome.allowed}`
+    };
+  });
+
+  // 26. Prop Firm Account with Missing prop_firm_settings Fails Closed
+  await runTest(26, 'Prop Firm Account: Missing prop_firm_settings fails closed (never falls back to personal)', async () => {
+    const rawAccountType = 'prop|MODE:AUTO_RISK|LOT:0.01|MAXLOSS:1|ANALYSIS:HYBRID';
+    const resolvedType = resolvePersistedAccountType(rawAccountType);
+
+    const gateOutcome = await evaluateWatcherPropFirmGate({
+      supabase: null,
+      userId: 'user-no-prop-settings',
+      symbol: 'XAUUSD',
+      rawAccountType,
+      proposedTradeRisk: 500,
+      currentMarketPrice: 4122.59,
+      runtimeOverride: {
+        settingsLoader: async () => ({ settings: null, error: 'No prop firm settings found for user.' })
+      }
+    });
+
+    const passed =
+      resolvedType === 'prop' &&
+      gateOutcome.evaluated === true &&
+      gateOutcome.accountType === 'prop' &&
+      gateOutcome.allowed === false &&
+      gateOutcome.blockReason?.includes('Failed to load prop firm settings');
+
+    return {
+      passed,
+      details: `resolvedType=${resolvedType}, gateAllowed=${gateOutcome.allowed}, blockReason=${gateOutcome.blockReason}`
+    };
+  });
+
+  // 27. Economic News Gate Integration on XAUUSD (Clear vs Blocked vs Unavailable)
+  await runTest(27, 'Economic News Gate: Respects configured ±30m buffers on USD/XAU events and fails closed on error', async () => {
+    // Case 1: CLEAR news
+    const clearGate = await evaluateWatcherPropFirmGate({
+      supabase: null,
+      userId: 'user-prop-1',
+      symbol: 'XAUUSD',
+      rawAccountType: 'prop',
+      proposedTradeRisk: 500,
+      currentMarketPrice: 4122.59,
+      runtimeOverride: {
+        settingsLoader: async () => ({
+          settings: { ...BASE_PROP_SETTINGS, news_restriction_enabled: true, news_buffer_before_minutes: 30, news_buffer_after_minutes: 30 },
+          error: null
+        }),
+        tradeHistoryLoader: async () => ({ trades: [], error: null }),
+        openWatchersLoader: async () => ({ watchers: [], error: null }),
+        newsChecker: async () => ({ eventDetected: false, tradeBlocked: false })
+      }
+    });
+
+    // Case 2: BLOCKED news (High impact USD event in 15 mins)
+    const blockedGate = await evaluateWatcherPropFirmGate({
+      supabase: null,
+      userId: 'user-prop-1',
+      symbol: 'XAUUSD',
+      rawAccountType: 'prop',
+      proposedTradeRisk: 500,
+      currentMarketPrice: 4122.59,
+      runtimeOverride: {
+        settingsLoader: async () => ({
+          settings: { ...BASE_PROP_SETTINGS, news_restriction_enabled: true, news_buffer_before_minutes: 30, news_buffer_after_minutes: 30 },
+          error: null
+        }),
+        tradeHistoryLoader: async () => ({ trades: [], error: null }),
+        openWatchersLoader: async () => ({ watchers: [], error: null }),
+        newsChecker: async () => ({
+          eventDetected: true,
+          tradeBlocked: true,
+          eventName: 'US CPI m/m',
+          currency: 'USD',
+          impact: 'HIGH',
+          scheduledAt: new Date(Date.now() + 15 * 60000).toISOString(),
+          blockReason: 'NEWS_HARD_PAUSE: HIGH impact event US CPI m/m in 15 minutes'
+        })
+      }
+    });
+
+    // Case 3: UNAVAILABLE news (Throws -> fail closed)
+    const unavailableGate = await evaluateWatcherPropFirmGate({
+      supabase: null,
+      userId: 'user-prop-1',
+      symbol: 'XAUUSD',
+      rawAccountType: 'prop',
+      proposedTradeRisk: 500,
+      currentMarketPrice: 4122.59,
+      runtimeOverride: {
+        settingsLoader: async () => ({
+          settings: { ...BASE_PROP_SETTINGS, news_restriction_enabled: true, news_buffer_before_minutes: 30, news_buffer_after_minutes: 30 },
+          error: null
+        }),
+        tradeHistoryLoader: async () => ({ trades: [], error: null }),
+        openWatchersLoader: async () => ({ watchers: [], error: null }),
+        newsChecker: async () => { throw new Error('DB connection lost'); }
+      }
+    });
+
+    const passed =
+      clearGate.allowed === true &&
+      blockedGate.allowed === false &&
+      blockedGate.blockReason?.includes('NEWS_HARD_PAUSE') &&
+      unavailableGate.allowed === false;
+
+    return {
+      passed,
+      details: `clearAllowed=${clearGate.allowed}, blockedAllowed=${blockedGate.allowed}, unavailableAllowed=${unavailableGate.allowed}`
     };
   });
 
