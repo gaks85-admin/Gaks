@@ -527,13 +527,13 @@ export function AdminUserNotificationSection({ fetchWithAuth, showToast }: Admin
                   <div className="flex items-center gap-3 shrink-0">
                     <span
                       className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                        item.status === 'SENT' || item.status === 'sent'
+                        item.status === 'SENT'
                           ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
                           : 'bg-red-500/10 text-red-400 border border-red-500/20'
                       }`}
                       title={item.error_message || undefined}
                     >
-                      {item.status === 'SENT' || item.status === 'sent' ? 'Sent' : 'Failed'}
+                      {item.status === 'SENT' ? 'Sent' : 'Failed'}
                     </span>
                     <span className="text-[10px] text-zinc-500 font-mono">
                       {formatDateAgo(item.sent_at)}

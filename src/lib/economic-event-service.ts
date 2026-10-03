@@ -121,13 +121,20 @@ export class EconomicEventService {
   /**
    * Checks if there is a high-impact news event that should block trading.
    */
-  async checkNewsHardPause(symbol: string): Promise<EconomicEventResult> {
+  async checkNewsHardPause(
+    symbol: string,
+    preMinutes?: number,
+    postMinutes?: number,
+    nowOverride?: Date
+  ): Promise<EconomicEventResult> {
+    const pre = preMinutes !== undefined ? preMinutes : this.preEventBlockMinutes;
+    const post = postMinutes !== undefined ? postMinutes : this.postEventBlockMinutes;
     const currencies = this.extractCurrencies(symbol);
-    const now = new Date();
+    const now = nowOverride || new Date();
     
-    // Check window: from (now - postEventBlockMinutes) to (now + preEventBlockMinutes)
-    const windowStart = new Date(now.getTime() - this.postEventBlockMinutes * 60000).toISOString();
-    const windowEnd = new Date(now.getTime() + this.preEventBlockMinutes * 60000).toISOString();
+    // Check window: from (now - post) to (now + pre) in UTC ISO string
+    const windowStart = new Date(now.getTime() - post * 60000).toISOString();
+    const windowEnd = new Date(now.getTime() + pre * 60000).toISOString();
 
     try {
       // Query database for matching events
@@ -165,22 +172,19 @@ export class EconomicEventService {
             : `NEWS_HARD_PAUSE: HIGH impact event ${event.event_name} released ${Math.round(Math.abs(minutesDiff))} minutes ago`
         };
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error(`Error checking economic events for ${symbol}:`, err);
-      // Fail-closed approach: if we can't verify news, we might want to block if we are cautious
-      // But if the DB is just down, we might not want to kill the whole system.
-      // However, the original requirement was fail-closed.
       return { 
         eventDetected: false, 
         tradeBlocked: true, 
-        blockReason: `NEWS_GATE_ERROR: Failed to verify economic news for ${symbol}.` 
+        blockReason: `NEWS_RESTRICTION_UNAVAILABLE: Failed to verify economic news for ${symbol}.` 
       };
     }
 
     return { eventDetected: false, tradeBlocked: false };
   }
 
-  private extractCurrencies(symbol: string): string[] {
+  public extractCurrencies(symbol: string): string[] {
     // Standardize symbol e.g. BTCUSD -> BTC, USD or EUR/USD -> EUR, USD
     const normalized = symbol.replace(/[^A-Z]/g, '');
     if (normalized.length === 6) {

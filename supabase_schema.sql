@@ -44,6 +44,9 @@ CREATE TABLE IF NOT EXISTS public.trading_preferences (
   preferred_risk TEXT DEFAULT '1%',
   risk_reward TEXT DEFAULT '1:2',
   account_type TEXT DEFAULT 'personal',
+  news_restriction_enabled BOOLEAN DEFAULT false NOT NULL,
+  news_buffer_before_minutes INTEGER DEFAULT 30 NOT NULL CHECK (news_buffer_before_minutes >= 0 AND news_buffer_before_minutes <= 1440),
+  news_buffer_after_minutes INTEGER DEFAULT 30 NOT NULL CHECK (news_buffer_after_minutes >= 0 AND news_buffer_after_minutes <= 1440),
   preferred_sessions TEXT[] DEFAULT ARRAY['London', 'New York', 'Tokyo']::TEXT[],
   preferred_timeframes TEXT[] DEFAULT ARRAY['M15', 'H1']::TEXT[],
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL

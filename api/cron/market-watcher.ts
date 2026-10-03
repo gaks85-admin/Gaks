@@ -14,6 +14,7 @@ import { validateDetectors } from '../../src/lib/detector-capability-validator.j
 import { evaluateDecision } from '../../src/lib/decision-engine.js';
 import { extractMarketStructure } from '../../src/lib/market-structure-engine.js';
 import { defaultEconomicEventService } from '../../src/lib/economic-event-service.js';
+import { evaluateEconomicNewsGate } from '../../src/lib/economic-news-gate.js';
 import { validateExecutionFreshness } from '../../src/lib/execution-freshness.js';
 import { revalidatePreExecution } from '../../src/lib/pre-execution-validator.js';
 import { calculateStructuralStopLoss, validateAndResolveStopLoss, validateZoneProximityAndStopLoss, getTimeframeMaxSlPips, getMaxDeparturePips } from '../../src/lib/structural-stop-loss.js';
@@ -3868,16 +3869,32 @@ ${analysis.stopLossBasis === 'ATR_FALLBACK' ? `ATR: ${marketStructure.volatility
           results.push({ userId, symbol, tradeStatus: 'WAITING', result: `Position sizing rejected: ${posSizeResult.skipReason}` });
           return;
         }
-        // === STAGE 5 HARDENING: NEWS HARD-PAUSE GATE ===
-        const newsGateResult = await defaultEconomicEventService.checkNewsHardPause(selectedPair);
+        // === STAGE 5 HARDENING: ECONOMIC NEWS GATE ===
+        const propFirmSettingsForNews = resolvedAccountType === 'prop' ? propFirmMap.get(userId) : null;
+        const isPropNews = resolvedAccountType === 'prop';
+        
+        const newsRestrictionEnabled = isPropNews
+          ? propFirmSettingsForNews?.news_restriction_enabled === true
+          : prefsRecord?.news_restriction_enabled === true;
+          
+        const bufferBeforeMinutes = isPropNews
+          ? Number(propFirmSettingsForNews?.news_buffer_before_minutes ?? 5)
+          : Number(prefsRecord?.news_buffer_before_minutes ?? 30);
+          
+        const bufferAfterMinutes = isPropNews
+          ? Number(propFirmSettingsForNews?.news_buffer_after_minutes ?? 5)
+          : Number(prefsRecord?.news_buffer_after_minutes ?? 30);
 
-        if (!newsGateResult) {
-          console.log(`\n[ECONOMIC NEWS GATE]\nSymbol: ${selectedPair}\nStatus: UNAVAILABLE\nAction: FAIL CLOSED\n`);
-        } else if (newsGateResult.tradeBlocked) {
-          console.log(`\n[ECONOMIC NEWS GATE]\nSymbol: ${selectedPair}\nStatus: BLOCKED\nEvent: ${newsGateResult.eventName || 'N/A'}\nCurrency: ${newsGateResult.currency || 'N/A'}\nScheduled: ${newsGateResult.scheduledAt || 'N/A'}\nBuffer: 30m before / 30m after\nReason: ${newsGateResult.blockReason || 'HIGH impact event'}\n`);
-        } else {
-          console.log(`\n[ECONOMIC NEWS GATE]\nSymbol: ${selectedPair}\nStatus: CLEAR\nRelevant Event: None\nBuffer: 30m before / 30m after\n`);
-        }
+        const newsGateOutcome = await evaluateEconomicNewsGate({
+          accountType: isPropNews ? 'prop' : 'personal',
+          symbol: selectedPair,
+          newsRestrictionEnabled,
+          bufferBeforeMinutes,
+          bufferAfterMinutes,
+          supabase
+        });
+
+        const newsGateResult = newsGateOutcome.newsGateResult;
 
         const marketCandleTimestampMs = new Date(tsResult.candles[tsResult.candles.length - 1]?.timestamp || Date.now()).getTime();
 

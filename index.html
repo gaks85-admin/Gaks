@@ -1,28 +1,16 @@
 <!doctype html>
-<html lang="en" class="dark">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Gaks AI - Market Monitoring</title>
-    <script>
-      (function() {
-        try {
-          var theme = localStorage.getItem('gaks_theme') || 'dark';
-          if (theme === 'dark') {
-            document.documentElement.classList.add('dark');
-          } else {
-            document.documentElement.classList.remove('dark');
-          }
-        } catch (e) {}
-      })();
-    </script>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:slnt,wght@-10..0,100..900&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+    <title>Gaks AI</title>
+    <meta name="description" content="A sleek Forex market trading assistant with AI signals, customized strategy setup, and real-time watchlists." />
+    <meta property="og:title" content="Gaks AI" />
+    <meta property="og:description" content="A sleek Forex market trading assistant with AI signals, customized strategy setup, and real-time watchlists." />
   </head>
-  <body>
+  <body class="bg-slate-950 text-slate-50 antialiased min-h-screen">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
-

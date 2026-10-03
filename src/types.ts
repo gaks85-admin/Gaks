@@ -28,3 +28,30 @@ export interface Strategy {
   text: string;
   isDefault: boolean;
 }
+
+export interface PersonalNewsProtectionSettings {
+  news_restriction_enabled: boolean;
+  news_buffer_before_minutes: number;
+  news_buffer_after_minutes: number;
+}
+
+export interface TradingPreferences {
+  user_id?: string;
+  strategy_text?: string;
+  strategy_summary?: string | null;
+  capital?: string;
+  custom_capital?: string;
+  preferred_risk?: string;
+  max_daily_loss?: string;
+  risk_reward?: string;
+  account_type?: string;
+  position_mode?: 'AUTO_RISK' | 'FIXED_LOT';
+  fixed_lot_size?: string;
+  preferred_sessions?: string[];
+  preferred_timeframes?: string[];
+  news_restriction_enabled?: boolean;
+  news_buffer_before_minutes?: number;
+  news_buffer_after_minutes?: number;
+  updated_at?: string;
+}
+

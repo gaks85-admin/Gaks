@@ -102,7 +102,7 @@ const TradingPerformanceChart = ({ fetchWithAuth }: { fetchWithAuth: any }) => {
               dx={-10}
             />
             <Tooltip 
-              cursor={{ fill: 'rgba(0,0,0,0.05)', radius: [8, 8, 0, 0] }}
+              cursor={{ fill: 'rgba(0,0,0,0.05)', radius: 8 as any }}
               contentStyle={{ 
                 backgroundColor: '#000', 
                 border: '1px solid #27272a', 
@@ -2755,7 +2755,7 @@ export default function AdminDashboard({
   authLoading: boolean,
   initialTab?: 'dashboard' | 'learning' | 'live-logs' | 'users' | 'notifications' | 'watchers' | 'signals' | 'health' | 'settings'
 }) {
-  const [activeAdminTab, setActiveAdminTab] = useState<'dashboard' | 'learning' | 'live-logs' | 'users' | 'notifications' | 'watchers' | 'signals' | 'health' | 'settings'>(initialTab || 'dashboard');
+  const [activeAdminTab, setActiveAdminTab] = useState<'dashboard' | 'zone-history' | 'learning' | 'live-logs' | 'users' | 'notifications' | 'watchers' | 'signals' | 'health' | 'settings'>(initialTab || 'dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
@@ -2902,7 +2902,7 @@ export default function AdminDashboard({
 
       {/* Subpage Content Section */}
       <div className="bg-white dark:bg-[#0c0c0e]/30 rounded-[32px] border border-zinc-200 dark:border-zinc-900/80 shadow-sm backdrop-blur-sm overflow-hidden min-h-[60vh]">
-        {activeAdminTab === 'dashboard' && <DashboardPage fetchWithAuth={fetchWithAuth} onNavigateToTab={setActiveAdminTab} />}
+        {activeAdminTab === 'dashboard' && <DashboardPage fetchWithAuth={fetchWithAuth} onNavigateToTab={(tab: any) => setActiveAdminTab(tab)} />}
         {activeAdminTab === 'zone-history' && (
           <div className="p-4 sm:p-6 space-y-6">
             <ZoneHistorySection fetchWithAuth={fetchWithAuth} isOverview={false} />

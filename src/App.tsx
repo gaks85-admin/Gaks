@@ -262,6 +262,11 @@ export default function App() {
   const strategyTextareaRef = useRef<HTMLTextAreaElement>(null);
   const prevSelectedId = useRef<string>('default');
 
+  // Personal News Protection States
+  const [personalNewsRestriction, setPersonalNewsRestriction] = useState<boolean>(false);
+  const [personalNewsBufferBefore, setPersonalNewsBufferBefore] = useState<string>('30');
+  const [personalNewsBufferAfter, setPersonalNewsBufferAfter] = useState<string>('30');
+
   // Prop Firm Form States
   const [propFirmName, setPropFirmName] = useState('');
   const [propFirmAccountPhase, setPropFirmAccountPhase] = useState('Phase 1');
@@ -416,6 +421,9 @@ export default function App() {
     analysisMode?: 'HYBRID' | 'RULE_ONLY' | 'AI_ONLY';
     preferredSessions: string[];
     preferredTimeframes: string[];
+    personalNewsRestriction: boolean;
+    personalNewsBufferBefore: string;
+    personalNewsBufferAfter: string;
   }>({
     capital: '$1,000',
     customCapital: '',
@@ -427,7 +435,10 @@ export default function App() {
     fixedLotSize: '0.01',
     analysisMode: 'HYBRID' as 'HYBRID' | 'RULE_ONLY' | 'AI_ONLY',
     preferredSessions: ['London', 'New York', 'Tokyo'],
-    preferredTimeframes: ['M15', 'H1']
+    preferredTimeframes: ['M15', 'H1'],
+    personalNewsRestriction: false,
+    personalNewsBufferBefore: '30',
+    personalNewsBufferAfter: '30'
   });
 
   const isPrefsDirty = useMemo(() => {
@@ -451,6 +462,13 @@ export default function App() {
     const sortedTimeframes = [...preferredTimeframes].sort();
     const sortedInitialTimeframes = [...initialPrefs.preferredTimeframes].sort();
     if (sortedTimeframes.some((t, idx) => t !== sortedInitialTimeframes[idx])) return true;
+
+    // Personal Account News Protection dirty check
+    if (accountType === 'personal' || accountType === null) {
+      if (personalNewsRestriction !== initialPrefs.personalNewsRestriction) return true;
+      if (personalNewsBufferBefore.trim() !== initialPrefs.personalNewsBufferBefore.trim()) return true;
+      if (personalNewsBufferAfter.trim() !== initialPrefs.personalNewsBufferAfter.trim()) return true;
+    }
 
     // 2. Prop Firm Settings dirty check (evaluated when accountType === 'prop')
     if (accountType === 'prop') {
@@ -477,7 +495,8 @@ export default function App() {
 
     return false;
   }, [
-    capital, customCapital, preferredRisk, maxDailyLoss, riskReward, accountType, positionMode, fixedLotSize, analysisMode, preferredSessions, preferredTimeframes, initialPrefs,
+    capital, customCapital, preferredRisk, maxDailyLoss, riskReward, accountType, positionMode, fixedLotSize, analysisMode, preferredSessions, preferredTimeframes,
+    personalNewsRestriction, personalNewsBufferBefore, personalNewsBufferAfter, initialPrefs,
     propFirmName, propFirmAccountPhase, propFirmAccountSize, propFirmProfitTarget, propFirmProfitTargetType,
     propFirmDailyLossLimit, propFirmDailyLossLimitType, propFirmDailyLossCalcBasis, propFirmDailyResetTime,
     propFirmDailyResetTimezone, propFirmMaxDrawdown, propFirmDrawdownType, propFirmDrawdownCalcBasis,
@@ -852,6 +871,13 @@ export default function App() {
       const savedTimeframes = localStorage.getItem('gaks_timeframes') ? JSON.parse(localStorage.getItem('gaks_timeframes')!) : ['M15', 'H1'];
       if (savedTimeframes) setPreferredTimeframes(savedTimeframes);
 
+      const savedNewsRest = localStorage.getItem('gaks_personal_news_restriction') === 'true';
+      const savedNewsBefore = localStorage.getItem('gaks_personal_news_buffer_before') || '30';
+      const savedNewsAfter = localStorage.getItem('gaks_personal_news_buffer_after') || '30';
+      setPersonalNewsRestriction(savedNewsRest);
+      setPersonalNewsBufferBefore(savedNewsBefore);
+      setPersonalNewsBufferAfter(savedNewsAfter);
+
       setInitialPrefs({
         capital: savedCapital,
         customCapital: savedCustomCapital,
@@ -863,7 +889,10 @@ export default function App() {
         fixedLotSize: '0.01',
         analysisMode: 'HYBRID',
         preferredSessions: savedSessions,
-        preferredTimeframes: savedTimeframes
+        preferredTimeframes: savedTimeframes,
+        personalNewsRestriction: savedNewsRest,
+        personalNewsBufferBefore: savedNewsBefore,
+        personalNewsBufferAfter: savedNewsAfter
       });
 
       const savedWatchlist = localStorage.getItem('gaks_watchlist');
@@ -1351,6 +1380,9 @@ export default function App() {
 
         const sessionsVal = data.preferred_sessions || ['London', 'New York', 'Tokyo'];
         const timeframesVal = data.preferred_timeframes || ['M15', 'H1'];
+        const newsRestVal = data.news_restriction_enabled ?? false;
+        const newsBeforeVal = data.news_buffer_before_minutes !== null && data.news_buffer_before_minutes !== undefined ? String(data.news_buffer_before_minutes) : '30';
+        const newsAfterVal = data.news_buffer_after_minutes !== null && data.news_buffer_after_minutes !== undefined ? String(data.news_buffer_after_minutes) : '30';
 
         setCapital(capVal);
         setCustomCapital(customCapVal);
@@ -1360,6 +1392,9 @@ export default function App() {
         setAccountType(accountVal);
         setPositionMode(modeVal);
         setFixedLotSize(String(lotVal));
+        setPersonalNewsRestriction(Boolean(newsRestVal));
+        setPersonalNewsBufferBefore(newsBeforeVal);
+        setPersonalNewsBufferAfter(newsAfterVal);
         if (data.preferred_sessions) setPreferredSessions(data.preferred_sessions);
         if (data.preferred_timeframes) setPreferredTimeframes(data.preferred_timeframes);
 
@@ -1379,7 +1414,10 @@ export default function App() {
           fixedLotSize: String(lotVal),
           analysisMode: amVal,
           preferredSessions: sessionsVal,
-          preferredTimeframes: timeframesVal
+          preferredTimeframes: timeframesVal,
+          personalNewsRestriction: Boolean(newsRestVal),
+          personalNewsBufferBefore: newsBeforeVal,
+          personalNewsBufferAfter: newsAfterVal
         });
 
         localStorage.setItem('gaks_capital', capVal);
@@ -1390,6 +1428,9 @@ export default function App() {
         localStorage.setItem('gaks_account_type', accountVal);
         localStorage.setItem('gaks_position_mode', modeVal);
         localStorage.setItem('gaks_fixed_lot_size', String(lotVal));
+        localStorage.setItem('gaks_personal_news_restriction', String(Boolean(newsRestVal)));
+        localStorage.setItem('gaks_personal_news_buffer_before', newsBeforeVal);
+        localStorage.setItem('gaks_personal_news_buffer_after', newsAfterVal);
         localStorage.setItem('gaks_sessions', JSON.stringify(sessionsVal));
         localStorage.setItem('gaks_timeframes', JSON.stringify(timeframesVal));
       }
@@ -1768,6 +1809,9 @@ export default function App() {
           account_type: encodedAccountType,
           preferred_sessions: preferredSessions,
           preferred_timeframes: preferredTimeframes,
+          news_restriction_enabled: personalNewsRestriction,
+          news_buffer_before_minutes: parseInt(personalNewsBufferBefore, 10) || 30,
+          news_buffer_after_minutes: parseInt(personalNewsBufferAfter, 10) || 30,
           updated_at: new Date().toISOString()
         }, { onConflict: 'user_id' });
 
@@ -1983,20 +2027,57 @@ export default function App() {
       }
     }
 
+    // Validate Personal News Protection values
+    if (accountType === 'personal' || accountType === null) {
+      if (typeof personalNewsRestriction !== 'boolean') {
+        triggerNotification("Invalid news restriction configuration.", "info");
+        return;
+      }
+      const beforeNum = Number(personalNewsBufferBefore);
+      const afterNum = Number(personalNewsBufferAfter);
+
+      if (
+        !Number.isFinite(beforeNum) ||
+        !Number.isInteger(beforeNum) ||
+        beforeNum < 0 ||
+        beforeNum > 1440
+      ) {
+        triggerNotification("News Buffer Before must be an integer between 0 and 1440 minutes.", "info");
+        return;
+      }
+
+      if (
+        !Number.isFinite(afterNum) ||
+        !Number.isInteger(afterNum) ||
+        afterNum < 0 ||
+        afterNum > 1440
+      ) {
+        triggerNotification("News Buffer After must be an integer between 0 and 1440 minutes.", "info");
+        return;
+      }
+    }
+
     const encodedAccountType = accountType ? `${accountType}|MODE:${positionMode}|LOT:${fixedLotSize}|MAXLOSS:${maxDailyLoss.replace(/[^0-9.]/g, '')}|ANALYSIS:${analysisMode}` : `personal|MODE:${positionMode}|LOT:${fixedLotSize}|MAXLOSS:${maxDailyLoss.replace(/[^0-9.]/g, '')}|ANALYSIS:${analysisMode}`;
     
     if (session?.user) {
       try {
+        const beforeMinutesVal = parseInt(personalNewsBufferBefore, 10);
+        const afterMinutesVal = parseInt(personalNewsBufferAfter, 10);
+
         const payload = {
           user_id: session.user.id,
           capital: capital,
           custom_capital: customCapital,
           preferred_risk: preferredRisk,
+          max_daily_loss: maxDailyLoss,
           risk_reward: riskReward,
           account_type: encodedAccountType,
           preferred_sessions: preferredSessions,
           preferred_timeframes: preferredTimeframes,
           strategy_text: strategyText,
+          news_restriction_enabled: personalNewsRestriction,
+          news_buffer_before_minutes: Number.isFinite(beforeMinutesVal) && beforeMinutesVal >= 0 && beforeMinutesVal <= 1440 ? beforeMinutesVal : 30,
+          news_buffer_after_minutes: Number.isFinite(afterMinutesVal) && afterMinutesVal >= 0 && afterMinutesVal <= 1440 ? afterMinutesVal : 30,
           updated_at: new Date().toISOString()
         };
 
@@ -2051,7 +2132,10 @@ export default function App() {
             fixedLotSize,
             analysisMode,
             preferredSessions,
-            preferredTimeframes
+            preferredTimeframes,
+            personalNewsRestriction,
+            personalNewsBufferBefore,
+            personalNewsBufferAfter
           });
 
           setInitialPropFirmPrefs({
@@ -2105,7 +2189,10 @@ export default function App() {
         fixedLotSize,
         analysisMode,
         preferredSessions,
-        preferredTimeframes
+        preferredTimeframes,
+        personalNewsRestriction,
+        personalNewsBufferBefore,
+        personalNewsBufferAfter
       });
 
       setInitialPropFirmPrefs({
@@ -2841,6 +2928,12 @@ export default function App() {
               setPropFirmNewsBufferBefore={setPropFirmNewsBufferBefore}
               propFirmNewsBufferAfter={propFirmNewsBufferAfter}
               setPropFirmNewsBufferAfter={setPropFirmNewsBufferAfter}
+              personalNewsRestriction={personalNewsRestriction}
+              setPersonalNewsRestriction={setPersonalNewsRestriction}
+              personalNewsBufferBefore={personalNewsBufferBefore}
+              setPersonalNewsBufferBefore={setPersonalNewsBufferBefore}
+              personalNewsBufferAfter={personalNewsBufferAfter}
+              setPersonalNewsBufferAfter={setPersonalNewsBufferAfter}
               preferredSessions={preferredSessions}
               toggleSession={toggleSession}
               preferredTimeframes={preferredTimeframes}

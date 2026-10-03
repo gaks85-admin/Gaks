@@ -71,6 +71,12 @@ export interface StrategyTabProps {
   setPropFirmNewsBufferBefore: (val: string) => void;
   propFirmNewsBufferAfter: string;
   setPropFirmNewsBufferAfter: (val: string) => void;
+  personalNewsRestriction: boolean;
+  setPersonalNewsRestriction: (val: boolean) => void;
+  personalNewsBufferBefore: string;
+  setPersonalNewsBufferBefore: (val: string) => void;
+  personalNewsBufferAfter: string;
+  setPersonalNewsBufferAfter: (val: string) => void;
   preferredSessions: string[];
   toggleSession: (session: string) => void;
   preferredTimeframes: string[];
@@ -149,6 +155,12 @@ export const StrategyTab: React.FC<StrategyTabProps> = ({
   setPropFirmNewsBufferBefore,
   propFirmNewsBufferAfter,
   setPropFirmNewsBufferAfter,
+  personalNewsRestriction,
+  setPersonalNewsRestriction,
+  personalNewsBufferBefore,
+  setPersonalNewsBufferBefore,
+  personalNewsBufferAfter,
+  setPersonalNewsBufferAfter,
   preferredSessions,
   toggleSession,
   preferredTimeframes,
@@ -408,6 +420,66 @@ export const StrategyTab: React.FC<StrategyTabProps> = ({
                   />
                 </div>
                 <p className="text-[11px] text-zinc-400">Trading halts automatically for the day if cumulative losses reach this amount.</p>
+              </div>
+
+              {/* Personal News Protection Section */}
+              <div className="space-y-3 pt-2">
+                <div className="space-y-1">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-400">News Protection</h3>
+                  <p className="text-[11px] text-zinc-500">Protect your personal capital from high-impact volatility spikes.</p>
+                </div>
+
+                <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-900/40 border border-zinc-200 dark:border-zinc-800 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-0.5 pr-4">
+                      <label htmlFor="personalNewsToggle" className="text-xs font-bold text-zinc-800 dark:text-zinc-200 cursor-pointer">
+                        Avoid High-Impact News
+                      </label>
+                      <p className="text-[10px] text-zinc-500">
+                        Automatically pause new trade entries during high-impact economic news events.
+                      </p>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                      <input
+                        type="checkbox"
+                        id="personalNewsToggle"
+                        checked={personalNewsRestriction}
+                        onChange={(e) => setPersonalNewsRestriction(e.target.checked)}
+                        className="sr-only peer"
+                      />
+                      <div className="w-11 h-6 bg-zinc-200 peer-focus:outline-none rounded-full peer dark:bg-zinc-800 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-zinc-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-zinc-950 dark:peer-checked:bg-white dark:peer-checked:after:bg-zinc-950"></div>
+                    </label>
+                  </div>
+
+                  {personalNewsRestriction && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-3 border-t border-zinc-200/60 dark:border-zinc-800/60 animate-fade-in">
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">Before news (minutes)</label>
+                        <input
+                          type="number"
+                          min={0}
+                          max={1440}
+                          value={personalNewsBufferBefore}
+                          onChange={(e) => setPersonalNewsBufferBefore(e.target.value)}
+                          placeholder="30"
+                          className="w-full bg-white dark:bg-zinc-950/60 border border-zinc-200 dark:border-zinc-900 rounded-xl px-3 py-2.5 text-xs text-zinc-800 dark:text-white focus:outline-none focus:border-zinc-400"
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">After news (minutes)</label>
+                        <input
+                          type="number"
+                          min={0}
+                          max={1440}
+                          value={personalNewsBufferAfter}
+                          onChange={(e) => setPersonalNewsBufferAfter(e.target.value)}
+                          placeholder="30"
+                          className="w-full bg-white dark:bg-zinc-950/60 border border-zinc-200 dark:border-zinc-900 rounded-xl px-3 py-2.5 text-xs text-zinc-800 dark:text-white focus:outline-none focus:border-zinc-400"
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           )}

@@ -36,6 +36,7 @@ import {
 } from "../zone-engine.js";
 import { resolveHigherTimeframeTrend } from "../htf-trend-engine.js";
 import { evaluateWatcherPropFirmGate, WatcherPropFirmGateOutcome } from "../prop-firm-watcher-gate.js";
+import { evaluateEconomicNewsGate } from "../economic-news-gate.js";
 
 // TEMPORARY MODE FLAG: Force Market Watcher into RULE_ONLY mode for diagnostic testing.
 // To restore original behavior, set this to null.
@@ -1607,6 +1608,55 @@ ${analysis.stopLossBasis === 'ATR_FALLBACK' ? `ATR: ${marketStructure.volatility
       if (!posSizeResult.accepted) {
         console.log(`[Risk Validation Failed - Trade Skipped] ${posSizeResult.skipReason}`);
         analysis.signal = 'NO_TRADE';
+      }
+    }
+
+    // === ECONOMIC NEWS GATE (Personal & Prop Firm) ===
+    let newsGateOutcome: any = null;
+    if (analysis.signal === 'BUY' || analysis.signal === 'SELL') {
+      const rawAccType = prefsRecord?.account_type ? String(prefsRecord.account_type).toLowerCase() : 'personal';
+      const isProp = rawAccType.startsWith('prop');
+      
+      let newsRestEnabled = false;
+      let bufBefore = 30;
+      let bufAfter = 30;
+
+      if (isProp) {
+        const { data: pfData } = await supabase.from('prop_firm_settings').select('*').eq('user_id', userId).maybeSingle();
+        newsRestEnabled = pfData?.news_restriction_enabled === true;
+        bufBefore = Number(pfData?.news_buffer_before_minutes ?? 5);
+        bufAfter = Number(pfData?.news_buffer_after_minutes ?? 5);
+      } else {
+        newsRestEnabled = prefsRecord?.news_restriction_enabled === true;
+        bufBefore = Number(prefsRecord?.news_buffer_before_minutes ?? 30);
+        bufAfter = Number(prefsRecord?.news_buffer_after_minutes ?? 30);
+      }
+
+      newsGateOutcome = await evaluateEconomicNewsGate({
+        accountType: isProp ? 'prop' : 'personal',
+        symbol,
+        newsRestrictionEnabled: newsRestEnabled,
+        bufferBeforeMinutes: bufBefore,
+        bufferAfterMinutes: bufAfter,
+        supabase
+      });
+
+      if (!newsGateOutcome.allowed) {
+        const blockReason = newsGateOutcome.blockReason || (isProp ? 'PROP_FIRM_NEWS_RESTRICTION' : 'PERSONAL_NEWS_RESTRICTION');
+        analysis.signal = 'NO_TRADE';
+        (analysis as any).accepted = false;
+        (analysis as any).skipReason = blockReason;
+        riskResult = { accepted: false, skipReason: blockReason };
+        const newsMsg = `[EconomicNewsGate] ${blockReason}`;
+        if (analysis.reasoning) {
+          if (Array.isArray(analysis.reasoning)) {
+            analysis.reasoning.push(newsMsg);
+          } else {
+            analysis.reasoning = [analysis.reasoning, newsMsg];
+          }
+        } else {
+          analysis.reasoning = [newsMsg];
+        }
       }
     }
 

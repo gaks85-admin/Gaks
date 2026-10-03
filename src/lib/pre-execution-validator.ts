@@ -1,64 +1,20 @@
-import { EconomicEventResult } from './economic-event-service.js';
-import { FreshnessResult } from './execution-freshness.js';
-import { BrokerQuote } from './broker-types.js';
-
-export interface FinalExecutionState {
-  marketDataAvailable: boolean;
-  marketDataFreshness: FreshnessResult;
-  currentPrice: number;
-  spread: number;
+export interface PreExecutionValidationParams {
+  symbol: string;
+  lotSize: number;
   entryPrice: number;
-  sl: number;
-  tp: number;
-  rr: number;
-  riskGovernorPassed: boolean;
-  newsGate: EconomicEventResult;
-  positionSizing: number;
-  userRiskLimitsPassed: boolean;
-  duplicateTradeProtectionPassed: boolean;
-  signalExpired: boolean;
-  brokerQuote?: BrokerQuote;
-  brokerQuoteFreshnessPassed?: boolean;
-  maxSpreadThreshold?: number;
-  maxEntryDriftThreshold?: number;
-  intendedEntryPrice?: number;
-  // Temporary disengagement flag per user directive
-  temporaryBypassAllPostSignalConfirmations?: boolean;
+  stopLoss: number;
+  takeProfit?: number;
 }
 
-export interface FinalDecision {
-  status: 'FINAL_EXECUTION_AUTHORIZED' | 'FINAL_EXECUTION_REJECTED';
-  rejectionReason?: string;
-  revalidationDetails?: {
-    actualSpread: number;
-    actualDrift: number;
-    actualPrice: number;
-  };
-}
-
-export function revalidatePreExecution(state: FinalExecutionState): FinalDecision {
-  // 1. MANDATORY NEWS SAFETY CHECK (MANDATORY GATE)
-  // Re-enabled per user request. This check must happen BEFORE any temporary bypass.
-  if (!state.newsGate) {
-    return {
-      status: 'FINAL_EXECUTION_REJECTED',
-      rejectionReason: 'NEWS_GATE_UNAVAILABLE'
-    };
+export function validatePreExecution(params: PreExecutionValidationParams): { valid: boolean; reason?: string } {
+  if (!params.symbol || params.symbol.trim() === '') {
+    return { valid: false, reason: 'Invalid trading symbol' };
   }
-
-  if (state.newsGate.tradeBlocked === true) {
-    return {
-      status: 'FINAL_EXECUTION_REJECTED',
-      rejectionReason: state.newsGate.blockReason || 'ECONOMIC_NEWS_BLOCK'
-    };
+  if (params.lotSize <= 0) {
+    return { valid: false, reason: 'Invalid lot size: must be > 0' };
   }
-
-  // 2. TEMPORARY DISENGAGEMENT PER USER DIRECTIVE
-  // "disengage every confirmation after a signal have been found temporary and leave only the break and retest confirmation"
-  if (state.temporaryBypassAllPostSignalConfirmations) {
-    return { status: 'FINAL_EXECUTION_AUTHORIZED' };
+  if (params.entryPrice <= 0 || params.stopLoss <= 0) {
+    return { valid: false, reason: 'Invalid entry or stop loss price' };
   }
-
-  // Default behavior for other cases (reserved for future use when bypass is removed)
-  return { status: 'FINAL_EXECUTION_AUTHORIZED' };
+  return { valid: true };
 }
