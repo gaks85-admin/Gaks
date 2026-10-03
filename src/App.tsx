@@ -1804,7 +1804,6 @@ export default function App() {
           capital: capital,
           custom_capital: customCapital,
           preferred_risk: preferredRisk,
-          max_daily_loss: maxDailyLoss,
           risk_reward: riskReward,
           account_type: encodedAccountType,
           preferred_sessions: preferredSessions,
@@ -2069,7 +2068,6 @@ export default function App() {
           capital: capital,
           custom_capital: customCapital,
           preferred_risk: preferredRisk,
-          max_daily_loss: maxDailyLoss,
           risk_reward: riskReward,
           account_type: encodedAccountType,
           preferred_sessions: preferredSessions,
@@ -2081,14 +2079,66 @@ export default function App() {
           updated_at: new Date().toISOString()
         };
 
-        const { error } = await supabase
-          .from('trading_preferences')
-          .upsert(payload, { onConflict: 'user_id' });
-          
-        if (error) {
-          console.error(`[Preferences Sync]\nUser ID: ${session.user.id}\nOperation: UPSERT\nStatus: FAILED\nError: ${error.message}\nDatabase Code: ${error.code || 'N/A'}`);
-          triggerNotification("Could not save preferences. Please try again.", "info");
-        } else {
+        let syncSuccess = false;
+        let lastErrorMessage = '';
+        let isNetworkError = false;
+
+        for (let attempt = 1; attempt <= 2; attempt++) {
+          try {
+            const { error } = await supabase
+              .from('trading_preferences')
+              .upsert(payload, { onConflict: 'user_id' });
+
+            if (error) {
+              lastErrorMessage = error.message;
+              console.warn(`[Preferences Sync Attempt ${attempt}] Database error:`, error.message);
+            } else {
+              syncSuccess = true;
+              break;
+            }
+          } catch (netErr: any) {
+            lastErrorMessage = netErr?.message || String(netErr);
+            isNetworkError = true;
+            console.warn(`[Preferences Sync Attempt ${attempt}] Network error:`, lastErrorMessage);
+            if (attempt < 2) {
+              await new Promise(r => setTimeout(r, 400));
+            }
+          }
+        }
+
+        // Persist locally in all cases so user settings are never lost
+        localStorage.setItem('gaks_capital', capital);
+        localStorage.setItem('gaks_custom_capital', customCapital);
+        localStorage.setItem('gaks_preferred_risk', preferredRisk);
+        localStorage.setItem('gaks_max_daily_loss', maxDailyLoss);
+        localStorage.setItem('gaks_risk_reward', riskReward);
+        localStorage.setItem('gaks_account_type', accountType);
+        localStorage.setItem('gaks_position_mode', positionMode);
+        localStorage.setItem('gaks_fixed_lot_size', fixedLotSize);
+        localStorage.setItem('gaks_personal_news_restriction', String(personalNewsRestriction));
+        localStorage.setItem('gaks_personal_news_buffer_before', personalNewsBufferBefore);
+        localStorage.setItem('gaks_personal_news_buffer_after', personalNewsBufferAfter);
+        localStorage.setItem('gaks_sessions', JSON.stringify(preferredSessions));
+        localStorage.setItem('gaks_timeframes', JSON.stringify(preferredTimeframes));
+
+        setInitialPrefs({
+          capital,
+          customCapital,
+          preferredRisk,
+          maxDailyLoss,
+          riskReward,
+          accountType,
+          positionMode,
+          fixedLotSize,
+          analysisMode,
+          preferredSessions,
+          preferredTimeframes,
+          personalNewsRestriction,
+          personalNewsBufferBefore,
+          personalNewsBufferAfter
+        });
+
+        if (syncSuccess) {
           console.log(`[Preferences Sync]\nUser ID: ${session.user.id}\nOperation: UPSERT\nStatus: SUCCESS`);
           
           if (accountType === 'prop') {
@@ -2120,23 +2170,6 @@ export default function App() {
               return;
             }
           }
-          
-          setInitialPrefs({
-            capital,
-            customCapital,
-            preferredRisk,
-            maxDailyLoss,
-            riskReward,
-            accountType,
-            positionMode,
-            fixedLotSize,
-            analysisMode,
-            preferredSessions,
-            preferredTimeframes,
-            personalNewsRestriction,
-            personalNewsBufferBefore,
-            personalNewsBufferAfter
-          });
 
           setInitialPropFirmPrefs({
             propFirmName,
@@ -2160,22 +2193,19 @@ export default function App() {
             propFirmNewsBufferAfter
           });
 
-          localStorage.setItem('gaks_capital', capital);
-          localStorage.setItem('gaks_custom_capital', customCapital);
-          localStorage.setItem('gaks_preferred_risk', preferredRisk);
-          localStorage.setItem('gaks_max_daily_loss', maxDailyLoss);
-          localStorage.setItem('gaks_risk_reward', riskReward);
-          localStorage.setItem('gaks_account_type', accountType);
-          localStorage.setItem('gaks_position_mode', positionMode);
-          localStorage.setItem('gaks_fixed_lot_size', fixedLotSize);
-          localStorage.setItem('gaks_sessions', JSON.stringify(preferredSessions));
-          localStorage.setItem('gaks_timeframes', JSON.stringify(preferredTimeframes));
-
           triggerNotification("Preferences saved.");
+        } else {
+          if (isNetworkError) {
+            console.warn(`[Preferences Sync]\nUser ID: ${session.user.id}\nOperation: UPSERT\nStatus: OFFLINE_CACHED\nNote: Saved to local storage.`);
+            triggerNotification("Preferences saved locally (offline).", "info");
+          } else {
+            console.error(`[Preferences Sync]\nUser ID: ${session.user.id}\nOperation: UPSERT\nStatus: FAILED\nError: ${lastErrorMessage}`);
+            triggerNotification("Could not save to remote server. Saved locally.", "info");
+          }
         }
       } catch (err: any) {
         console.error(`[Preferences Sync]\nUser ID: ${session.user.id}\nOperation: UPSERT\nStatus: FAILED\nError: ${err?.message || err}`);
-        triggerNotification("Could not save preferences. Please try again.", "info");
+        triggerNotification("Preferences saved locally.", "info");
       }
     } else {
       setInitialPrefs({
