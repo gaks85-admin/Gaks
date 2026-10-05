@@ -19,6 +19,9 @@ export interface WatcherPropFirmGateParams {
 
 export interface WatcherPropFirmGateResult {
   passed: boolean;
+  allowed?: boolean;
+  decision?: string;
+  success?: boolean;
   blockReason?: string;
   details?: string;
 }

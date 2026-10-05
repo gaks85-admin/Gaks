@@ -8,7 +8,6 @@ import { createClient } from '@supabase/supabase-js';
 
 const getViteEnv = (key: string): string => {
   // 1. Fallback for Node.js / Server-side environments
-  // We check this first to avoid import.meta errors in some Node environments
   try {
     if (typeof process !== 'undefined' && process.env && process.env[key]) {
       return process.env[key]!;
@@ -19,14 +18,36 @@ const getViteEnv = (key: string): string => {
   // IMPORTANT: These literals MUST remain as full import.meta.env.KEY paths 
   // for Vite to statically replace them during the production build.
   try {
-    if (key === 'VITE_SUPABASE_URL') return import.meta.env.VITE_SUPABASE_URL || '';
-    if (key === 'VITE_SUPABASE_ANON_KEY') return import.meta.env.VITE_SUPABASE_ANON_KEY || '';
-    if (key === 'NEXT_PUBLIC_SUPABASE_URL') return import.meta.env.NEXT_PUBLIC_SUPABASE_URL || '';
-    if (key === 'NEXT_PUBLIC_SUPABASE_ANON_KEY') return import.meta.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
     // @ts-ignore
-    if (key === 'SUPABASE_URL') return import.meta.env.SUPABASE_URL || '';
+    if (key === 'VITE_SUPABASE_URL') {
+      // @ts-ignore
+      try { return import.meta.env.VITE_SUPABASE_URL || ''; } catch {}
+    }
     // @ts-ignore
-    if (key === 'SUPABASE_ANON_KEY') return import.meta.env.SUPABASE_ANON_KEY || '';
+    if (key === 'VITE_SUPABASE_ANON_KEY') {
+      // @ts-ignore
+      try { return import.meta.env.VITE_SUPABASE_ANON_KEY || ''; } catch {}
+    }
+    // @ts-ignore
+    if (key === 'NEXT_PUBLIC_SUPABASE_URL') {
+      // @ts-ignore
+      try { return import.meta.env.NEXT_PUBLIC_SUPABASE_URL || ''; } catch {}
+    }
+    // @ts-ignore
+    if (key === 'NEXT_PUBLIC_SUPABASE_ANON_KEY') {
+      // @ts-ignore
+      try { return import.meta.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''; } catch {}
+    }
+    // @ts-ignore
+    if (key === 'SUPABASE_URL') {
+      // @ts-ignore
+      try { return import.meta.env.SUPABASE_URL || ''; } catch {}
+    }
+    // @ts-ignore
+    if (key === 'SUPABASE_ANON_KEY') {
+      // @ts-ignore
+      try { return import.meta.env.SUPABASE_ANON_KEY || ''; } catch {}
+    }
   } catch {}
   
   return '';
