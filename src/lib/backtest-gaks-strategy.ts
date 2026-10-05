@@ -90,17 +90,67 @@ export class GaksBacktestStrategy implements BacktestStrategy {
     // 2. Evaluate Decision Engine against Compiled Gaks Strategy
     const decision = evaluateDecision(this.compiledStrategy, marketStructure);
 
-    // If decision engine approves signal
-    if (decision.recommendation === 'PASS' || decision.recommendation === 'LIKELY_PASS' || decision.mandatory_rules_passed) {
-      let direction: 'BUY' | 'SELL' = 'BUY';
+    // Determine matching signal from Strategy keywords or Decision Engine
+    const strategyLower = this.rawStrategyText.toLowerCase();
+    const isSupplyDemandStrategy = strategyLower.includes('supply') || strategyLower.includes('demand') || strategyLower.includes('order block');
+    const isEmaStrategy = strategyLower.includes('ema') || strategyLower.includes('crossover');
+    const isBosStrategy = strategyLower.includes('bos') || strategyLower.includes('break of structure') || strategyLower.includes('choch');
+
+    let triggerSignal = false;
+    let direction: 'BUY' | 'SELL' = 'BUY';
+    let reason = '';
+
+    // A. Supply & Demand / Order Block Tap & Rejections
+    if (isSupplyDemandStrategy) {
+      if (marketStructure.support_rejection && confirmationBullish) {
+        triggerSignal = true;
+        direction = 'BUY';
+        reason = 'Price tapped and rejected Demand Zone / Order Block with bullish confirmation';
+      } else if (marketStructure.resistance_rejection && confirmationBearish) {
+        triggerSignal = true;
+        direction = 'SELL';
+        reason = 'Price tapped and rejected Supply Zone / Order Block with bearish confirmation';
+      }
+    }
+
+    // B. EMA Alignment & Crossovers
+    if (!triggerSignal && isEmaStrategy) {
+      if (emaCrossoverBullish) {
+        triggerSignal = true;
+        direction = 'BUY';
+        reason = 'Bullish EMA Crossover detected (Fast crossed above Slow EMA)';
+      } else if (emaCrossoverBearish) {
+        triggerSignal = true;
+        direction = 'SELL';
+        reason = 'Bearish EMA Crossover detected (Fast crossed below Slow EMA)';
+      }
+    }
+
+    // C. Break of Structure (BOS)
+    if (!triggerSignal && isBosStrategy) {
+      if (bosBullish && confirmationBullish) {
+        triggerSignal = true;
+        direction = 'BUY';
+        reason = 'Bullish Break of Structure (BOS) confirmed with candle momentum';
+      } else if (bosBearish && confirmationBearish) {
+        triggerSignal = true;
+        direction = 'SELL';
+        reason = 'Bearish Break of Structure (BOS) confirmed with candle momentum';
+      }
+    }
+
+    // D. Decision Engine Fallback
+    if (!triggerSignal && (decision.recommendation === 'PASS' || decision.recommendation === 'LIKELY_PASS' || decision.mandatory_rules_passed)) {
+      triggerSignal = true;
       if (bosBearish || emaCrossoverBearish || isBearishEngulfing || isBearishPinbar) {
         direction = 'SELL';
-      } else if (bosBullish || emaCrossoverBullish || isBullishEngulfing || isBullishPinbar) {
-        direction = 'BUY';
       } else {
-        direction = fastEma && slowEma && fastEma < slowEma ? 'SELL' : 'BUY';
+        direction = 'BUY';
       }
+      reason = decision.explanation || `Deterministic Gaks Rule Passed (${decision.matched_rules.join(', ')})`;
+    }
 
+    if (triggerSignal) {
       const slBuffer = Math.max(atr * 1.5, 0.0010);
       const rrRatio = this.compiledStrategy.compiled_rules?.risk_reward?.min_ratio || 2.0;
 
@@ -127,8 +177,8 @@ export class GaksBacktestStrategy implements BacktestStrategy {
         entryPrice,
         stopLoss,
         takeProfit,
-        reason: decision.explanation || `Deterministic Gaks Rule Passed (${decision.matched_rules.join(', ')})`,
-        confidence: Math.round(decision.decision_score * 100)
+        reason,
+        confidence: Math.round((decision.decision_score || 0.8) * 100)
       };
     }
 
