@@ -24,7 +24,7 @@ const TabLoading = () => (
 );
 import {
   Home as HomeIcon,
-  TrendingUp,
+  TrendingUp as TrendingUpIcon,
   Activity,
   Eye,
   LogOut,
@@ -2689,7 +2689,7 @@ export default function App() {
                                 ? 'bg-red-50 dark:bg-[#200c0c] text-red-600 dark:text-[#ef4444] border-red-100 dark:border-[#3f1616]'
                                 : 'bg-zinc-50 dark:bg-[#1a1a1e] text-zinc-500 dark:text-[#a1a1aa] border-zinc-200 dark:border-[#27272a]'
                             }`}>
-                              {pair.sentiment === 'Bullish' && <TrendingUp className="w-3.5 h-3.5 shrink-0" />}
+                              {pair.sentiment === 'Bullish' && <TrendingUpIcon className="w-3.5 h-3.5 shrink-0" />}
                               {pair.sentiment === 'Bearish' && <TrendingDown className="w-3.5 h-3.5 shrink-0" />}
                               {pair.sentiment === 'Neutral' && <Minus className="w-3.5 h-3.5 shrink-0" />}
                               <span>{pair.sentiment}</span>
@@ -2871,7 +2871,7 @@ export default function App() {
                         >
                           <div className="flex justify-between items-start">
                             <span className="text-[10px] sm:text-[11px] font-bold text-white tracking-wide">{pair.symbol}</span>
-                            {isBearish ? <TrendingDown className="w-3 h-3 text-white/90" /> : <TrendingUp className="w-3 h-3 text-white/90" />}
+                            {isBearish ? <TrendingDown className="w-3 h-3 text-white/90" /> : <TrendingUpIcon className="w-3 h-3 text-white/90" />}
                           </div>
                           <div className="text-[12px] sm:text-[13px] font-bold text-white text-right">
                              {pair.change >= 0 ? '+' : ''}{pair.change.toFixed(2)}%
@@ -3095,7 +3095,7 @@ export default function App() {
             <div className={`py-1.5 px-3 rounded-2xl flex flex-col items-center gap-1 transition-colors ${
               activeTab === 'strategy' ? 'bg-zinc-100 dark:bg-[#1a1a1e] text-zinc-950 dark:text-white shadow-xs font-medium' : ''
             }`}>
-              <TrendingUp className="w-4 h-4 stroke-[1.8]" />
+              <TrendingUpIcon className="w-4 h-4 stroke-[1.8]" />
               <span className="text-[10px] font-medium tracking-normal">Strategy</span>
             </div>
           </button>
