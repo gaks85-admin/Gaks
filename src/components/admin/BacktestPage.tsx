@@ -759,11 +759,11 @@ export function BacktestPage({ fetchWithAuth, showToast }: BacktestPageProps) {
                     </div>
                     <div className="p-2.5 bg-zinc-900/50 rounded-lg border border-zinc-800">
                       <span className="text-zinc-500 text-[10px] block">Long P/L (Win%)</span>
-                      <span className="text-zinc-200">${engineResult.analytics.longTrades.netPnL} ({engineResult.analytics.longTrades.winRate ?? 0}%)</span>
+                      <span className="text-zinc-200">${engineResult.analytics.longTrades?.netPnL ?? 0} ({engineResult.analytics.longTrades?.winRate ?? 0}%)</span>
                     </div>
                     <div className="p-2.5 bg-zinc-900/50 rounded-lg border border-zinc-800">
                       <span className="text-zinc-500 text-[10px] block">Short P/L (Win%)</span>
-                      <span className="text-zinc-200">${engineResult.analytics.shortTrades.netPnL} ({engineResult.analytics.shortTrades.winRate ?? 0}%)</span>
+                      <span className="text-zinc-200">${engineResult.analytics.shortTrades?.netPnL ?? 0} ({engineResult.analytics.shortTrades?.winRate ?? 0}%)</span>
                     </div>
                   </div>
 
