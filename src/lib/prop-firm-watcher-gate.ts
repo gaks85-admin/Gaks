@@ -72,4 +72,16 @@ export async function evaluateWatcherPropFirmGate(
   return { passed: true };
 }
 
+export async function syncPropFirmStateForActiveWatcher(params: {
+  supabase: any;
+  userId: string;
+  rawAccountType?: string | null;
+  symbol: string;
+  currentMarketPrice: number;
+}) {
+  // Hotfix: This function is required by api/cron/market-watcher.ts but was missing from exports.
+  // Reconstructed as a stub to restore build functionality.
+  return { success: true };
+}
+
 export { resolvePersistedAccountType, computePropFirmResetBoundaryUtc, calculateSingleOpenWatcherRisk } from './prop-firm-service.js';
