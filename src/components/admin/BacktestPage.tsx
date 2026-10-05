@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
   FileText, Upload, RefreshCw, Trash2, CheckCircle2, AlertTriangle, 
-  Layers, Calendar, Database, Eye, X, Check, ArrowRight, ShieldCheck 
+  Layers, Calendar, Database, Eye, X, Check, ArrowRight, ShieldCheck, TrendingUp
 } from 'lucide-react';
 
 interface BacktestDataset {
