@@ -3744,7 +3744,7 @@ Output ONLY valid JSON.
             .from('trade_learning')
             .select('net_pnl')
             .eq('user_id', userId)
-            .gte('closed_at', todayStart.toISOString());
+            .gte('created_at', todayStart.toISOString());
 
           let totalLossToday = 0;
           if (todayTrades && todayTrades.length > 0) {

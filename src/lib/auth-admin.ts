@@ -13,8 +13,8 @@ export interface AdminAuthResult {
 
 /**
  * Centralized server-side admin authorization verification.
- * Verifies that the bearer token is valid and belongs to an authorized administrator.
- * Does NOT trust client-side claims or parameters.
+ * Verifies that the bearer token is valid and belongs to an authorized administrator in public.app_admins.
+ * Does NOT trust client-side claims, query params, or body parameters.
  */
 export async function verifyAdminAuth(
   req: any,
@@ -35,6 +35,7 @@ export async function verifyAdminAuth(
   }
 
   try {
+    // 1. Verify the Supabase JWT cryptographically
     const { data: { user }, error: authError } = await supabase.auth.getUser(token);
     if (authError || !user) {
       return {
@@ -47,49 +48,57 @@ export async function verifyAdminAuth(
       };
     }
 
-    const email = user.email?.trim().toLowerCase();
+    // 2. Determine identity ONLY from verified user.id and email
+    const userId = user.id;
+    const userEmail = (user.email || '').toLowerCase().trim();
+    const isPrimaryAdmin = userEmail === ADMIN_EMAIL.toLowerCase().trim();
 
-    // 1. Check primary administrator email allowlist
-    if (email === ADMIN_EMAIL.trim().toLowerCase()) {
-      return {
-        isAdmin: true,
-        user,
-        userId: user.id,
-        email
-      };
-    }
-
-    // 2. Check profile role in database
-    try {
-      const { data: profile, error: profileErr } = await supabase
-        .from('profiles')
-        .select('role')
-        .eq('id', user.id)
+    if (!isPrimaryAdmin) {
+      // 3. Query authoritative public.app_admins table for secondary admins
+      const { data: adminRecord, error: adminErr } = await supabase
+        .from('app_admins')
+        .select('user_id')
+        .eq('user_id', userId)
         .maybeSingle();
 
-      if (!profileErr && profile && profile.role === 'admin') {
+      if (adminErr) {
+        console.error('[ADMIN AUTH] app_admins lookup failed:', adminErr.message);
         return {
-          isAdmin: true,
+          isAdmin: false,
           user,
-          userId: user.id,
-          email
+          userId,
+          email: user.email || null,
+          error: 'Internal Server Error',
+          statusCode: 500
         };
       }
-    } catch (profileErr) {
-      console.warn('[Admin Auth] Error checking profile role:', profileErr);
+
+      if (!adminRecord) {
+        return {
+          isAdmin: false,
+          user,
+          userId,
+          email: user.email || null,
+          error: 'Forbidden',
+          statusCode: 403
+        };
+      }
     }
 
-    // Authenticated user is not an administrator
+    // Attach verified user info to request for downstream handlers
+    if (req) {
+      req.user = user;
+      req.userId = userId;
+    }
+
     return {
-      isAdmin: false,
+      isAdmin: true,
       user,
-      userId: user.id,
-      email,
-      error: 'Forbidden',
-      statusCode: 403
+      userId,
+      email: user.email || null
     };
   } catch (err: any) {
-    console.error('[Admin Auth] Error during admin verification:', err);
+    console.error('[ADMIN AUTH] Unexpected verification error:', err);
     return {
       isAdmin: false,
       user: null,
@@ -100,3 +109,4 @@ export async function verifyAdminAuth(
     };
   }
 }
+

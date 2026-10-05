@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, AreaChart, Area
 } from 'recharts';
@@ -11,6 +11,7 @@ import {
 import { supabase } from '../../supabaseClient';
 import { LearningPerformanceView } from '../LearningPerformanceView';
 import { AdminUserNotificationSection } from './AdminUserNotificationSection';
+import { BacktestPage } from './BacktestPage';
 
 // ----------------------------------------------------
 // Toast Component
@@ -2775,50 +2776,61 @@ export default function AdminDashboard({
     setToast({ message, type });
   };
 
-  const fetchWithAuth = async (url: string, options: RequestInit = {}) => {
+  const fetchWithAuth = useCallback(async (url: string, options: RequestInit = {}) => {
     const headers = new Headers(options.headers || {});
-    if (session?.access_token) {
-      headers.set('Authorization', `Bearer ${session.access_token}`);
+    let token = session?.access_token;
+    if (!token) {
+      try {
+        const { data } = await supabase.auth.getSession();
+        token = data?.session?.access_token;
+      } catch (e) {
+        console.warn('Failed to get session token fallback:', e);
+      }
+    }
+    if (token) {
+      headers.set('Authorization', `Bearer ${token}`);
     }
     if (!headers.has('Content-Type') && !(options.body instanceof FormData)) {
       headers.set('Content-Type', 'application/json');
     }
     
-    console.log(`[Admin Fetch Request] URL: ${url}`, { method: options.method || 'GET', headers: Object.fromEntries(headers.entries()) });
+    let response: Response | null = null;
+    let lastError: any = null;
+    const targetUrl = url.startsWith('http') ? url : (typeof window !== 'undefined' ? new URL(url, window.location.origin).toString() : url);
     
-    try {
-      const response = await fetch(url, { ...options, headers });
-      
-      console.log(`[Admin Fetch Debug] Request URL: ${url}`);
-      console.log(`[Admin Fetch Debug] HTTP Status: ${response.status}`);
-      
-      const responseHeaders: Record<string, string> = {};
-      response.headers.forEach((value, key) => {
-        responseHeaders[key] = value;
-      });
-      console.log(`[Admin Fetch Debug] Response Headers:`, responseHeaders);
-      
-      const text = await response.text();
-      console.log(`[Admin Fetch Debug] Raw Response Body:`, text);
-      
-      const isHtml = text.trim().startsWith('<') || text.trim().startsWith('<!DOCTYPE html');
-      if (isHtml) {
-        console.error(`[Admin Fetch HTML Response Alert]
-- Requested URL: ${url}
-- Status Code: ${response.status}
-- Why the endpoint does not exist: The endpoint returned HTML content instead of JSON. This typically happens when the server route is not found (404) or matches a catch-all route that serves index.html (the frontend SPA entry point) instead of a proper API response.`);
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const fetchUrl = attempt === 1 ? url : targetUrl;
+        response = await fetch(fetchUrl, { ...options, headers });
+        if (response) break;
+      } catch (err: any) {
+        lastError = err;
+        if (attempt < 3) {
+          await new Promise(r => setTimeout(r, 300 * attempt));
+        }
       }
-      
-      return new Response(text, {
-        status: response.status,
-        statusText: response.statusText,
-        headers: response.headers
-      });
-    } catch (err: any) {
-      console.error(`[Admin Fetch Network Error] URL: ${url}, Error:`, err);
-      throw err;
     }
-  };
+
+    if (!response) {
+      console.warn(`[Admin Fetch Network Warning] URL: ${url}, returning synthetic fallback:`, lastError);
+      return new Response(JSON.stringify({ success: false, error: lastError?.message || 'Network request failed' }), {
+        status: 503,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+
+    const text = await response.text();
+    const isHtml = text.trim().startsWith('<') || text.trim().startsWith('<!DOCTYPE html');
+    if (isHtml) {
+      console.error(`[Admin Fetch HTML Response Alert] URL: ${url}, Status: ${response.status}`);
+    }
+    
+    return new Response(text, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: response.headers
+    });
+  }, [session]);
 
   if (authLoading) {
     return (
@@ -2847,6 +2859,7 @@ export default function AdminDashboard({
 
   const menuItems = [
     { id: 'dashboard', label: 'Overview', icon: LayoutDashboard },
+    { id: 'backtest', label: 'Backtesting', icon: Layers },
     { id: 'zone-history', label: 'Zone History', icon: Crosshair },
     { id: 'learning', label: 'Learning & Performance', icon: Sparkles },
     { id: 'live-logs', label: 'Live Logs', icon: Terminal },
@@ -2903,6 +2916,7 @@ export default function AdminDashboard({
       {/* Subpage Content Section */}
       <div className="bg-white dark:bg-[#0c0c0e]/30 rounded-[32px] border border-zinc-200 dark:border-zinc-900/80 shadow-sm backdrop-blur-sm overflow-hidden min-h-[60vh]">
         {activeAdminTab === 'dashboard' && <DashboardPage fetchWithAuth={fetchWithAuth} onNavigateToTab={(tab: any) => setActiveAdminTab(tab)} />}
+        {activeAdminTab === 'backtest' && <BacktestPage fetchWithAuth={fetchWithAuth} showToast={showToast} />}
         {activeAdminTab === 'zone-history' && (
           <div className="p-4 sm:p-6 space-y-6">
             <ZoneHistorySection fetchWithAuth={fetchWithAuth} isOverview={false} />

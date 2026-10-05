@@ -1,4 +1,114 @@
-import { TradingPreferences } from './types.js';
+import { TradingPreferences } from '../types.js';
+
+export type AssetClass = 'Forex' | 'Gold' | 'Indices' | 'Crypto';
+
+export interface InstrumentSpec {
+  symbol: string;
+  assetClass: AssetClass;
+  contractSize: number;
+  minLot: number;
+  maxLot: number;
+  lotStep: number;
+  tickSize: number;
+  source: string;
+}
+
+export function resolveInstrumentSpec(symbol: string): InstrumentSpec {
+  const cleanSym = (symbol || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+  let assetClass: AssetClass = 'Forex';
+  let contractSize = 100000;
+  let minLot = 0.01;
+  let maxLot = 100;
+  let lotStep = 0.01;
+  let tickSize = 0.0001;
+  let source = 'Forex Specification Resolver';
+
+  if (
+    cleanSym.includes('BTC') ||
+    cleanSym.includes('ETH') ||
+    cleanSym.includes('SOL') ||
+    cleanSym.includes('XRP') ||
+    cleanSym.includes('LTC') ||
+    cleanSym.includes('CRYPTO') ||
+    cleanSym.endsWith('USDT') ||
+    cleanSym.endsWith('USDC') ||
+    cleanSym.endsWith('BUSD')
+  ) {
+    assetClass = 'Crypto';
+    contractSize = 1;
+    minLot = 0.01;
+    maxLot = 100;
+    lotStep = 0.01;
+    tickSize = 0.01;
+    source = 'Crypto Specification Resolver';
+  } else if (
+    cleanSym.includes('XAU') ||
+    cleanSym.includes('GOLD') ||
+    cleanSym.includes('XAG') ||
+    cleanSym.includes('SILVER')
+  ) {
+    assetClass = 'Gold';
+    contractSize = 100;
+    minLot = 0.01;
+    maxLot = 100;
+    lotStep = 0.01;
+    tickSize = 0.01;
+    source = 'Metals Specification Resolver';
+  } else if (
+    cleanSym.includes('NAS') ||
+    cleanSym.includes('US30') ||
+    cleanSym.includes('SPX') ||
+    cleanSym.includes('US500') ||
+    cleanSym.includes('GER') ||
+    cleanSym.includes('UK100') ||
+    cleanSym.includes('INDEX') ||
+    cleanSym.includes('DOW')
+  ) {
+    assetClass = 'Indices';
+    contractSize = 1;
+    minLot = 0.01;
+    maxLot = 100;
+    lotStep = 0.01;
+    tickSize = 0.1;
+    source = 'Indices Specification Resolver';
+  } else {
+    assetClass = 'Forex';
+    contractSize = 100000;
+    minLot = 0.01;
+    maxLot = 100;
+    lotStep = 0.01;
+    tickSize = cleanSym.includes('JPY') ? 0.001 : 0.0001;
+    source = 'Forex Specification Resolver';
+  }
+
+  return {
+    symbol: cleanSym,
+    assetClass,
+    contractSize,
+    minLot,
+    maxLot,
+    lotStep,
+    tickSize,
+    source
+  };
+}
+
+export function getInstrumentContractConfig(symbol: string): InstrumentSpec {
+  return resolveInstrumentSpec(symbol);
+}
+
+export function parseRiskRewardRatio(ratioStr?: string | null): number {
+  if (!ratioStr) return 2;
+  const clean = String(ratioStr).trim();
+  const parts = clean.split(':');
+  if (parts.length === 2) {
+    const num = parseFloat(parts[1]);
+    if (!isNaN(num) && num > 0) return num;
+  }
+  const parsed = parseFloat(clean.replace(/[^0-9.]/g, ''));
+  return !isNaN(parsed) && parsed > 0 ? parsed : 2;
+}
 
 export interface PositionSizeParams {
   accountSize: number;
@@ -6,9 +116,14 @@ export interface PositionSizeParams {
   entryPrice: number;
   executedEntry?: number;
   stopLoss: number;
+  takeProfit?: number;
   geminiTp?: number;
   symbol: string;
   instrument?: string;
+  direction?: 'BUY' | 'SELL';
+  riskRewardStr?: string;
+  positionMode?: 'AUTO_RISK' | 'FIXED_LOT';
+  preferredLotSize?: number;
   minLot?: number;
   maxLot?: number;
   lotStep?: number;
@@ -18,6 +133,11 @@ export interface PositionSizeParams {
 export interface PositionSizeResult {
   accepted: boolean;
   lots: number;
+  calculatedLotSize: number;
+  actualRr?: number;
+  entryPrice?: number;
+  stopLoss?: number;
+  takeProfit?: number;
   riskAmount: number;
   expectedLoss: number;
   reason?: string;
@@ -63,22 +183,24 @@ export function extractRiskPreferences(prefsRecord?: Partial<TradingPreferences>
 }
 
 export function calculatePositionSize(params: PositionSizeParams): PositionSizeResult {
+  const spec = resolveInstrumentSpec(params.symbol || params.instrument || 'EURUSD');
+
   const {
     accountSize,
     riskPercentage,
     entryPrice,
     stopLoss,
-    symbol,
-    minLot = 0.01,
-    maxLot = 100,
-    lotStep = 0.01,
-    contractSize = symbol.toUpperCase().includes('XAU') || symbol.toUpperCase().includes('GOLD') ? 100 : 100000
+    minLot = spec.minLot,
+    maxLot = spec.maxLot,
+    lotStep = spec.lotStep,
+    contractSize = params.contractSize ?? spec.contractSize
   } = params;
 
   if (accountSize <= 0 || riskPercentage <= 0) {
     return {
       accepted: false,
       lots: 0,
+      calculatedLotSize: 0,
       riskAmount: 0,
       expectedLoss: 0,
       reason: 'Invalid account size or risk percentage'
@@ -92,6 +214,7 @@ export function calculatePositionSize(params: PositionSizeParams): PositionSizeR
     return {
       accepted: false,
       lots: 0,
+      calculatedLotSize: 0,
       riskAmount,
       expectedLoss: 0,
       reason: 'Stop loss is equal to entry price'
@@ -111,6 +234,7 @@ export function calculatePositionSize(params: PositionSizeParams): PositionSizeR
     return {
       accepted: false,
       lots: minLot,
+      calculatedLotSize: minLot,
       riskAmount,
       expectedLoss: Math.round(lossAtMinLot * 100) / 100,
       reason: `Calculated lot size (${rawLots.toFixed(4)}) is below broker minimum lot (${minLot}). Risk amount $${riskAmount.toFixed(2)} is too small for SL distance ${slDistance.toFixed(2)}.`
@@ -120,9 +244,22 @@ export function calculatePositionSize(params: PositionSizeParams): PositionSizeR
   const finalLots = Math.min(roundedLots, maxLot);
   const expectedLoss = Math.round(finalLots * lossPerLot * 100) / 100;
 
+  let actualRr: number | undefined;
+  if (params.takeProfit && slDistance > 0) {
+    const tpDistance = Math.abs(params.takeProfit - entryPrice);
+    actualRr = Math.round((tpDistance / slDistance) * 100) / 100;
+  } else if (params.riskRewardStr) {
+    actualRr = parseRiskRewardRatio(params.riskRewardStr);
+  }
+
   return {
     accepted: true,
     lots: finalLots,
+    calculatedLotSize: finalLots,
+    actualRr,
+    entryPrice,
+    stopLoss,
+    takeProfit: params.takeProfit,
     riskAmount: Math.round(riskAmount * 100) / 100,
     expectedLoss
   };

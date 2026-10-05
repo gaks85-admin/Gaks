@@ -41,13 +41,39 @@ export const TradeHistory: React.FC<TradeHistoryProps> = ({ userId }) => {
     try {
       const { data, error: fetchError } = await supabase
         .from('trade_learning')
-        .select('id, pair, entry_price, exit_price, realized_r, outcome, closed_at, direction, notes')
+        .select('id, pair, entry_price, exit_price, stop_loss, take_profit, realized_r, rr_achieved, outcome, created_at, notes')
         .eq('user_id', userId)
-        .order('closed_at', { ascending: false })
+        .order('created_at', { ascending: false })
         .limit(20);
 
       if (fetchError) throw fetchError;
-      setTrades(data || []);
+
+      const mappedTrades: Trade[] = (data || []).map((row: any) => {
+        let dir = 'BUY';
+        if (row.take_profit && row.entry_price) {
+          dir = row.take_profit > row.entry_price ? 'BUY' : 'SELL';
+        } else if (row.stop_loss && row.entry_price) {
+          dir = row.stop_loss < row.entry_price ? 'BUY' : 'SELL';
+        } else if (row.outcome === 'WIN') {
+          dir = row.exit_price > row.entry_price ? 'BUY' : 'SELL';
+        } else {
+          dir = row.exit_price < row.entry_price ? 'BUY' : 'SELL';
+        }
+
+        return {
+          id: row.id,
+          pair: row.pair,
+          entry_price: Number(row.entry_price) || 0,
+          exit_price: Number(row.exit_price) || 0,
+          realized_r: Number(row.realized_r ?? row.rr_achieved) || 0,
+          outcome: row.outcome || 'BREAKEVEN',
+          closed_at: row.created_at,
+          direction: dir,
+          notes: row.notes
+        };
+      });
+
+      setTrades(mappedTrades);
     } catch (err: any) {
       console.error('Error fetching trade history:', err);
       setError(err.message || 'Failed to load trade history');

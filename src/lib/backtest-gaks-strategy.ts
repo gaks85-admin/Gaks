@@ -1,0 +1,137 @@
+/**
+ * GAKS AI — Actual Gaks Strategy Backtest Adapter (Phase 5/6 Integration)
+ * Deterministically evaluates compiled Gaks strategy rules (CompilerOutput / CompiledRules)
+ * over historical candle contexts using pure decision-engine evaluators without Gemini API calls.
+ */
+
+import { BacktestStrategy, BacktestCandleContext, BacktestSignal } from './backtest-types.js';
+import { compileStrategy, CompilerOutput } from './strategy-compiler.js';
+import { evaluateDecision } from './decision-engine.js';
+import {
+  calculateDeterministicATR,
+  calculateDeterministicEMA,
+  calculateDeterministicRSI
+} from './backtest-strategy.js';
+
+export class GaksBacktestStrategy implements BacktestStrategy {
+  id: string;
+  name: string;
+  compiledStrategy: CompilerOutput;
+  rawStrategyText: string;
+
+  constructor(strategyText?: string, strategyId?: string) {
+    this.id = strategyId || 'gaks-actual-strategy';
+    this.name = 'Actual Gaks Strategy (Deterministic Rule Engine)';
+    this.rawStrategyText = strategyText || 'Default Gaks Strategy: EMA alignment, BOS/CHOCH structure, confirmation candle, 1:2 RR';
+    this.compiledStrategy = compileStrategy(this.rawStrategyText);
+  }
+
+  evaluate(context: BacktestCandleContext): BacktestSignal | null {
+    const { current, previous, index, symbol, timeframe } = context;
+    if (!previous || previous.length < 14) return null; // Requires at least 14 historical candles
+
+    const allCandles = [...previous, current];
+    const closes = allCandles.map(c => c.close);
+
+    // 1. Calculate Deterministic Indicators over available historical candles
+    const atr = calculateDeterministicATR(allCandles, 14);
+    const rsi = calculateDeterministicRSI(closes, 14);
+
+    const emaPeriods = this.compiledStrategy.compiled_rules?.ema?.periods || [9, 21];
+    const fastPeriod = emaPeriods[0] || 9;
+    const slowPeriod = emaPeriods[1] || 21;
+
+    const fastEma = calculateDeterministicEMA(closes, fastPeriod);
+    const slowEma = calculateDeterministicEMA(closes, slowPeriod);
+
+    const prevCloses = closes.slice(0, -1);
+    const prevFastEma = calculateDeterministicEMA(prevCloses, fastPeriod);
+    const prevSlowEma = calculateDeterministicEMA(prevCloses, slowPeriod);
+
+    const emaCrossoverBullish = prevFastEma !== null && prevSlowEma !== null && fastEma !== null && slowEma !== null && prevFastEma <= prevSlowEma && fastEma > slowEma;
+    const emaCrossoverBearish = prevFastEma !== null && prevSlowEma !== null && fastEma !== null && slowEma !== null && prevFastEma >= prevSlowEma && fastEma < slowEma;
+
+    // Market structure detection over previous 20 candles
+    const lookback = Math.min(previous.length, 20);
+    const recentCandles = previous.slice(-lookback);
+    const recentHigh = Math.max(...recentCandles.map(c => c.high));
+    const recentLow = Math.min(...recentCandles.map(c => c.low));
+
+    const bosBullish = current.close > recentHigh;
+    const bosBearish = current.close < recentLow;
+
+    // Pinbar / Engulfing Confirmation Candle Detection
+    const candleBody = Math.abs(current.close - current.open);
+    const isBullishEngulfing = current.close > current.open && previous.length > 0 && current.close > previous[previous.length - 1].open;
+    const isBearishEngulfing = current.close < current.open && previous.length > 0 && current.close < previous[previous.length - 1].open;
+    const isBullishPinbar = current.close > current.open && (current.open - current.low) >= 1.5 * candleBody;
+    const isBearishPinbar = current.close < current.open && (current.high - current.open) >= 1.5 * candleBody;
+
+    const confirmationBullish = isBullishEngulfing || isBullishPinbar;
+    const confirmationBearish = isBearishEngulfing || isBearishPinbar;
+
+    // Build deterministic market structure object
+    const marketStructure = {
+      trend: fastEma && slowEma ? (fastEma > slowEma ? 'BULLISH' : 'BEARISH') : 'SIDEWAYS',
+      ema: fastEma && slowEma ? fastEma > slowEma : false,
+      ema_crossover: emaCrossoverBullish || emaCrossoverBearish,
+      rsi: rsi !== null ? rsi : 50,
+      rsi_oversold: rsi !== null && rsi <= 30,
+      rsi_overbought: rsi !== null && rsi >= 70,
+      bos: bosBullish || bosBearish,
+      choch: bosBullish || bosBearish,
+      confirmation_candle: confirmationBullish || confirmationBearish,
+      support_rejection: current.low <= recentLow && current.close > recentLow,
+      resistance_rejection: current.high >= recentHigh && current.close < recentHigh,
+      tap_and_rejection: (current.low <= recentLow && current.close > recentLow) || (current.high >= recentHigh && current.close < recentHigh),
+      risk_reward: true
+    };
+
+    // 2. Evaluate Decision Engine against Compiled Gaks Strategy
+    const decision = evaluateDecision(this.compiledStrategy, marketStructure);
+
+    // If decision engine approves signal
+    if (decision.recommendation === 'PASS' || decision.recommendation === 'LIKELY_PASS' || decision.mandatory_rules_passed) {
+      let direction: 'BUY' | 'SELL' = 'BUY';
+      if (bosBearish || emaCrossoverBearish || isBearishEngulfing || isBearishPinbar) {
+        direction = 'SELL';
+      } else if (bosBullish || emaCrossoverBullish || isBullishEngulfing || isBullishPinbar) {
+        direction = 'BUY';
+      } else {
+        direction = fastEma && slowEma && fastEma < slowEma ? 'SELL' : 'BUY';
+      }
+
+      const slBuffer = Math.max(atr * 1.5, 0.0010);
+      const rrRatio = this.compiledStrategy.compiled_rules?.risk_reward?.min_ratio || 2.0;
+
+      const entryPrice = current.close;
+      let stopLoss = 0;
+      let takeProfit = 0;
+
+      if (direction === 'BUY') {
+        stopLoss = Math.round((entryPrice - slBuffer) * 100000) / 100000;
+        const risk = entryPrice - stopLoss;
+        takeProfit = Math.round((entryPrice + risk * rrRatio) * 100000) / 100000;
+      } else {
+        stopLoss = Math.round((entryPrice + slBuffer) * 100000) / 100000;
+        const risk = stopLoss - entryPrice;
+        takeProfit = Math.round((entryPrice - risk * rrRatio) * 100000) / 100000;
+      }
+
+      return {
+        id: `gaks_sig_${index}_${direction.toLowerCase()}`,
+        timestamp: current.timestamp,
+        symbol,
+        timeframe,
+        direction,
+        entryPrice,
+        stopLoss,
+        takeProfit,
+        reason: decision.explanation || `Deterministic Gaks Rule Passed (${decision.matched_rules.join(', ')})`,
+        confidence: Math.round(decision.decision_score * 100)
+      };
+    }
+
+    return null;
+  }
+}

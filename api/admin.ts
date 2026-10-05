@@ -8,6 +8,20 @@ import { resolveUserGeminiKey } from '../src/lib/gemini-key-resolver.js';
 import { defaultMarketDataService, getMarketDataStats, getRequiredCandleCountForTimeframe } from '../src/lib/market-data-service.js';
 import { marketDataGateway } from '../src/lib/market-data-gateway.js';
 import { sendNotificationEmail } from '../src/lib/email-service.js';
+import { verifyAdminAuth } from '../src/lib/auth-admin.js';
+import {
+  createBacktestDataset,
+  listBacktestDatasets,
+  getBacktestDatasetDetails,
+  deleteBacktestDataset
+} from '../src/lib/backtest-service.js';
+import {
+  saveBacktestRun,
+  getBacktestRun,
+  listBacktestRuns,
+  deleteBacktestRun
+} from '../src/lib/backtest-persistence-service.js';
+import { runBacktest } from '../src/lib/backtest-engine.js';
 
 export async function sendTelegramMessage(chatId: string | number, text: string): Promise<boolean> {
   const token = process.env.TELEGRAM_BOT_TOKEN;
@@ -80,20 +94,12 @@ async function health_handler(req: any, res: any) {
   if (req.method === "OPTIONS") return res.status(200).end();
   if (req.method !== 'GET' && req.method !== 'POST') return res.status(405).json({ success: false, error: 'Method Not Allowed' });
 
-  const authHeader = req.headers.authorization || '';
-  const token = authHeader.startsWith('Bearer ') ? authHeader.substring(7) : authHeader;
-  if (!token) return res.status(401).json({ success: false, error: "Unauthorized" });
-
   try {
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
-    if (authError || !user || user.email?.trim().toLowerCase() !== "gaks6535@gmail.com") {
-      return res.status(403).json({ success: false, error: "Unauthorized" });
-    }
-
     if (req.method === 'POST') {
+      const user = req.user;
       const model = "gemini-3.5-flash-lite";
       try {
-        const responseText = await runGeminiRequest(supabase, user.id, "Reply only with OK", model);
+        const responseText = await runGeminiRequest(supabase, user?.id || 'admin', "Reply only with OK", model);
         return res.status(200).json({ success: true, geminiDebug: { authenticated: true, model, geminiResponse: responseText } });
       } catch (err: any) {
         return res.status(200).json({ success: false, geminiDebug: { authenticated: true, model, geminiError: err.message } });
@@ -158,21 +164,11 @@ async function saveSettingsToSupabaseAndFile(settings: any) {
 }
 
 async function settings_handler(req: any, res: any) {
-  const supabase = getSupabase();
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Content-Type", "application/json");
   if (req.method === "OPTIONS") return res.status(200).end();
 
-  const authHeader = req.headers.authorization || '';
-  const token = authHeader.startsWith('Bearer ') ? authHeader.substring(7) : authHeader;
-  if (!token) return res.status(401).json({ success: false, error: "Unauthorized" });
-
   try {
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
-    if (authError || !user || user.email?.trim().toLowerCase() !== "gaks6535@gmail.com") {
-      return res.status(403).json({ success: false, error: "Unauthorized" });
-    }
-
     let appSettings = await loadSettingsFromSupabaseOrFile();
     if (req.method === 'GET') {
       return res.status(200).json({ success: true, settings: appSettings });
@@ -352,16 +348,7 @@ async function zone_history_handler(req: any, res: any) {
   res.setHeader("Content-Type", "application/json");
   if (req.method === "OPTIONS") return res.status(200).end();
 
-  const authHeader = req.headers.authorization || '';
-  const token = authHeader.startsWith('Bearer ') ? authHeader.substring(7) : authHeader;
-  if (!token) return res.status(401).json({ success: false, error: "Unauthorized" });
-
   try {
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
-    if (authError || !user || user.email?.trim().toLowerCase() !== "gaks6535@gmail.com") {
-      return res.status(403).json({ success: false, error: "Unauthorized" });
-    }
-
     const { data: watchers, error: watcherError } = await supabase
       .from('watchers')
       .select('*')
@@ -581,21 +568,11 @@ async function send_test_alert_handler(req: any, res: any) {
 import { defaultEconomicEventService } from '../src/lib/economic-event-service.js';
 
 async function sync_economic_events_handler(req: any, res: any) {
-  const supabase = getSupabase();
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Content-Type", "application/json");
   if (req.method === "OPTIONS") return res.status(200).end();
 
-  const authHeader = req.headers.authorization || '';
-  const token = authHeader.startsWith('Bearer ') ? authHeader.substring(7) : authHeader;
-  if (!token) return res.status(401).json({ success: false, error: "Unauthorized" });
-
   try {
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
-    if (authError || !user || user.email?.trim().toLowerCase() !== "gaks6535@gmail.com") {
-      return res.status(403).json({ success: false, error: "Unauthorized" });
-    }
-
     const { from, to } = req.query;
     console.log(`[Admin] Triggering manual economic event sync. From: ${from || 'default'}, To: ${to || 'default'}`);
     
@@ -611,12 +588,200 @@ async function sync_economic_events_handler(req: any, res: any) {
   }
 }
 
+async function backtest_dataset_handler(req: any, res: any) {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Content-Type", "application/json");
+  if (req.method === "OPTIONS") return res.status(200).end();
+
+  const matchedPath = req.headers['x-matched-path'] || req.headers['x-original-url'] || req.url || '';
+  const parsedUrl = new URL(matchedPath, 'http://localhost');
+  const pathname = parsedUrl.pathname || '';
+
+  try {
+    if (req.method === 'GET') {
+      const parts = pathname.split('/');
+      const datasetIndex = parts.indexOf('datasets');
+      const datasetId = datasetIndex !== -1 && parts.length > datasetIndex + 1 ? parts[datasetIndex + 1] : req.query?.id;
+
+      if (datasetId) {
+        const details = await getBacktestDatasetDetails(datasetId);
+        if (!details.success) {
+          return res.status(404).json(details);
+        }
+        return res.status(200).json(details);
+      }
+
+      const datasets = await listBacktestDatasets();
+      return res.status(200).json({ success: true, datasets });
+    }
+
+    if (req.method === 'POST') {
+      const { name, symbol, timeframe, sourceFilename, csvContent } = req.body || {};
+      const userId = req.userId || 'admin';
+
+      const result = await createBacktestDataset({
+        userId,
+        name,
+        symbol,
+        timeframe,
+        sourceFilename,
+        csvContent
+      });
+
+      if (!result.success) {
+        return res.status(400).json(result);
+      }
+
+      return res.status(200).json(result);
+    }
+
+    if (req.method === 'DELETE') {
+      const parts = pathname.split('/');
+      const datasetIndex = parts.indexOf('datasets');
+      const datasetId = datasetIndex !== -1 && parts.length > datasetIndex + 1 ? parts[datasetIndex + 1] : req.query?.id;
+
+      if (!datasetId) {
+        return res.status(400).json({ success: false, error: 'Dataset ID required for deletion' });
+      }
+
+      const result = await deleteBacktestDataset(datasetId);
+      return res.status(200).json(result);
+    }
+
+    return res.status(405).json({ success: false, error: 'Method Not Allowed' });
+  } catch (err: any) {
+    console.error('[Admin Backtest Handler Error]:', err);
+    return res.status(500).json({ success: false, error: err.message || 'Internal Server Error' });
+  }
+}
+
+async function backtest_run_handler(req: any, res: any) {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Content-Type", "application/json");
+  if (req.method === "OPTIONS") return res.status(200).end();
+
+  if (req.method !== 'POST') {
+    return res.status(405).json({ success: false, error: 'Method Not Allowed' });
+  }
+
+  try {
+    const { datasetId, strategyId, strategyText, initialBalance, symbol, timeframe, startTime, endTime, simulation } = req.body || {};
+
+    const config = {
+      datasetId,
+      strategyId,
+      strategyText,
+      initialBalance: Number(initialBalance) || 100000,
+      symbol,
+      timeframe,
+      startTime,
+      endTime,
+      simulation
+    };
+
+    const result = await runBacktest(config);
+
+    if (!result.success) {
+      return res.status(400).json(result);
+    }
+
+    const userId = req.userId || 'admin';
+    const saveRes = await saveBacktestRun({
+      userId,
+      engineResult: result,
+      strategySnapshot: { strategyText: config.strategyText, strategyId: config.strategyId },
+      simulationConfig: config.simulation || {}
+    });
+
+    return res.status(200).json({
+      ...result,
+      runId: saveRes.runId
+    });
+  } catch (err: any) {
+    console.error('[Admin Backtest Run Error]:', err);
+    return res.status(500).json({ success: false, error: err.message || 'Backtest execution failed' });
+  }
+}
+
+async function backtest_runs_handler(req: any, res: any) {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Content-Type", "application/json");
+  if (req.method === "OPTIONS") return res.status(200).end();
+
+  const matchedPath = req.headers['x-matched-path'] || req.headers['x-original-url'] || req.url || '';
+  const parsedUrl = new URL(matchedPath, 'http://localhost');
+  const pathname = parsedUrl.pathname || '';
+
+  try {
+    if (req.method === 'GET') {
+      const parts = pathname.split('/');
+      const runsIndex = parts.indexOf('runs');
+      const runId = runsIndex !== -1 && parts.length > runsIndex + 1 ? parts[runsIndex + 1] : req.query?.id;
+
+      if (runId) {
+        const run = await getBacktestRun(runId);
+        if (!run) {
+          return res.status(404).json({ success: false, error: 'Backtest run not found' });
+        }
+        return res.status(200).json({ success: true, run });
+      }
+
+      const runs = await listBacktestRuns();
+      return res.status(200).json({ success: true, runs });
+    }
+
+    if (req.method === 'DELETE') {
+      const parts = pathname.split('/');
+      const runsIndex = parts.indexOf('runs');
+      const runId = runsIndex !== -1 && parts.length > runsIndex + 1 ? parts[runsIndex + 1] : req.query?.id;
+
+      if (!runId) {
+        return res.status(400).json({ success: false, error: 'Run ID required for deletion' });
+      }
+
+      const result = await deleteBacktestRun(runId);
+      return res.status(200).json(result);
+    }
+
+    return res.status(405).json({ success: false, error: 'Method Not Allowed' });
+  } catch (err: any) {
+    console.error('[Admin Backtest Runs Handler Error]:', err);
+    return res.status(500).json({ success: false, error: err.message || 'Internal Server Error' });
+  }
+}
+
 export default async function handler(req: any, res: any) {
+  // CORS configuration
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Content-Type", "application/json");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, PATCH, DELETE");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With");
+
+  if (req.method === "OPTIONS") {
+    return res.status(200).end();
+  }
+
+  const supabase = getSupabase();
+
+  const authResult = await verifyAdminAuth(req, supabase);
+
+  if (!authResult.isAdmin) {
+    return res
+      .status(authResult.statusCode || 403)
+      .json({
+        success: false,
+        error: authResult.error || "Forbidden",
+      });
+  }
+
   try {
     const matchedPath = req.headers['x-matched-path'] || req.headers['x-original-url'] || req.url || '';
     const parsedUrl = new URL(matchedPath, 'http://localhost');
     const pathname = parsedUrl.pathname || '';
 
+    if (pathname.includes('/backtest/run')) return backtest_run_handler(req, res);
+    if (pathname.includes('/backtest/runs')) return backtest_runs_handler(req, res);
+    if (pathname.includes('/backtest/datasets')) return backtest_dataset_handler(req, res);
     if (pathname.endsWith('/sync-economic-events')) return sync_economic_events_handler(req, res);
     if (pathname.endsWith('/logs')) return logs_handler(req, res);
     if (pathname.endsWith('/system-health')) return system_health_handler(req, res);

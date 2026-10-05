@@ -1,0 +1,423 @@
+/**
+ * GAKS AI — Backtesting Engine: Historical Dataset Service (Phase 3)
+ * Manages creation, validation, storage, retrieval, and deletion of backtest datasets.
+ */
+
+import fs from 'fs';
+import path from 'path';
+import { getSupabase } from '../../lib/supabase-server.js';
+import { parseAndValidateCSV, ParsedCandle } from './backtest-csv.js';
+
+export interface BacktestDatasetRecord {
+  id: string;
+  created_by: string;
+  name: string;
+  symbol: string;
+  timeframe: string;
+  source_filename: string;
+  row_count: number;
+  start_time: string | null;
+  end_time: string | null;
+  status: 'processing' | 'ready' | 'failed';
+  error_message?: string | null;
+  covers_2025?: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+// File system fallback directory for environments where database tables are being provisioned
+const FALLBACK_DIR = path.join(process.cwd(), '.data', 'backtest');
+
+function ensureFallbackDir() {
+  if (!fs.existsSync(FALLBACK_DIR)) {
+    fs.mkdirSync(FALLBACK_DIR, { recursive: true });
+  }
+}
+
+function getFallbackIndexFile(): string {
+  ensureFallbackDir();
+  return path.join(FALLBACK_DIR, 'datasets.json');
+}
+
+function readFallbackDatasets(): BacktestDatasetRecord[] {
+  try {
+    const file = getFallbackIndexFile();
+    if (!fs.existsSync(file)) return [];
+    const content = fs.readFileSync(file, 'utf8');
+    return JSON.parse(content);
+  } catch {
+    return [];
+  }
+}
+
+function saveFallbackDatasets(datasets: BacktestDatasetRecord[]) {
+  try {
+    const file = getFallbackIndexFile();
+    fs.writeFileSync(file, JSON.stringify(datasets, null, 2), 'utf8');
+  } catch (err) {
+    console.error('[Backtest Fallback] Error saving index:', err);
+  }
+}
+
+function saveFallbackCandles(datasetId: string, candles: ParsedCandle[]) {
+  try {
+    ensureFallbackDir();
+    const candleFile = path.join(FALLBACK_DIR, `candles_${datasetId}.json`);
+    fs.writeFileSync(candleFile, JSON.stringify(candles), 'utf8');
+  } catch (err) {
+    console.error('[Backtest Fallback] Error saving candles:', err);
+  }
+}
+
+function readFallbackCandles(datasetId: string): ParsedCandle[] {
+  try {
+    const candleFile = path.join(FALLBACK_DIR, `candles_${datasetId}.json`);
+    if (!fs.existsSync(candleFile)) return [];
+    return JSON.parse(fs.readFileSync(candleFile, 'utf8'));
+  } catch {
+    return [];
+  }
+}
+
+function deleteFallbackDataset(datasetId: string) {
+  try {
+    const datasets = readFallbackDatasets().filter(d => d.id !== datasetId);
+    saveFallbackDatasets(datasets);
+    const candleFile = path.join(FALLBACK_DIR, `candles_${datasetId}.json`);
+    if (fs.existsSync(candleFile)) {
+      fs.unlinkSync(candleFile);
+    }
+  } catch (err) {
+    console.error('[Backtest Fallback] Error deleting dataset:', err);
+  }
+}
+
+function checkCovers2025(startStr: string | null, endStr: string | null): boolean {
+  if (!startStr || !endStr) return false;
+  const startYear = new Date(startStr).getUTCFullYear();
+  const endYear = new Date(endStr).getUTCFullYear();
+  return (startYear <= 2025 && endYear >= 2025);
+}
+
+/**
+ * Creates, validates, and stores a new historical backtest dataset.
+ */
+export async function createBacktestDataset(params: {
+  userId: string;
+  name: string;
+  symbol: string;
+  timeframe: string;
+  sourceFilename: string;
+  csvContent: string;
+}): Promise<{ success: boolean; dataset?: BacktestDatasetRecord; error?: string }> {
+  const { userId, name, symbol, timeframe, sourceFilename, csvContent } = params;
+
+  if (!name || !name.trim()) return { success: false, error: 'Dataset name is required' };
+  if (!symbol || !symbol.trim()) return { success: false, error: 'Symbol is required' };
+  if (!timeframe || !timeframe.trim()) return { success: false, error: 'Timeframe is required' };
+  if (!csvContent || !csvContent.trim()) return { success: false, error: 'CSV content is empty' };
+
+  const normSymbol = symbol.trim().toUpperCase();
+  const normTimeframe = timeframe.trim().toUpperCase();
+
+  // 1. Parse & Validate CSV
+  const parseRes = parseAndValidateCSV(csvContent);
+  if (!parseRes.success || parseRes.candles.length === 0) {
+    return { success: false, error: parseRes.error || 'CSV validation failed' };
+  }
+
+  const candles = parseRes.candles;
+  const rowCount = parseRes.rowCount;
+  const startTime = parseRes.startTime;
+  const endTime = parseRes.endTime;
+  const datasetId = crypto.randomUUID();
+  const now = new Date().toISOString();
+
+  const supabase = getSupabase();
+
+  // Attempt database insertion
+  try {
+    // 2. Insert dataset with status = 'processing'
+    const { data: dbDataset, error: dbErr } = await supabase
+      .from('backtest_datasets')
+      .insert({
+        id: datasetId,
+        created_by: userId,
+        name: name.trim(),
+        symbol: normSymbol,
+        timeframe: normTimeframe,
+        source_filename: sourceFilename || 'uploaded_data.csv',
+        row_count: 0,
+        start_time: startTime,
+        end_time: endTime,
+        status: 'processing',
+        created_at: now,
+        updated_at: now
+      })
+      .select()
+      .single();
+
+    if (dbErr) {
+      if (dbErr.code === 'PGRST205' || dbErr.code === '23503' || dbErr.code === '22P02' || dbErr.message?.includes('schema cache') || dbErr.message?.includes('does not exist') || dbErr.message?.includes('foreign key')) {
+        // Fallback to local file store
+        console.warn('[Backtest Service] Table missing or foreign key constraint error, using fallback storage');
+        return createFallbackDataset(params, datasetId, candles, rowCount, startTime, endTime, now);
+      }
+      throw dbErr;
+    }
+
+    // 3. Batch insert candles into backtest_candles
+    const BATCH_SIZE = 1500;
+    for (let i = 0; i < candles.length; i += BATCH_SIZE) {
+      const batch = candles.slice(i, i + BATCH_SIZE).map(c => ({
+        dataset_id: datasetId,
+        timestamp: c.timestamp,
+        open: c.open,
+        high: c.high,
+        low: c.low,
+        close: c.close,
+        volume: c.volume
+      }));
+
+      const { error: batchErr } = await supabase.from('backtest_candles').insert(batch);
+      if (batchErr) {
+        // Rollback dataset to failed
+        await supabase.from('backtest_datasets').update({
+          status: 'failed',
+          error_message: `Candle insertion failed: ${batchErr.message}`
+        }).eq('id', datasetId);
+
+        return { success: false, error: `Database insertion error: ${batchErr.message}` };
+      }
+    }
+
+    // 4. Verify count
+    const { count, error: countErr } = await supabase
+      .from('backtest_candles')
+      .select('*', { count: 'exact', head: true })
+      .eq('dataset_id', datasetId);
+
+    if (countErr || count !== rowCount) {
+      await supabase.from('backtest_datasets').update({
+        status: 'failed',
+        error_message: `Row count mismatch: expected ${rowCount}, stored ${count || 0}`
+      }).eq('id', datasetId);
+
+      return { success: false, error: `Dataset verification failed: Expected ${rowCount} rows, stored ${count || 0}` };
+    }
+
+    // 5. Mark ready
+    const { data: finalDataset, error: updateErr } = await supabase
+      .from('backtest_datasets')
+      .update({
+        status: 'ready',
+        row_count: rowCount,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', datasetId)
+      .select()
+      .single();
+
+    if (updateErr) throw updateErr;
+
+    return {
+      success: true,
+      dataset: {
+        ...finalDataset,
+        covers_2025: checkCovers2025(startTime, endTime)
+      }
+    };
+  } catch (err: any) {
+    console.error('[Backtest Service] Error creating dataset:', err);
+    return createFallbackDataset(params, datasetId, candles, rowCount, startTime, endTime, now);
+  }
+}
+
+function createFallbackDataset(
+  params: { userId: string; name: string; symbol: string; timeframe: string; sourceFilename: string },
+  datasetId: string,
+  candles: ParsedCandle[],
+  rowCount: number,
+  startTime: string | null,
+  endTime: string | null,
+  now: string
+): { success: boolean; dataset?: BacktestDatasetRecord; error?: string } {
+  const dataset: BacktestDatasetRecord = {
+    id: datasetId,
+    created_by: params.userId,
+    name: params.name.trim(),
+    symbol: params.symbol.trim().toUpperCase(),
+    timeframe: params.timeframe.trim().toUpperCase(),
+    source_filename: params.sourceFilename || 'uploaded_data.csv',
+    row_count: rowCount,
+    start_time: startTime,
+    end_time: endTime,
+    status: 'ready',
+    created_at: now,
+    updated_at: now,
+    covers_2025: checkCovers2025(startTime, endTime)
+  };
+
+  saveFallbackCandles(datasetId, candles);
+  const existing = readFallbackDatasets();
+  saveFallbackDatasets([dataset, ...existing]);
+
+  return { success: true, dataset };
+}
+
+/**
+ * Lists all historical backtest datasets.
+ */
+export async function listBacktestDatasets(): Promise<BacktestDatasetRecord[]> {
+  const supabase = getSupabase();
+  const fallback = readFallbackDatasets();
+  try {
+    const { data, error } = await supabase
+      .from('backtest_datasets')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      return fallback;
+    }
+
+    const dbDatasets = (data || []).map(d => ({
+      ...d,
+      covers_2025: checkCovers2025(d.start_time, d.end_time)
+    }));
+
+    const map = new Map<string, BacktestDatasetRecord>();
+    for (const d of fallback) map.set(d.id, d);
+    for (const d of dbDatasets) map.set(d.id, d);
+    return Array.from(map.values()).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+  } catch (err) {
+    return fallback;
+  }
+}
+
+/**
+ * Gets details and candle sample preview for a dataset.
+ */
+export async function getBacktestDatasetDetails(id: string): Promise<{
+  success: boolean;
+  dataset?: BacktestDatasetRecord;
+  sampleCandles?: ParsedCandle[];
+  error?: string;
+}> {
+  const supabase = getSupabase();
+  try {
+    const { data: dataset, error: dsErr } = await supabase
+      .from('backtest_datasets')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (dsErr || !dataset) {
+      return getFallbackDetails(id);
+    }
+
+    // Fetch first 25 and last 25 candles for preview
+    const { data: startCandles } = await supabase
+      .from('backtest_candles')
+      .select('timestamp, open, high, low, close, volume')
+      .eq('dataset_id', id)
+      .order('timestamp', { ascending: true })
+      .limit(25);
+
+    const { data: endCandles } = await supabase
+      .from('backtest_candles')
+      .select('timestamp, open, high, low, close, volume')
+      .eq('dataset_id', id)
+      .order('timestamp', { ascending: false })
+      .limit(25);
+
+    const sample = [...(startCandles || []), ...(endCandles || []).reverse()];
+
+    return {
+      success: true,
+      dataset: {
+        ...dataset,
+        covers_2025: checkCovers2025(dataset.start_time, dataset.end_time)
+      },
+      sampleCandles: sample
+    };
+  } catch {
+    return getFallbackDetails(id);
+  }
+}
+
+function getFallbackDetails(id: string) {
+  const datasets = readFallbackDatasets();
+  const dataset = datasets.find(d => d.id === id);
+  if (!dataset) return { success: false, error: 'Dataset not found' };
+
+  const candles = readFallbackCandles(id);
+  const sample = candles.length > 50
+    ? [...candles.slice(0, 25), ...candles.slice(-25)]
+    : candles;
+
+  return {
+    success: true,
+    dataset: {
+      ...dataset,
+      covers_2025: checkCovers2025(dataset.start_time, dataset.end_time)
+    },
+    sampleCandles: sample
+  };
+}
+
+/**
+ * Fetches ALL historical candles for a dataset in chronological order.
+ */
+export async function getBacktestDatasetCandles(id: string): Promise<ParsedCandle[]> {
+  const supabase = getSupabase();
+  try {
+    const { data: candles, error } = await supabase
+      .from('backtest_candles')
+      .select('timestamp, open, high, low, close, volume')
+      .eq('dataset_id', id)
+      .order('timestamp', { ascending: true });
+
+    if (error) {
+      if (error.code === 'PGRST205' || error.message?.includes('schema cache') || error.message?.includes('does not exist')) {
+        return readFallbackCandles(id);
+      }
+      return readFallbackCandles(id);
+    }
+
+    if (candles && candles.length > 0) {
+      return candles.map(c => ({
+        timestamp: c.timestamp,
+        open: Number(c.open),
+        high: Number(c.high),
+        low: Number(c.low),
+        close: Number(c.close),
+        volume: c.volume !== undefined && c.volume !== null ? Number(c.volume) : undefined
+      }));
+    }
+
+    return readFallbackCandles(id);
+  } catch {
+    return readFallbackCandles(id);
+  }
+}
+export async function deleteBacktestDataset(id: string): Promise<{ success: boolean; error?: string }> {
+  const supabase = getSupabase();
+  try {
+    deleteFallbackDataset(id);
+
+    const { error } = await supabase
+      .from('backtest_datasets')
+      .delete()
+      .eq('id', id);
+
+    if (error && error.code !== 'PGRST205' && !error.message?.includes('does not exist')) {
+      console.warn('[Backtest Service] DB Delete notice:', error.message);
+    }
+
+    return { success: true };
+  } catch (err: any) {
+    deleteFallbackDataset(id);
+    return { success: true };
+  }
+}
