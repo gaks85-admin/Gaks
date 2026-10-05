@@ -779,8 +779,8 @@ export default async function handler(req: any, res: any) {
     const parsedUrl = new URL(matchedPath, 'http://localhost');
     const pathname = parsedUrl.pathname || '';
 
-    if (pathname.includes('/backtest/run')) return backtest_run_handler(req, res);
     if (pathname.includes('/backtest/runs')) return backtest_runs_handler(req, res);
+    if (pathname.includes('/backtest/run')) return backtest_run_handler(req, res);
     if (pathname.includes('/backtest/datasets')) return backtest_dataset_handler(req, res);
     if (pathname.endsWith('/sync-economic-events')) return sync_economic_events_handler(req, res);
     if (pathname.endsWith('/logs')) return logs_handler(req, res);

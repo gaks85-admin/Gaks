@@ -29,7 +29,9 @@ export interface BacktestRunRecord {
   trades?: BacktestTradeRecord[];
 }
 
-const FALLBACK_DIR = path.join(process.cwd(), '.data', 'backtest');
+const FALLBACK_DIR = process.env.VERCEL || process.env.NODE_ENV === 'production' || process.cwd().startsWith('/var/task')
+  ? path.join('/tmp', '.data', 'backtest')
+  : path.join(process.cwd(), '.data', 'backtest');
 
 function ensureFallbackDir() {
   if (!fs.existsSync(FALLBACK_DIR)) {

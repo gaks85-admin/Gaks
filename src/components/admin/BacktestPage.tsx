@@ -57,16 +57,34 @@ export function BacktestPage({ fetchWithAuth, showToast }: BacktestPageProps) {
   const handleRunBacktest = async (dataset: BacktestDataset) => {
     setRunningEngineId(dataset.id);
     try {
+      // 1. Parse account capital from localStorage
+      const savedCapital = localStorage.getItem('gaks_capital') || '$100,000';
+      let balanceNum = 100000;
+      if (savedCapital === 'Custom') {
+        const customCapital = localStorage.getItem('gaks_custom_capital') || '100000';
+        balanceNum = parseFloat(customCapital.replace(/[^0-9.]/g, '')) || 100000;
+      } else {
+        balanceNum = parseFloat(savedCapital.replace(/[^0-9.]/g, '')) || 100000;
+      }
+
+      // 2. Parse risk percent from localStorage
+      const savedRisk = localStorage.getItem('gaks_preferred_risk') || '1%';
+      const riskPercentNum = parseFloat(savedRisk.replace(/[^0-9.]/g, '')) || 1.0;
+
+      // 3. Get customized strategy text from localStorage
+      const savedStrategyText = localStorage.getItem('gaks_strategy_text') || '';
+
       const res = await fetchWithAuth('/api/admin/backtest/run', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           datasetId: dataset.id,
-          initialBalance: 100000,
+          initialBalance: balanceNum,
+          strategyText: savedStrategyText,
           symbol: dataset.symbol,
           timeframe: dataset.timeframe,
           simulation: {
-            riskPercent: 1.0,
+            riskPercent: riskPercentNum,
             spreadPips: 1.0,
             slippagePips: 0.5,
             commissionPerLot: 7.0,
