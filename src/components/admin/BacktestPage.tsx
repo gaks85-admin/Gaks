@@ -64,8 +64,16 @@ export function BacktestPage({ fetchWithAuth, showToast }: BacktestPageProps) {
         const customCapital = localStorage.getItem('gaks_custom_capital') || '100000';
         balanceNum = parseFloat(customCapital.replace(/[^0-9.]/g, '')) || 100000;
       } else {
-        balanceNum = parseFloat(savedCapital.replace(/[^0-9.]/g, '')) || 100000;
+        const raw = savedCapital.trim().toLowerCase();
+        if (raw.includes('k')) {
+          balanceNum = (parseFloat(raw.replace(/[^0-9.]/g, '')) || 100) * 1000;
+        } else if (raw.includes('m')) {
+          balanceNum = (parseFloat(raw.replace(/[^0-9.]/g, '')) || 1) * 1000000;
+        } else {
+          balanceNum = parseFloat(raw.replace(/[^0-9.]/g, '')) || 100000;
+        }
       }
+      if (balanceNum <= 0) balanceNum = 100000;
 
       // 2. Parse risk percent from localStorage
       const savedRisk = localStorage.getItem('gaks_preferred_risk') || '1%';
@@ -729,6 +737,18 @@ export function BacktestPage({ fetchWithAuth, showToast }: BacktestPageProps) {
             </div>
 
             <div className="p-5 overflow-y-auto space-y-4 flex-1 text-xs">
+              {engineResult.tradesCompleted === 0 && (
+                <div className="p-3.5 bg-amber-500/10 border border-amber-500/20 rounded-xl text-amber-300 text-xs flex items-start gap-2.5">
+                  <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-amber-400" />
+                  <div>
+                    <span className="font-semibold block text-amber-300">0 Trades Triggered in this Period</span>
+                    <p className="text-zinc-400 text-[11px] mt-0.5 leading-relaxed">
+                      Your strategy's strict rules (Order Block / Zone tap + Confirmation Candle + EMA alignment) had zero simultaneous matches in this short test window. Select the <strong>EURUSD 2025 Multi-Month Dataset (1,500 Candles)</strong> or upload your own broker CSV with more historical price swings to see full simulation metrics.
+                    </p>
+                  </div>
+                </div>
+              )}
+
               {engineResult.analytics && (
                 <div className="space-y-4 bg-zinc-950/40 p-4 rounded-2xl border border-zinc-800/80">
                   <h4 className="font-bold text-zinc-100 flex items-center gap-2">
