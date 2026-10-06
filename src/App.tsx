@@ -3120,69 +3120,69 @@ export default function App() {
         </main>
 
         {/* Floating/Bottom Navigation Bar - Matches minimalist reference UI */}
-        <nav className="fixed bottom-4 left-4 right-4 mx-auto w-auto max-w-[416px] bg-white dark:bg-[#0c0c0e] border border-zinc-200 dark:border-zinc-800 px-4 py-2 z-50 rounded-full flex justify-between items-center shadow-md">
+        <nav className="fixed bottom-3 sm:bottom-4 left-2 sm:left-4 right-2 sm:right-4 mx-auto w-auto max-w-[440px] bg-white/95 dark:bg-[#0c0c0e]/95 backdrop-blur-md border border-zinc-200 dark:border-zinc-800 px-1.5 sm:px-3 py-1.5 z-50 rounded-full flex justify-between items-center shadow-lg">
           <button
             onClick={() => setActiveTab('home')}
-            className={`flex-1 flex flex-col items-center gap-1 cursor-pointer transition-colors ${
+            className={`flex-1 min-w-0 flex flex-col items-center cursor-pointer transition-colors ${
               activeTab === 'home'
                 ? 'text-zinc-950 dark:text-white'
                 : 'text-zinc-400 hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300'
             }`}
           >
-            <div className={`py-1.5 px-3 rounded-2xl flex flex-col items-center gap-1 transition-colors ${
+            <div className={`py-1 sm:py-1.5 px-1 sm:px-2.5 rounded-xl sm:rounded-2xl flex flex-col items-center gap-0.5 sm:gap-1 transition-colors w-full ${
               activeTab === 'home' ? 'bg-zinc-100 dark:bg-[#1a1a1e] text-zinc-950 dark:text-white shadow-xs font-medium' : ''
             }`}>
-              <HomeIcon className="w-4 h-4 stroke-[1.8]" />
-              <span className="text-[10px] font-medium tracking-normal">Home</span>
+              <HomeIcon className="w-3.5 h-3.5 sm:w-4 sm:h-4 stroke-[1.8] shrink-0" />
+              <span className="text-[9px] sm:text-[10px] font-medium tracking-tight truncate max-w-full">Home</span>
             </div>
           </button>
 
           <button
             onClick={() => setActiveTab('strategy')}
-            className={`flex-1 flex flex-col items-center gap-1 cursor-pointer transition-colors ${
+            className={`flex-1 min-w-0 flex flex-col items-center cursor-pointer transition-colors ${
               activeTab === 'strategy'
                 ? 'text-zinc-950 dark:text-white'
                 : 'text-zinc-400 hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300'
             }`}
           >
-            <div className={`py-1.5 px-3 rounded-2xl flex flex-col items-center gap-1 transition-colors ${
+            <div className={`py-1 sm:py-1.5 px-1 sm:px-2.5 rounded-xl sm:rounded-2xl flex flex-col items-center gap-0.5 sm:gap-1 transition-colors w-full ${
               activeTab === 'strategy' ? 'bg-zinc-100 dark:bg-[#1a1a1e] text-zinc-950 dark:text-white shadow-xs font-medium' : ''
             }`}>
-              <TrendingUpIcon className="w-4 h-4 stroke-[1.8]" />
-              <span className="text-[10px] font-medium tracking-normal">Strategy</span>
+              <TrendingUpIcon className="w-3.5 h-3.5 sm:w-4 sm:h-4 stroke-[1.8] shrink-0" />
+              <span className="text-[9px] sm:text-[10px] font-medium tracking-tight truncate max-w-full">Strategy</span>
             </div>
           </button>
 
           <button
             onClick={() => setActiveTab('watcher')}
-            className={`flex-1 flex flex-col items-center gap-1 cursor-pointer transition-colors ${
+            className={`flex-1 min-w-0 flex flex-col items-center cursor-pointer transition-colors ${
               activeTab === 'watcher'
                 ? 'text-zinc-950 dark:text-white'
                 : 'text-zinc-400 hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300'
             }`}
           >
-            <div className={`py-1.5 px-3 rounded-2xl flex flex-col items-center gap-1 transition-colors ${
+            <div className={`py-1 sm:py-1.5 px-1 sm:px-2.5 rounded-xl sm:rounded-2xl flex flex-col items-center gap-0.5 sm:gap-1 transition-colors w-full ${
               activeTab === 'watcher' ? 'bg-zinc-100 dark:bg-[#1a1a1e] text-zinc-950 dark:text-white shadow-xs font-medium' : ''
             }`}>
-              <Eye className="w-4 h-4 stroke-[1.8]" />
-              <span className="text-[10px] font-medium tracking-normal">Watcher</span>
+              <Eye className="w-3.5 h-3.5 sm:w-4 sm:h-4 stroke-[1.8] shrink-0" />
+              <span className="text-[9px] sm:text-[10px] font-medium tracking-tight truncate max-w-full">Watcher</span>
             </div>
           </button>
 
           {/* Settings Tab */}
           <button
             onClick={() => setActiveTab('settings')}
-            className={`flex-1 flex flex-col items-center gap-1 cursor-pointer transition-colors ${
+            className={`flex-1 min-w-0 flex flex-col items-center cursor-pointer transition-colors ${
               activeTab === 'settings'
                 ? 'text-zinc-950 dark:text-white'
                 : 'text-zinc-400 hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300'
             }`}
           >
-            <div className={`py-1.5 px-3 rounded-2xl flex flex-col items-center gap-1 transition-colors ${
+            <div className={`py-1 sm:py-1.5 px-1 sm:px-2.5 rounded-xl sm:rounded-2xl flex flex-col items-center gap-0.5 sm:gap-1 transition-colors w-full ${
               activeTab === 'settings' ? 'bg-zinc-100 dark:bg-[#1a1a1e] text-zinc-950 dark:text-white shadow-xs font-medium' : ''
             }`}>
-              <SettingsIcon className="w-4 h-4 stroke-[1.8]" />
-              <span className="text-[10px] font-medium tracking-normal">Settings</span>
+              <SettingsIcon className="w-3.5 h-3.5 sm:w-4 sm:h-4 stroke-[1.8] shrink-0" />
+              <span className="text-[9px] sm:text-[10px] font-medium tracking-tight truncate max-w-full">Settings</span>
             </div>
           </button>
 
@@ -3190,17 +3190,17 @@ export default function App() {
           {isAdmin && (
             <button
               onClick={() => setActiveTab('backtest')}
-              className={`flex-1 flex flex-col items-center gap-1 cursor-pointer transition-colors ${
+              className={`flex-1 min-w-0 flex flex-col items-center cursor-pointer transition-colors ${
                 activeTab === 'backtest'
                   ? 'text-zinc-950 dark:text-white'
                   : 'text-zinc-400 hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300'
               }`}
             >
-              <div className={`py-1.5 px-3 rounded-2xl flex flex-col items-center gap-1 transition-colors ${
+              <div className={`py-1 sm:py-1.5 px-1 sm:px-2.5 rounded-xl sm:rounded-2xl flex flex-col items-center gap-0.5 sm:gap-1 transition-colors w-full ${
                 activeTab === 'backtest' ? 'bg-zinc-100 dark:bg-[#1a1a1e] text-zinc-950 dark:text-white shadow-xs font-medium' : ''
               }`}>
-                <Layers className="w-4 h-4 stroke-[1.8]" />
-                <span className="text-[10px] font-medium tracking-normal">Backtest</span>
+                <Layers className="w-3.5 h-3.5 sm:w-4 sm:h-4 stroke-[1.8] shrink-0" />
+                <span className="text-[9px] sm:text-[10px] font-medium tracking-tight truncate max-w-full">Backtest</span>
               </div>
             </button>
           )}
@@ -3209,17 +3209,17 @@ export default function App() {
           {isAdmin && (
             <button
               onClick={() => setActiveTab('admin')}
-              className={`flex-1 flex flex-col items-center gap-1 cursor-pointer transition-colors ${
+              className={`flex-1 min-w-0 flex flex-col items-center cursor-pointer transition-colors ${
                 activeTab === 'admin'
                   ? 'text-zinc-950 dark:text-white'
                   : 'text-zinc-400 hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300'
               }`}
             >
-              <div className={`py-1.5 px-3 rounded-2xl flex flex-col items-center gap-1 transition-colors ${
+              <div className={`py-1 sm:py-1.5 px-1 sm:px-2.5 rounded-xl sm:rounded-2xl flex flex-col items-center gap-0.5 sm:gap-1 transition-colors w-full ${
                 activeTab === 'admin' ? 'bg-zinc-100 dark:bg-[#1a1a1e] text-zinc-950 dark:text-white shadow-xs font-medium' : ''
               }`}>
-                <Shield className="w-4 h-4 stroke-[1.8]" />
-                <span className="text-[10px] font-medium tracking-normal">Admin</span>
+                <Shield className="w-3.5 h-3.5 sm:w-4 sm:h-4 stroke-[1.8] shrink-0" />
+                <span className="text-[9px] sm:text-[10px] font-medium tracking-tight truncate max-w-full">Admin</span>
               </div>
             </button>
           )}

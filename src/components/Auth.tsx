@@ -132,7 +132,9 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
         });
         
         let errorMessage = error.message;
-        if (errorMessage === 'Failed to fetch' || (error as any).name === 'TypeError') {
+        if (error.message === 'Invalid login credentials' || (error as any).code === 'invalid_credentials') {
+          errorMessage = 'Invalid email or password. Please verify your credentials, or tap "Create one" above to register an account.';
+        } else if (errorMessage === 'Failed to fetch' || (error as any).name === 'TypeError') {
           if (!isRealSupabaseConfigured) {
             errorMessage = 'Configuration Error: The authentication service URL is not set. Please check your environment variables (VITE_SUPABASE_URL).';
           } else {
