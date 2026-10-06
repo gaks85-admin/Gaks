@@ -286,18 +286,11 @@ export function parseAndValidateCSV(csvText: string): CSVParseResult {
 
     const timestamp = tsResult.iso;
 
-    // Check duplicate timestamp in source file
+    // Deduplicate duplicate timestamps from DST transitions / broker overlaps
     if (timestampSet.has(timestamp)) {
-      return {
-        success: false,
-        candles: [],
-        rowCount: 0,
-        startTime: null,
-        endTime: null,
-        covers2025: false,
-        error: `Row ${rowNum}: Duplicate timestamp detected (${timestamp})`
-      };
+      continue;
     }
+    timestampSet.add(timestamp);
 
     // Parse numbers
     const cleanOpenStr = rawOpen.trim().replace(/^["']|["']$/g, '');
