@@ -176,11 +176,17 @@ export function parseAndValidateCSV(csvText: string): CSVParseResult {
   const lines = rawLines.filter(line => {
     const lower = line.toLowerCase();
     if (lower.startsWith('#') || lower.startsWith('//') || lower.startsWith('/*')) return false;
-    if (lower.includes('histdata.com') || lower.includes('gap of') || lower.includes('status report') || lower.startsWith('file:')) return false;
+    if (
+      lower.includes('histdata.com') || 
+      lower.includes('gap of') || 
+      lower.includes('status report') || 
+      lower.startsWith('file:') ||
+      lower.includes('tick interval')
+    ) return false;
     return true;
   });
 
-  if (lines.length < 2) {
+  if (lines.length === 0) {
     return {
       success: false,
       candles: [],
@@ -188,7 +194,7 @@ export function parseAndValidateCSV(csvText: string): CSVParseResult {
       startTime: null,
       endTime: null,
       covers2025: false,
-      error: 'CSV must contain a header row and at least one data row'
+      error: "This file is a HistData status report text file (~0.10 MB) rather than the candle data file. Please select the main CSV file 'DAT_MT_EURUSD_M1_2025.csv' (~30 MB) from your downloaded ZIP folder."
     };
   }
 
