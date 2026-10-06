@@ -121,6 +121,13 @@ function parseTimestamp(rawTs: string): { iso: string | null; error?: string } {
   let cleaned = rawTs.trim().replace(/^["']|["']$/g, '');
   if (!cleaned) return { iso: null, error: 'Empty timestamp string' };
 
+  // Handle compact HistData timestamps like "20250101 170000" or "2025.01.01 17:00"
+  if (/^(\d{4})\.?(\d{2})\.?(\d{2})[ T](\d{2}):?(\d{2}):?(\d{2})?$/.test(cleaned)) {
+    cleaned = cleaned.replace(/^(\d{4})\.?(\d{2})\.?(\d{2})[ T](\d{2}):?(\d{2}):?(\d{2})?$/, (match, y, m, d, hh, mm, ss) => {
+      return `${y}-${m}-${d}T${hh}:${mm}:${ss || '00'}Z`;
+    });
+  }
+
   // Handle UNIX timestamp in seconds or milliseconds
   if (/^\d{10}$/.test(cleaned)) {
     const date = new Date(parseInt(cleaned, 10) * 1000);
@@ -176,31 +183,60 @@ export function parseAndValidateCSV(csvText: string): CSVParseResult {
     };
   }
 
-  const headerLine = splitCSVLine(lines[0]);
-  const headerMap = identifyHeaders(headerLine);
+  const firstLineCols = splitCSVLine(lines[0]);
+  let headerMap = identifyHeaders(firstLineCols);
+  let startRowIndex = 1;
+  let isSeparateTimeCol = false;
+
   if (headerMap.error) {
-    return {
-      success: false,
-      candles: [],
-      rowCount: 0,
-      startTime: null,
-      endTime: null,
-      covers2025: false,
-      error: headerMap.error
-    };
+    // Check if line 0 is a headerless MetaTrader / HistData data row (starts with year digits e.g. 2025, 2024)
+    const cleanedFirstCol = (firstLineCols[0] || '').trim().replace(/["']/g, '');
+    if (firstLineCols.length >= 5 && /^\d{4}/.test(cleanedFirstCol)) {
+      startRowIndex = 0; // Headerless file, start reading from row 0
+      if (firstLineCols.length >= 7) {
+        // Date, Time, Open, High, Low, Close, Volume
+        headerMap = { timestampIdx: 0, openIdx: 2, highIdx: 3, lowIdx: 4, closeIdx: 5, volumeIdx: 6 };
+        isSeparateTimeCol = true;
+      } else if (firstLineCols.length === 6) {
+        if (!isNaN(parseFloat(firstLineCols[1]))) {
+          // Date+Time, Open, High, Low, Close, Volume
+          headerMap = { timestampIdx: 0, openIdx: 1, highIdx: 2, lowIdx: 3, closeIdx: 4, volumeIdx: 5 };
+        } else {
+          // Date, Time, Open, High, Low, Close
+          headerMap = { timestampIdx: 0, openIdx: 2, highIdx: 3, lowIdx: 4, closeIdx: 5, volumeIdx: -1 };
+          isSeparateTimeCol = true;
+        }
+      } else if (firstLineCols.length === 5) {
+        // Date+Time, Open, High, Low, Close
+        headerMap = { timestampIdx: 0, openIdx: 1, highIdx: 2, lowIdx: 3, closeIdx: 4, volumeIdx: -1 };
+      }
+    } else {
+      return {
+        success: false,
+        candles: [],
+        rowCount: 0,
+        startTime: null,
+        endTime: null,
+        covers2025: false,
+        error: headerMap.error
+      };
+    }
   }
 
   const candles: ParsedCandle[] = [];
   const timestampSet = new Set<string>();
 
-  for (let rowIndex = 1; rowIndex < lines.length; rowIndex++) {
+  for (let rowIndex = startRowIndex; rowIndex < lines.length; rowIndex++) {
     const line = lines[rowIndex];
     if (!line) continue;
 
     const cols = splitCSVLine(line);
     const rowNum = rowIndex + 1;
 
-    const rawTs = cols[headerMap.timestampIdx];
+    let rawTs = cols[headerMap.timestampIdx];
+    if (isSeparateTimeCol && cols.length > 1) {
+      rawTs = `${cols[0]} ${cols[1]}`;
+    }
     const rawOpen = cols[headerMap.openIdx];
     const rawHigh = cols[headerMap.highIdx];
     const rawLow = cols[headerMap.lowIdx];
