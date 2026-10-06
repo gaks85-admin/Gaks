@@ -22,7 +22,21 @@ export class GaksBacktestStrategy implements BacktestStrategy {
   constructor(strategyText?: string, strategyId?: string) {
     this.id = strategyId || 'gaks-actual-strategy';
     this.name = 'Actual Gaks Strategy (Deterministic Rule Engine)';
-    this.rawStrategyText = strategyText || 'Default Gaks Strategy: EMA alignment, BOS/CHOCH structure, confirmation candle, 1:2 RR';
+    
+    let textToUse = (strategyText || '').trim();
+    if (textToUse.startsWith('{')) {
+      try {
+        const parsed = JSON.parse(textToUse);
+        if (parsed.strategies && Array.isArray(parsed.strategies)) {
+          const active = parsed.strategies.find((s: any) => s.id === parsed.activeId) || parsed.strategies[0];
+          if (active && active.text) {
+            textToUse = active.text.trim();
+          }
+        }
+      } catch {}
+    }
+
+    this.rawStrategyText = textToUse || 'Default Gaks Strategy: EMA alignment, Order Block structure, confirmation candle, 1:2 RR';
     this.compiledStrategy = compileStrategy(this.rawStrategyText);
   }
 
