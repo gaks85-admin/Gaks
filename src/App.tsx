@@ -11,6 +11,7 @@ const Auth = React.lazy(() => import('./components/Auth'));
 import { AuthSkeleton } from './components/Auth';
 const ResetPassword = React.lazy(() => import('./components/ResetPassword'));
 import AdminDashboard from './components/admin/AdminDashboard';
+import { BacktestPage } from './components/admin/BacktestPage';
 import { StrategyTab } from './components/StrategyTab';
 import { WatcherTab, ActiveTradeData } from './components/WatcherTab';
 import { SettingsTab } from './components/SettingsTab';
@@ -59,7 +60,8 @@ import {
   ChevronDown,
   Sun,
   Moon,
-  Monitor
+  Monitor,
+  Layers
 } from 'lucide-react';
 
 import { getTelegramConnection, initiateTelegramConnection, getTelegramDeepLink } from './lib/telegram';
@@ -143,7 +145,7 @@ const serializeStrategies = (activeId: string, list: Strategy[]) => {
 };
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'home' | 'strategy' | 'watcher' | 'settings' | 'admin'>('home');
+  const [activeTab, setActiveTab] = useState<'home' | 'strategy' | 'watcher' | 'settings' | 'admin' | 'backtest'>('home');
   const [adminInitialTab, setAdminInitialTab] = useState<'dashboard' | 'learning' | 'live-logs' | 'users' | 'watchers' | 'signals' | 'health' | 'settings'>('dashboard');
 
   const [isResetPasswordPage, setIsResetPasswordPage] = useState(() => {
@@ -511,10 +513,34 @@ export default function App() {
 
   // Enforce access control on admin-only tabs
   useEffect(() => {
-    if (!isAuthLoading && !isAdmin && activeTab === 'admin') {
+    if (!isAuthLoading && !isAdmin && (activeTab === 'admin' || activeTab === 'backtest')) {
       setActiveTab('home');
     }
   }, [isAuthLoading, isAdmin, activeTab]);
+
+  const showToast = useCallback((message: string, type: 'success' | 'error' = 'success') => {
+    setShowNotification({ message, type: type === 'error' ? 'info' : 'success' });
+    setTimeout(() => {
+      setShowNotification(null);
+    }, 4000);
+  }, []);
+
+  const fetchWithAuth = useCallback(async (url: string, options: RequestInit = {}) => {
+    const headers = new Headers(options.headers || {});
+    let token = session?.access_token;
+    if (!token) {
+      try {
+        const { data } = await supabase.auth.getSession();
+        token = data?.session?.access_token;
+      } catch (e) {
+        console.warn('Failed to get session token fallback:', e);
+      }
+    }
+    if (token) {
+      headers.set('Authorization', `Bearer ${token}`);
+    }
+    return fetch(url, { ...options, headers });
+  }, [session]);
 
   useEffect(() => {
     if (prevSelectedId.current !== selectedStrategyId) {
@@ -3064,6 +3090,38 @@ export default function App() {
             )
           )}
 
+          {/* ==================== TAB 6: BACKTEST (ADMIN ONLY) ==================== */}
+          {activeTab === 'backtest' && (
+            isAdmin ? (
+              <div className="space-y-6">
+                <div className="flex justify-between items-center mb-2 px-1">
+                  <div>
+                    <h2 className="text-base font-bold tracking-tight text-zinc-900 dark:text-white flex items-center gap-2">
+                      <Layers className="w-5 h-5 text-sky-500" />
+                      Deterministic Backtesting Engine
+                    </h2>
+                    <p className="text-[11px] text-zinc-500 mt-0.5">Test custom strategy rules on historical premium data with 100% precision.</p>
+                  </div>
+                </div>
+                <BacktestPage fetchWithAuth={fetchWithAuth} showToast={showToast} />
+              </div>
+            ) : (
+              <div className="p-8 rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-[#0c0c0e]/60 space-y-4 text-center my-8">
+                <Shield className="w-10 h-10 text-zinc-400 mx-auto" />
+                <h3 className="text-base font-semibold text-zinc-900 dark:text-white">Access Restricted</h3>
+                <p className="text-xs text-zinc-500 max-w-md mx-auto">
+                  The Backtesting Engine is restricted to administrators.
+                </p>
+                <button
+                  onClick={() => setActiveTab('home')}
+                  className="px-4 py-2 text-xs font-semibold rounded-xl bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 hover:opacity-90 transition-all inline-flex items-center gap-2"
+                >
+                  Return to Home
+                </button>
+              </div>
+            )
+          )}
+
         </main>
 
         {/* Floating/Bottom Navigation Bar - Matches minimalist reference UI */}
@@ -3132,6 +3190,25 @@ export default function App() {
               <span className="text-[10px] font-medium tracking-normal">Settings</span>
             </div>
           </button>
+
+          {/* Backtest Tab (Admin Only) */}
+          {isAdmin && (
+            <button
+              onClick={() => setActiveTab('backtest')}
+              className={`flex-1 flex flex-col items-center gap-1 cursor-pointer transition-colors ${
+                activeTab === 'backtest'
+                  ? 'text-zinc-950 dark:text-white'
+                  : 'text-zinc-400 hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300'
+              }`}
+            >
+              <div className={`py-1.5 px-3 rounded-2xl flex flex-col items-center gap-1 transition-colors ${
+                activeTab === 'backtest' ? 'bg-zinc-100 dark:bg-[#1a1a1e] text-zinc-950 dark:text-white shadow-xs font-medium' : ''
+              }`}>
+                <Layers className="w-4 h-4 stroke-[1.8]" />
+                <span className="text-[10px] font-medium tracking-normal">Backtest</span>
+              </div>
+            </button>
+          )}
           
           {/* Admin Tab (Admin Only) */}
           {isAdmin && (
