@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useLiveRates } from './hooks/useLiveRates';
 import { supabase } from './supabaseClient';
 import { getGeminiKey, saveGeminiKey, deleteGeminiKey, testGeminiKey, GeminiTestResult, GeminiTestStatus, parseGeminiError, classifyCredentialType } from './lib/apiKeys';
