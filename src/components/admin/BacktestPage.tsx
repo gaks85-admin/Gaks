@@ -101,7 +101,7 @@ export function BacktestPage({ fetchWithAuth, showToast }: BacktestPageProps) {
     const savedStrategyText = localStorage.getItem('gaks_strategy_text') || '';
     const totalCandles = dataset.row_count || 1500;
 
-    // Initialize the live simulation animation overlay
+    // Initialize live simulation animation overlay
     setSimulationRunner({
       datasetName: dataset.name,
       symbol: dataset.symbol,
@@ -114,54 +114,9 @@ export function BacktestPage({ fetchWithAuth, showToast }: BacktestPageProps) {
       slHits: 0,
       simulatedEquity: balanceNum,
       maxDrawdown: 0,
-      statusText: 'Streaming OHLC candle dataset & initializing order simulator...',
+      statusText: 'Connecting to backtest engine & loading historical OHLC candles...',
       isComplete: false
     });
-
-    let currentC = 0;
-    let sigs = 0;
-    let tps = 0;
-    let sls = 0;
-    let equity = balanceNum;
-    let maxDd = 0;
-
-    const interval = setInterval(() => {
-      if (currentC < totalCandles * 0.92) {
-        currentC = Math.min(totalCandles * 0.92, currentC + Math.max(14, Math.floor(totalCandles / 32)));
-        const pct = Math.min(92, Math.round((currentC / totalCandles) * 100));
-
-        if (Math.random() > 0.42 && currentC > 30) {
-          sigs += 1;
-          const isWin = Math.random() > 0.34;
-          const riskAmount = equity * (riskPercentNum / 100);
-          if (isWin) {
-            tps += 1;
-            equity += riskAmount * 2.0;
-          } else {
-            sls += 1;
-            equity -= riskAmount;
-            const curDd = Math.round(((balanceNum - equity) / balanceNum) * 10000) / 100;
-            if (curDd > maxDd) maxDd = Math.max(0, curDd);
-          }
-        }
-
-        let status = 'Scanning candles for Order Blocks & Confirmation Pinbars...';
-        if (pct > 30 && pct <= 65) status = 'Evaluating 9/21 EMA trend alignment & Break of Structure...';
-        if (pct > 65) status = 'Simulating Stop Loss, Take Profit & commission execution...';
-
-        setSimulationRunner(prev => prev ? {
-          ...prev,
-          currentCandle: Math.floor(currentC),
-          progressPercent: pct,
-          signalsFound: sigs,
-          tpHits: tps,
-          slHits: sls,
-          simulatedEquity: Math.round(equity),
-          maxDrawdown: maxDd,
-          statusText: status
-        } : null);
-      }
-    }, 45);
 
     try {
       const res = await fetchWithAuth('/api/admin/backtest/run', {
@@ -184,27 +139,69 @@ export function BacktestPage({ fetchWithAuth, showToast }: BacktestPageProps) {
         })
       });
       const json = await res.json();
-      clearInterval(interval);
 
       if (json.success) {
-        const finalWins = json.analytics?.winningTrades ?? Math.round((json.tradesCompleted || 0) * 0.68);
-        const finalLosses = json.analytics?.losingTrades ?? Math.max(0, (json.tradesCompleted || 0) - finalWins);
+        const realTrades: any[] = json.trades || [];
+        const realSignals: any[] = json.signals || [];
+        const processedCandles: number = json.candlesProcessed || totalCandles;
+        const analytics = json.analytics || {};
+        const finalWinningTrades: number = analytics.winningTrades ?? realTrades.filter((t: any) => t.netPnL > 0 || t.exitReason === 'TAKE_PROFIT').length;
+        const finalLosingTrades: number = analytics.losingTrades ?? realTrades.filter((t: any) => t.netPnL <= 0 || t.exitReason === 'STOP_LOSS' || t.exitReason === 'SAME_CANDLE_STOP_LOSS').length;
+        const finalBalance: number = json.finalBalance || balanceNum;
+        const finalMaxDrawdown: number = analytics.maxDrawdownPercent || 0;
 
-        setSimulationRunner(prev => prev ? {
-          ...prev,
-          currentCandle: totalCandles,
-          progressPercent: 100,
-          signalsFound: json.signalsGenerated || 0,
-          tpHits: finalWins,
-          slHits: finalLosses,
-          simulatedEquity: Math.round(json.finalBalance || balanceNum),
-          maxDrawdown: json.analytics?.maxDrawdownPercent || 0,
-          statusText: '✓ 100% Deterministic Execution Complete! Finalizing analytics...',
-          isComplete: true
-        } : null);
+        // Run real-data replay animation over 25 steps (approx 1.2s)
+        const TOTAL_STEPS = 25;
+        for (let step = 1; step <= TOTAL_STEPS; step++) {
+          const ratio = step / TOTAL_STEPS;
+          const currentCandle = Math.round(ratio * processedCandles);
+          const currentTradesCount = Math.round(ratio * realTrades.length);
+          const activeTrades = realTrades.slice(0, currentTradesCount);
 
-        // Pause briefly so user clearly views the completed 100% calculations
-        await new Promise(r => setTimeout(r, 650));
+          const currentTpHits = step === TOTAL_STEPS 
+            ? finalWinningTrades 
+            : activeTrades.filter((t: any) => t.netPnL > 0 || t.exitReason === 'TAKE_PROFIT').length;
+
+          const currentSlHits = step === TOTAL_STEPS 
+            ? finalLosingTrades 
+            : activeTrades.filter((t: any) => t.netPnL <= 0 || t.exitReason === 'STOP_LOSS' || t.exitReason === 'SAME_CANDLE_STOP_LOSS').length;
+
+          const currentEquity = step === TOTAL_STEPS
+            ? Math.round(finalBalance)
+            : activeTrades.length > 0 
+              ? Math.round(activeTrades[activeTrades.length - 1].balanceAfter) 
+              : balanceNum;
+
+          const currentDrawdown = step === TOTAL_STEPS
+            ? finalMaxDrawdown
+            : Math.round(ratio * finalMaxDrawdown * 10) / 10;
+
+          let statusMsg = `Scanning candle #${currentCandle} of ${processedCandles}...`;
+          if (step > 10 && step < 20) statusMsg = `Evaluating order block triggers & trade executions (${currentTradesCount} trades)...`;
+          if (step >= 20 && step < TOTAL_STEPS) statusMsg = `Calculating TP/SL win rates & equity curve envelope...`;
+          if (step === TOTAL_STEPS) statusMsg = `✓ 100% Deterministic Trade Replay Complete!`;
+
+          setSimulationRunner({
+            datasetName: dataset.name,
+            symbol: dataset.symbol,
+            timeframe: dataset.timeframe,
+            totalCandles: processedCandles,
+            currentCandle,
+            progressPercent: Math.round(ratio * 100),
+            signalsFound: Math.round(ratio * (json.signalsGenerated || realSignals.length)),
+            tpHits: currentTpHits,
+            slHits: currentSlHits,
+            simulatedEquity: currentEquity,
+            maxDrawdown: currentDrawdown,
+            statusText: statusMsg,
+            isComplete: step === TOTAL_STEPS
+          });
+
+          await new Promise(r => setTimeout(r, 45));
+        }
+
+        // Pause briefly at 100% so user clearly views the completed real figures
+        await new Promise(r => setTimeout(r, 550));
         setSimulationRunner(null);
         setEngineResult(json);
         loadRuns();
@@ -217,7 +214,6 @@ export function BacktestPage({ fetchWithAuth, showToast }: BacktestPageProps) {
         showToast(json.error || 'Backtest engine failed', 'error');
       }
     } catch (err: any) {
-      clearInterval(interval);
       setSimulationRunner(null);
       showToast(err.message || 'Error running backtest engine', 'error');
     } finally {
