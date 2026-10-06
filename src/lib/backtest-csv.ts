@@ -170,7 +170,16 @@ export function parseAndValidateCSV(csvText: string): CSVParseResult {
     };
   }
 
-  const lines = csvText.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
+  const rawLines = csvText.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
+  
+  // Filter out commentary, copyright headers, and status report metadata (e.g. HistData status report lines)
+  const lines = rawLines.filter(line => {
+    const lower = line.toLowerCase();
+    if (lower.startsWith('#') || lower.startsWith('//') || lower.startsWith('/*')) return false;
+    if (lower.includes('histdata.com') || lower.includes('gap of') || lower.includes('status report') || lower.startsWith('file:')) return false;
+    return true;
+  });
+
   if (lines.length < 2) {
     return {
       success: false,
