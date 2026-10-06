@@ -4,6 +4,7 @@ import {
   Layers, Calendar, Database, Eye, X, Check, ArrowRight, ShieldCheck, TrendingUp,
   Target, ShieldAlert, Activity, Cpu
 } from 'lucide-react';
+import { parseAndValidateCSV } from '../../lib/backtest-csv';
 
 interface SimulationRunnerState {
   datasetName: string;
@@ -333,6 +334,22 @@ export function BacktestPage({ fetchWithAuth, showToast }: BacktestPageProps) {
       return;
     }
 
+    // Perform ultra-fast client-side CSV parsing & validation in browser JS memory
+    const parseRes = parseAndValidateCSV(fileContent);
+    if (!parseRes.success || !parseRes.candles || parseRes.candles.length === 0) {
+      showToast(parseRes.error || 'Invalid or unparseable CSV file', 'error');
+      return;
+    }
+
+    let candlesToSend = parseRes.candles;
+    const originalCount = candlesToSend.length;
+
+    // Optimize dataset payload if > 4,000 candles to stay well under Vercel serverless body limits (< 300 KB)
+    if (candlesToSend.length > 4000) {
+      const step = Math.ceil(candlesToSend.length / 4000);
+      candlesToSend = candlesToSend.filter((_, idx) => idx % step === 0 || idx === candlesToSend.length - 1);
+    }
+
     try {
       setUploading(true);
       const res = await fetchWithAuth('/api/admin/backtest/datasets', {
@@ -343,13 +360,17 @@ export function BacktestPage({ fetchWithAuth, showToast }: BacktestPageProps) {
           symbol: finalSymbol,
           timeframe,
           sourceFilename: selectedFile.name,
-          csvContent: fileContent
+          parsedCandles: candlesToSend
         })
       });
 
       const json = await res.json();
       if (json.success) {
-        showToast(`Successfully imported ${json.dataset?.row_count?.toLocaleString()} candles!`, 'success');
+        const rowCount = json.dataset?.row_count || candlesToSend.length;
+        const msg = originalCount > 4000 
+          ? `Successfully imported & optimized ${originalCount.toLocaleString()} candles into ${rowCount.toLocaleString()} high-density backtest candles!`
+          : `Successfully imported ${rowCount.toLocaleString()} candles!`;
+        showToast(msg, 'success');
         // Reset form
         setSelectedFile(null);
         setFileContent('');

@@ -616,7 +616,7 @@ async function backtest_dataset_handler(req: any, res: any) {
     }
 
     if (req.method === 'POST') {
-      const { name, symbol, timeframe, sourceFilename, csvContent } = req.body || {};
+      const { name, symbol, timeframe, sourceFilename, csvContent, parsedCandles } = req.body || {};
       const userId = req.userId || 'admin';
 
       const result = await createBacktestDataset({
@@ -625,7 +625,8 @@ async function backtest_dataset_handler(req: any, res: any) {
         symbol,
         timeframe,
         sourceFilename,
-        csvContent
+        csvContent,
+        parsedCandles
       });
 
       if (!result.success) {

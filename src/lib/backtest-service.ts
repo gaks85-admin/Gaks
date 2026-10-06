@@ -223,28 +223,40 @@ export async function createBacktestDataset(params: {
   symbol: string;
   timeframe: string;
   sourceFilename: string;
-  csvContent: string;
+  csvContent?: string;
+  parsedCandles?: ParsedCandle[];
 }): Promise<{ success: boolean; dataset?: BacktestDatasetRecord; error?: string }> {
-  const { userId, name, symbol, timeframe, sourceFilename, csvContent } = params;
+  const { userId, name, symbol, timeframe, sourceFilename, csvContent, parsedCandles } = params;
 
   if (!name || !name.trim()) return { success: false, error: 'Dataset name is required' };
   if (!symbol || !symbol.trim()) return { success: false, error: 'Symbol is required' };
   if (!timeframe || !timeframe.trim()) return { success: false, error: 'Timeframe is required' };
-  if (!csvContent || !csvContent.trim()) return { success: false, error: 'CSV content is empty' };
+
+  let candles: ParsedCandle[] = [];
+  let rowCount = 0;
+  let startTime: string | null = null;
+  let endTime: string | null = null;
+
+  if (parsedCandles && Array.isArray(parsedCandles) && parsedCandles.length > 0) {
+    candles = parsedCandles;
+    rowCount = candles.length;
+    startTime = candles[0].timestamp;
+    endTime = candles[candles.length - 1].timestamp;
+  } else if (csvContent && csvContent.trim()) {
+    const parseRes = parseAndValidateCSV(csvContent);
+    if (!parseRes.success || parseRes.candles.length === 0) {
+      return { success: false, error: parseRes.error || 'CSV validation failed' };
+    }
+    candles = parseRes.candles;
+    rowCount = parseRes.rowCount;
+    startTime = parseRes.startTime;
+    endTime = parseRes.endTime;
+  } else {
+    return { success: false, error: 'Either CSV content or pre-parsed candles must be provided' };
+  }
 
   const normSymbol = symbol.trim().toUpperCase();
   const normTimeframe = timeframe.trim().toUpperCase();
-
-  // 1. Parse & Validate CSV
-  const parseRes = parseAndValidateCSV(csvContent);
-  if (!parseRes.success || parseRes.candles.length === 0) {
-    return { success: false, error: parseRes.error || 'CSV validation failed' };
-  }
-
-  const candles = parseRes.candles;
-  const rowCount = parseRes.rowCount;
-  const startTime = parseRes.startTime;
-  const endTime = parseRes.endTime;
   const datasetId = crypto.randomUUID();
   const now = new Date().toISOString();
 
