@@ -84,8 +84,23 @@ export class GaksBacktestStrategy implements BacktestStrategy {
     const confirmationBullish = isBullishEngulfing || isBullishPinbar;
     const confirmationBearish = isBearishEngulfing || isBearishPinbar;
 
+    // Volume Analysis
+    const recentVolumes = recentCandles.map(c => c.volume || 0).filter(v => v > 0);
+    const averageVolume = recentVolumes.length > 0 ? recentVolumes.reduce((a, b) => a + b, 0) / recentVolumes.length : 1000;
+    const latestVolume = current.volume || 0;
+
+    // Supply & Demand / Support & Resistance Zones
+    const supportZoneRange = { low: recentLow, high: recentLow + atr * 0.5, type: 'SUPPORT' };
+    const resistanceZoneRange = { low: recentHigh - atr * 0.5, high: recentHigh, type: 'RESISTANCE' };
+
+    const inSupport = current.low <= supportZoneRange.high;
+    const inResistance = current.high >= resistanceZoneRange.low;
+
     // Build deterministic market structure object
     const marketStructure = {
+      watcherId: this.id,
+      symbol,
+      timeframe,
       trend: fastEma && slowEma ? (fastEma > slowEma ? 'BULLISH' : 'BEARISH') : 'SIDEWAYS',
       ema: fastEma && slowEma ? fastEma > slowEma : false,
       ema_crossover: emaCrossoverBullish || emaCrossoverBearish,
@@ -95,10 +110,35 @@ export class GaksBacktestStrategy implements BacktestStrategy {
       bos: bosBullish || bosBearish,
       choch: bosBullish || bosBearish,
       confirmation_candle: confirmationBullish || confirmationBearish,
-      support_rejection: current.low <= recentLow && current.close > recentLow,
-      resistance_rejection: current.high >= recentHigh && current.close < recentHigh,
-      tap_and_rejection: (current.low <= recentLow && current.close > recentLow) || (current.high >= recentHigh && current.close < recentHigh),
-      risk_reward: true
+      support: inSupport,
+      resistance: inResistance,
+      supportZones: inSupport ? [supportZoneRange] : [],
+      resistanceZones: inResistance ? [resistanceZoneRange] : [],
+      orderBlocks: [
+        { type: 'BULLISH_ORDER_BLOCK', low: recentLow, high: recentLow + atr * 0.5, status: inSupport ? 'TAPPED' : 'UNMITIGATED' },
+        { type: 'BEARISH_ORDER_BLOCK', low: recentHigh - atr * 0.5, high: recentHigh, status: inResistance ? 'TAPPED' : 'UNMITIGATED' }
+      ],
+      support_rejection: inSupport && current.close > supportZoneRange.high,
+      resistance_rejection: inResistance && current.close < resistanceZoneRange.low,
+      tap_and_rejection: (inSupport && current.close > supportZoneRange.high) || (inResistance && current.close < resistanceZoneRange.low),
+      volume_confirmation: latestVolume >= averageVolume * 1.2,
+      latestVolume,
+      averageVolume,
+      volumeInformation: {
+        latestVolume,
+        averageVolume,
+        volumeSpike: latestVolume >= averageVolume * 1.5
+      },
+      order_block: inSupport || inResistance,
+      markedZone: inSupport 
+        ? { type: 'DEMAND', low: recentLow, high: recentLow + atr * 0.5, status: 'ZONE_TAPPED', direction: 'BUY' }
+        : inResistance
+          ? { type: 'SUPPLY', low: recentHigh - atr * 0.5, high: recentHigh, status: 'ZONE_TAPPED', direction: 'SELL' }
+          : null,
+      zone_status: (inSupport || inResistance) ? 'ZONE_TAPPED' : 'NO_ZONE',
+      isRejected: (inSupport && current.close > supportZoneRange.high) || (inResistance && current.close < resistanceZoneRange.low),
+      risk_reward: true,
+      timeframes: [timeframe] 
     };
 
     // 2. Evaluate Decision Engine against Compiled Gaks Strategy
