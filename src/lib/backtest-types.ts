@@ -184,6 +184,11 @@ export interface BacktestAnalyticsResult {
   worstTrade: BestWorstTradeInfo | null;
 }
 
+export interface TradeSimulationResult {
+  trade: BacktestTradeRecord | null;
+  rejectionReason?: string;
+}
+
 export interface BacktestEngineResult {
   success: boolean;
   datasetId: string;
@@ -199,6 +204,11 @@ export interface BacktestEngineResult {
   tradesCompleted: number;
   signals: BacktestSignal[];
   trades: BacktestTradeRecord[];
+  rejectedSignals?: {
+    timestamp: string;
+    reason: string;
+    direction: string;
+  }[];
   analytics?: BacktestAnalyticsResult;
   error?: string;
 }

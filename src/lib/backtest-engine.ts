@@ -109,6 +109,7 @@ export async function runBacktest(config: BacktestConfig): Promise<BacktestEngin
 
   const signals: BacktestSignal[] = [];
   const trades: BacktestTradeRecord[] = [];
+  const rejectedSignals: { timestamp: string; reason: string; direction: string }[] = [];
 
   let activeTradeUntilIndex = -1;
 
@@ -141,7 +142,7 @@ export async function runBacktest(config: BacktestConfig): Promise<BacktestEngin
 
       // Simulate Trade Lifecycle over remaining historical candles
       const remainingCandles = candles.slice(i);
-      const simTrade = simulateTradeLifecycle({
+      const simResult = simulateTradeLifecycle({
         signal,
         datasetId: config.datasetId,
         signalIndex: signals.length - 1,
@@ -152,7 +153,8 @@ export async function runBacktest(config: BacktestConfig): Promise<BacktestEngin
         timeframe: normTimeframe
       });
 
-      if (simTrade) {
+      if (simResult.trade) {
+        const simTrade = simResult.trade;
         trades.push(simTrade);
         state.tradesCompleted++;
         state.balance = simTrade.balanceAfter;
@@ -163,6 +165,12 @@ export async function runBacktest(config: BacktestConfig): Promise<BacktestEngin
         if (exitIndex !== -1) {
           activeTradeUntilIndex = exitIndex;
         }
+      } else {
+        rejectedSignals.push({
+          timestamp: currentCandle.timestamp,
+          reason: simResult.rejectionReason || 'Unknown rejection',
+          direction: signal.direction
+        });
       }
     }
   }
@@ -198,6 +206,7 @@ export async function runBacktest(config: BacktestConfig): Promise<BacktestEngin
     tradesCompleted: trades.length,
     signals,
     trades,
+    rejectedSignals,
     analytics
   };
 }

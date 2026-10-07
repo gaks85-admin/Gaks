@@ -14,6 +14,7 @@ interface SimulationRunnerState {
   currentCandle: number;
   progressPercent: number;
   signalsFound: number;
+  rejectedSignals: number;
   tpHits: number;
   slHits: number;
   simulatedEquity: number;
@@ -129,6 +130,7 @@ export function BacktestPage({ fetchWithAuth, showToast }: BacktestPageProps) {
       currentCandle: 0,
       progressPercent: 0,
       signalsFound: 0,
+      rejectedSignals: 0,
       tpHits: 0,
       slHits: 0,
       simulatedEquity: balanceNum,
@@ -208,6 +210,7 @@ export function BacktestPage({ fetchWithAuth, showToast }: BacktestPageProps) {
             currentCandle,
             progressPercent: Math.round(ratio * 100),
             signalsFound: Math.round(ratio * (json.signalsGenerated || realSignals.length)),
+            rejectedSignals: Math.round(ratio * (json.rejectedSignals?.length || 0)),
             tpHits: currentTpHits,
             slHits: currentSlHits,
             simulatedEquity: currentEquity,
@@ -564,23 +567,31 @@ export function BacktestPage({ fetchWithAuth, showToast }: BacktestPageProps) {
           </div>
 
           {/* File Upload Box */}
-          <div className="border-2 border-dashed border-zinc-300 dark:border-zinc-800 hover:border-sky-500/50 rounded-2xl p-5 text-center transition-colors">
-            <input
-              type="file"
-              accept=".csv,.txt"
-              onChange={handleFileChange}
-              id="csv-upload-input"
-              className="hidden"
-            />
-            <label htmlFor="csv-upload-input" className="cursor-pointer flex flex-col items-center justify-center space-y-2">
-              <FileText className="w-8 h-8 text-sky-500 mb-1" />
-              <span className="text-xs font-bold text-zinc-800 dark:text-zinc-200">
-                {selectedFile ? selectedFile.name : 'Click to select or drag & drop historical CSV file'}
-              </span>
-              <span className="text-[11px] text-zinc-500">
-                {selectedFile ? `${(selectedFile.size / (1024 * 1024)).toFixed(2)} MB` : 'Supported headers: timestamp, open, high, low, close, volume'}
-              </span>
-            </label>
+          <div className="space-y-3">
+            <div className="border-2 border-dashed border-zinc-300 dark:border-zinc-800 hover:border-sky-500/50 rounded-2xl p-5 text-center transition-colors">
+              <input
+                type="file"
+                accept=".csv,.txt"
+                onChange={handleFileChange}
+                id="csv-upload-input"
+                className="hidden"
+              />
+              <label htmlFor="csv-upload-input" className="cursor-pointer flex flex-col items-center justify-center space-y-2">
+                <FileText className="w-8 h-8 text-sky-500 mb-1" />
+                <span className="text-xs font-bold text-zinc-800 dark:text-zinc-200">
+                  {selectedFile ? selectedFile.name : 'Click to select or drag & drop historical CSV file'}
+                </span>
+                <span className="text-[11px] text-zinc-500">
+                  {selectedFile ? `${(selectedFile.size / (1024 * 1024)).toFixed(2)} MB` : 'Supported headers: timestamp, open, high, low, close, volume'}
+                </span>
+              </label>
+            </div>
+            
+            <div className="p-3 bg-sky-500/5 border border-sky-500/10 rounded-xl">
+              <p className="text-[10px] text-zinc-500 leading-relaxed">
+                <strong className="text-sky-500">Need data?</strong> You can download free historical M1/M5/H1 candle data from <a href="https://www.histdata.com/" target="_blank" rel="noopener noreferrer" className="text-sky-400 underline underline-offset-2 hover:text-sky-300">HistData.com</a>, or export directly from your <strong className="text-zinc-400">MetaTrader (F2 to Export)</strong> or <strong className="text-zinc-400">TradingView (Object Tree to Export CSV)</strong> terminals.
+              </p>
+            </div>
           </div>
 
           {/* Upload Button */}
@@ -721,7 +732,7 @@ export function BacktestPage({ fetchWithAuth, showToast }: BacktestPageProps) {
             <FileText className="w-8 h-8 text-zinc-400 mx-auto mb-2" />
             <p className="text-xs font-bold text-zinc-700 dark:text-zinc-300">No historical datasets imported yet.</p>
             <p className="text-[11px] text-zinc-500 mt-1 max-w-sm mx-auto">
-              Upload a 2025 OHLC CSV dataset above to build your backtesting data foundation for Phase 4.
+              Upload a 2025 OHLC CSV dataset above to build your backtesting data foundation.
             </p>
           </div>
         ) : (
@@ -818,7 +829,7 @@ export function BacktestPage({ fetchWithAuth, showToast }: BacktestPageProps) {
         )}
       </div>
 
-      {/* Backtest History Section (Phase 7) */}
+      {/* Backtest History Section */}
       <div className="bg-zinc-50 dark:bg-zinc-900/50 p-5 sm:p-6 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm space-y-6">
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-bold text-zinc-900 dark:text-white flex items-center gap-2">
@@ -1054,6 +1065,18 @@ export function BacktestPage({ fetchWithAuth, showToast }: BacktestPageProps) {
                   </span>
                   <span className="text-[9px] text-zinc-500 font-mono">Max Peak Drop</span>
                 </div>
+
+                {/* Rejected Orders */}
+                <div className="bg-zinc-900/90 border border-amber-500/20 p-3 rounded-2xl flex flex-col justify-between shadow-xs">
+                  <span className="text-[10px] uppercase font-mono text-zinc-400 flex items-center gap-1">
+                    <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
+                    Rejected
+                  </span>
+                  <span className="text-lg font-bold font-mono text-amber-400 mt-1">
+                    {simulationRunner.rejectedSignals}
+                  </span>
+                  <span className="text-[9px] text-zinc-500 font-mono">Risk Filtered</span>
+                </div>
               </div>
 
               {/* Live Status Description */}
@@ -1246,6 +1269,30 @@ export function BacktestPage({ fetchWithAuth, showToast }: BacktestPageProps) {
                   </div>
                 )}
               </div>
+
+              {engineResult.rejectedSignals && engineResult.rejectedSignals.length > 0 && (
+                <div>
+                  <h4 className="font-bold text-amber-400 mb-2 flex items-center gap-2">
+                    <AlertTriangle className="w-4 h-4" />
+                    Rejected Orders ({engineResult.rejectedSignals.length})
+                  </h4>
+                  <div className="space-y-2 max-h-60 overflow-y-auto">
+                    {engineResult.rejectedSignals.map((rej: any, idx: number) => (
+                      <div key={idx} className="p-3 bg-amber-500/5 border border-amber-500/10 rounded-xl flex items-center justify-between text-xs">
+                        <div className="space-y-0.5">
+                          <div className="flex items-center gap-2">
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold font-mono bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                              {rej.direction}
+                            </span>
+                            <span className="text-zinc-500 font-mono">{formatDate(rej.timestamp)}</span>
+                          </div>
+                          <p className="text-amber-200/70 text-[11px] font-medium">{rej.reason}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="p-4 border-t border-zinc-800 bg-zinc-950/50 flex justify-between items-center">
