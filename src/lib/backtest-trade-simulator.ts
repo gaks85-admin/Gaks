@@ -91,7 +91,10 @@ export function simulateTradeLifecycle(params: SimulateTradeParams): TradeSimula
     entryPrice: rawEntryPrice,
     stopLoss,
     takeProfit,
-    symbol
+    symbol,
+    spreadPips: simConfig.spreadPips,
+    slippagePips: simConfig.slippagePips,
+    direction: signal.direction
   });
 
   if (!posSizeResult.accepted || posSizeResult.lots <= 0) {

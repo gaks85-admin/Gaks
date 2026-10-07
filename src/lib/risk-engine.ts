@@ -128,6 +128,8 @@ export interface PositionSizeParams {
   maxLot?: number;
   lotStep?: number;
   contractSize?: number;
+  spreadPips?: number;
+  slippagePips?: number;
 }
 
 export interface PositionSizeResult {
@@ -196,7 +198,10 @@ export function calculatePositionSize(params: PositionSizeParams): PositionSizeR
     lotStep = spec.lotStep,
     contractSize = params.contractSize ?? spec.contractSize,
     positionMode = 'AUTO_RISK',
-    preferredLotSize
+    preferredLotSize,
+    spreadPips = 0,
+    slippagePips = 0,
+    direction = 'BUY'
   } = params;
 
   if (accountSize <= 0) {
@@ -210,8 +215,19 @@ export function calculatePositionSize(params: PositionSizeParams): PositionSizeR
     };
   }
 
-  const slDistance = Math.abs(entryPrice - stopLoss);
-  if (slDistance <= 0) {
+  const pipsToPrice = spec.tickSize;
+  const spreadInPrice = spreadPips * pipsToPrice;
+  const slippageInPrice = slippagePips * pipsToPrice;
+
+  // Realized SL distance includes spread and slippage
+  // For a BUY: Executed Entry = theoretical + slippage + 0.5*spread; Exit at SL = stopLoss - slippage
+  // Total Distance = (theoretical + slippage + 0.5*spread) - (stopLoss - slippage)
+  //                = (theoretical - stopLoss) + 2*slippage + 0.5*spread
+  
+  const theoreticalSlDistance = Math.abs(entryPrice - stopLoss);
+  const realizedSlDistance = theoreticalSlDistance + (2 * slippageInPrice) + (spreadInPrice / 2);
+
+  if (theoreticalSlDistance <= 0) {
     return {
       accepted: false,
       lots: 0,
@@ -225,9 +241,10 @@ export function calculatePositionSize(params: PositionSizeParams): PositionSizeR
   // 1. Handle FIXED_LOT Mode
   if (positionMode === 'FIXED_LOT' && typeof preferredLotSize === 'number' && preferredLotSize > 0) {
     const finalLots = Math.min(Math.max(preferredLotSize, minLot), maxLot);
-    const lossPerLot = slDistance * contractSize;
+    const lossPerLot = realizedSlDistance * contractSize;
     const expectedLoss = Math.round(finalLots * lossPerLot * 100) / 100;
 
+    // Reject trade if expected loss exceeds account balance
     if (expectedLoss >= accountSize) {
       return {
         accepted: false,
@@ -237,6 +254,21 @@ export function calculatePositionSize(params: PositionSizeParams): PositionSizeR
         expectedLoss,
         reason: `Fixed lot order rejected: Expected loss ($${expectedLoss.toFixed(2)}) exceeds available account balance ($${accountSize.toFixed(2)}).`
       };
+    }
+
+    // STRICT RISK CHECK: If a risk percentage is provided, enforce it as a hard cap even in fixed lot mode
+    if (riskPercentage > 0) {
+      const riskAmount = (accountSize * riskPercentage) / 100;
+      if (expectedLoss > riskAmount + 0.01) {
+        return {
+          accepted: false,
+          lots: 0,
+          calculatedLotSize: finalLots,
+          riskAmount: Math.round(riskAmount * 100) / 100,
+          expectedLoss,
+          reason: `Fixed lot order rejected: A ${finalLots} lot position risks $${expectedLoss.toFixed(2)} (including costs), which exceeds your ${riskPercentage}% risk budget ($${riskAmount.toFixed(2)}).`
+        };
+      }
     }
 
     return {
@@ -264,16 +296,34 @@ export function calculatePositionSize(params: PositionSizeParams): PositionSizeR
   }
 
   const riskAmount = (accountSize * riskPercentage) / 100;
-  const lossPerLot = slDistance * contractSize;
+  const lossPerLot = realizedSlDistance * contractSize;
   const rawLots = riskAmount / lossPerLot;
 
-  // Round down to lotStep
+  // Round down to lotStep to stay WITHIN risk budget
   const steppedLots = Math.floor(rawLots / lotStep) * lotStep;
   const roundedLots = Math.round(steppedLots * 100) / 100;
 
   let finalLots = roundedLots;
+  
+  // If calculated lots is zero (because budget is too small for 0.01), check if 0.01 lot is acceptable
   if (finalLots < minLot) {
     const lossAtMinLot = minLot * lossPerLot;
+    const minLotExpectedLoss = Math.round(lossAtMinLot * 100) / 100;
+
+    // STRICT ENFORCEMENT: If min lot risks more than the budget, REJECT.
+    // This matches real AI behavior where signals are rejected if they are too risky for the account.
+    if (minLotExpectedLoss > Math.round(riskAmount * 100) / 100) {
+      return {
+        accepted: false,
+        lots: 0,
+        calculatedLotSize: minLot,
+        riskAmount: Math.round(riskAmount * 100) / 100,
+        expectedLoss: minLotExpectedLoss,
+        reason: `Order rejected: On a $${accountSize.toFixed(2)} account, the smallest trade (0.01 lot) risks $${minLotExpectedLoss.toFixed(2)} (including spread/slippage), which exceeds your ${riskPercentage}% budget ($${riskAmount.toFixed(2)}).`
+      };
+    }
+
+    // If min lot fits in budget, use it
     if (lossAtMinLot < accountSize) {
       finalLots = minLot;
     } else {
@@ -281,9 +331,9 @@ export function calculatePositionSize(params: PositionSizeParams): PositionSizeR
         accepted: false,
         lots: 0,
         calculatedLotSize: minLot,
-        riskAmount,
-        expectedLoss: Math.round(lossAtMinLot * 100) / 100,
-        reason: `Calculated lot size (${rawLots.toFixed(4)}) is below broker minimum lot (${minLot}) and exceeds account balance.`
+        riskAmount: Math.round(riskAmount * 100) / 100,
+        expectedLoss: minLotExpectedLoss,
+        reason: `Insufficient balance: Broker minimum lot (${minLot}) risks $${minLotExpectedLoss.toFixed(2)} but you only have $${accountSize.toFixed(2)} available.`
       };
     }
   }
@@ -297,35 +347,28 @@ export function calculatePositionSize(params: PositionSizeParams): PositionSizeR
       accepted: false,
       lots: 0,
       calculatedLotSize: finalLots,
-      riskAmount,
+      riskAmount: Math.round(riskAmount * 100) / 100,
       expectedLoss,
       reason: `Order rejected: Expected loss ($${expectedLoss.toFixed(2)}) exceeds available account balance ($${accountSize.toFixed(2)}).`
     };
   }
 
-  // Reject trade if expected loss exceeds user's requested risk budget by a significant margin.
-  // We allow a tiny tolerance ($0.05) for rounding, but otherwise we must respect the budget.
-  const maxAllowedRisk = riskAmount + 0.05;
-
-  if (expectedLoss > maxAllowedRisk) {
-    let reason = `Order rejected: Expected loss ($${expectedLoss.toFixed(2)}) exceeds your configured risk budget ($${riskAmount.toFixed(2)}).`;
-    if (accountSize <= 100 && finalLots === minLot) {
-      reason = `Order rejected: On a $${accountSize.toFixed(2)} account, the smallest possible trade (0.01 lot) risks $${expectedLoss.toFixed(2)}, which exceeds your ${riskPercentage}% risk budget ($${riskAmount.toFixed(2)}). Try a larger balance or a tighter stop loss.`;
-    }
+  // FINAL STRICT RISK CHECK (Strictly adhere to the budget)
+  if (expectedLoss > Math.round(riskAmount * 100) / 100) {
     return {
       accepted: false,
       lots: 0,
       calculatedLotSize: finalLots,
-      riskAmount,
+      riskAmount: Math.round(riskAmount * 100) / 100,
       expectedLoss,
-      reason
+      reason: `Order rejected: Expected loss ($${expectedLoss.toFixed(2)}) exceeds your configured risk budget ($${riskAmount.toFixed(2)}).`
     };
   }
 
   let actualRr: number | undefined;
-  if (params.takeProfit && slDistance > 0) {
+  if (params.takeProfit && theoreticalSlDistance > 0) {
     const tpDistance = Math.abs(params.takeProfit - entryPrice);
-    actualRr = Math.round((tpDistance / slDistance) * 100) / 100;
+    actualRr = Math.round((tpDistance / theoreticalSlDistance) * 100) / 100;
   } else if (params.riskRewardStr) {
     actualRr = parseRiskRewardRatio(params.riskRewardStr);
   }
