@@ -161,15 +161,16 @@ export function extractRiskPreferences(prefsRecord?: Partial<TradingPreferences>
   }
 
   let maxDailyLossAmount = 100;
-  if (prefsRecord?.max_daily_risk) {
-    const parsed = parseFloat(String(prefsRecord.max_daily_risk).replace(/[^0-9.]/g, ''));
+  const maxLossStr = prefsRecord?.max_daily_risk || prefsRecord?.max_daily_loss;
+  if (maxLossStr) {
+    const parsed = parseFloat(String(maxLossStr).replace(/[^0-9.]/g, ''));
     if (!isNaN(parsed) && parsed > 0) {
       maxDailyLossAmount = parsed;
     }
   }
 
-  const positionMode = prefsRecord?.position_sizing_mode || 'AUTO_RISK';
-  const preferredLotSize = prefsRecord?.preferred_lot_size;
+  const positionMode = prefsRecord?.position_sizing_mode || prefsRecord?.position_mode || 'AUTO_RISK';
+  const preferredLotSize = prefsRecord?.preferred_lot_size || (prefsRecord?.fixed_lot_size ? parseFloat(prefsRecord.fixed_lot_size) : undefined);
 
   return {
     accountSize,
@@ -177,8 +178,8 @@ export function extractRiskPreferences(prefsRecord?: Partial<TradingPreferences>
     maxDailyLossAmount,
     positionMode,
     preferredLotSize,
-    riskRewardStr: prefsRecord?.risk_reward_ratio || '1:2',
-    maxDailyRiskStr: prefsRecord?.max_daily_risk || '3%'
+    riskRewardStr: prefsRecord?.risk_reward_ratio || prefsRecord?.risk_reward || '1:2',
+    maxDailyRiskStr: prefsRecord?.max_daily_risk || prefsRecord?.max_daily_loss || '3%'
   };
 }
 
@@ -233,7 +234,7 @@ export function calculatePositionSize(params: PositionSizeParams): PositionSizeR
     const lossAtMinLot = minLot * lossPerLot;
     return {
       accepted: false,
-      lots: minLot,
+      lots: 0,
       calculatedLotSize: minLot,
       riskAmount,
       expectedLoss: Math.round(lossAtMinLot * 100) / 100,
@@ -243,6 +244,31 @@ export function calculatePositionSize(params: PositionSizeParams): PositionSizeR
 
   const finalLots = Math.min(roundedLots, maxLot);
   const expectedLoss = Math.round(finalLots * lossPerLot * 100) / 100;
+
+  // Reject trade if expected loss exceeds account balance
+  if (expectedLoss >= accountSize) {
+    return {
+      accepted: false,
+      lots: 0,
+      calculatedLotSize: finalLots,
+      riskAmount,
+      expectedLoss,
+      reason: `Order rejected: Expected loss ($${expectedLoss.toFixed(2)}) exceeds available account balance ($${accountSize.toFixed(2)}).`
+    };
+  }
+
+  // Reject trade if expected loss exceeds user's requested risk budget by > 35% (prevents wiping out small accounts)
+  const maxAllowedRisk = Math.max(riskAmount * 1.35, riskAmount + 0.25);
+  if (expectedLoss > maxAllowedRisk) {
+    return {
+      accepted: false,
+      lots: 0,
+      calculatedLotSize: finalLots,
+      riskAmount,
+      expectedLoss,
+      reason: `Order rejected: Minimum lot size (${finalLots}) results in expected loss of $${expectedLoss.toFixed(2)}, which exceeds your configured risk budget of $${riskAmount.toFixed(2)} (${riskPercentage}% of $${accountSize.toFixed(2)}).`
+    };
+  }
 
   let actualRr: number | undefined;
   if (params.takeProfit && slDistance > 0) {

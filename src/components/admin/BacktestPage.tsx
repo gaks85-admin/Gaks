@@ -65,6 +65,38 @@ export function BacktestPage({ fetchWithAuth, showToast }: BacktestPageProps) {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [fileContent, setFileContent] = useState<string>('');
 
+  // Engine Risk & Capital Parameters
+  const [accountCapital, setAccountCapital] = useState<string>(() => {
+    const custom = localStorage.getItem('gaks_custom_capital');
+    const cap = localStorage.getItem('gaks_capital');
+    const raw = custom || (cap ? cap.replace(/[^0-9.]/g, '') : '100000');
+    const num = parseFloat(raw);
+    return !isNaN(num) && num > 0 ? String(num) : '100000';
+  });
+
+  const [riskPercentage, setRiskPercentage] = useState<string>(() => {
+    const saved = localStorage.getItem('gaks_preferred_risk') || '1%';
+    const num = parseFloat(saved.replace(/[^0-9.]/g, ''));
+    return !isNaN(num) && num > 0 ? String(num) : '1';
+  });
+
+  const updateAccountCapital = (val: string) => {
+    setAccountCapital(val);
+    const num = parseFloat(val);
+    if (!isNaN(num) && num > 0) {
+      localStorage.setItem('gaks_custom_capital', String(num));
+      localStorage.setItem('gaks_capital', `$${num.toLocaleString()}`);
+    }
+  };
+
+  const updateRiskPercentage = (val: string) => {
+    setRiskPercentage(val);
+    const num = parseFloat(val);
+    if (!isNaN(num) && num > 0) {
+      localStorage.setItem('gaks_preferred_risk', `${num}%`);
+    }
+  };
+
   // Preview & Engine State
   const [previewDataset, setPreviewDataset] = useState<BacktestDataset | null>(null);
   const [sampleCandles, setSampleCandles] = useState<ParsedCandle[]>([]);
@@ -76,27 +108,13 @@ export function BacktestPage({ fetchWithAuth, showToast }: BacktestPageProps) {
   const handleRunBacktest = async (dataset: BacktestDataset) => {
     setRunningEngineId(dataset.id);
     
-    // 1. Parse account capital from localStorage
-    const savedCapital = localStorage.getItem('gaks_capital') || '$100,000';
-    let balanceNum = 100000;
-    if (savedCapital === 'Custom') {
-      const customCapital = localStorage.getItem('gaks_custom_capital') || '100000';
-      balanceNum = parseFloat(customCapital.replace(/[^0-9.]/g, '')) || 100000;
-    } else {
-      const raw = savedCapital.trim().toLowerCase();
-      if (raw.includes('k')) {
-        balanceNum = (parseFloat(raw.replace(/[^0-9.]/g, '')) || 100) * 1000;
-      } else if (raw.includes('m')) {
-        balanceNum = (parseFloat(raw.replace(/[^0-9.]/g, '')) || 1) * 1000000;
-      } else {
-        balanceNum = parseFloat(raw.replace(/[^0-9.]/g, '')) || 100000;
-      }
-    }
-    if (balanceNum <= 0) balanceNum = 100000;
+    // 1. Parse account capital from state
+    let balanceNum = parseFloat(accountCapital);
+    if (isNaN(balanceNum) || balanceNum <= 0) balanceNum = 100000;
 
-    // 2. Parse risk percent from localStorage
-    const savedRisk = localStorage.getItem('gaks_preferred_risk') || '1%';
-    const riskPercentNum = parseFloat(savedRisk.replace(/[^0-9.]/g, '')) || 1.0;
+    // 2. Parse risk percent from state
+    let riskPercentNum = parseFloat(riskPercentage);
+    if (isNaN(riskPercentNum) || riskPercentNum <= 0) riskPercentNum = 1.0;
 
     // 3. Get customized strategy text from localStorage
     const savedStrategyText = localStorage.getItem('gaks_strategy_text') || '';
@@ -207,7 +225,7 @@ export function BacktestPage({ fetchWithAuth, showToast }: BacktestPageProps) {
         setEngineResult(json);
         loadRuns();
         showToast(
-          `Phase 5 Simulation completed: ${json.candlesProcessed} candles, ${json.signalsGenerated} signals, ${json.tradesCompleted} simulated trades ($${json.totalNetPnL >= 0 ? '+' : ''}${json.totalNetPnL?.toLocaleString()})!`,
+          `Backtest simulation completed: ${json.candlesProcessed} candles, ${json.signalsGenerated} signals, ${json.tradesCompleted} simulated trades ($${json.totalNetPnL >= 0 ? '+' : ''}${json.totalNetPnL?.toLocaleString()})!`,
           'success'
         );
       } else {
@@ -451,7 +469,7 @@ export function BacktestPage({ fetchWithAuth, showToast }: BacktestPageProps) {
             </h2>
           </div>
           <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1 pl-1">
-            Phase 3: Import, validate, and store normalized OHLC historical candle data for deterministic strategy backtesting.
+            Import, validate, and test strategies against normalized OHLC historical candle data.
           </p>
         </div>
 
@@ -472,7 +490,7 @@ export function BacktestPage({ fetchWithAuth, showToast }: BacktestPageProps) {
             Import Historical CSV Dataset
           </h3>
           <span className="text-[10px] uppercase font-mono tracking-wider px-2 py-0.5 rounded bg-sky-500/10 text-sky-400 border border-sky-500/20">
-            Phase 3 Ready
+            CSV Parser Ready
           </span>
         </div>
 
@@ -590,6 +608,98 @@ export function BacktestPage({ fetchWithAuth, showToast }: BacktestPageProps) {
             </button>
           </div>
         </form>
+      </div>
+
+      {/* Account Capital & Risk Configuration Panel */}
+      <div className="bg-zinc-50 dark:bg-zinc-900/60 p-5 rounded-2xl border border-sky-500/30 dark:border-sky-500/20 shadow-sm space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-zinc-200 dark:border-zinc-800 pb-3">
+          <div className="flex items-center gap-2">
+            <Target className="w-4 h-4 text-sky-500" />
+            <h3 className="text-xs font-bold text-zinc-900 dark:text-white uppercase tracking-wider">
+              Backtest Risk & Capital Parameters
+            </h3>
+          </div>
+          <span className="text-[11px] text-zinc-500 dark:text-zinc-400 font-mono">
+            Active Config: <strong className="text-emerald-600 dark:text-emerald-400">${Number(accountCapital || 0).toLocaleString()}</strong> @ <strong className="text-amber-600 dark:text-amber-400">{riskPercentage}% Risk</strong> per trade
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          {/* Account Balance */}
+          <div className="space-y-2">
+            <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+              Account Balance / Starting Capital ($)
+            </label>
+            <div className="flex items-center gap-2">
+              <span className="text-zinc-500 text-sm font-bold">$</span>
+              <input
+                type="number"
+                min="1"
+                step="any"
+                value={accountCapital}
+                onChange={(e) => updateAccountCapital(e.target.value)}
+                placeholder="e.g. 5, 100, 100000"
+                className="w-full px-3.5 py-2 bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-800 rounded-xl text-xs font-mono font-bold text-zinc-900 dark:text-white focus:outline-none focus:border-sky-500"
+              />
+            </div>
+            {/* Quick Presets */}
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-[10px] text-zinc-500 font-mono">Presets:</span>
+              {['5', '100', '1000', '10000', '100000'].map((preset) => (
+                <button
+                  key={preset}
+                  type="button"
+                  onClick={() => updateAccountCapital(preset)}
+                  className={`px-2 py-0.5 rounded text-[10px] font-mono transition-colors cursor-pointer ${
+                    accountCapital === preset
+                      ? 'bg-sky-600 text-white font-bold'
+                      : 'bg-zinc-200 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-800 dark:text-zinc-300'
+                  }`}
+                >
+                  ${Number(preset).toLocaleString()}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Risk Percentage */}
+          <div className="space-y-2">
+            <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+              Risk Per Trade (%)
+            </label>
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                min="0.1"
+                max="100"
+                step="0.1"
+                value={riskPercentage}
+                onChange={(e) => updateRiskPercentage(e.target.value)}
+                placeholder="e.g. 1, 2, 5, 10"
+                className="w-full px-3.5 py-2 bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-800 rounded-xl text-xs font-mono font-bold text-zinc-900 dark:text-white focus:outline-none focus:border-sky-500"
+              />
+              <span className="text-zinc-500 text-sm font-bold">%</span>
+            </div>
+            {/* Quick Presets */}
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-[10px] text-zinc-500 font-mono">Presets:</span>
+              {['0.5', '1', '2', '5', '10'].map((preset) => (
+                <button
+                  key={preset}
+                  type="button"
+                  onClick={() => updateRiskPercentage(preset)}
+                  className={`px-2 py-0.5 rounded text-[10px] font-mono transition-colors cursor-pointer ${
+                    riskPercentage === preset
+                      ? 'bg-amber-500 text-black font-bold'
+                      : 'bg-zinc-200 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-800 dark:text-zinc-300'
+                  }`}
+                >
+                  {preset}%
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* Imported Datasets Table */}
@@ -969,7 +1079,7 @@ export function BacktestPage({ fetchWithAuth, showToast }: BacktestPageProps) {
               <div>
                 <h3 className="text-sm font-bold text-white flex items-center gap-2">
                   <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                  Phase 4 Deterministic Engine Output
+                  Backtest Engine Execution Output
                 </h3>
                 <p className="text-[11px] text-zinc-400 mt-0.5">
                   100% Deterministic Execution (Zero Look-Ahead, Zero External Calls)
@@ -1001,7 +1111,7 @@ export function BacktestPage({ fetchWithAuth, showToast }: BacktestPageProps) {
                 <div className="space-y-4 bg-zinc-950/40 p-4 rounded-2xl border border-zinc-800/80">
                   <h4 className="font-bold text-zinc-100 flex items-center gap-2">
                     <TrendingUp className="w-4 h-4 text-emerald-400" />
-                    Phase 6 Performance Analytics Summary
+                    Performance Analytics Summary
                   </h4>
 
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -1139,7 +1249,7 @@ export function BacktestPage({ fetchWithAuth, showToast }: BacktestPageProps) {
             </div>
 
             <div className="p-4 border-t border-zinc-800 bg-zinc-950/50 flex justify-between items-center">
-              <span className="text-[11px] text-zinc-500">Ready for Phase 5 Trade & Fill Simulation</span>
+              <span className="text-[11px] text-zinc-500">100% Deterministic Backtest Execution Verified</span>
               <button
                 onClick={() => setEngineResult(null)}
                 className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-white rounded-xl text-xs font-semibold cursor-pointer transition-colors"
