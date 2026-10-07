@@ -230,19 +230,24 @@ export function calculatePositionSize(params: PositionSizeParams): PositionSizeR
   const steppedLots = Math.floor(rawLots / lotStep) * lotStep;
   const roundedLots = Math.round(steppedLots * 100) / 100;
 
-  if (roundedLots < minLot) {
+  let finalLots = roundedLots;
+  if (finalLots < minLot) {
     const lossAtMinLot = minLot * lossPerLot;
-    return {
-      accepted: false,
-      lots: 0,
-      calculatedLotSize: minLot,
-      riskAmount,
-      expectedLoss: Math.round(lossAtMinLot * 100) / 100,
-      reason: `Calculated lot size (${rawLots.toFixed(4)}) is below broker minimum lot (${minLot}). Risk amount $${riskAmount.toFixed(2)} is too small for SL distance ${slDistance.toFixed(2)}.`
-    };
+    if (lossAtMinLot < accountSize) {
+      finalLots = minLot;
+    } else {
+      return {
+        accepted: false,
+        lots: 0,
+        calculatedLotSize: minLot,
+        riskAmount,
+        expectedLoss: Math.round(lossAtMinLot * 100) / 100,
+        reason: `Calculated lot size (${rawLots.toFixed(4)}) is below broker minimum lot (${minLot}) and exceeds account balance.`
+      };
+    }
   }
 
-  const finalLots = Math.min(roundedLots, maxLot);
+  finalLots = Math.min(finalLots, maxLot);
   const expectedLoss = Math.round(finalLots * lossPerLot * 100) / 100;
 
   // Reject trade if expected loss exceeds account balance
@@ -257,8 +262,11 @@ export function calculatePositionSize(params: PositionSizeParams): PositionSizeR
     };
   }
 
-  // Reject trade if expected loss exceeds user's requested risk budget by > 35% (prevents wiping out small accounts)
-  const maxAllowedRisk = Math.max(riskAmount * 1.35, riskAmount + 0.25);
+  // Reject trade if expected loss exceeds user's requested risk budget by > 35% (adjusted for small accounts <= $100 to allow min lot testing)
+  const maxAllowedRisk = accountSize <= 100
+    ? Math.max(riskAmount * 1.35, accountSize * 0.9)
+    : Math.max(riskAmount * 1.35, riskAmount + 0.25);
+
   if (expectedLoss > maxAllowedRisk) {
     return {
       accepted: false,
