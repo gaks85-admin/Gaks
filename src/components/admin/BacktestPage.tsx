@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   FileText, Upload, RefreshCw, Trash2, CheckCircle2, AlertTriangle, 
   Layers, Calendar, Database, Eye, X, Check, ArrowRight, ShieldCheck, TrendingUp,
-  Target, ShieldAlert, Activity, Cpu
+  Target, ShieldAlert, Activity, Cpu, Clock
 } from 'lucide-react';
 import { parseAndValidateCSV } from '../../lib/backtest-csv';
 
