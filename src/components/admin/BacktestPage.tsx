@@ -50,9 +50,22 @@ interface ParsedCandle {
 interface BacktestPageProps {
   fetchWithAuth: (url: string, options?: RequestInit) => Promise<Response>;
   showToast: (message: string, type?: 'success' | 'error') => void;
+  accountType?: 'personal' | 'prop' | null;
+  globalCapital?: string;
+  globalRisk?: string;
+  propFirmAccountSize?: string;
+  propFirmRiskPerTrade?: string;
 }
 
-export function BacktestPage({ fetchWithAuth, showToast }: BacktestPageProps) {
+export function BacktestPage({ 
+  fetchWithAuth, 
+  showToast,
+  accountType,
+  globalCapital,
+  globalRisk,
+  propFirmAccountSize,
+  propFirmRiskPerTrade
+}: BacktestPageProps) {
   const [datasets, setDatasets] = useState<BacktestDataset[]>([]);
   const [runs, setRuns] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -67,19 +80,30 @@ export function BacktestPage({ fetchWithAuth, showToast }: BacktestPageProps) {
   const [fileContent, setFileContent] = useState<string>('');
 
   // Engine Risk & Capital Parameters
-  const [accountCapital, setAccountCapital] = useState<string>(() => {
-    const custom = localStorage.getItem('gaks_custom_capital');
-    const cap = localStorage.getItem('gaks_capital');
-    const raw = custom || (cap ? cap.replace(/[^0-9.]/g, '') : '100000');
-    const num = parseFloat(raw);
-    return !isNaN(num) && num > 0 ? String(num) : '100000';
-  });
+  const [accountCapital, setAccountCapital] = useState<string>('100000');
+  const [riskPercentage, setRiskPercentage] = useState<string>('1');
 
-  const [riskPercentage, setRiskPercentage] = useState<string>(() => {
-    const saved = localStorage.getItem('gaks_preferred_risk') || '1%';
-    const num = parseFloat(saved.replace(/[^0-9.]/g, ''));
-    return !isNaN(num) && num > 0 ? String(num) : '1';
-  });
+  // Automatically sync with strategy page configuration
+  useEffect(() => {
+    let targetCapital = '100000';
+    let targetRisk = '1';
+
+    if (accountType === 'prop') {
+      targetCapital = propFirmAccountSize || '100000';
+      targetRisk = propFirmRiskPerTrade || '1';
+    } else {
+      // Personal
+      targetCapital = globalCapital?.replace(/[^0-9.]/g, '') || '100000';
+      targetRisk = globalRisk?.replace(/[^0-9.]/g, '') || '1';
+    }
+
+    setAccountCapital(targetCapital);
+    setRiskPercentage(targetRisk);
+    
+    // Save to local storage for persistence
+    localStorage.setItem('gaks_custom_capital', targetCapital);
+    localStorage.setItem('gaks_preferred_risk', `${targetRisk}%`);
+  }, [accountType, globalCapital, globalRisk, propFirmAccountSize, propFirmRiskPerTrade]);
 
   const updateAccountCapital = (val: string) => {
     setAccountCapital(val);
@@ -629,6 +653,10 @@ export function BacktestPage({ fetchWithAuth, showToast }: BacktestPageProps) {
             <h3 className="text-xs font-bold text-zinc-900 dark:text-white uppercase tracking-wider">
               Backtest Risk & Capital Parameters
             </h3>
+            <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 text-[9px] font-bold uppercase tracking-tight flex items-center gap-1">
+              <RefreshCw className="w-2 h-2" />
+              Synced with Strategy
+            </span>
           </div>
           <span className="text-[11px] text-zinc-500 dark:text-zinc-400 font-mono">
             Active Config: <strong className="text-emerald-600 dark:text-emerald-400">${Number(accountCapital || 0).toLocaleString()}</strong> @ <strong className="text-amber-600 dark:text-amber-400">{riskPercentage}% Risk</strong> per trade

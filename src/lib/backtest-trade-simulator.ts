@@ -1,5 +1,5 @@
 /**
- * GAKS AI — Deterministic Trade Simulator (Phase 5)
+ * GAKS AI — Deterministic Trade Simulator
  * Simulates realistic trade execution, position lifecycle, SL/TP resolution,
  * spread, slippage, commission, and risk-based lot sizing over historical candles.
  * ABSOLUTE RULE: 100% Deterministic, zero live market or external API calls.

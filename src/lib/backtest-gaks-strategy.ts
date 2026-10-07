@@ -1,5 +1,5 @@
 /**
- * GAKS AI — Actual Gaks Strategy Backtest Adapter (Phase 5/6 Integration)
+ * GAKS AI — Actual Gaks Strategy Backtest Adapter
  * Deterministically evaluates compiled Gaks strategy rules (CompilerOutput / CompiledRules)
  * over historical candle contexts using pure decision-engine evaluators without Gemini API calls.
  */

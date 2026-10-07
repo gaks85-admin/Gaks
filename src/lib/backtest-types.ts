@@ -1,5 +1,5 @@
 /**
- * GAKS AI — Backtesting Engine Types (Phase 4)
+ * GAKS AI — Backtesting Engine Types
  * Defines strongly typed contracts for deterministic backtest configuration,
  * context, state, signals, and strategy adapters.
  */

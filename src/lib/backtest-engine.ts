@@ -1,5 +1,5 @@
 /**
- * GAKS AI — Deterministic Backtesting Engine (Phase 4)
+ * GAKS AI — Deterministic Backtesting Engine
  * Sequentially evaluates historical OHLC candle datasets without look-ahead bias,
  * live market calls, or Gemini API dependencies.
  */

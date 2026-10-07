@@ -3098,7 +3098,16 @@ export default function App() {
                     <p className="text-[11px] text-zinc-500 mt-0.5">Test custom strategy rules on historical premium data with 100% precision.</p>
                   </div>
                 </div>
-                <BacktestPage fetchWithAuth={fetchWithAuth} showToast={showToast} />
+                <BacktestPage 
+                  fetchWithAuth={fetchWithAuth} 
+                  showToast={showToast} 
+                  // Configured Risk Sync
+                  accountType={accountType}
+                  globalCapital={capital === 'Custom' ? customCapital : capital}
+                  globalRisk={preferredRisk}
+                  propFirmAccountSize={propFirmAccountSize}
+                  propFirmRiskPerTrade={propFirmRiskPerTrade}
+                />
               </div>
             ) : (
               <div className="p-8 rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-[#0c0c0e]/60 space-y-4 text-center my-8">

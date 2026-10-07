@@ -1,5 +1,5 @@
 /**
- * GAKS AI — Deterministic Strategy Evaluators & Adapters (Phase 4)
+ * GAKS AI — Deterministic Strategy Evaluators & Adapters
  * Provides pure, deterministic strategy evaluation over historical candle contexts.
  * ABSOLUTE RULE: Zero calls to Gemini API, live market data, or external services.
  */

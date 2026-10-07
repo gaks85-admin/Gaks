@@ -1,8 +1,8 @@
 /**
- * GAKS AI — Deterministic Backtest Performance Analytics (Phase 6)
+ * GAKS AI — Deterministic Backtest Performance Analytics
  * Pure, deterministic analytics module that calculates account results, win rates,
  * profit factor, maximum drawdown, equity curve, trade duration, streaks, and R-multiples
- * from completed Phase 5 trade records.
+ * from completed trade records.
  */
 
 import {

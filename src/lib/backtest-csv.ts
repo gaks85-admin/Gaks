@@ -1,5 +1,5 @@
 /**
- * GAKS AI — Backtesting Engine: Historical CSV Parser & Validator (Phase 3)
+ * GAKS AI — Backtesting Engine: Historical CSV Parser & Validator
  * Provides strict parsing, validation, normalization, and integrity checks
  * for historical OHLC candle data.
  */
