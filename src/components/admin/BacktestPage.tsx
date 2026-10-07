@@ -55,6 +55,8 @@ interface BacktestPageProps {
   globalRisk?: string;
   propFirmAccountSize?: string;
   propFirmRiskPerTrade?: string;
+  globalPositionMode?: 'AUTO_RISK' | 'FIXED_LOT';
+  globalFixedLotSize?: string;
 }
 
 export function BacktestPage({ 
@@ -64,7 +66,9 @@ export function BacktestPage({
   globalCapital,
   globalRisk,
   propFirmAccountSize,
-  propFirmRiskPerTrade
+  propFirmRiskPerTrade,
+  globalPositionMode,
+  globalFixedLotSize
 }: BacktestPageProps) {
   const [datasets, setDatasets] = useState<BacktestDataset[]>([]);
   const [runs, setRuns] = useState<any[]>([]);
@@ -82,6 +86,8 @@ export function BacktestPage({
   // Engine Risk & Capital Parameters
   const [accountCapital, setAccountCapital] = useState<string>('100000');
   const [riskPercentage, setRiskPercentage] = useState<string>('1');
+  const [positionMode, setPositionMode] = useState<'AUTO_RISK' | 'FIXED_LOT'>('AUTO_RISK');
+  const [fixedLotSize, setFixedLotSize] = useState<string>('0.01');
 
   // Automatically sync with strategy page configuration
   useEffect(() => {
@@ -99,11 +105,13 @@ export function BacktestPage({
 
     setAccountCapital(targetCapital);
     setRiskPercentage(targetRisk);
+    if (globalPositionMode) setPositionMode(globalPositionMode);
+    if (globalFixedLotSize) setFixedLotSize(globalFixedLotSize);
     
     // Save to local storage for persistence
     localStorage.setItem('gaks_custom_capital', targetCapital);
     localStorage.setItem('gaks_preferred_risk', `${targetRisk}%`);
-  }, [accountType, globalCapital, globalRisk, propFirmAccountSize, propFirmRiskPerTrade]);
+  }, [accountType, globalCapital, globalRisk, propFirmAccountSize, propFirmRiskPerTrade, globalPositionMode, globalFixedLotSize]);
 
   const updateAccountCapital = (val: string) => {
     setAccountCapital(val);
@@ -136,6 +144,7 @@ export function BacktestPage({
     // 1. Parse account capital from state
     let balanceNum = parseFloat(accountCapital);
     if (isNaN(balanceNum) || balanceNum <= 0) balanceNum = 100000;
+    const initialStartingBalance = balanceNum;
 
     // 2. Parse risk percent from state
     let riskPercentNum = parseFloat(riskPercentage);
@@ -175,6 +184,8 @@ export function BacktestPage({
           timeframe: dataset.timeframe,
           simulation: {
             riskPercent: riskPercentNum,
+            positionMode: positionMode,
+            preferredLotSize: parseFloat(fixedLotSize) || 0.01,
             spreadPips: 1.0,
             slippagePips: 0.5,
             commissionPerLot: 7.0,
@@ -389,9 +400,9 @@ export function BacktestPage({
     let candlesToSend = parseRes.candles;
     const originalCount = candlesToSend.length;
 
-    // Optimize dataset payload if > 25,000 candles to stay within stable processing limits
-    if (candlesToSend.length > 25000) {
-      const step = Math.ceil(candlesToSend.length / 25000);
+    // Optimize dataset payload if > 100,000 candles to stay within stable processing limits
+    if (candlesToSend.length > 100000) {
+      const step = Math.ceil(candlesToSend.length / 100000);
       candlesToSend = candlesToSend.filter((_, idx) => idx % step === 0 || idx === candlesToSend.length - 1);
     }
 
@@ -1084,7 +1095,9 @@ export function BacktestPage({
                   <span className="text-sm sm:text-base font-bold font-mono text-white mt-1 truncate">
                     ${simulationRunner.simulatedEquity.toLocaleString()}
                   </span>
-                  <span className="text-[9px] text-zinc-500 font-mono">Live Balance</span>
+                  <span className="text-[9px] text-zinc-500 font-mono">
+                    Live Balance (Start: ${Number(accountCapital || 0).toLocaleString()})
+                  </span>
                 </div>
 
                 {/* Max Drawdown */}

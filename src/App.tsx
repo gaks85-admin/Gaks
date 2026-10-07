@@ -3107,6 +3107,8 @@ export default function App() {
                   globalRisk={preferredRisk}
                   propFirmAccountSize={propFirmAccountSize}
                   propFirmRiskPerTrade={propFirmRiskPerTrade}
+                  globalPositionMode={positionMode}
+                  globalFixedLotSize={fixedLotSize}
                 />
               </div>
             ) : (

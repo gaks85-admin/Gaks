@@ -65,8 +65,8 @@ export class GaksBacktestStrategy implements BacktestStrategy {
     const emaCrossoverBullish = prevFastEma !== null && prevSlowEma !== null && fastEma !== null && slowEma !== null && prevFastEma <= prevSlowEma && fastEma > slowEma;
     const emaCrossoverBearish = prevFastEma !== null && prevSlowEma !== null && fastEma !== null && slowEma !== null && prevFastEma >= prevSlowEma && fastEma < slowEma;
 
-    // Market structure detection over previous 20 candles
-    const lookback = Math.min(previous.length, 20);
+    // Market structure detection over previous 100 candles (better for zone identification)
+    const lookback = Math.min(previous.length, 100);
     const recentCandles = previous.slice(-lookback);
     const recentHigh = Math.max(...recentCandles.map(c => c.high));
     const recentLow = Math.min(...recentCandles.map(c => c.low));

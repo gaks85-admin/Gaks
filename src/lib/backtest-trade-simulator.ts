@@ -86,6 +86,8 @@ export function simulateTradeLifecycle(params: SimulateTradeParams): TradeSimula
   const posSizeResult = calculatePositionSize({
     accountSize: currentBalance,
     riskPercentage: riskPercent,
+    positionMode: simConfig.positionMode,
+    preferredLotSize: simConfig.preferredLotSize,
     entryPrice: rawEntryPrice,
     stopLoss,
     takeProfit,

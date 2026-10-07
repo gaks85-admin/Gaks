@@ -8,6 +8,8 @@ import { ParsedCandle } from './backtest-csv.js';
 
 export interface BacktestSimulationConfig {
   riskPercent?: number; // e.g. 1.0 = 1% risk per trade
+  positionMode?: 'AUTO_RISK' | 'FIXED_LOT'; // Default: AUTO_RISK
+  preferredLotSize?: number; // Default: 0.01
   spreadPips?: number; // Spread cost in pips/points
   slippagePips?: number; // Slippage cost in pips/points
   commissionPerLot?: number; // USD per round-turn lot
