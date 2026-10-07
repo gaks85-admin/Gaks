@@ -375,6 +375,8 @@ export function calculateBacktestAnalytics(params: CalculateAnalyticsParams): Ba
     averagePlannedRR,
     averageRealizedR,
     totalRealizedR,
+    winningTradeAverageR,
+    losingTradeAverageR,
     longestWinningStreak: longestWinStreak,
     longestLosingStreak: longestLossStreak,
     currentWinningStreak: currentWinStreak,

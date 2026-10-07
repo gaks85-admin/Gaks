@@ -114,9 +114,14 @@ export async function runBacktest(config: BacktestConfig): Promise<BacktestEngin
   let activeTradeUntilIndex = -1;
 
   // 6. Chronological Engine Loop (NO LOOK-AHEAD BIAS)
+  const MAX_HISTORY = 500; // Limit history passed to strategy for performance (enough for EMA 200, ATR, etc.)
+
   for (let i = 0; i < candles.length; i++) {
     const currentCandle = candles[i];
-    const previousCandles = candles.slice(0, i); // Strictly historical context at or before index i
+    
+    // Optimizing memory: Instead of slicing whole history, only take what's needed
+    const historyStart = Math.max(0, i - MAX_HISTORY);
+    const previousCandles = candles.slice(historyStart, i); 
 
     state.currentTimestamp = currentCandle.timestamp;
     state.candleIndex = i;

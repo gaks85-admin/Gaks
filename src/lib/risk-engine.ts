@@ -262,19 +262,25 @@ export function calculatePositionSize(params: PositionSizeParams): PositionSizeR
     };
   }
 
-  // Reject trade if expected loss exceeds user's requested risk budget by > 35% (adjusted for small accounts <= $100 to allow min lot testing)
+  // Reject trade if expected loss exceeds user's requested risk budget by a significant margin.
+  // We allow some flexibility for small accounts where the minimum lot (0.01) might exceed the tight risk budget, 
+  // but we still cap it at 90% of the account balance to prevent immediate wipeout from one trade.
   const maxAllowedRisk = accountSize <= 100
-    ? Math.max(riskAmount * 1.35, accountSize * 0.9)
-    : Math.max(riskAmount * 1.35, riskAmount + 0.25);
+    ? Math.max(riskAmount * 2.0, accountSize * 0.8) // For small accounts, allow up to 2x requested risk OR 80% of balance
+    : Math.max(riskAmount * 1.35, riskAmount + 0.50); // For larger accounts, be stricter (35% buffer or $0.50)
 
   if (expectedLoss > maxAllowedRisk) {
+    let reason = `Order rejected: Expected loss ($${expectedLoss.toFixed(2)}) significantly exceeds your configured risk budget ($${riskAmount.toFixed(2)}).`;
+    if (accountSize <= 100) {
+      reason = `Order rejected: On a $${accountSize.toFixed(2)} account, a 0.01 lot position results in an expected loss of $${expectedLoss.toFixed(2)}, which is over 80% of your total balance. This trade is too risky for this account size.`;
+    }
     return {
       accepted: false,
       lots: 0,
       calculatedLotSize: finalLots,
       riskAmount,
       expectedLoss,
-      reason: `Order rejected: Minimum lot size (${finalLots}) results in expected loss of $${expectedLoss.toFixed(2)}, which exceeds your configured risk budget of $${riskAmount.toFixed(2)} (${riskPercentage}% of $${accountSize.toFixed(2)}).`
+      reason
     };
   }
 

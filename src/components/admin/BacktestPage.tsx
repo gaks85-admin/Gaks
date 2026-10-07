@@ -168,16 +168,16 @@ export function BacktestPage({ fetchWithAuth, showToast }: BacktestPageProps) {
         const analytics = json.analytics || {};
         const finalWinningTrades: number = analytics.winningTrades ?? realTrades.filter((t: any) => t.netPnL > 0 || t.exitReason === 'TAKE_PROFIT').length;
         const finalLosingTrades: number = analytics.losingTrades ?? realTrades.filter((t: any) => t.netPnL <= 0 || t.exitReason === 'STOP_LOSS' || t.exitReason === 'SAME_CANDLE_STOP_LOSS').length;
-        const finalBalance: number = json.finalBalance || balanceNum;
-        const finalMaxDrawdown: number = analytics.maxDrawdownPercent || 0;
+        const finalBalance: number = json.finalBalance ?? balanceNum;
+        const finalMaxDrawdown: number = analytics.maxDrawdownPercent ?? 0;
 
         // Run real-data replay animation over 25 steps (approx 1.2s)
         const TOTAL_STEPS = 25;
         for (let step = 1; step <= TOTAL_STEPS; step++) {
           const ratio = step / TOTAL_STEPS;
           const currentCandle = Math.round(ratio * processedCandles);
-          const currentTradesCount = Math.round(ratio * realTrades.length);
-          const activeTrades = realTrades.slice(0, currentTradesCount);
+          const currentTradesCount = Math.round(ratio * (realTrades?.length || 0));
+          const activeTrades = (realTrades || []).slice(0, currentTradesCount);
 
           const currentTpHits = step === TOTAL_STEPS 
             ? finalWinningTrades 
