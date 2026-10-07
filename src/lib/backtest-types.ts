@@ -8,6 +8,7 @@ import { ParsedCandle } from './backtest-csv.js';
 
 export interface BacktestSimulationConfig {
   riskPercent?: number; // e.g. 1.0 = 1% risk per trade
+  riskRewardRatio?: number; // Overrides strategy default if provided
   positionMode?: 'AUTO_RISK' | 'FIXED_LOT'; // Default: AUTO_RISK
   preferredLotSize?: number; // Default: 0.01
   spreadPips?: number; // Spread cost in pips/points
@@ -219,5 +220,5 @@ export interface BacktestEngineResult {
 export interface BacktestStrategy {
   id: string;
   name: string;
-  evaluate(context: BacktestCandleContext): BacktestSignal | null;
+  evaluate(context: BacktestCandleContext, simConfig?: BacktestSimulationConfig): BacktestSignal | null;
 }

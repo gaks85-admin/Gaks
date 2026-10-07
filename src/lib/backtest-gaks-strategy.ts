@@ -40,7 +40,7 @@ export class GaksBacktestStrategy implements BacktestStrategy {
     this.compiledStrategy = compileStrategy(this.rawStrategyText);
   }
 
-  evaluate(context: BacktestCandleContext): BacktestSignal | null {
+  evaluate(context: BacktestCandleContext, simConfig?: BacktestSimulationConfig): BacktestSignal | null {
     const { current, previous, index, symbol, timeframe } = context;
     if (!previous || previous.length < 14) return null; // Requires at least 14 historical candles
 
@@ -206,7 +206,9 @@ export class GaksBacktestStrategy implements BacktestStrategy {
 
     if (triggerSignal) {
       const slBuffer = Math.max(atr * 1.5, 0.0010);
-      const rrRatio = this.compiledStrategy.compiled_rules?.risk_reward?.min_ratio || 2.0;
+      
+      // Load RR from simConfig if provided, otherwise fallback to strategy or default
+      const rrRatio = simConfig?.riskRewardRatio || this.compiledStrategy.compiled_rules?.risk_reward?.min_ratio || 2.0;
 
       const entryPrice = current.close;
       let stopLoss = 0;

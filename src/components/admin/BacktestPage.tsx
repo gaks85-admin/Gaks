@@ -57,6 +57,7 @@ interface BacktestPageProps {
   propFirmRiskPerTrade?: string;
   globalPositionMode?: 'AUTO_RISK' | 'FIXED_LOT';
   globalFixedLotSize?: string;
+  globalRR?: string;
 }
 
 export function BacktestPage({ 
@@ -68,7 +69,8 @@ export function BacktestPage({
   propFirmAccountSize,
   propFirmRiskPerTrade,
   globalPositionMode,
-  globalFixedLotSize
+  globalFixedLotSize,
+  globalRR
 }: BacktestPageProps) {
   const [datasets, setDatasets] = useState<BacktestDataset[]>([]);
   const [runs, setRuns] = useState<any[]>([]);
@@ -88,6 +90,7 @@ export function BacktestPage({
   const [riskPercentage, setRiskPercentage] = useState<string>('1');
   const [positionMode, setPositionMode] = useState<'AUTO_RISK' | 'FIXED_LOT'>('AUTO_RISK');
   const [fixedLotSize, setFixedLotSize] = useState<string>('0.01');
+  const [riskReward, setRiskReward] = useState<string>('1:2');
 
   // Automatically sync with strategy page configuration
   useEffect(() => {
@@ -107,11 +110,13 @@ export function BacktestPage({
     setRiskPercentage(targetRisk);
     if (globalPositionMode) setPositionMode(globalPositionMode);
     if (globalFixedLotSize) setFixedLotSize(globalFixedLotSize);
+    if (globalRR) setRiskReward(globalRR);
     
     // Save to local storage for persistence
     localStorage.setItem('gaks_custom_capital', targetCapital);
     localStorage.setItem('gaks_preferred_risk', `${targetRisk}%`);
-  }, [accountType, globalCapital, globalRisk, propFirmAccountSize, propFirmRiskPerTrade, globalPositionMode, globalFixedLotSize]);
+    if (globalRR) localStorage.setItem('gaks_risk_reward', globalRR);
+  }, [accountType, globalCapital, globalRisk, propFirmAccountSize, propFirmRiskPerTrade, globalPositionMode, globalFixedLotSize, globalRR]);
 
   const updateAccountCapital = (val: string) => {
     setAccountCapital(val);
@@ -128,6 +133,11 @@ export function BacktestPage({
     if (!isNaN(num) && num > 0) {
       localStorage.setItem('gaks_preferred_risk', `${num}%`);
     }
+  };
+
+  const updateRiskReward = (val: string) => {
+    setRiskReward(val);
+    localStorage.setItem('gaks_risk_reward', val);
   };
 
   // Preview & Engine State
@@ -149,6 +159,17 @@ export function BacktestPage({
     // 2. Parse risk percent from state
     let riskPercentNum = parseFloat(riskPercentage);
     if (isNaN(riskPercentNum) || riskPercentNum <= 0) riskPercentNum = 1.0;
+
+    // 2b. Parse RR from state
+    const rrParts = riskReward.split(':');
+    let rrRatio = 2.0;
+    if (rrParts.length === 2) {
+      const num = parseFloat(rrParts[1]);
+      if (!isNaN(num) && num > 0) rrRatio = num;
+    } else {
+      const num = parseFloat(riskReward.replace(/[^0-9.]/g, ''));
+      if (!isNaN(num) && num > 0) rrRatio = num;
+    }
 
     // 3. Get customized strategy text from localStorage
     const savedStrategyText = localStorage.getItem('gaks_strategy_text') || '';
@@ -184,6 +205,7 @@ export function BacktestPage({
           timeframe: dataset.timeframe,
           simulation: {
             riskPercent: riskPercentNum,
+            riskRewardRatio: rrRatio,
             positionMode: positionMode,
             preferredLotSize: parseFloat(fixedLotSize) || 0.01,
             spreadPips: 1.0,
@@ -752,6 +774,39 @@ export function BacktestPage({
                   }`}
                 >
                   {preset}%
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="space-y-2">
+            <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+              Risk:Reward Ratio
+            </label>
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                value={riskReward}
+                onChange={(e) => updateRiskReward(e.target.value)}
+                placeholder="e.g. 1:2, 1:3, 1:5"
+                className="w-full px-3.5 py-2 bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-800 rounded-xl text-xs font-mono font-bold text-zinc-900 dark:text-white focus:outline-none focus:border-sky-500"
+              />
+              <Target className="w-4 h-4 text-zinc-400" />
+            </div>
+            {/* Quick Presets */}
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-[10px] text-zinc-500 font-mono">Presets:</span>
+              {['1:1', '1:2', '1:3', '1:5'].map((preset) => (
+                <button
+                  key={preset}
+                  type="button"
+                  onClick={() => updateRiskReward(preset)}
+                  className={`px-2 py-0.5 rounded text-[10px] font-mono transition-colors cursor-pointer ${
+                    riskReward === preset
+                      ? 'bg-emerald-500 text-black font-bold'
+                      : 'bg-zinc-200 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-800 dark:text-zinc-300'
+                  }`}
+                >
+                  {preset}
                 </button>
               ))}
             </div>

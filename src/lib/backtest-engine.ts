@@ -139,7 +139,7 @@ export async function runBacktest(config: BacktestConfig): Promise<BacktestEngin
     };
 
     // Evaluate strategy
-    const signal = strategy.evaluate(context);
+    const signal = strategy.evaluate(context, config.simulation);
     if (signal) {
       signals.push(signal);
       state.signalsGenerated++;

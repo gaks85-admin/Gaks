@@ -3109,6 +3109,7 @@ export default function App() {
                   propFirmRiskPerTrade={propFirmRiskPerTrade}
                   globalPositionMode={positionMode}
                   globalFixedLotSize={fixedLotSize}
+                  globalRR={riskReward}
                 />
               </div>
             ) : (
