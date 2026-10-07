@@ -152,6 +152,7 @@ export async function runBacktest(config: BacktestConfig): Promise<BacktestEngin
         candles: candles,
         startIndex: i,
         currentBalance: state.balance,
+        initialBalance: config.initialBalance,
         simConfig: config.simulation,
         symbol: normSymbol,
         timeframe: normTimeframe

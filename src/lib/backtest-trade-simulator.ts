@@ -22,6 +22,7 @@ export interface SimulateTradeParams {
   candles: ParsedCandle[];
   startIndex: number;
   currentBalance: number;
+  initialBalance: number;
   simConfig?: BacktestSimulationConfig;
   symbol: string;
   timeframe: string;
@@ -82,9 +83,10 @@ export function simulateTradeLifecycle(params: SimulateTradeParams): TradeSimula
   // 3. Resolve Instrument Specs and Position Size
   const spec = resolveInstrumentSpec(symbol);
   const riskPercent = simConfig.riskPercent !== undefined && simConfig.riskPercent > 0 ? simConfig.riskPercent : 1.0;
+  const riskCalculationBalance = simConfig.useCompounding ? currentBalance : params.initialBalance;
 
   const posSizeResult = calculatePositionSize({
-    accountSize: currentBalance,
+    accountSize: riskCalculationBalance,
     riskPercentage: riskPercent,
     positionMode: simConfig.positionMode,
     preferredLotSize: simConfig.preferredLotSize,
