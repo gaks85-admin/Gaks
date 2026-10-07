@@ -92,6 +92,7 @@ export function BacktestPage({
   const [fixedLotSize, setFixedLotSize] = useState<string>('0.01');
   const [riskReward, setRiskReward] = useState<string>('1:2');
   const [useCompounding, setUseCompounding] = useState<boolean>(false);
+  const [tradingTimeframe, setTradingTimeframe] = useState<string>('M5');
 
   // Automatically sync with strategy page configuration
   useEffect(() => {
@@ -158,7 +159,7 @@ export function BacktestPage({
     const initialStartingBalance = balanceNum;
 
     // 2. Parse risk percent from state
-    let riskPercentNum = parseFloat(riskPercentage);
+    let riskPercentNum = parseFloat(String(riskPercentage).replace(/[^0-9.]/g, ''));
     if (isNaN(riskPercentNum) || riskPercentNum <= 0) riskPercentNum = 1.0;
 
     // 2b. Parse RR from state
@@ -203,7 +204,7 @@ export function BacktestPage({
           initialBalance: balanceNum,
           strategyText: savedStrategyText,
           symbol: dataset.symbol,
-          timeframe: dataset.timeframe,
+          timeframe: tradingTimeframe,
           simulation: {
             riskPercent: riskPercentNum,
             riskRewardRatio: rrRatio,
@@ -837,6 +838,32 @@ export function BacktestPage({
               {useCompounding 
                 ? 'Risk is calculated based on current account balance (profits increase risk).' 
                 : 'Risk is calculated based on initial starting capital ($5 fixed).'}
+            </p>
+          </div>
+
+          {/* Trading Timeframe */}
+          <div className="space-y-2">
+            <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+              Backtest Execution Timeframe
+            </label>
+            <div className="flex items-center gap-2">
+              <select
+                value={tradingTimeframe}
+                onChange={(e) => setTradingTimeframe(e.target.value)}
+                className="w-full px-3.5 py-2 bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-800 rounded-xl text-xs font-mono font-bold text-zinc-900 dark:text-white focus:outline-none focus:border-sky-500"
+              >
+                <option value="M1">M1 (1 Minute)</option>
+                <option value="M5">M5 (5 Minutes)</option>
+                <option value="M15">M15 (15 Minutes)</option>
+                <option value="M30">M30 (30 Minutes)</option>
+                <option value="H1">H1 (1 Hour)</option>
+                <option value="H4">H4 (4 Hours)</option>
+                <option value="D1">D1 (Daily)</option>
+              </select>
+              <Clock className="w-4 h-4 text-zinc-400" />
+            </div>
+            <p className="text-[10px] text-zinc-500 leading-tight italic">
+              GAKS aggregates M1 data into this timeframe before evaluating rules.
             </p>
           </div>
         </div>

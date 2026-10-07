@@ -322,14 +322,15 @@ export function calculatePositionSize(params: PositionSizeParams): PositionSizeR
 
     // STRICT ENFORCEMENT: If min lot risks more than the budget, REJECT.
     // This matches real AI behavior where signals are rejected if they are too risky for the account.
-    if (minLotExpectedLoss > Math.round(riskAmount * 100) / 100) {
+    const roundedRiskBudget = Math.floor(riskAmount * 100) / 100;
+    if (minLotExpectedLoss > roundedRiskBudget + 0.00001) {
       return {
         accepted: false,
         lots: 0,
         calculatedLotSize: minLot,
-        riskAmount: Math.round(riskAmount * 100) / 100,
+        riskAmount: roundedRiskBudget,
         expectedLoss: minLotExpectedLoss,
-        reason: `Order rejected: On a $${accountSize.toFixed(2)} account, the smallest trade (0.01 lot) risks $${minLotExpectedLoss.toFixed(2)} (including commissions/costs), which exceeds your ${riskPercentage}% budget ($${riskAmount.toFixed(2)}).`
+        reason: `Order rejected: On a $${accountSize.toFixed(2)} account, the smallest trade (0.01 lot) risks $${minLotExpectedLoss.toFixed(2)} (including commissions/costs), which exceeds your ${riskPercentage}% budget ($${roundedRiskBudget.toFixed(2)}).`
       };
     }
 
@@ -365,14 +366,16 @@ export function calculatePositionSize(params: PositionSizeParams): PositionSizeR
   }
 
   // FINAL STRICT RISK CHECK (Strictly adhere to the budget)
-  if (expectedLoss > Math.round(riskAmount * 100) / 100) {
+  // We use a tiny epsilon (0.00001) for floating point safety, but otherwise zero tolerance.
+  const roundedRiskBudget = Math.floor(riskAmount * 100) / 100;
+  if (expectedLoss > roundedRiskBudget + 0.00001) {
     return {
       accepted: false,
       lots: 0,
       calculatedLotSize: finalLots,
-      riskAmount: Math.round(riskAmount * 100) / 100,
+      riskAmount: roundedRiskBudget,
       expectedLoss,
-      reason: `Order rejected: Expected loss ($${expectedLoss.toFixed(2)}) exceeds your configured risk budget ($${riskAmount.toFixed(2)}).`
+      reason: `Order rejected: Calculated risk ($${expectedLoss.toFixed(2)}) exceeds your strict ${riskPercentage}% budget ($${roundedRiskBudget.toFixed(2)}). Try increasing balance or reducing stop loss distance.`
     };
   }
 

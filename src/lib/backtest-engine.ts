@@ -18,6 +18,8 @@ import { getBacktestDatasetDetails, getBacktestDatasetCandles } from './backtest
 import { resolveBacktestStrategy } from './backtest-strategy.js';
 import { simulateTradeLifecycle } from './backtest-trade-simulator.js';
 import { calculateBacktestAnalytics } from './backtest-analytics.js';
+import { aggregateCandles } from './backtest-utils.js';
+import { timeframeToMinutes } from './timeframe.js';
 
 /**
  * Executes a deterministic backtest over a Phase 3 historical dataset.
@@ -65,6 +67,18 @@ export async function runBacktest(config: BacktestConfig): Promise<BacktestEngin
 
   // Ensure strict chronological sorting (timestamp ASC)
   candles = [...candles].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+
+  // --- NEW: Timeframe Aggregation ---
+  // If target timeframe (normTimeframe) is higher than dataset timeframe, aggregate.
+  const datasetTimeframeMinutes = timeframeToMinutes(dataset.timeframe);
+  const targetTimeframeMinutes = timeframeToMinutes(normTimeframe);
+
+  if (targetTimeframeMinutes > datasetTimeframeMinutes) {
+    candles = aggregateCandles(candles, targetTimeframeMinutes);
+  } else if (targetTimeframeMinutes < datasetTimeframeMinutes) {
+    // We cannot interpolate upwards reliably for backtesting.
+    console.warn(`[BacktestEngine] Target timeframe ${normTimeframe} is lower than dataset timeframe ${dataset.timeframe}. Running on ${dataset.timeframe} instead.`);
+  }
 
   // Validate internal chronological integrity
   for (let i = 1; i < candles.length; i++) {
