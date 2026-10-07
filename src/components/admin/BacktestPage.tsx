@@ -159,7 +159,7 @@ export function BacktestPage({
       slHits: 0,
       simulatedEquity: balanceNum,
       maxDrawdown: 0,
-      statusText: 'Connecting to backtest engine & loading historical OHLC candles...',
+      statusText: 'Engine processing your strategy rules candle-by-candle (this may take up to 60s for large 2025 datasets)...',
       isComplete: false
     });
 
@@ -389,9 +389,9 @@ export function BacktestPage({
     let candlesToSend = parseRes.candles;
     const originalCount = candlesToSend.length;
 
-    // Optimize dataset payload if > 50,000 candles to stay within reasonable request limits
-    if (candlesToSend.length > 50000) {
-      const step = Math.ceil(candlesToSend.length / 50000);
+    // Optimize dataset payload if > 25,000 candles to stay within stable processing limits
+    if (candlesToSend.length > 25000) {
+      const step = Math.ceil(candlesToSend.length / 25000);
       candlesToSend = candlesToSend.filter((_, idx) => idx % step === 0 || idx === candlesToSend.length - 1);
     }
 

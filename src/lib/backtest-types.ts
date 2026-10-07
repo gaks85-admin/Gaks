@@ -187,6 +187,7 @@ export interface BacktestAnalyticsResult {
 export interface TradeSimulationResult {
   trade: BacktestTradeRecord | null;
   rejectionReason?: string;
+  exitIndex?: number;
 }
 
 export interface BacktestEngineResult {

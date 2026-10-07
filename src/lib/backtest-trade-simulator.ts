@@ -20,6 +20,7 @@ export interface SimulateTradeParams {
   datasetId: string;
   signalIndex: number;
   candles: ParsedCandle[];
+  startIndex: number;
   currentBalance: number;
   simConfig?: BacktestSimulationConfig;
   symbol: string;
@@ -37,6 +38,7 @@ export function simulateTradeLifecycle(params: SimulateTradeParams): TradeSimula
     datasetId,
     signalIndex,
     candles,
+    startIndex,
     currentBalance,
     simConfig = {},
     symbol,
@@ -48,7 +50,7 @@ export function simulateTradeLifecycle(params: SimulateTradeParams): TradeSimula
   }
 
   const executionModel = simConfig.executionModel || 'NEXT_CANDLE_OPEN';
-  const entryCandleIndex = executionModel === 'NEXT_CANDLE_OPEN' ? 1 : 0;
+  const entryCandleIndex = (executionModel === 'NEXT_CANDLE_OPEN' ? 1 : 0) + startIndex;
 
   if (entryCandleIndex >= candles.length) {
     return { trade: null, rejectionReason: 'Signal occurred at end of dataset' };
@@ -193,32 +195,26 @@ export function simulateTradeLifecycle(params: SimulateTradeParams): TradeSimula
   // 7. Calculate Financial Outcomes
   const contractSize = spec.contractSize;
 
-  // Net PnL is the actual realized difference between executed prices minus commission.
-  // Note: executedEntryPrice and exitPrice ALREADY include spread and slippage.
-  const commissionCost = commissionPerLot * lotSize;
+  // Net PnL is the realized difference between executed prices minus commission.
+  // executedEntryPrice and exitPrice ALREADY include spread and slippage.
+  const commissionCost = Math.round((commissionPerLot * lotSize) * 100) / 100;
   
-  let netPnL = 0;
+  let realizedPriceDiff = 0;
   if (direction === 'LONG') {
-    netPnL = (exitPrice - executedEntryPrice) * lotSize * contractSize - commissionCost;
+    realizedPriceDiff = exitPrice - executedEntryPrice;
   } else {
-    netPnL = (executedEntryPrice - exitPrice) * lotSize * contractSize - commissionCost;
+    realizedPriceDiff = executedEntryPrice - exitPrice;
   }
 
-  const roundedNetPnL = Math.round(netPnL * 100) / 100;
+  const netPnL = Math.round((realizedPriceDiff * lotSize * contractSize - commissionCost) * 100) / 100;
 
-  // Total Costs for reporting
+  // For reporting/transparency only:
   const spreadCost = spreadInPrice * lotSize * contractSize;
-  const slippageCost = slippageInPrice * 2 * lotSize * contractSize; // Entry and exit
-  const totalCosts = spreadCost + slippageCost + commissionCost;
-
-  // Gross PnL is theoretical profit before any costs
-  const roundedGross = Math.round((netPnL + totalCosts) * 100) / 100;
-  const roundedSpreadCost = Math.round(spreadCost * 100) / 100;
-  const roundedSlippageCost = Math.round(slippageCost * 100) / 100;
-  const roundedCommissionCost = Math.round(commissionCost * 100) / 100;
+  const slippageCost = slippageInPrice * 2 * lotSize * contractSize; 
+  const totalCosts = Math.round((spreadCost + slippageCost + commissionCost) * 100) / 100;
 
   const balanceBefore = currentBalance;
-  const balanceAfter = Math.round((currentBalance + roundedNetPnL) * 100) / 100;
+  const balanceAfter = Math.round((currentBalance + netPnL) * 100) / 100;
 
   const slDistance = Math.abs(executedEntryPrice - stopLoss);
   const tpDistance = Math.abs(takeProfit - executedEntryPrice);
@@ -244,14 +240,15 @@ export function simulateTradeLifecycle(params: SimulateTradeParams): TradeSimula
       lotSize,
       riskAmount: Math.round(posSizeResult.riskAmount * 100) / 100,
       riskRewardRatio,
-      grossPnL: roundedGross,
-      spreadCost: roundedSpreadCost,
-      slippageCost: roundedSlippageCost,
-      commissionCost: roundedCommissionCost,
-      netPnL: roundedNetPnL,
+      grossPnL: Math.round((netPnL + totalCosts) * 100) / 100,
+      spreadCost: Math.round(spreadCost * 100) / 100,
+      slippageCost: Math.round(slippageCost * 100) / 100,
+      commissionCost,
+      netPnL,
       balanceBefore,
       balanceAfter,
       exitReason
-    }
+    },
+    exitIndex: candles.findIndex(c => c.timestamp === exitTimestamp)
   };
 }

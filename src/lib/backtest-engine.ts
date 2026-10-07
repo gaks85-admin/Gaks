@@ -114,15 +114,10 @@ export async function runBacktest(config: BacktestConfig): Promise<BacktestEngin
   let activeTradeUntilIndex = -1;
 
   // 6. Chronological Engine Loop (NO LOOK-AHEAD BIAS)
-  const MAX_HISTORY = 500; // Limit history passed to strategy for performance (enough for EMA 200, ATR, etc.)
+  const MAX_HISTORY = 300; // Efficient window for indicators (EMA 200, ATR, etc.)
 
   for (let i = 0; i < candles.length; i++) {
     const currentCandle = candles[i];
-    
-    // Optimizing memory: Instead of slicing whole history, only take what's needed
-    const historyStart = Math.max(0, i - MAX_HISTORY);
-    const previousCandles = candles.slice(historyStart, i); 
-
     state.currentTimestamp = currentCandle.timestamp;
     state.candleIndex = i;
 
@@ -130,6 +125,10 @@ export async function runBacktest(config: BacktestConfig): Promise<BacktestEngin
     if (i <= activeTradeUntilIndex) {
       continue;
     }
+
+    // Pass slice of history to strategy (shallow pointers)
+    const historyStart = i > MAX_HISTORY ? i - MAX_HISTORY : 0;
+    const previousCandles = candles.slice(historyStart, i);
 
     const context: BacktestCandleContext = {
       current: currentCandle,
@@ -145,13 +144,13 @@ export async function runBacktest(config: BacktestConfig): Promise<BacktestEngin
       signals.push(signal);
       state.signalsGenerated++;
 
-      // Simulate Trade Lifecycle over remaining historical candles
-      const remainingCandles = candles.slice(i);
+      // Pass entire array and current index to avoid heavy slicing
       const simResult = simulateTradeLifecycle({
         signal,
         datasetId: config.datasetId,
         signalIndex: signals.length - 1,
-        candles: remainingCandles,
+        candles: candles,
+        startIndex: i,
         currentBalance: state.balance,
         simConfig: config.simulation,
         symbol: normSymbol,
@@ -165,10 +164,9 @@ export async function runBacktest(config: BacktestConfig): Promise<BacktestEngin
         state.balance = simTrade.balanceAfter;
         state.equity = simTrade.balanceAfter;
 
-        // Skip candle indices while trade was active
-        const exitIndex = candles.findIndex(c => c.timestamp === simTrade.exitTimestamp);
-        if (exitIndex !== -1) {
-          activeTradeUntilIndex = exitIndex;
+        // Use exit index provided by simulator to skip forward
+        if (simResult.exitIndex !== undefined && simResult.exitIndex > i) {
+          activeTradeUntilIndex = simResult.exitIndex;
         }
       } else {
         rejectedSignals.push({
