@@ -731,7 +731,8 @@ export function BacktestPage({
                 value={riskPercentage}
                 onChange={(e) => updateRiskPercentage(e.target.value)}
                 placeholder="e.g. 1, 2, 5, 10"
-                className="w-full px-3.5 py-2 bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-800 rounded-xl text-xs font-mono font-bold text-zinc-900 dark:text-white focus:outline-none focus:border-sky-500"
+                className="w-full px-3.5 py-2 bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-800 rounded-xl text-xs font-mono font-bold text-zinc-900 dark:text-white focus:outline-none focus:border-sky-500 disabled:opacity-50"
+                disabled={positionMode === 'FIXED_LOT'}
               />
               <span className="text-zinc-500 text-sm font-bold">%</span>
             </div>
@@ -743,7 +744,8 @@ export function BacktestPage({
                   key={preset}
                   type="button"
                   onClick={() => updateRiskPercentage(preset)}
-                  className={`px-2 py-0.5 rounded text-[10px] font-mono transition-colors cursor-pointer ${
+                  disabled={positionMode === 'FIXED_LOT'}
+                  className={`px-2 py-0.5 rounded text-[10px] font-mono transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed ${
                     riskPercentage === preset
                       ? 'bg-amber-500 text-black font-bold'
                       : 'bg-zinc-200 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-800 dark:text-zinc-300'
@@ -753,6 +755,63 @@ export function BacktestPage({
                 </button>
               ))}
             </div>
+          </div>
+        </div>
+
+        {/* Position Sizing Mode */}
+        <div className="pt-4 border-t border-zinc-200 dark:border-zinc-800 grid grid-cols-1 md:grid-cols-2 gap-5">
+          <div className="space-y-2">
+            <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+              Position Sizing Mode
+            </label>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setPositionMode('AUTO_RISK')}
+                className={`py-2 rounded-xl border text-[11px] font-bold transition-all cursor-pointer ${
+                  positionMode === 'AUTO_RISK'
+                    ? 'bg-sky-600 border-sky-600 text-white shadow-sm'
+                    : 'bg-white dark:bg-zinc-900 border-zinc-300 dark:border-zinc-800 text-zinc-500 hover:border-zinc-400'
+                }`}
+              >
+                Auto Risk (%)
+              </button>
+              <button
+                type="button"
+                onClick={() => setPositionMode('FIXED_LOT')}
+                className={`py-2 rounded-xl border text-[11px] font-bold transition-all cursor-pointer ${
+                  positionMode === 'FIXED_LOT'
+                    ? 'bg-sky-600 border-sky-600 text-white shadow-sm'
+                    : 'bg-white dark:bg-zinc-900 border-zinc-300 dark:border-zinc-800 text-zinc-500 hover:border-zinc-400'
+                }`}
+              >
+                Fixed Lot
+              </button>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+              {positionMode === 'FIXED_LOT' ? 'Fixed Lot Size' : 'Lot Size (Inactive)'}
+            </label>
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                min="0.01"
+                step="0.01"
+                value={fixedLotSize}
+                onChange={(e) => setFixedLotSize(e.target.value)}
+                placeholder="e.g. 0.01, 0.10, 1.00"
+                className="w-full px-3.5 py-2 bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-800 rounded-xl text-xs font-mono font-bold text-zinc-900 dark:text-white focus:outline-none focus:border-sky-500 disabled:opacity-50"
+                disabled={positionMode === 'AUTO_RISK'}
+              />
+              <span className="text-zinc-500 text-xs font-bold uppercase font-mono">Lots</span>
+            </div>
+            <p className="text-[10px] text-zinc-500 leading-tight italic">
+              {positionMode === 'FIXED_LOT' 
+                ? 'Trades will execute with this exact lot size regardless of account balance.' 
+                : 'Using dynamic sizing based on risk percentage above.'}
+            </p>
           </div>
         </div>
       </div>

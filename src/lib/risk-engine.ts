@@ -194,35 +194,76 @@ export function calculatePositionSize(params: PositionSizeParams): PositionSizeR
     minLot = spec.minLot,
     maxLot = spec.maxLot,
     lotStep = spec.lotStep,
-    contractSize = params.contractSize ?? spec.contractSize
+    contractSize = params.contractSize ?? spec.contractSize,
+    positionMode = 'AUTO_RISK',
+    preferredLotSize
   } = params;
 
-  if (accountSize <= 0 || riskPercentage <= 0) {
+  if (accountSize <= 0) {
     return {
       accepted: false,
       lots: 0,
       calculatedLotSize: 0,
       riskAmount: 0,
       expectedLoss: 0,
-      reason: 'Invalid account size or risk percentage'
+      reason: 'Invalid account size'
     };
   }
 
-  const riskAmount = (accountSize * riskPercentage) / 100;
   const slDistance = Math.abs(entryPrice - stopLoss);
-
   if (slDistance <= 0) {
     return {
       accepted: false,
       lots: 0,
       calculatedLotSize: 0,
-      riskAmount,
+      riskAmount: 0,
       expectedLoss: 0,
       reason: 'Stop loss is equal to entry price'
     };
   }
 
-  // Loss per 1.0 lot = slDistance * contractSize
+  // 1. Handle FIXED_LOT Mode
+  if (positionMode === 'FIXED_LOT' && typeof preferredLotSize === 'number' && preferredLotSize > 0) {
+    const finalLots = Math.min(Math.max(preferredLotSize, minLot), maxLot);
+    const lossPerLot = slDistance * contractSize;
+    const expectedLoss = Math.round(finalLots * lossPerLot * 100) / 100;
+
+    if (expectedLoss >= accountSize) {
+      return {
+        accepted: false,
+        lots: 0,
+        calculatedLotSize: finalLots,
+        riskAmount: expectedLoss,
+        expectedLoss,
+        reason: `Fixed lot order rejected: Expected loss ($${expectedLoss.toFixed(2)}) exceeds available account balance ($${accountSize.toFixed(2)}).`
+      };
+    }
+
+    return {
+      accepted: true,
+      lots: finalLots,
+      calculatedLotSize: finalLots,
+      entryPrice,
+      stopLoss,
+      takeProfit: params.takeProfit,
+      riskAmount: expectedLoss,
+      expectedLoss
+    };
+  }
+
+  // 2. Handle AUTO_RISK Mode (Calculated from percentage)
+  if (riskPercentage <= 0) {
+    return {
+      accepted: false,
+      lots: 0,
+      calculatedLotSize: 0,
+      riskAmount: 0,
+      expectedLoss: 0,
+      reason: 'Invalid risk percentage'
+    };
+  }
+
+  const riskAmount = (accountSize * riskPercentage) / 100;
   const lossPerLot = slDistance * contractSize;
   const rawLots = riskAmount / lossPerLot;
 
@@ -264,7 +305,6 @@ export function calculatePositionSize(params: PositionSizeParams): PositionSizeR
 
   // Reject trade if expected loss exceeds user's requested risk budget by a significant margin.
   // We allow a tiny tolerance ($0.05) for rounding, but otherwise we must respect the budget.
-  // For micro accounts, we formerly allowed 30% risk, but the user wants strict 10% adherence.
   const maxAllowedRisk = riskAmount + 0.05;
 
   if (expectedLoss > maxAllowedRisk) {
