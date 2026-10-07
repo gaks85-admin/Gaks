@@ -130,6 +130,7 @@ export interface PositionSizeParams {
   contractSize?: number;
   spreadPips?: number;
   slippagePips?: number;
+  commissionPerLot?: number;
 }
 
 export interface PositionSizeResult {
@@ -201,6 +202,7 @@ export function calculatePositionSize(params: PositionSizeParams): PositionSizeR
     preferredLotSize,
     spreadPips = 0,
     slippagePips = 0,
+    commissionPerLot = 0,
     direction = 'BUY'
   } = params;
 
@@ -242,7 +244,8 @@ export function calculatePositionSize(params: PositionSizeParams): PositionSizeR
   if (positionMode === 'FIXED_LOT' && typeof preferredLotSize === 'number' && preferredLotSize > 0) {
     const finalLots = Math.min(Math.max(preferredLotSize, minLot), maxLot);
     const lossPerLot = realizedSlDistance * contractSize;
-    const expectedLoss = Math.round(finalLots * lossPerLot * 100) / 100;
+    const commissionCost = Math.round((commissionPerLot * finalLots) * 100) / 100;
+    const expectedLoss = Math.round((finalLots * lossPerLot + commissionCost) * 100) / 100;
 
     // Reject trade if expected loss exceeds account balance
     if (expectedLoss >= accountSize) {
@@ -259,14 +262,14 @@ export function calculatePositionSize(params: PositionSizeParams): PositionSizeR
     // STRICT RISK CHECK: If a risk percentage is provided, enforce it as a hard cap even in fixed lot mode
     if (riskPercentage > 0) {
       const riskAmount = (accountSize * riskPercentage) / 100;
-      if (expectedLoss > riskAmount + 0.01) {
+      if (expectedLoss > Math.round(riskAmount * 100) / 100) {
         return {
           accepted: false,
           lots: 0,
           calculatedLotSize: finalLots,
           riskAmount: Math.round(riskAmount * 100) / 100,
           expectedLoss,
-          reason: `Fixed lot order rejected: A ${finalLots} lot position risks $${expectedLoss.toFixed(2)} (including costs), which exceeds your ${riskPercentage}% risk budget ($${riskAmount.toFixed(2)}).`
+          reason: `Fixed lot order rejected: A ${finalLots} lot position risks $${expectedLoss.toFixed(2)} (including spreads, slippage, and commission), which exceeds your ${riskPercentage}% risk budget ($${riskAmount.toFixed(2)}).`
         };
       }
     }
@@ -297,7 +300,13 @@ export function calculatePositionSize(params: PositionSizeParams): PositionSizeR
 
   const riskAmount = (accountSize * riskPercentage) / 100;
   const lossPerLot = realizedSlDistance * contractSize;
-  const rawLots = riskAmount / lossPerLot;
+  
+  // To find the max lots while staying within risk budget:
+  // (lots * lossPerLot) + (lots * commissionPerLot) <= riskAmount
+  // lots * (lossPerLot + commissionPerLot) <= riskAmount
+  // lots <= riskAmount / (lossPerLot + commissionPerLot)
+  
+  const rawLots = riskAmount / (lossPerLot + commissionPerLot);
 
   // Round down to lotStep to stay WITHIN risk budget
   const steppedLots = Math.floor(rawLots / lotStep) * lotStep;
@@ -307,7 +316,8 @@ export function calculatePositionSize(params: PositionSizeParams): PositionSizeR
   
   // If calculated lots is zero (because budget is too small for 0.01), check if 0.01 lot is acceptable
   if (finalLots < minLot) {
-    const lossAtMinLot = minLot * lossPerLot;
+    const commissionCostAtMin = Math.round((minLot * commissionPerLot) * 100) / 100;
+    const lossAtMinLot = minLot * lossPerLot + commissionCostAtMin;
     const minLotExpectedLoss = Math.round(lossAtMinLot * 100) / 100;
 
     // STRICT ENFORCEMENT: If min lot risks more than the budget, REJECT.
@@ -319,7 +329,7 @@ export function calculatePositionSize(params: PositionSizeParams): PositionSizeR
         calculatedLotSize: minLot,
         riskAmount: Math.round(riskAmount * 100) / 100,
         expectedLoss: minLotExpectedLoss,
-        reason: `Order rejected: On a $${accountSize.toFixed(2)} account, the smallest trade (0.01 lot) risks $${minLotExpectedLoss.toFixed(2)} (including spread/slippage), which exceeds your ${riskPercentage}% budget ($${riskAmount.toFixed(2)}).`
+        reason: `Order rejected: On a $${accountSize.toFixed(2)} account, the smallest trade (0.01 lot) risks $${minLotExpectedLoss.toFixed(2)} (including commissions/costs), which exceeds your ${riskPercentage}% budget ($${riskAmount.toFixed(2)}).`
       };
     }
 
@@ -339,7 +349,8 @@ export function calculatePositionSize(params: PositionSizeParams): PositionSizeR
   }
 
   finalLots = Math.min(finalLots, maxLot);
-  const expectedLoss = Math.round(finalLots * lossPerLot * 100) / 100;
+  const finalCommissionCost = Math.round((finalLots * commissionPerLot) * 100) / 100;
+  const expectedLoss = Math.round((finalLots * lossPerLot + finalCommissionCost) * 100) / 100;
 
   // Reject trade if expected loss exceeds account balance
   if (expectedLoss >= accountSize) {

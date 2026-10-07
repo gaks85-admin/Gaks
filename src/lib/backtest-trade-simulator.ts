@@ -94,6 +94,7 @@ export function simulateTradeLifecycle(params: SimulateTradeParams): TradeSimula
     symbol,
     spreadPips: simConfig.spreadPips,
     slippagePips: simConfig.slippagePips,
+    commissionPerLot: simConfig.commissionPerLot,
     direction: signal.direction
   });
 
