@@ -193,25 +193,29 @@ export function simulateTradeLifecycle(params: SimulateTradeParams): TradeSimula
   // 7. Calculate Financial Outcomes
   const contractSize = spec.contractSize;
 
-  let grossPnL = 0;
+  // Net PnL is the actual realized difference between executed prices minus commission.
+  // Note: executedEntryPrice and exitPrice ALREADY include spread and slippage.
+  const commissionCost = commissionPerLot * lotSize;
+  
+  let netPnL = 0;
   if (direction === 'LONG') {
-    grossPnL = (exitPrice - executedEntryPrice) * lotSize * contractSize;
+    netPnL = (exitPrice - executedEntryPrice) * lotSize * contractSize - commissionCost;
   } else {
-    grossPnL = (executedEntryPrice - exitPrice) * lotSize * contractSize;
+    netPnL = (executedEntryPrice - exitPrice) * lotSize * contractSize - commissionCost;
   }
 
+  const roundedNetPnL = Math.round(netPnL * 100) / 100;
+
+  // Total Costs for reporting
   const spreadCost = spreadInPrice * lotSize * contractSize;
-  const slippageCost = slippageInPrice * 2 * lotSize * contractSize; // Entry and exit slippage
-  const commissionCost = commissionPerLot * lotSize;
+  const slippageCost = slippageInPrice * 2 * lotSize * contractSize; // Entry and exit
+  const totalCosts = spreadCost + slippageCost + commissionCost;
 
-  const netPnL = grossPnL - spreadCost - slippageCost - commissionCost;
-
-  // Round values to 2 decimal places (cents)
-  const roundedGross = Math.round(grossPnL * 100) / 100;
+  // Gross PnL is theoretical profit before any costs
+  const roundedGross = Math.round((netPnL + totalCosts) * 100) / 100;
   const roundedSpreadCost = Math.round(spreadCost * 100) / 100;
   const roundedSlippageCost = Math.round(slippageCost * 100) / 100;
   const roundedCommissionCost = Math.round(commissionCost * 100) / 100;
-  const roundedNetPnL = Math.round(netPnL * 100) / 100;
 
   const balanceBefore = currentBalance;
   const balanceAfter = Math.round((currentBalance + roundedNetPnL) * 100) / 100;

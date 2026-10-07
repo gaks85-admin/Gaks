@@ -389,9 +389,9 @@ export function BacktestPage({
     let candlesToSend = parseRes.candles;
     const originalCount = candlesToSend.length;
 
-    // Optimize dataset payload if > 4,000 candles to stay well under Vercel serverless body limits (< 300 KB)
-    if (candlesToSend.length > 4000) {
-      const step = Math.ceil(candlesToSend.length / 4000);
+    // Optimize dataset payload if > 50,000 candles to stay within reasonable request limits
+    if (candlesToSend.length > 50000) {
+      const step = Math.ceil(candlesToSend.length / 50000);
       candlesToSend = candlesToSend.filter((_, idx) => idx % step === 0 || idx === candlesToSend.length - 1);
     }
 
@@ -681,6 +681,11 @@ export function BacktestPage({
                 className="w-full px-3.5 py-2 bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-800 rounded-xl text-xs font-mono font-bold text-zinc-900 dark:text-white focus:outline-none focus:border-sky-500"
               />
             </div>
+            {Number(accountCapital) < 50 && (
+              <p className="text-[10px] text-amber-500 font-medium leading-tight">
+                ⚠️ Micro-account detected ($50). Due to broker minimum lot limits (0.01), your actual risk per trade may exceed your configured {riskPercentage}% risk.
+              </p>
+            )}
             {/* Quick Presets */}
             <div className="flex items-center gap-1.5 flex-wrap">
               <span className="text-[10px] text-zinc-500 font-mono">Presets:</span>
@@ -1132,9 +1137,19 @@ export function BacktestPage({
                   <ShieldCheck className="w-4 h-4 text-emerald-400" />
                   Backtest Engine Execution Output
                 </h3>
-                <p className="text-[11px] text-zinc-400 mt-0.5">
-                  100% Deterministic Execution (Zero Look-Ahead, Zero External Calls)
-                </p>
+                <div className="flex items-center gap-3 mt-1">
+                  <p className="text-[11px] text-zinc-400">
+                    100% Deterministic Execution (Zero Look-Ahead)
+                  </p>
+                  <span className="w-1 h-1 rounded-full bg-zinc-700" />
+                  <p className="text-[11px] text-emerald-400 font-mono">
+                    Start: ${engineResult.initialBalance?.toLocaleString()}
+                  </p>
+                  <span className="w-1 h-1 rounded-full bg-zinc-700" />
+                  <p className="text-[11px] text-sky-400 font-mono">
+                    End: ${engineResult.finalBalance?.toLocaleString()}
+                  </p>
+                </div>
               </div>
 
               <button
@@ -1165,7 +1180,21 @@ export function BacktestPage({
                     Performance Analytics Summary
                   </h4>
 
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                    <div className="bg-zinc-900/80 p-3 rounded-xl border border-zinc-800">
+                      <span className="text-[10px] text-zinc-500 block uppercase font-mono">Starting</span>
+                      <span className="text-sm font-bold text-zinc-300 font-mono">
+                        ${engineResult.initialBalance?.toLocaleString()}
+                      </span>
+                    </div>
+
+                    <div className="bg-zinc-900/80 p-3 rounded-xl border border-zinc-800">
+                      <span className="text-[10px] text-zinc-500 block uppercase font-mono">Final Balance</span>
+                      <span className="text-sm font-bold text-white font-mono">
+                        ${engineResult.finalBalance?.toLocaleString()}
+                      </span>
+                    </div>
+
                     <div className="bg-zinc-900/80 p-3 rounded-xl border border-zinc-800">
                       <span className="text-[10px] text-zinc-500 block uppercase font-mono">Net Profit</span>
                       <span className={`text-sm font-bold font-mono ${engineResult.analytics.netProfit >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
@@ -1181,9 +1210,9 @@ export function BacktestPage({
                     </div>
 
                     <div className="bg-zinc-900/80 p-3 rounded-xl border border-zinc-800">
-                      <span className="text-[10px] text-zinc-500 block uppercase font-mono">Profit Factor</span>
-                      <span className="text-sm font-bold text-purple-400 font-mono">
-                        {engineResult.analytics.profitFactor !== null ? engineResult.analytics.profitFactor : 'N/A'}
+                      <span className="text-[10px] text-zinc-500 block uppercase font-mono">Risk Used</span>
+                      <span className="text-sm font-bold text-amber-400 font-mono">
+                        {riskPercentage}%
                       </span>
                     </div>
 
@@ -1251,6 +1280,9 @@ export function BacktestPage({
                           </div>
                           <div className="text-zinc-400 text-[11px]">
                             Entry: {tr.entryPrice} → Exit: {tr.exitPrice} (SL: {tr.stopLoss} | TP: {tr.takeProfit})
+                          </div>
+                          <div className="text-[10px] text-zinc-500 font-mono mt-1">
+                            Balance: ${tr.balanceBefore?.toLocaleString()} → <strong className="text-zinc-300">${tr.balanceAfter?.toLocaleString()}</strong>
                           </div>
                         </div>
 
