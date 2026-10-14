@@ -4,7 +4,7 @@
  * over historical candle contexts using pure decision-engine evaluators without Gemini API calls.
  */
 
-import { BacktestStrategy, BacktestCandleContext, BacktestSignal } from './backtest-types.js';
+import { BacktestStrategy, BacktestCandleContext, BacktestSignal, BacktestSimulationConfig } from './backtest-types.js';
 import { compileStrategy, CompilerOutput } from './strategy-compiler.js';
 import { evaluateDecision } from './decision-engine.js';
 import {
@@ -65,21 +65,30 @@ export class GaksBacktestStrategy implements BacktestStrategy {
     const emaCrossoverBullish = prevFastEma !== null && prevSlowEma !== null && fastEma !== null && slowEma !== null && prevFastEma <= prevSlowEma && fastEma > slowEma;
     const emaCrossoverBearish = prevFastEma !== null && prevSlowEma !== null && fastEma !== null && slowEma !== null && prevFastEma >= prevSlowEma && fastEma < slowEma;
 
-    // Market structure detection over previous 100 candles (better for zone identification)
+    // Market structure detection over previous 100 candles
     const lookback = Math.min(previous.length, 100);
     const recentCandles = previous.slice(-lookback);
-    const recentHigh = Math.max(...recentCandles.map(c => c.high));
-    const recentLow = Math.min(...recentCandles.map(c => c.low));
+    
+    // Find local swing points (last 20 candles) for more sensitive BOS
+    const swingLookback = Math.min(previous.length, 20);
+    const swingCandles = previous.slice(-swingLookback);
+    const localHigh = Math.max(...swingCandles.map(c => c.high));
+    const localLow = Math.min(...swingCandles.map(c => c.low));
+    
+    // Global lookback for major zones
+    const globalHigh = Math.max(...recentCandles.map(c => c.high));
+    const globalLow = Math.min(...recentCandles.map(c => c.low));
 
-    const bosBullish = current.close > recentHigh;
-    const bosBearish = current.close < recentLow;
+    // BOS should be based on local swings, not global 100-candle extremes
+    const bosBullish = current.close > localHigh;
+    const bosBearish = current.close < localLow;
 
     // Pinbar / Engulfing Confirmation Candle Detection
     const candleBody = Math.abs(current.close - current.open);
     const isBullishEngulfing = current.close > current.open && previous.length > 0 && current.close > previous[previous.length - 1].open;
     const isBearishEngulfing = current.close < current.open && previous.length > 0 && current.close < previous[previous.length - 1].open;
-    const isBullishPinbar = current.close > current.open && (current.open - current.low) >= 1.5 * candleBody;
-    const isBearishPinbar = current.close < current.open && (current.high - current.open) >= 1.5 * candleBody;
+    const isBullishPinbar = current.close > current.open && (current.open - current.low) >= 1.2 * candleBody; // Slightly more relaxed pinbar
+    const isBearishPinbar = current.close < current.open && (current.high - current.open) >= 1.2 * candleBody;
 
     const confirmationBullish = isBullishEngulfing || isBullishPinbar;
     const confirmationBearish = isBearishEngulfing || isBearishPinbar;
@@ -89,9 +98,10 @@ export class GaksBacktestStrategy implements BacktestStrategy {
     const averageVolume = recentVolumes.length > 0 ? recentVolumes.reduce((a, b) => a + b, 0) / recentVolumes.length : 1000;
     const latestVolume = current.volume || 0;
 
-    // Supply & Demand / Support & Resistance Zones
-    const supportZoneRange = { low: recentLow, high: recentLow + atr * 0.5, type: 'SUPPORT' };
-    const resistanceZoneRange = { low: recentHigh - atr * 0.5, high: recentHigh, type: 'RESISTANCE' };
+    // Supply & Demand / Support & Resistance Zones (using global major levels)
+    const zoneWidth = Math.max(atr * 0.75, 0.0005); // Dynamic zone width
+    const supportZoneRange = { low: globalLow, high: globalLow + zoneWidth, type: 'SUPPORT' };
+    const resistanceZoneRange = { low: globalHigh - zoneWidth, high: globalHigh, type: 'RESISTANCE' };
 
     const inSupport = current.low <= supportZoneRange.high;
     const inResistance = current.high >= resistanceZoneRange.low;
@@ -105,8 +115,8 @@ export class GaksBacktestStrategy implements BacktestStrategy {
       ema: fastEma && slowEma ? fastEma > slowEma : false,
       ema_crossover: emaCrossoverBullish || emaCrossoverBearish,
       rsi: rsi !== null ? rsi : 50,
-      rsi_oversold: rsi !== null && rsi <= 30,
-      rsi_overbought: rsi !== null && rsi >= 70,
+      rsi_oversold: rsi !== null && rsi <= 35, // Relaxed RSI
+      rsi_overbought: rsi !== null && rsi >= 65,
       bos: bosBullish || bosBearish,
       choch: bosBullish || bosBearish,
       confirmation_candle: confirmationBullish || confirmationBearish,
@@ -115,28 +125,28 @@ export class GaksBacktestStrategy implements BacktestStrategy {
       supportZones: inSupport ? [supportZoneRange] : [],
       resistanceZones: inResistance ? [resistanceZoneRange] : [],
       orderBlocks: [
-        { type: 'BULLISH_ORDER_BLOCK', low: recentLow, high: recentLow + atr * 0.5, status: inSupport ? 'TAPPED' : 'UNMITIGATED' },
-        { type: 'BEARISH_ORDER_BLOCK', low: recentHigh - atr * 0.5, high: recentHigh, status: inResistance ? 'TAPPED' : 'UNMITIGATED' }
+        { type: 'BULLISH_ORDER_BLOCK', low: globalLow, high: globalLow + zoneWidth, status: inSupport ? 'TAPPED' : 'UNMITIGATED' },
+        { type: 'BEARISH_ORDER_BLOCK', low: globalHigh - zoneWidth, high: globalHigh, status: inResistance ? 'TAPPED' : 'UNMITIGATED' }
       ],
-      support_rejection: inSupport && current.close > supportZoneRange.high,
-      resistance_rejection: inResistance && current.close < resistanceZoneRange.low,
-      tap_and_rejection: (inSupport && current.close > supportZoneRange.high) || (inResistance && current.close < resistanceZoneRange.low),
-      volume_confirmation: latestVolume >= averageVolume * 1.2,
+      support_rejection: inSupport && current.close > current.open, // Simple rejection: close green in zone
+      resistance_rejection: inResistance && current.close < current.open, // Close red in zone
+      tap_and_rejection: (inSupport && current.close > current.open) || (inResistance && current.close < current.open),
+      volume_confirmation: latestVolume >= averageVolume * 1.1, // Relaxed volume
       latestVolume,
       averageVolume,
       volumeInformation: {
         latestVolume,
         averageVolume,
-        volumeSpike: latestVolume >= averageVolume * 1.5
+        volumeSpike: latestVolume >= averageVolume * 1.3
       },
       order_block: inSupport || inResistance,
       markedZone: inSupport 
-        ? { type: 'DEMAND', low: recentLow, high: recentLow + atr * 0.5, status: 'ZONE_TAPPED', direction: 'BUY' }
+        ? { type: 'DEMAND', low: globalLow, high: globalLow + zoneWidth, status: 'ZONE_TAPPED', direction: 'BUY' }
         : inResistance
-          ? { type: 'SUPPLY', low: recentHigh - atr * 0.5, high: recentHigh, status: 'ZONE_TAPPED', direction: 'SELL' }
+          ? { type: 'SUPPLY', low: globalHigh - zoneWidth, high: globalHigh, status: 'ZONE_TAPPED', direction: 'SELL' }
           : null,
       zone_status: (inSupport || inResistance) ? 'ZONE_TAPPED' : 'NO_ZONE',
-      isRejected: (inSupport && current.close > supportZoneRange.high) || (inResistance && current.close < resistanceZoneRange.low),
+      isRejected: (inSupport && current.close > current.open) || (inResistance && current.close < current.open),
       risk_reward: true,
       timeframes: [timeframe] 
     };
