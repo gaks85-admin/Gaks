@@ -204,28 +204,25 @@ export default async function handler(req: any, res: any) {
     });
   }
 
-  // Validate if symbol is supported before proceeding
+  // Validate if symbol is supported before proceeding (Fully Dynamic)
   const isSupportedSymbol = (sym: string): boolean => {
     if (!sym) return false;
     const normalized = sym.toUpperCase().trim().replace(/[-_\s/]/g, "");
-    const supported = [
-      'EURUSD', 'GBPUSD', 'XAUUSD', 'BTCUSD', 'NAS100', 'US30', 'SPX500', 'US500',
-      'EUR/USD', 'GBP/USD', 'XAU/USD', 'BTC/USD', 'QQQ', 'DIA', 'SPY'
-    ].map(s => s.toUpperCase().trim().replace(/[-_\s/]/g, ""));
-    return supported.includes(normalized);
+    // Dynamically accept any valid 2 to 12 character alphanumeric financial ticker symbol
+    return /^[A-Z0-9]{2,12}$/.test(normalized);
   };
 
   if (!isSupportedSymbol(selectedPair)) {
     console.log("[Watcher Activation] FAILED at Step 3:", {
       step: 3,
-      reason: `Symbol "${selectedPair}" is not supported.`,
+      reason: `Symbol "${selectedPair}" is invalid.`,
       user_id: userId,
       selected_pair: selectedPair,
       selected_timeframe: selectedTimeframe
     });
     return res.status(400).json({
       success: false,
-      error: `Symbol "${selectedPair}" is not supported. Please choose one of our supported pairs: EURUSD, GBPUSD, XAUUSD, BTCUSD, NAS100, US30.`
+      error: `Symbol "${selectedPair}" is invalid. Please enter a valid trading symbol (e.g., USDCAD, AUDUSD, AUDCAD, EURUSD, US30).`
     });
   }
 
