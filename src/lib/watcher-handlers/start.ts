@@ -472,55 +472,57 @@ export default async function handler(req: any, res: any) {
     // (Deprecated: Now we just use selectedPair)
     const pairsMonitored = selectedPair;
 
+    // Normalize and map symbol for Twelve Data compatibility
+    const convertSymbol = (sym: string): string => {
+      if (!sym) return sym;
+      const mapped = sym.toUpperCase().trim().replace(/[-_\s/]/g, '');
+      
+      // Symbol mapping layer for Twelve Data compatibility on free plans
+      const mappings: Record<string, string> = {
+        'EURUSD': 'EUR/USD',
+        'GBPUSD': 'GBP/USD',
+        'XAUUSD': 'XAU/USD',
+        'BTCUSD': 'BTC/USD',
+        'NAS100': 'QQQ',
+        'US30': 'DIA',
+        'SPX500': 'SPY',
+        'US500': 'SPY'
+      };
+
+      if (mappings[mapped]) {
+        return mappings[mapped];
+      }
+
+      const commonCryptoCoins = ["BTC", "ETH", "SOL", "XRP", "ADA", "DOGE", "AVAX", "DOT", "LINK", "MATIC"];
+      const commonCryptoQuote = ["USD", "USDT", "BTC", "ETH", "EUR", "GBP", "FDUSD", "USDC"];
+      
+      for (const coin of commonCryptoCoins) {
+        if (mapped.startsWith(coin)) {
+          const suffix = mapped.slice(coin.length);
+          if (commonCryptoQuote.includes(suffix)) {
+            return `${coin}/${suffix}`;
+          }
+        }
+      }
+      
+      if (mapped.length === 6 && /^[A-Z]{6}$/.test(mapped)) {
+        return `${mapped.slice(0, 3)}/${mapped.slice(3)}`;
+      }
+      
+      if (mapped.endsWith('USD') && mapped.length > 3) return mapped.slice(0, -3) + '/USD';
+      if (mapped.endsWith('JPY') && mapped.length > 3) return mapped.slice(0, -3) + '/JPY';
+      if (mapped.endsWith('EUR') && mapped.length > 3) return mapped.slice(0, -3) + '/EUR';
+      if (mapped.endsWith('GBP') && mapped.length > 3) return mapped.slice(0, -3) + '/GBP';
+      return mapped;
+    };
+
+    const mappedSymbol = convertSymbol(selectedPair);
+
     // Validate Symbol with Twelve Data before activating
     const twelveDataKey = process.env.TWELVE_DATA_API_KEY;
     if (!twelveDataKey) {
       console.warn("[Watcher Start] Missing TWELVE_DATA_API_KEY. Skipping Twelve Data symbol validation.");
     } else {
-      const convertSymbol = (sym: string): string => {
-        if (!sym) return sym;
-        const mapped = sym.toUpperCase().trim().replace(/[-_\s/]/g, '');
-        
-        // Symbol mapping layer for Twelve Data compatibility on free plans
-        const mappings: Record<string, string> = {
-          'EURUSD': 'EUR/USD',
-          'GBPUSD': 'GBP/USD',
-          'XAUUSD': 'XAU/USD',
-          'BTCUSD': 'BTC/USD',
-          'NAS100': 'QQQ',
-          'US30': 'DIA',
-          'SPX500': 'SPY',
-          'US500': 'SPY'
-        };
-
-        if (mappings[mapped]) {
-          return mappings[mapped];
-        }
-
-        const commonCryptoCoins = ["BTC", "ETH", "SOL", "XRP", "ADA", "DOGE", "AVAX", "DOT", "LINK", "MATIC"];
-        const commonCryptoQuote = ["USD", "USDT", "BTC", "ETH", "EUR", "GBP", "FDUSD", "USDC"];
-        
-        for (const coin of commonCryptoCoins) {
-          if (mapped.startsWith(coin)) {
-            const suffix = mapped.slice(coin.length);
-            if (commonCryptoQuote.includes(suffix)) {
-              return `${coin}/${suffix}`;
-            }
-          }
-        }
-        
-        if (mapped.length === 6 && /^[A-Z]{6}$/.test(mapped)) {
-          return `${mapped.slice(0, 3)}/${mapped.slice(3)}`;
-        }
-        
-        if (mapped.endsWith('USD') && mapped.length > 3) return mapped.slice(0, -3) + '/USD';
-        if (mapped.endsWith('JPY') && mapped.length > 3) return mapped.slice(0, -3) + '/JPY';
-        if (mapped.endsWith('EUR') && mapped.length > 3) return mapped.slice(0, -3) + '/EUR';
-        if (mapped.endsWith('GBP') && mapped.length > 3) return mapped.slice(0, -3) + '/GBP';
-        return mapped;
-      };
-
-      const mappedSymbol = convertSymbol(selectedPair);
       console.log(`[Watcher Start] Validating symbol "${mappedSymbol}" (converted from "${selectedPair}") against Twelve Data API...`);
       
       try {
@@ -631,7 +633,7 @@ export default async function handler(req: any, res: any) {
       .from("watchers")
       .select("id, selected_timeframe, scan_interval_minutes")
       .eq("user_id", userId)
-      .eq("selected_pair", selectedPair)
+      .eq("selected_pair", mappedSymbol)
       .maybeSingle();
 
     if (fetchSavedErr || !savedWatcherRow) {
@@ -650,15 +652,15 @@ export default async function handler(req: any, res: any) {
 
     console.log(`[Watcher Start] AI Market Watcher activated successfully for user ${userId}.`);
 
-    const marketSchedule = getMarketSchedule(selectedPair);
+    const marketSchedule = getMarketSchedule(mappedSymbol);
     let marketNoticeTelegram = '';
     let activationMessage = "AI Market Watcher activated successfully.";
 
     if (!marketSchedule.isOpen && marketSchedule.closesOnWeekends) {
-      marketNoticeTelegram = `\n\n*Market Notice (Nigeria Time / WAT):*\n⚠️ ${selectedPair} is currently closed for the weekend (${marketSchedule.reasonWat}). Reopens *${marketSchedule.nextOpenWatFormatted || 'Sunday 10:00 PM WAT'}*. Watcher is active and candle downloads will automatically begin once markets reopen.`;
-      activationMessage = `AI Market Watcher activated! Note: ${selectedPair} is closed for the weekend and reopens ${marketSchedule.nextOpenWatFormatted || 'Sunday 10:00 PM WAT'} (Nigeria Time).`;
+      marketNoticeTelegram = `\n\n*Market Notice (Nigeria Time / WAT):*\n⚠️ ${mappedSymbol} is currently closed for the weekend (${marketSchedule.reasonWat}). Reopens *${marketSchedule.nextOpenWatFormatted || 'Sunday 10:00 PM WAT'}*. Watcher is active and candle downloads will automatically begin once markets reopen.`;
+      activationMessage = `AI Market Watcher activated! Note: ${mappedSymbol} is closed for the weekend and reopens ${marketSchedule.nextOpenWatFormatted || 'Sunday 10:00 PM WAT'} (Nigeria Time).`;
     } else if (!marketSchedule.closesOnWeekends) {
-      marketNoticeTelegram = `\n\n*Market Status:*\n⚡ ${selectedPair} trades 24/7 in Nigeria (WAT). Real-time monitoring and candle scanning are running.`;
+      marketNoticeTelegram = `\n\n*Market Status:*\n⚡ ${mappedSymbol} trades 24/7 in Nigeria (WAT). Real-time monitoring and candle scanning are running.`;
     }
 
     const telegramSuccess = await sendTelegramMessage(telegramChatId, `✅ *Gaks AI Market Watcher Activated*\n\n` +
