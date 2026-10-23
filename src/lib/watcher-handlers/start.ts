@@ -584,7 +584,7 @@ export default async function handler(req: any, res: any) {
       telegram_chat_id: telegramChatId,
       account_size: accountSize,
       risk_percentage: riskPercentage,
-      selected_pair: selectedPair,
+      selected_pair: mappedSymbol,
       selected_timeframe: finalTimeframe,
       gemini_model: "gemini-3.5-flash-lite",
       scan_interval_minutes: computedInterval,

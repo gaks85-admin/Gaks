@@ -110,7 +110,7 @@ export function validateZoneProximityAndStopLoss(
   if (departurePips > maxDeparturePips) {
     return {
       isLateEntry: true,
-      lateReason: `Late entry rejected: Price (${currentPrice.toFixed(5)}) has moved ${departurePips.toFixed(1)} pips past marked ${zone.type || 'POI'} [${zone.low.toFixed(5)} - ${zone.high.toFixed(5)}] in ${direction} direction (Max allowable departure: ${maxDeparturePips.toFixed(1)} pips). Entry window closed; trade would chase the move and inflate Stop Loss.`,
+      lateReason: `Late entry rejected: Price (${currentPrice.toFixed(5)}) has moved ${departurePips.toFixed(1)} pips past marked ${zone.type || 'POI'} [${zone.low?.toFixed(5) || '0.00000'} - ${zone.high?.toFixed(5) || '0.00000'}] in ${direction} direction (Max allowable departure: ${maxDeparturePips.toFixed(1)} pips). Entry window closed; trade would chase the move and inflate Stop Loss.`,
       entryPrice: currentPrice,
       stopLoss: zone.invalidationLevel,
       stopLossBasis: direction === 'SELL' ? 'SUPPLY_ZONE' : 'DEMAND_ZONE',

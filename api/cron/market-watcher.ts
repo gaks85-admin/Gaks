@@ -2496,7 +2496,7 @@ Reason: ${activeValidation.reason}`);
 
         // Stage 4
         addLog("Decision Engine Complete", "success");
-        addLog(`Decision Score: ${decisionResult.decision_score.toFixed(1)}%`);
+        addLog(`Decision Score: ${decisionResult.decision_score?.toFixed(1) || '0.0'}%`);
         addLog(`Recommendation: ${decisionResult.recommendation}`);
 
         let analysis: any = {
@@ -2546,7 +2546,7 @@ Watcher ID: ${watcher.id}
 Pair: ${selectedPair}
 Timeframe: ${selectedTimeframe}
 Strategy Mode: ${compiledStrategy.strategy_mode || 'HYBRID'}
-Decision Score: ${decisionResult.decision_score.toFixed(1)}% (Threshold: >= ${PRE_FILTER_MIN_SCORE}%)
+Decision Score: ${decisionResult.decision_score?.toFixed(1) || '0.0'}% (Threshold: >= ${PRE_FILTER_MIN_SCORE}%)
 Recommendation: ${recommendation}
 Mandatory Rules Passed: ${mandatoryPassed}
 Failed Mandatory: ${decisionResult.failed_mandatory_rules?.join(', ') || 'None'}
@@ -2589,7 +2589,7 @@ Action: LOCAL_NO_TRADE (Gemini API Bypassed - Quota 100% Preserved)
           if (currentZone && (currentZone.status === 'ZONE_TAPPED' || currentZone.status === 'CONFIRMED' || lastZoneEval?.isTapped)) {
             const rejectReason = decisionResult.no_trade_reason ||
               decisionResult.explanation ||
-              `Deterministic pre-filter rejected setup (Score: ${decisionResult.decision_score?.toFixed(1)}% < ${PRE_FILTER_MIN_SCORE}%)`;
+              `Deterministic pre-filter rejected setup (Score: ${decisionResult.decision_score?.toFixed(1) || '0.0'}% < ${PRE_FILTER_MIN_SCORE}%)`;
             
             recordRejectedZone(watcher.id, currentZone, rejectReason);
             activeZonesMemoryMap.delete(watcher.id);
@@ -2643,7 +2643,7 @@ Watcher ID: ${watcher.id}
 Pair: ${selectedPair}
 Timeframe: ${selectedTimeframe}
 Strategy Mode: ${compiledStrategy.strategy_mode || 'HYBRID'}
-Decision Score: ${decisionResult.decision_score.toFixed(1)}%
+Decision Score: ${decisionResult.decision_score?.toFixed(1) || '0.0'}%
 Recommendation: ${recommendation}
 Action: PROCEED_TO_EXECUTION_GATE
 `.trim());
@@ -2860,19 +2860,19 @@ Strategy Summary:
 Current Price: ${currentPrice}
 
 Marked Zone / Point of Interest (POI):
-${currentZone ? `- Zone: ${currentZone.type} (${currentZone.direction}) [${currentZone.low.toFixed(5)} - ${currentZone.high.toFixed(5)}]
-- Invalidation Level: ${currentZone.invalidationLevel.toFixed(5)}
+${currentZone ? `- Zone: ${currentZone.type} (${currentZone.direction}) [${currentZone.low?.toFixed(5) || '0.00000'} - ${currentZone.high?.toFixed(5) || '0.00000'}]
+- Invalidation Level: ${currentZone.invalidationLevel?.toFixed(5) || '0.00000'}
 - Status: ${currentZone.status} (Tapped: YES, Rejection Confirmed: ${lastZoneEval?.isRejected || currentZone.status === 'CONFIRMED' ? 'YES' : 'IN_PROGRESS'})` : '- None'}
 
 Detailed Numeric Market Structure & Key Levels:
 - Trend: ${marketStructure.trend}
-- Support Zones (Min-Max): ${marketStructure.supportZones?.map(s => `[${s.priceMin.toFixed(5)} - ${s.priceMax.toFixed(5)}]`).join(', ') || 'None'}
-- Resistance Zones (Min-Max): ${marketStructure.resistanceZones?.map(r => `[${r.priceMin.toFixed(5)} - ${r.priceMax.toFixed(5)}]`).join(', ') || 'None'}
-- Swing Highs: ${marketStructure.swingHighs?.slice(-3).map(s => s.price.toFixed(5)).join(', ') || 'None'}
-- Swing Lows: ${marketStructure.swingLows?.slice(-3).map(s => s.price.toFixed(5)).join(', ') || 'None'}
-- Fair Value Gaps: ${marketStructure.fairValueGaps?.slice(-3).map(f => `${f.type} (${f.bottom.toFixed(5)} - ${f.top.toFixed(5)})`).join(', ') || 'None'}
-- Volume Confirmation: ${marketStructure.volumeInformation.volumeSpike ? 'Confirmed' : 'None'}
-- ATR: ${marketStructure.volatilityInformation.atr.toFixed(5)}
+- Support Zones (Min-Max): ${marketStructure.supportZones?.map(s => `[${s.priceMin?.toFixed(5) || '0.00000'} - ${s.priceMax?.toFixed(5) || '0.00000'}]`).join(', ') || 'None'}
+- Resistance Zones (Min-Max): ${marketStructure.resistanceZones?.map(r => `[${r.priceMin?.toFixed(5) || '0.00000'} - ${r.priceMax?.toFixed(5) || '0.00000'}]`).join(', ') || 'None'}
+- Swing Highs: ${marketStructure.swingHighs?.slice(-3).map(s => s.price?.toFixed(5) || '0.00000').join(', ') || 'None'}
+- Swing Lows: ${marketStructure.swingLows?.slice(-3).map(s => s.price?.toFixed(5) || '0.00000').join(', ') || 'None'}
+- Fair Value Gaps: ${marketStructure.fairValueGaps?.slice(-3).map(f => `${f.type} (${f.bottom?.toFixed(5) || '0.00000'} - ${f.top?.toFixed(5) || '0.00000'})`).join(', ') || 'None'}
+- Volume Confirmation: ${marketStructure.volumeInformation?.volumeSpike ? 'Confirmed' : 'None'}
+- ATR: ${marketStructure.volatilityInformation?.atr?.toFixed(5) || '0.00000'}
 
 AI Instructions:
 1. Evaluate ONLY the supplied market evidence and marked POI zone.
@@ -2881,8 +2881,8 @@ AI Instructions:
 - This is a ${selectedTimeframe} trade. Keep Stop Loss tight and proportionate to ${selectedTimeframe} (typically 5 to 10 pips for M5/M15). Never output wide H1/H4 swing stop losses.
 - If current price (${currentPrice}) has already moved significantly away from the marked POI zone in the target direction (late entry / chasing after the move has started), evaluate as NO_TRADE. Do NOT chase late entries.
 4. If BUY or SELL, provide the exact Entry Price, Stop Loss, and Take Profit based on actual NUMERIC market structure.
-5. For BUY: Stop Loss MUST be placed BELOW entry, at or below marked zone invalidation level (${currentZone?.direction === 'BUY' ? currentZone.invalidationLevel.toFixed(5) : 'support structure'}).
-6. For SELL: Stop Loss MUST be placed ABOVE entry, at or above marked zone invalidation level (${currentZone?.direction === 'SELL' ? currentZone.invalidationLevel.toFixed(5) : 'resistance structure'}).
+5. For BUY: Stop Loss MUST be placed BELOW entry, at or below marked zone invalidation level (${currentZone?.direction === 'BUY' ? (currentZone.invalidationLevel?.toFixed(5) || '0.00000') : 'support structure'}).
+6. For SELL: Stop Loss MUST be placed ABOVE entry, at or above marked zone invalidation level (${currentZone?.direction === 'SELL' ? (currentZone.invalidationLevel?.toFixed(5) || '0.00000') : 'resistance structure'}).
 7. Identify the basis used for the Stop Loss in "stopLossBasis" (SUPPORT_ZONE, RESISTANCE_ZONE, SWING_LOW, SWING_HIGH, DEMAND_ZONE, SUPPLY_ZONE, ORDER_BLOCK, STRUCTURAL_CANDLE, ATR_FALLBACK).
 8. Only return NO_TRADE when the supplied evidence clearly argues against taking a trade.
 
@@ -3068,10 +3068,10 @@ Output ONLY valid JSON.
                       parsedResult.direction = 'NO_TRADE';
                       parsedResult.reasoning = proximityValidation.lateReason;
                     } else if (proximityValidation?.isSlTooWide) {
-                      console.log(`[GEMINI STOP LOSS TOO WIDE] Watcher ID: ${watcher.id} (${selectedPair}): Stop loss distance (${proximityValidation.slDistancePips.toFixed(1)} pips) exceeds maximum allowable limit for ${selectedTimeframe}. Setup rejected.`);
+                      console.log(`[GEMINI STOP LOSS TOO WIDE] Watcher ID: ${watcher.id} (${selectedPair}): Stop loss distance (${proximityValidation.slDistancePips?.toFixed(1) || '0.0'} pips) exceeds maximum allowable limit for ${selectedTimeframe}. Setup rejected.`);
                       parsedResult.satisfies = false;
                       parsedResult.direction = 'NO_TRADE';
-                      parsedResult.reasoning = `Stop loss distance (${proximityValidation.slDistancePips.toFixed(1)} pips) is too wide for ${selectedTimeframe}. Setup rejected.`;
+                      parsedResult.reasoning = `Stop loss distance (${proximityValidation.slDistancePips?.toFixed(1) || '0.0'} pips) is too wide for ${selectedTimeframe}. Setup rejected.`;
                     }
                   }
 
@@ -4100,7 +4100,7 @@ ${analysis.stopLossBasis === 'ATR_FALLBACK' ? `ATR: ${marketStructure.volatility
 Symbol: ${brokerQuote.symbol}
 Bid: ${brokerQuote.bid}
 Ask: ${brokerQuote.ask}
-Spread: ${brokerQuote.spread.toFixed(5)}
+Spread: ${brokerQuote.spread?.toFixed(5) || '0.00000'}
 Age: ${quoteAgeMs}ms (Threshold: ${maxQuoteAgeMs}ms)
 Freshness: ${brokerQuoteFreshnessPassed ? 'PASS' : 'FAIL'}
 Source: ${brokerQuote.source}`);
