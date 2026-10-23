@@ -5,6 +5,7 @@ import { resolveUserGeminiKey } from '../gemini-key-resolver.js';
 import { timeframeToMinutes } from '../timeframe.js';
 import { defaultMarketDataService } from '../market-data-service.js';
 import { getMarketSchedule } from '../market-hours.js';
+import { toCanonicalSymbol, toDisplaySymbol } from '../market-data-gateway.js';
 
 /**
  * Self-contained Supabase client initialization.
@@ -586,7 +587,7 @@ export default async function handler(req: any, res: any) {
       telegram_chat_id: telegramChatId,
       account_size: accountSize,
       risk_percentage: riskPercentage,
-      selected_pair: mappedSymbol,
+      selected_pair: toCanonicalSymbol(selectedPair),
       selected_timeframe: finalTimeframe,
       gemini_model: "gemini-3.5-flash-lite",
       scan_interval_minutes: computedInterval,
@@ -633,7 +634,7 @@ export default async function handler(req: any, res: any) {
       .from("watchers")
       .select("id, selected_timeframe, scan_interval_minutes")
       .eq("user_id", userId)
-      .eq("selected_pair", mappedSymbol)
+      .eq("selected_pair", toCanonicalSymbol(selectedPair))
       .maybeSingle();
 
     if (fetchSavedErr || !savedWatcherRow) {
@@ -652,20 +653,21 @@ export default async function handler(req: any, res: any) {
 
     console.log(`[Watcher Start] AI Market Watcher activated successfully for user ${userId}.`);
 
-    const marketSchedule = getMarketSchedule(mappedSymbol);
+    const displayPair = toDisplaySymbol(selectedPair);
+    const marketSchedule = getMarketSchedule(displayPair);
     let marketNoticeTelegram = '';
     let activationMessage = "AI Market Watcher activated successfully.";
 
     if (!marketSchedule.isOpen && marketSchedule.closesOnWeekends) {
-      marketNoticeTelegram = `\n\n*Market Notice (Nigeria Time / WAT):*\n⚠️ ${mappedSymbol} is currently closed for the weekend (${marketSchedule.reasonWat}). Reopens *${marketSchedule.nextOpenWatFormatted || 'Sunday 10:00 PM WAT'}*. Watcher is active and candle downloads will automatically begin once markets reopen.`;
-      activationMessage = `AI Market Watcher activated! Note: ${mappedSymbol} is closed for the weekend and reopens ${marketSchedule.nextOpenWatFormatted || 'Sunday 10:00 PM WAT'} (Nigeria Time).`;
+      marketNoticeTelegram = `\n\n*Market Notice (Nigeria Time / WAT):*\n⚠️ ${displayPair} is currently closed for the weekend (${marketSchedule.reasonWat}). Reopens *${marketSchedule.nextOpenWatFormatted || 'Sunday 10:00 PM WAT'}*. Watcher is active and candle downloads will automatically begin once markets reopen.`;
+      activationMessage = `AI Market Watcher activated! Note: ${displayPair} is closed for the weekend and reopens ${marketSchedule.nextOpenWatFormatted || 'Sunday 10:00 PM WAT'} (Nigeria Time).`;
     } else if (!marketSchedule.closesOnWeekends) {
-      marketNoticeTelegram = `\n\n*Market Status:*\n⚡ ${mappedSymbol} trades 24/7 in Nigeria (WAT). Real-time monitoring and candle scanning are running.`;
+      marketNoticeTelegram = `\n\n*Market Status:*\n⚡ ${displayPair} trades 24/7 in Nigeria (WAT). Real-time monitoring and candle scanning are running.`;
     }
 
     const telegramSuccess = await sendTelegramMessage(telegramChatId, `✅ *Gaks AI Market Watcher Activated*\n\n` +
       `*Status:* Active 🟢\n` +
-      `*Pairs Monitored:* ${pairsMonitored}\n` +
+      `*Pairs Monitored:* ${displayPair}\n` +
       `*Strategy:* ${strategyDetails.name} (${strategyDetails.isDefault ? 'Default' : 'Custom'})\n` +
       `*Account Size:* $${accountSize || 'Not set'}\n` +
       `*Risk:* ${riskPercentage ? riskPercentage + '%' : 'Not set'}\n` +

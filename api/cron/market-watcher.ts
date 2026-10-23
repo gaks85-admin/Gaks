@@ -855,7 +855,8 @@ export default async function handler(req: any, res: any) {
         const symbol = w.selected_pair || w.pair;
         const timeframe = w.selected_timeframe || w.timeframe;
         if (symbol && timeframe) {
-          const reqKey = `${symbol}:${timeframe}`;
+          const canonical = toCanonicalSymbol(symbol);
+          const reqKey = `${canonical}:${timeframe}`;
           if (!uniqueRequests.has(reqKey)) {
             uniqueRequests.add(reqKey);
             requestArgs.push({
