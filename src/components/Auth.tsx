@@ -373,11 +373,12 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
               className="w-full space-y-5"
             >
               {/* Brand Emblem / Logo Badge */}
-              <div className="flex justify-center">
-                <div className="w-12 h-12 rounded-2xl bg-[#121217] border border-zinc-800 flex items-center justify-center shadow-md relative overflow-hidden group">
-                  <span className="text-2xl font-black tracking-tighter text-white font-sans">G</span>
-                  <div className="absolute top-2 right-2 w-1.5 h-1.5 rounded-full bg-white shadow-[0_0_8px_rgba(255,255,255,0.8)]" />
-                </div>
+              <div className="flex justify-center mb-2">
+                <img 
+                  src="/gaks-logo-white.png" 
+                  alt="Gaks" 
+                  className="h-10 w-auto object-contain drop-shadow-[0_2px_12px_rgba(255,255,255,0.15)]"
+                />
               </div>
 
               {/* Title & Subtitle */}
@@ -633,8 +634,8 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
       </div>
 
       {/* Footer Branding */}
-      <div className="text-[11px] text-zinc-600 text-center py-2 relative z-10">
-        Gaks AI
+      <div className="flex items-center justify-center gap-1.5 py-2 relative z-10">
+        <img src="/gaks-logo-white.png" alt="Gaks" className="h-3 w-auto opacity-40 object-contain" />
       </div>
 
     </div>

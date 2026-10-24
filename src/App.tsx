@@ -2516,9 +2516,17 @@ export default function App() {
         
         {/* Minimalist Header - Matches reference UI */}
         <header className="px-6 py-4 border-b border-zinc-100 dark:border-zinc-900/80 flex justify-between items-center bg-white dark:bg-[#080808] sticky top-0 z-40 transition-colors duration-300">
-          <div className="flex items-center gap-1 cursor-pointer" onClick={() => setActiveTab('home')}>
-            <span className="text-[20px] font-semibold tracking-[-0.03em] text-zinc-950 dark:text-white font-sans">Gaks</span>
-            <span className="text-[16px] font-normal tracking-normal text-zinc-400 dark:text-zinc-500 font-sans">AI</span>
+          <div className="flex items-center gap-1.5 cursor-pointer select-none py-0.5" onClick={() => setActiveTab('home')}>
+            <img 
+              src="/gaks-logo-white.png" 
+              alt="Gaks" 
+              className="h-6 w-auto object-contain hidden dark:block"
+            />
+            <img 
+              src="/gaks-logo-dark.png" 
+              alt="Gaks" 
+              className="h-6 w-auto object-contain block dark:hidden"
+            />
           </div>
           <div className="flex items-center gap-3">
             {activeTab !== 'home' && userProfile && (
