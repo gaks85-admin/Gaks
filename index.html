@@ -19,26 +19,31 @@
       (function() {
         const originalError = console.error;
         const originalWarn = console.warn;
-        const isViteWS = (msg) => typeof msg === 'string' && (msg.includes('[vite]') || msg.includes('WebSocket') || msg.includes('HMR'));
+        const isViteWS = (msg) => {
+          if (!msg) return false;
+          const str = typeof msg === 'string' ? msg : (msg.message || msg.stack || String(msg));
+          return str.includes('[vite]') || str.includes('WebSocket') || str.includes('HMR') || str.includes('ws://') || str.includes('wss://');
+        };
         
         console.error = function(...args) {
-          if (isViteWS(args[0])) return;
+          if (args.some(isViteWS)) return;
           originalError.apply(console, args);
         };
         
         console.warn = function(...args) {
-          if (isViteWS(args[0])) return;
+          if (args.some(isViteWS)) return;
           originalWarn.apply(console, args);
         };
 
         window.addEventListener('error', function(e) {
-          if (isViteWS(e.message) || isViteWS(e.filename)) {
+          if (isViteWS(e.message) || isViteWS(e.filename) || isViteWS(e.error)) {
             e.stopImmediatePropagation();
+            e.preventDefault();
           }
         }, true);
 
         window.addEventListener('unhandledrejection', function(e) {
-          if (e.reason && isViteWS(e.reason.message)) {
+          if (isViteWS(e.reason)) {
             e.stopImmediatePropagation();
             e.preventDefault();
           }
