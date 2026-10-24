@@ -35,7 +35,7 @@ import {
   clearRejectedZones
 } from "../zone-engine.js";
 import { resolveHigherTimeframeTrend } from "../htf-trend-engine.js";
-import { evaluateWatcherPropFirmGate, WatcherPropFirmGateOutcome } from "../prop-firm-watcher-gate.js";
+import { evaluateWatcherPropFirmGate, WatcherPropFirmGateResult } from "../prop-firm-watcher-gate.js";
 import { evaluateEconomicNewsGate } from "../economic-news-gate.js";
 
 // TEMPORARY MODE FLAG: Force Market Watcher into RULE_ONLY mode for diagnostic testing.
@@ -1559,8 +1559,8 @@ Reason: ${adaptiveReq.reason}
         entryPrice: Number(analysis.entryPrice) || 0,
         executedEntry: executedPrice,
         stopLoss: Number(analysis.stopLoss) || 0,
-        takeProfit: analysis.takeProfit ? Number(analysis.takeProfit) : null,
-        geminiTp: analysis.takeProfit ? Number(analysis.takeProfit) : null,
+        takeProfit: analysis.takeProfit ? Number(analysis.takeProfit) : undefined,
+        geminiTp: analysis.takeProfit ? Number(analysis.takeProfit) : undefined,
         symbol: symbol,
         direction: analysis.signal,
         riskRewardStr: riskRewardStr,

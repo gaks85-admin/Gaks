@@ -19,5 +19,12 @@ export function validatePreExecution(params: PreExecutionValidationParams): { va
   return { valid: true };
 }
 
+export interface FinalExecutionState {
+  status: 'PENDING' | 'REJECTED' | 'EXECUTED' | 'FAILED';
+  rejectionReason?: string;
+  orderId?: string;
+  timestamp: string;
+}
+
 export const revalidatePreExecution = validatePreExecution;
 

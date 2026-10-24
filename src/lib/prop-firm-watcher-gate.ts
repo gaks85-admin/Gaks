@@ -1,6 +1,6 @@
 import { defaultEconomicEventService, EconomicEventService } from './economic-event-service.js';
 import { resolvePersistedAccountType } from './prop-firm-service.js';
-import { NewsGateEvaluation } from './types.js';
+import { NewsGateEvaluation } from '../types.js';
 
 export interface WatcherPropFirmGateParams {
   supabase: any;

@@ -17,6 +17,7 @@ import { Zap,
   XCircle
 } from 'lucide-react';
 import { GEMINI_API_KEY_URL, GeminiTestResult, classifyCredentialType } from '../lib/apiKeys.js';
+import { PWAInstallButton } from './PWAInstallButton';
 
 export interface SettingsTabProps {
   analysisMode: 'HYBRID' | 'RULE_ONLY' | 'AI_ONLY';
@@ -555,6 +556,14 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
               </div>
             </div>
             
+            {/* Mobile App Installation Section */}
+            <div className="space-y-4 pt-2">
+              <div className="flex items-center gap-2 px-1">
+                <h3 className="text-xs font-bold text-zinc-900 dark:text-white uppercase tracking-widest">Mobile Application</h3>
+              </div>
+              <PWAInstallButton variant="card" />
+            </div>
+
             {/* Appearance Section */}
             {toggleTheme && (
               <div className="space-y-4 pt-2">

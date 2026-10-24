@@ -14,6 +14,8 @@ import { BacktestPage } from './components/admin/BacktestPage';
 import { StrategyTab } from './components/StrategyTab';
 import { WatcherTab, ActiveTradeData } from './components/WatcherTab';
 import { SettingsTab } from './components/SettingsTab';
+import { PWAInstallButton } from './components/PWAInstallButton';
+import { OfflineIndicator } from './components/OfflineIndicator';
 
 const TabLoading = () => (
   <div className="space-y-8 animate-pulse p-4">
@@ -2510,6 +2512,7 @@ export default function App() {
     <div className="min-h-screen bg-white dark:bg-[#030303] text-zinc-950 dark:text-zinc-100 flex justify-center items-start font-sans antialiased overflow-x-hidden selection:bg-zinc-200 dark:selection:bg-zinc-800 selection:text-zinc-900 dark:selection:text-white transition-colors duration-300">
       {/* Maximum-width wrapper modeled for an incredible mobile aspect layout & gorgeous desktop presentation */}
       <div className={`w-full ${activeTab === 'admin' || activeTab === 'backtest' ? 'max-w-6xl' : 'max-w-md'} bg-white dark:bg-[#080808] min-h-screen pb-36 border-x border-zinc-100 dark:border-zinc-900 shadow-sm relative flex flex-col transition-all duration-300`}>
+        <OfflineIndicator />
         
         {/* Minimalist Header - Matches reference UI */}
         <header className="px-6 py-4 border-b border-zinc-100 dark:border-zinc-900/80 flex justify-between items-center bg-white dark:bg-[#080808] sticky top-0 z-40 transition-colors duration-300">
@@ -2533,6 +2536,7 @@ export default function App() {
                 <span className="text-[11px] font-normal text-zinc-700 dark:text-zinc-300 max-w-[80px] truncate">{profileFullName}</span>
               </div>
             )}
+            <PWAInstallButton />
             <button 
               onClick={toggleTheme}
               className="p-2 text-zinc-500 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white transition-all rounded-xl hover:bg-zinc-100 dark:hover:bg-zinc-900 cursor-pointer" 

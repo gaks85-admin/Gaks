@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import { supabase, isRealSupabaseConfigured } from '../supabaseClient';
 import { Lock, Mail, ArrowLeft, AlertCircle, Eye, EyeOff, CheckCircle2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { PWAInstallButton } from './PWAInstallButton';
 
 export interface AuthProps {
   onAuthSuccess: (session: any) => void;
@@ -624,6 +625,11 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
             </motion.div>
           )}
         </AnimatePresence>
+      </div>
+
+      {/* Mobile App Install Prompt on Auth */}
+      <div className="w-full max-w-[380px] px-2 mb-2 relative z-10 flex justify-center">
+        <PWAInstallButton variant="button" className="w-full" />
       </div>
 
       {/* Footer Branding */}

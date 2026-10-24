@@ -295,7 +295,7 @@ export function calculateStructuralStopLoss(
 
     // Resolve SL with minimum distance enforcement
     let stopLoss = finalSl ?? (entryPrice - Math.min(atr * 0.75, maxSlDistance));
-    let basis = finalBasis ?? 'ATR_FALLBACK';
+    let basis: StructuralStopLossResult['stopLossBasis'] = finalBasis ?? 'ATR_FALLBACK';
     
     // Enforcement: If structural SL is too tight, ensure minimum cushion, but NEVER exceed maxSlDistance
     if ((entryPrice - stopLoss) < minSlDistance) {
@@ -399,7 +399,7 @@ export function calculateStructuralStopLoss(
 
     // Resolve SL with minimum distance enforcement
     let stopLoss = finalSl ?? (entryPrice + Math.min(atr * 0.75, maxSlDistance));
-    let basis = finalBasis ?? 'ATR_FALLBACK';
+    let basis: StructuralStopLossResult['stopLossBasis'] = finalBasis ?? 'ATR_FALLBACK';
     
     // Enforcement: If structural SL is too tight, ensure minimum cushion, but NEVER exceed maxSlDistance
     if ((stopLoss - entryPrice) < minSlDistance) {
