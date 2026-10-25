@@ -13,7 +13,7 @@ export interface AuthProps {
 
 export function AuthSkeleton() {
   return (
-    <div className="min-h-[100dvh] w-full bg-[#050507] text-white flex flex-col justify-between items-center px-4 py-6 font-sans select-none overflow-hidden box-border relative">
+    <div className="min-h-[100dvh] w-full bg-black text-white flex flex-col justify-between items-center px-4 py-6 font-sans select-none overflow-hidden box-border relative">
       <div className="w-full max-w-[380px] my-auto flex flex-col items-center animate-pulse space-y-4 relative z-10">
         <div className="h-6 w-16 bg-zinc-800/60 rounded-md self-start" />
         <div className="w-12 h-12 bg-zinc-800/80 rounded-2xl" />
@@ -296,10 +296,10 @@ export default function Auth({ onAuthSuccess, initialMode = 'login', isInitializ
   };
 
   return (
-    <div className="min-h-[100dvh] w-full bg-[#050507] text-white flex flex-col justify-between items-center px-4 py-5 font-sans antialiased select-none relative overflow-x-hidden overflow-y-auto box-border">
+    <div className="min-h-[100dvh] w-full bg-black text-white flex flex-col justify-between items-center px-4 py-5 font-sans antialiased select-none relative overflow-x-hidden overflow-y-auto box-border">
       
       {/* Premium dark diagonal sheen overlay matching reference screenshot */}
-      <div className="fixed inset-0 pointer-events-none overflow-hidden z-0 bg-[#050507]">
+      <div className="fixed inset-0 pointer-events-none overflow-hidden z-0 bg-black">
         <div className="absolute -top-[10%] -right-[10%] w-[700px] h-[700px] bg-gradient-to-bl from-zinc-800/15 via-zinc-900/5 to-transparent rounded-full blur-3xl" />
         <div className="absolute top-0 right-0 w-full h-full bg-[radial-gradient(ellipse_at_top_right,rgba(255,255,255,0.03),transparent_75%)]" />
       </div>

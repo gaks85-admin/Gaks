@@ -44,7 +44,7 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({
   };
 
   const renderModal = () => (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/80 backdrop-blur-md p-4 animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in duration-200">
       <div className="w-full max-w-sm rounded-2xl bg-zinc-900 border border-zinc-800 p-6 shadow-2xl text-left">
         <div className="flex justify-between items-start mb-4">
           <div className="p-2.5 bg-cyan-500/10 border border-cyan-500/20 rounded-xl">
