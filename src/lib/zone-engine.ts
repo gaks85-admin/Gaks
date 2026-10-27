@@ -301,15 +301,45 @@ export function identifyCandidateZones(
 
       // --- BULLISH ORDER BLOCK (DEMAND / BUY) ---
       const isDownCandle = c.close < c.open || (c.close === c.open && body <= atr * 0.1);
-      if (isDownCandle) {
+      const zoneHeight = c.high - c.low;
+      const minZoneHeight = Math.max(atr * 0.35, buffer * 1.5);
+
+      if (isDownCandle && zoneHeight >= minZoneHeight) {
         const obHigh = Number(Math.max(c.open, c.high).toFixed(5));
         const obLow = Number(c.low.toFixed(5));
 
-        // Upward displacement check: At least one candle in the next 1-4 candles MUST close above obHigh
+        // Upward institutional displacement check:
+        // Must show genuine impulsive expansion (not just a 0.1-pip micro-close)
+        // that breaks structure (BOS/CHOCH or prior swing high) or leaves an FVG.
         let displacementIdx = -1;
+        let hasStructuralBreak = false;
+
         for (let d = i + 1; d < Math.min(sortedCandles.length, i + 5); d++) {
-          if (sortedCandles[d].close > obHigh) {
+          const dispCandle = sortedCandles[d];
+          const dispExpansion = dispCandle.close - obHigh;
+          const dispBody = dispCandle.close - dispCandle.open;
+
+          // Strong displacement criteria:
+          // 1. Closes decisively above obHigh by at least 0.75 * ATR
+          // 2. Strong green momentum body (dispBody >= 0.5 * ATR)
+          const hasDecisiveExpansion = dispExpansion >= Math.max(atr * 0.75, buffer * 2.0) && dispBody >= atr * 0.5;
+
+          // 3. Break of Structure check: broke a recent swing high, formed BOS/CHOCH, or created FVG
+          const brokeSwingHigh = (marketStructure?.swingHighs || []).some(
+            sh => sh.index < d && sh.index >= Math.max(0, i - 20) && dispCandle.high > sh.price
+          );
+          const hasBosOrChoch = (marketStructure?.BOS || []).some(
+            b => b.type === 'BULLISH_BOS' && b.candleIndex >= i && b.candleIndex <= d
+          ) || (marketStructure?.CHOCH || []).some(
+            ch => ch.type === 'BULLISH_CHOCH' && ch.candleIndex >= i && ch.candleIndex <= d
+          );
+          const createdFvg = (marketStructure?.fairValueGaps || []).some(
+            f => f.type === 'BULLISH_FVG' && f.candleIndex >= i && f.candleIndex <= d
+          );
+
+          if (hasDecisiveExpansion && (brokeSwingHigh || hasBosOrChoch || createdFvg || dispExpansion >= atr * 1.25)) {
             displacementIdx = d;
+            hasStructuralBreak = brokeSwingHigh || hasBosOrChoch || createdFvg;
             break;
           }
         }
@@ -336,7 +366,8 @@ export function identifyCandidateZones(
               const isImmediate = displacementIdx === i + 1;
               const recencyWeight = (i / sortedCandles.length) * 15;
               const immediateBonus = isImmediate ? 20 : 0;
-              const strength = Math.round((proximityScore * 0.6 + recencyWeight + immediateBonus) * (trend === 'BULLISH' ? 1.0 : 0.85));
+              const structuralBonus = hasStructuralBreak ? 25 : 0;
+              const strength = Math.round(Math.min(100, (proximityScore * 0.5 + recencyWeight + immediateBonus + structuralBonus) * (trend === 'BULLISH' ? 1.0 : 0.85)));
 
               candidateZones.push({
                 id: generateZoneId(pair, 'BULLISH_ORDER_BLOCK', 'BUY'),
@@ -353,7 +384,7 @@ export function identifyCandidateZones(
                 tappedAt: null,
                 tapCount: 0,
                 status: 'WAITING_FOR_TAP',
-                reasoning: `Fresh Unmitigated Demand Zone / Bullish Order Block [${obLow} - ${obHigh}].`,
+                reasoning: `Institutional Demand Zone / Bullish Order Block [${obLow} - ${obHigh}] confirmed with structural displacement.${hasStructuralBreak ? ' (BOS / Swing High Broken)' : ''}`,
                 candleIndex: i
               });
             }
@@ -363,15 +394,42 @@ export function identifyCandidateZones(
 
       // --- BEARISH ORDER BLOCK (SUPPLY / SELL) ---
       const isUpCandle = c.close > c.open || (c.close === c.open && body <= atr * 0.1);
-      if (isUpCandle) {
+      if (isUpCandle && zoneHeight >= minZoneHeight) {
         const obHigh = Number(c.high.toFixed(5));
         const obLow = Number(Math.min(c.open, c.low).toFixed(5));
 
-        // Downward displacement check: At least one candle in the next 1-4 candles MUST close below obLow
+        // Downward institutional displacement check:
+        // Must show genuine impulsive expansion (not just a 0.1-pip micro-close)
+        // that breaks structure (BOS/CHOCH or prior swing low) or leaves an FVG.
         let displacementIdx = -1;
+        let hasStructuralBreak = false;
+
         for (let d = i + 1; d < Math.min(sortedCandles.length, i + 5); d++) {
-          if (sortedCandles[d].close < obLow) {
+          const dispCandle = sortedCandles[d];
+          const dispExpansion = obLow - dispCandle.close;
+          const dispBody = dispCandle.open - dispCandle.close;
+
+          // Strong displacement criteria:
+          // 1. Closes decisively below obLow by at least 0.75 * ATR
+          // 2. Strong red momentum body (dispBody >= 0.5 * ATR)
+          const hasDecisiveExpansion = dispExpansion >= Math.max(atr * 0.75, buffer * 2.0) && dispBody >= atr * 0.5;
+
+          // 3. Break of Structure check: broke a recent swing low, formed BOS/CHOCH, or created FVG
+          const brokeSwingLow = (marketStructure?.swingLows || []).some(
+            sl => sl.index < d && sl.index >= Math.max(0, i - 20) && dispCandle.low < sl.price
+          );
+          const hasBosOrChoch = (marketStructure?.BOS || []).some(
+            b => b.type === 'BEARISH_BOS' && b.candleIndex >= i && b.candleIndex <= d
+          ) || (marketStructure?.CHOCH || []).some(
+            ch => ch.type === 'BEARISH_CHOCH' && ch.candleIndex >= i && ch.candleIndex <= d
+          );
+          const createdFvg = (marketStructure?.fairValueGaps || []).some(
+            f => f.type === 'BEARISH_FVG' && f.candleIndex >= i && f.candleIndex <= d
+          );
+
+          if (hasDecisiveExpansion && (brokeSwingLow || hasBosOrChoch || createdFvg || dispExpansion >= atr * 1.25)) {
             displacementIdx = d;
+            hasStructuralBreak = brokeSwingLow || hasBosOrChoch || createdFvg;
             break;
           }
         }
@@ -398,7 +456,8 @@ export function identifyCandidateZones(
               const isImmediate = displacementIdx === i + 1;
               const recencyWeight = (i / sortedCandles.length) * 15;
               const immediateBonus = isImmediate ? 20 : 0;
-              const strength = Math.round((proximityScore * 0.6 + recencyWeight + immediateBonus) * (trend === 'BEARISH' ? 1.0 : 0.85));
+              const structuralBonus = hasStructuralBreak ? 25 : 0;
+              const strength = Math.round(Math.min(100, (proximityScore * 0.5 + recencyWeight + immediateBonus + structuralBonus) * (trend === 'BEARISH' ? 1.0 : 0.85)));
 
               candidateZones.push({
                 id: generateZoneId(pair, 'BEARISH_ORDER_BLOCK', 'SELL'),
@@ -415,7 +474,7 @@ export function identifyCandidateZones(
                 tappedAt: null,
                 tapCount: 0,
                 status: 'WAITING_FOR_TAP',
-                reasoning: `Fresh Unmitigated Supply Zone / Bearish Order Block [${obLow} - ${obHigh}].`,
+                reasoning: `Institutional Supply Zone / Bearish Order Block [${obLow} - ${obHigh}] confirmed with structural displacement.${hasStructuralBreak ? ' (BOS / Swing Low Broken)' : ''}`,
                 candleIndex: i
               });
             }

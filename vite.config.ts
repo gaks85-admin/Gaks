@@ -3,6 +3,89 @@ import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { VitePWA } from 'vite-plugin-pwa';
 
+const suppressHmrPlugin = () => ({
+  name: 'suppress-hmr-plugin',
+  transformIndexHtml: {
+    order: 'pre' as const,
+    handler() {
+      return [
+        {
+          tag: 'script',
+          children: `
+            (function() {
+              var NativeWebSocket = window.WebSocket;
+              window.WebSocket = function(url, protocols) {
+                var urlStr = String(url || '');
+                var protoStr = String(protocols || '');
+                if (urlStr.includes('vite') || protoStr.includes('vite') || urlStr.includes('token=')) {
+                  var fake = new EventTarget();
+                  fake.readyState = 1;
+                  fake.OPEN = 1;
+                  fake.CLOSED = 3;
+                  fake.CONNECTING = 0;
+                  fake.CLOSING = 2;
+                  fake.url = urlStr;
+                  fake.send = function() {};
+                  fake.close = function() {};
+                  setTimeout(function() {
+                    fake.dispatchEvent(new Event('open'));
+                  }, 0);
+                  return fake;
+                }
+                return new NativeWebSocket(url, protocols);
+              };
+              if (NativeWebSocket) {
+                window.WebSocket.prototype = NativeWebSocket.prototype;
+                window.WebSocket.CONNECTING = 0;
+                window.WebSocket.OPEN = 1;
+                window.WebSocket.CLOSING = 2;
+                window.WebSocket.CLOSED = 3;
+              }
+
+              var originalError = console.error;
+              var originalWarn = console.warn;
+              var isViteWS = function(msg) {
+                if (!msg) return false;
+                var str = typeof msg === 'string' ? msg : (msg.message || msg.stack || String(msg));
+                return str.includes('[vite]') || str.includes('WebSocket') || str.includes('HMR') || str.includes('ws://') || str.includes('wss://');
+              };
+
+              console.error = function() {
+                for (var i = 0; i < arguments.length; i++) {
+                  if (isViteWS(arguments[i])) return;
+                }
+                originalError.apply(console, arguments);
+              };
+
+              console.warn = function() {
+                for (var i = 0; i < arguments.length; i++) {
+                  if (isViteWS(arguments[i])) return;
+                }
+                originalWarn.apply(console, arguments);
+              };
+
+              window.addEventListener('error', function(e) {
+                if (isViteWS(e.message) || isViteWS(e.filename) || isViteWS(e.error)) {
+                  e.stopImmediatePropagation();
+                  e.preventDefault();
+                }
+              }, true);
+
+              window.addEventListener('unhandledrejection', function(e) {
+                if (isViteWS(e.reason)) {
+                  e.stopImmediatePropagation();
+                  e.preventDefault();
+                }
+              }, true);
+            })();
+          `,
+          injectTo: 'head-prepend' as const
+        }
+      ];
+    }
+  }
+});
+
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
@@ -12,6 +95,7 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [
+      suppressHmrPlugin(),
       react(), 
       tailwindcss(),
       VitePWA({
