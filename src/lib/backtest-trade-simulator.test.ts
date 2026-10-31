@@ -215,7 +215,7 @@ export async function runTradeSimulatorTests(): Promise<{ total: number; passed:
       timeframe: 'M5'
     });
 
-    assert(trade === null, 'Test 7: Invalid LONG SL/TP geometry rejected');
+    assert(trade.trade === null, 'Test 7: Invalid LONG SL/TP geometry rejected');
   } catch (err: any) {
     assert(false, 'Test 7 Exception', err.message);
   }
@@ -233,7 +233,7 @@ export async function runTradeSimulatorTests(): Promise<{ total: number; passed:
       timeframe: 'M5'
     });
 
-    assert(trade === null, 'Test 8: Invalid SHORT SL/TP geometry rejected');
+    assert(trade.trade === null, 'Test 8: Invalid SHORT SL/TP geometry rejected');
   } catch (err: any) {
     assert(false, 'Test 8 Exception', err.message);
   }
@@ -281,7 +281,7 @@ export async function runTradeSimulatorTests(): Promise<{ total: number; passed:
       timeframe: 'M5'
     });
 
-    assert(trade === null, 'Test 10: Trade below broker minimum lot size rejected');
+    assert(trade.trade === null, 'Test 10: Trade below broker minimum lot size rejected');
   } catch (err: any) {
     assert(false, 'Test 10 Exception', err.message);
   }
@@ -551,4 +551,11 @@ export async function runTradeSimulatorTests(): Promise<{ total: number; passed:
   }
 
   return { total, passed, failed: total - passed, failures };
+}
+
+if (import.meta.url === `file://${process.argv[1]}`) {
+  runTradeSimulatorTests().then(res => {
+    console.log('Trade Simulator Test Result:', res);
+    if (res.failed > 0) process.exit(1);
+  });
 }

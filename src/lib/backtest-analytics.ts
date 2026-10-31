@@ -109,7 +109,13 @@ export function calculateBacktestAnalytics(params: CalculateAnalyticsParams): Ba
       currentWinningStreak: 0,
       currentLosingStreak: 0,
       bestTrade: null,
-      worstTrade: null
+      worstTrade: null,
+      totalSpreadCost: 0,
+      totalSlippageCost: 0,
+      totalCommissionCost: 0,
+      totalSwapCost: 0,
+      totalTradingCosts: 0,
+      costBreakdownByInstrument: {}
     };
   }
 
@@ -152,6 +158,12 @@ export function calculateBacktestAnalytics(params: CalculateAnalyticsParams): Ba
   // Exit Reasons
   const exitReasonBreakdown: Record<string, number> = {};
 
+  let totalSpreadCost = 0;
+  let totalSlippageCost = 0;
+  let totalCommissionCost = 0;
+  let totalSwapCost = 0;
+  const costBreakdownByInstrument: Record<string, { spread: number; slippage: number; commission: number; swap: number; total: number }> = {};
+
   // Maximum Drawdown & Equity Curve
   let runningPeak = startingBalance;
   let maxDrawdownCurrency = 0;
@@ -170,6 +182,26 @@ export function calculateBacktestAnalytics(params: CalculateAnalyticsParams): Ba
 
   sortedTrades.forEach(t => {
     const netPnL = t.netPnL;
+
+    const sCost = t.spreadCost || 0;
+    const slipCost = t.slippageCost || 0;
+    const commCost = t.commissionCost || 0;
+    const swCost = t.swapCost || 0;
+
+    totalSpreadCost += sCost;
+    totalSlippageCost += slipCost;
+    totalCommissionCost += commCost;
+    totalSwapCost += swCost;
+
+    const sym = (t.symbol || symbol || 'UNKNOWN').toUpperCase();
+    if (!costBreakdownByInstrument[sym]) {
+      costBreakdownByInstrument[sym] = { spread: 0, slippage: 0, commission: 0, swap: 0, total: 0 };
+    }
+    costBreakdownByInstrument[sym].spread += sCost;
+    costBreakdownByInstrument[sym].slippage += slipCost;
+    costBreakdownByInstrument[sym].commission += commCost;
+    costBreakdownByInstrument[sym].swap += swCost;
+    costBreakdownByInstrument[sym].total += (sCost + slipCost + commCost + swCost);
 
     // Classification
     if (netPnL > 0) {
@@ -336,6 +368,21 @@ export function calculateBacktestAnalytics(params: CalculateAnalyticsParams): Ba
   const winningTradeAverageR = winningRCount > 0 ? Math.round((winningRealizedRSum / winningRCount) * 100) / 100 : null;
   const losingTradeAverageR = losingRCount > 0 ? Math.round((losingRealizedRSum / losingRCount) * 100) / 100 : null;
 
+  totalSpreadCost = Math.round(totalSpreadCost * 100) / 100;
+  totalSlippageCost = Math.round(totalSlippageCost * 100) / 100;
+  totalCommissionCost = Math.round(totalCommissionCost * 100) / 100;
+  totalSwapCost = Math.round(totalSwapCost * 100) / 100;
+  const totalTradingCosts = Math.round((totalSpreadCost + totalSlippageCost + totalCommissionCost + totalSwapCost) * 100) / 100;
+
+  for (const k of Object.keys(costBreakdownByInstrument)) {
+    const b = costBreakdownByInstrument[k];
+    b.spread = Math.round(b.spread * 100) / 100;
+    b.slippage = Math.round(b.slippage * 100) / 100;
+    b.commission = Math.round(b.commission * 100) / 100;
+    b.swap = Math.round(b.swap * 100) / 100;
+    b.total = Math.round(b.total * 100) / 100;
+  }
+
   return {
     datasetId,
     symbol,
@@ -382,6 +429,12 @@ export function calculateBacktestAnalytics(params: CalculateAnalyticsParams): Ba
     currentWinningStreak: currentWinStreak,
     currentLosingStreak: currentLossStreak,
     bestTrade,
-    worstTrade
+    worstTrade,
+    totalSpreadCost,
+    totalSlippageCost,
+    totalCommissionCost,
+    totalSwapCost,
+    totalTradingCosts,
+    costBreakdownByInstrument
   };
 }

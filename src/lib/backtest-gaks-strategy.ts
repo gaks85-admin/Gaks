@@ -1,12 +1,24 @@
 /**
  * GAKS AI — Actual Gaks Strategy Backtest Adapter
  * Deterministically evaluates compiled Gaks strategy rules (CompilerOutput / CompiledRules)
- * over historical candle contexts using pure decision-engine evaluators without Gemini API calls.
+ * over historical candle contexts using pure production decision-engine, market-structure,
+ * and zone-engine evaluators without look-ahead bias or live broker dependencies.
  */
 
 import { BacktestStrategy, BacktestCandleContext, BacktestSignal, BacktestSimulationConfig } from './backtest-types.js';
 import { compileStrategy, CompilerOutput } from './strategy-compiler.js';
 import { evaluateDecision } from './decision-engine.js';
+import { extractMarketStructure, MarketStructure } from './market-structure-engine.js';
+import {
+  identifyMarkedZone,
+  identifyCandidateZones,
+  evaluateZoneState,
+  evaluateZoneRejection,
+  MarkedZone,
+  RejectedZoneRecord
+} from './zone-engine.js';
+import { calculateStructuralStopLoss } from './structural-stop-loss.js';
+import { Candle } from './strategy-engine.js';
 import {
   calculateDeterministicATR,
   calculateDeterministicEMA,
@@ -18,6 +30,11 @@ export class GaksBacktestStrategy implements BacktestStrategy {
   name: string;
   compiledStrategy: CompilerOutput;
   rawStrategyText: string;
+
+  // Historical zone state machine across candle iterations
+  private activeZone: MarkedZone | null = null;
+  private rejectedZones: RejectedZoneRecord[] = [];
+  private lastEvaluatedIndex: number = -1;
 
   constructor(strategyText?: string, strategyId?: string) {
     this.id = strategyId || 'gaks-actual-strategy';
@@ -40,12 +57,41 @@ export class GaksBacktestStrategy implements BacktestStrategy {
     this.compiledStrategy = compileStrategy(this.rawStrategyText);
   }
 
+  /**
+   * Resets active zone and history between backtests or upon seek/rewind.
+   */
+  reset(): void {
+    this.activeZone = null;
+    this.rejectedZones = [];
+    this.lastEvaluatedIndex = -1;
+  }
+
+  /**
+   * Evaluates historical candle context strictly up to and including context.current.
+   * No future candles are ever referenced or accessed.
+   */
   evaluate(context: BacktestCandleContext, simConfig?: BacktestSimulationConfig): BacktestSignal | null {
     const { current, previous, index, symbol, timeframe } = context;
-    if (!previous || previous.length < 14) return null; // Requires at least 14 historical candles
+    if (!previous || previous.length < 5) return null; // Requires minimum history for indicators and structure
 
-    const allCandles = [...previous, current];
+    // Reset state if backtest looped or restarted
+    if (this.lastEvaluatedIndex >= 0 && index <= this.lastEvaluatedIndex) {
+      this.reset();
+    }
+    this.lastEvaluatedIndex = index;
+
+    // Convert to Candle format for production engines (historical slice only)
+    const allCandles: Candle[] = [...previous, current].map(c => ({
+      timestamp: c.timestamp,
+      open: c.open,
+      high: c.high,
+      low: c.low,
+      close: c.close,
+      volume: c.volume || 0
+    }));
+
     const closes = allCandles.map(c => c.close);
+    const prevCandle = previous.length > 0 ? previous[previous.length - 1] : undefined;
 
     // 1. Calculate Deterministic Indicators over available historical candles
     const atr = calculateDeterministicATR(allCandles, 14);
@@ -65,174 +111,202 @@ export class GaksBacktestStrategy implements BacktestStrategy {
     const emaCrossoverBullish = prevFastEma !== null && prevSlowEma !== null && fastEma !== null && slowEma !== null && prevFastEma <= prevSlowEma && fastEma > slowEma;
     const emaCrossoverBearish = prevFastEma !== null && prevSlowEma !== null && fastEma !== null && slowEma !== null && prevFastEma >= prevSlowEma && fastEma < slowEma;
 
-    // Market structure detection over previous 100 candles
-    const lookback = Math.min(previous.length, 100);
-    const recentCandles = previous.slice(-lookback);
-    
-    // Find local swing points (last 20 candles) for more sensitive BOS
-    const swingLookback = Math.min(previous.length, 20);
-    const swingCandles = previous.slice(-swingLookback);
-    const localHigh = Math.max(...swingCandles.map(c => c.high));
-    const localLow = Math.min(...swingCandles.map(c => c.low));
-    
-    // Global lookback for major zones
-    const globalHigh = Math.max(...recentCandles.map(c => c.high));
-    const globalLow = Math.min(...recentCandles.map(c => c.low));
+    // 2. PRODUCTION MARKET STRUCTURE EXTRACTION (Strict No Look-Ahead)
+    // Uses actual extractMarketStructure from market-structure-engine.ts
+    // 5-bar fractal window: swing at index i requires i-2, i-1, i, i+1, i+2.
+    // Therefore swings at index N-2 and N-1 are not yet confirmed and cannot trigger BOS.
+    const marketStructure: MarketStructure = extractMarketStructure(allCandles);
+    marketStructure.watcherId = this.id;
+    (marketStructure as any).pair = symbol;
+    (marketStructure as any).timeframe = timeframe;
+    marketStructure.latestCandles = allCandles.slice(-10);
 
-    // BOS should be based on local swings, not global 100-candle extremes
-    const bosBullish = current.close > localHigh;
-    const bosBearish = current.close < localLow;
+    const calculatedTrend = marketStructure.trend !== 'SIDEWAYS'
+      ? marketStructure.trend
+      : (fastEma && slowEma ? (fastEma > slowEma ? 'BULLISH' : 'BEARISH') : 'SIDEWAYS');
+    marketStructure.trend = calculatedTrend;
+    if (!(marketStructure as any).htfTrend && calculatedTrend !== 'SIDEWAYS') {
+      (marketStructure as any).htfTrend = calculatedTrend;
+    }
 
-    // Pinbar / Engulfing Confirmation Candle Detection
+    const hasBullishBos = marketStructure.BOS?.some(b => b.type === 'BULLISH_BOS') ?? false;
+    const hasBearishBos = marketStructure.BOS?.some(b => b.type === 'BEARISH_BOS') ?? false;
+    const hasBullishChoch = marketStructure.CHOCH?.some(c => c.type === 'BULLISH_CHOCH') ?? false;
+    const hasBearishChoch = marketStructure.CHOCH?.some(c => c.type === 'BEARISH_CHOCH') ?? false;
+
+    // Candle patterns from market structure engine & immediate confirmation candle
     const candleBody = Math.abs(current.close - current.open);
-    const isBullishEngulfing = current.close > current.open && previous.length > 0 && current.close > previous[previous.length - 1].open;
-    const isBearishEngulfing = current.close < current.open && previous.length > 0 && current.close < previous[previous.length - 1].open;
-    const isBullishPinbar = current.close > current.open && (current.open - current.low) >= 1.2 * candleBody; // Slightly more relaxed pinbar
+    const isBullishEngulfing = current.close > current.open && !!prevCandle && current.close > prevCandle.open && current.open <= prevCandle.close;
+    const isBearishEngulfing = current.close < current.open && !!prevCandle && current.close < prevCandle.open && current.open >= prevCandle.close;
+    const isBullishPinbar = current.close > current.open && (current.open - current.low) >= 1.2 * candleBody;
     const isBearishPinbar = current.close < current.open && (current.high - current.open) >= 1.2 * candleBody;
 
-    const confirmationBullish = isBullishEngulfing || isBullishPinbar;
-    const confirmationBearish = isBearishEngulfing || isBearishPinbar;
+    const confirmationBullish = isBullishEngulfing || isBullishPinbar || (marketStructure.candlePatterns?.some(p => p.direction === 'BULLISH') ?? false);
+    const confirmationBearish = isBearishEngulfing || isBearishPinbar || (marketStructure.candlePatterns?.some(p => p.direction === 'BEARISH') ?? false);
 
-    // Volume Analysis
-    const recentVolumes = recentCandles.map(c => c.volume || 0).filter(v => v > 0);
-    const averageVolume = recentVolumes.length > 0 ? recentVolumes.reduce((a, b) => a + b, 0) / recentVolumes.length : 1000;
-    const latestVolume = current.volume || 0;
+    // 3. PRODUCTION ZONE ENGINE & HISTORICAL ZONE LIFECYCLE
+    const rules = this.compiledStrategy.compiled_rules;
+    const hasZoneOrObRule = !!(rules?.order_block || rules?.supply_demand || rules?.unmitigated_zone || rules?.fair_value_gap);
 
-    // Supply & Demand / Support & Resistance Zones (using global major levels)
-    const zoneWidth = Math.max(atr * 0.75, 0.0005); // Dynamic zone width
-    const supportZoneRange = { low: globalLow, high: globalLow + zoneWidth, type: 'SUPPORT' };
-    const resistanceZoneRange = { low: globalHigh - zoneWidth, high: globalHigh, type: 'RESISTANCE' };
+    // Evaluate existing active zone if one is being tracked
+    if (this.activeZone) {
+      const zoneEval = evaluateZoneState(
+        this.activeZone,
+        current,
+        current.close,
+        atr,
+        allCandles,
+        marketStructure
+      );
+      this.activeZone = zoneEval.updatedZone;
 
-    const inSupport = current.low <= supportZoneRange.high;
-    const inResistance = current.high >= resistanceZoneRange.low;
+      if (zoneEval.isInvalidated || this.activeZone.status === 'INVALIDATED' || this.activeZone.status === 'EXPIRED') {
+        this.rejectedZones.push({
+          low: this.activeZone.low,
+          high: this.activeZone.high,
+          direction: this.activeZone.direction,
+          rejectedAt: Date.now(),
+          reason: zoneEval.reason || 'Zone invalidated'
+        });
+        this.activeZone = null;
+      } else if (zoneEval.isTapped || this.activeZone.status === 'ZONE_TAPPED') {
+        const rejection = evaluateZoneRejection(this.activeZone, current, current.close, prevCandle);
+        if (rejection.isRejected || zoneEval.isRejected) {
+          this.activeZone.status = 'CONFIRMED';
+        }
+      }
+    }
 
-    // Build deterministic market structure object
-    const marketStructure = {
+    // If no active zone is currently tracked, discover new candidate POI using production identifyMarkedZone
+    if (!this.activeZone) {
+      const discoveredZone = identifyMarkedZone(
+        allCandles,
+        marketStructure,
+        this.compiledStrategy,
+        current.close,
+        this.rejectedZones
+      );
+      if (discoveredZone) {
+        this.activeZone = discoveredZone;
+        // Newly discovered zone begins waiting for tap; does not trigger immediate trade on creation bar
+      }
+    }
+
+    // 4. PREPARE ENRICHED MARKET STRUCTURE FOR DECISION ENGINE
+    const enrichedMarketStructure: any = {
+      ...marketStructure,
       watcherId: this.id,
       symbol,
+      pair: symbol,
       timeframe,
-      trend: fastEma && slowEma ? (fastEma > slowEma ? 'BULLISH' : 'BEARISH') : 'SIDEWAYS',
+      trend: marketStructure.trend || (fastEma && slowEma ? (fastEma > slowEma ? 'BULLISH' : 'BEARISH') : 'SIDEWAYS'),
       ema: fastEma && slowEma ? fastEma > slowEma : false,
       ema_crossover: emaCrossoverBullish || emaCrossoverBearish,
+      emaCrossoverBullish,
+      emaCrossoverBearish,
+      fastEma,
+      slowEma,
       rsi: rsi !== null ? rsi : 50,
-      rsi_oversold: rsi !== null && rsi <= 35, // Relaxed RSI
-      rsi_overbought: rsi !== null && rsi >= 65,
-      bos: bosBullish || bosBearish,
-      choch: bosBullish || bosBearish,
+      rsi_oversold: rsi !== null && rsi <= (rules?.rsi?.oversold || 35),
+      rsi_overbought: rsi !== null && rsi >= (rules?.rsi?.overbought || 65),
+      bos: hasBullishBos || hasBearishBos,
+      choch: hasBullishChoch || hasBearishChoch,
       confirmation_candle: confirmationBullish || confirmationBearish,
-      support: inSupport,
-      resistance: inResistance,
-      supportZones: inSupport ? [supportZoneRange] : [],
-      resistanceZones: inResistance ? [resistanceZoneRange] : [],
-      orderBlocks: [
-        { type: 'BULLISH_ORDER_BLOCK', low: globalLow, high: globalLow + zoneWidth, status: inSupport ? 'TAPPED' : 'UNMITIGATED' },
-        { type: 'BEARISH_ORDER_BLOCK', low: globalHigh - zoneWidth, high: globalHigh, status: inResistance ? 'TAPPED' : 'UNMITIGATED' }
-      ],
-      support_rejection: inSupport && current.close > current.open, // Simple rejection: close green in zone
-      resistance_rejection: inResistance && current.close < current.open, // Close red in zone
-      tap_and_rejection: (inSupport && current.close > current.open) || (inResistance && current.close < current.open),
-      volume_confirmation: latestVolume >= averageVolume * 1.1, // Relaxed volume
-      latestVolume,
-      averageVolume,
-      volumeInformation: {
-        latestVolume,
-        averageVolume,
-        volumeSpike: latestVolume >= averageVolume * 1.3
-      },
-      order_block: inSupport || inResistance,
-      markedZone: inSupport 
-        ? { type: 'DEMAND', low: globalLow, high: globalLow + zoneWidth, status: 'ZONE_TAPPED', direction: 'BUY' }
-        : inResistance
-          ? { type: 'SUPPLY', low: globalHigh - zoneWidth, high: globalHigh, status: 'ZONE_TAPPED', direction: 'SELL' }
-          : null,
-      zone_status: (inSupport || inResistance) ? 'ZONE_TAPPED' : 'NO_ZONE',
-      isRejected: (inSupport && current.close > current.open) || (inResistance && current.close < current.open),
-      risk_reward: true,
-      timeframes: [timeframe] 
+      markedZone: this.activeZone,
+      zone_status: this.activeZone ? this.activeZone.status : 'NO_ZONE',
+      isRejected: this.activeZone ? this.activeZone.status === 'CONFIRMED' : false,
+      order_block: Boolean(this.activeZone),
+      support_rejection: this.activeZone?.direction === 'BUY' && this.activeZone.status === 'CONFIRMED',
+      resistance_rejection: this.activeZone?.direction === 'SELL' && this.activeZone.status === 'CONFIRMED',
+      tap_and_rejection: this.activeZone?.status === 'CONFIRMED',
+      risk_reward: true
     };
 
-    // 2. Evaluate Decision Engine against Compiled Gaks Strategy
-    const decision = evaluateDecision(this.compiledStrategy, marketStructure);
+    // 5. EVALUATE DECISION ENGINE
+    const decision = evaluateDecision(this.compiledStrategy, enrichedMarketStructure);
 
-    // Determine matching signal from Strategy keywords or Decision Engine
-    const strategyLower = this.rawStrategyText.toLowerCase();
-    const isSupplyDemandStrategy = strategyLower.includes('supply') || strategyLower.includes('demand') || strategyLower.includes('order block');
-    const isEmaStrategy = strategyLower.includes('ema') || strategyLower.includes('crossover');
-    const isBosStrategy = strategyLower.includes('bos') || strategyLower.includes('break of structure') || strategyLower.includes('choch');
-
+    // 6. SIGNAL RESOLUTION
     let triggerSignal = false;
     let direction: 'BUY' | 'SELL' = 'BUY';
     let reason = '';
 
-    // A. Supply & Demand / Order Block Tap & Rejections
-    if (isSupplyDemandStrategy) {
-      if (marketStructure.support_rejection && confirmationBullish) {
+    // Condition A: Confirmed Marked Zone / Order Block / Supply-Demand
+    if (this.activeZone && this.activeZone.status === 'CONFIRMED') {
+      if (this.activeZone.direction === 'BUY' && (confirmationBullish || !rules?.confirmation_candle)) {
         triggerSignal = true;
         direction = 'BUY';
-        reason = 'Price tapped and rejected Demand Zone / Order Block with bullish confirmation';
-      } else if (marketStructure.resistance_rejection && confirmationBearish) {
+        reason = `Price tapped and rejected ${this.activeZone.type} [${this.activeZone.low} - ${this.activeZone.high}] with confirmation`;
+      } else if (this.activeZone.direction === 'SELL' && (confirmationBearish || !rules?.confirmation_candle)) {
         triggerSignal = true;
         direction = 'SELL';
-        reason = 'Price tapped and rejected Supply Zone / Order Block with bearish confirmation';
+        reason = `Price tapped and rejected ${this.activeZone.type} [${this.activeZone.low} - ${this.activeZone.high}] with confirmation`;
       }
     }
 
-    // B. EMA Alignment & Crossovers
-    if (!triggerSignal && isEmaStrategy) {
-      if (emaCrossoverBullish) {
+    // Condition B: Non-Zone Strategies (e.g. pure EMA crossover, BOS, or Decision Engine pass without zone mandate)
+    if (!triggerSignal && !hasZoneOrObRule) {
+      if (emaCrossoverBullish && (confirmationBullish || !rules?.confirmation_candle)) {
         triggerSignal = true;
         direction = 'BUY';
-        reason = 'Bullish EMA Crossover detected (Fast crossed above Slow EMA)';
-      } else if (emaCrossoverBearish) {
+        reason = 'Bullish EMA Crossover detected with candle confirmation';
+      } else if (emaCrossoverBearish && (confirmationBearish || !rules?.confirmation_candle)) {
         triggerSignal = true;
         direction = 'SELL';
-        reason = 'Bearish EMA Crossover detected (Fast crossed below Slow EMA)';
-      }
-    }
-
-    // C. Break of Structure (BOS)
-    if (!triggerSignal && isBosStrategy) {
-      if (bosBullish && confirmationBullish) {
+        reason = 'Bearish EMA Crossover detected with candle confirmation';
+      } else if (hasBullishBos && (confirmationBullish || !rules?.confirmation_candle)) {
         triggerSignal = true;
         direction = 'BUY';
         reason = 'Bullish Break of Structure (BOS) confirmed with candle momentum';
-      } else if (bosBearish && confirmationBearish) {
+      } else if (hasBearishBos && (confirmationBearish || !rules?.confirmation_candle)) {
         triggerSignal = true;
         direction = 'SELL';
         reason = 'Bearish Break of Structure (BOS) confirmed with candle momentum';
       }
     }
 
-    // D. Decision Engine Fallback
+    // Condition C: Decision Engine recommendation pass
     if (!triggerSignal && (decision.recommendation === 'PASS' || decision.recommendation === 'LIKELY_PASS' || decision.mandatory_rules_passed)) {
-      triggerSignal = true;
-      if (bosBearish || emaCrossoverBearish || isBearishEngulfing || isBearishPinbar) {
-        direction = 'SELL';
-      } else {
-        direction = 'BUY';
+      if (this.activeZone && this.activeZone.status === 'CONFIRMED') {
+        triggerSignal = true;
+        direction = this.activeZone.direction;
+        reason = decision.explanation || `Deterministic Gaks Rule Passed (${decision.matched_rules.join(', ')})`;
+      } else if (!hasZoneOrObRule) {
+        triggerSignal = true;
+        direction = (emaCrossoverBearish || hasBearishBos || isBearishEngulfing || isBearishPinbar) ? 'SELL' : 'BUY';
+        reason = decision.explanation || `Deterministic Gaks Rule Passed (${decision.matched_rules.join(', ')})`;
       }
-      reason = decision.explanation || `Deterministic Gaks Rule Passed (${decision.matched_rules.join(', ')})`;
     }
 
+    // 7. STRUCTURAL STOP LOSS AND RISK-TO-REWARD VALIDATION (Task 5)
     if (triggerSignal) {
-      const slBuffer = Math.max(atr * 1.5, 0.0010);
-      
-      // Load RR from simConfig if provided, otherwise fallback to strategy or default
-      const rrRatio = simConfig?.riskRewardRatio || this.compiledStrategy.compiled_rules?.risk_reward?.min_ratio || 2.0;
-
       const entryPrice = current.close;
-      let stopLoss = 0;
-      let takeProfit = 0;
+      const slResult = calculateStructuralStopLoss(direction, entryPrice, enrichedMarketStructure);
 
-      if (direction === 'BUY') {
-        stopLoss = Math.round((entryPrice - slBuffer) * 100000) / 100000;
-        const risk = entryPrice - stopLoss;
-        takeProfit = Math.round((entryPrice + risk * rrRatio) * 100000) / 100000;
-      } else {
-        stopLoss = Math.round((entryPrice + slBuffer) * 100000) / 100000;
-        const risk = stopLoss - entryPrice;
-        takeProfit = Math.round((entryPrice - risk * rrRatio) * 100000) / 100000;
+      // Validate stop loss on correct side of entry
+      if (direction === 'BUY' && slResult.stopLoss >= entryPrice) {
+        return null; // Invalid structural stop loss: rejected
       }
+      if (direction === 'SELL' && slResult.stopLoss <= entryPrice) {
+        return null; // Invalid structural stop loss: rejected
+      }
+
+      const stopLoss = slResult.stopLoss;
+      const rrRatio = simConfig?.riskRewardRatio || rules?.risk_reward?.min_ratio || 2.0;
+
+      let takeProfit = 0;
+      if (direction === 'BUY') {
+        const risk = entryPrice - stopLoss;
+        takeProfit = Number((entryPrice + (risk * rrRatio)).toFixed(5));
+      } else {
+        const risk = stopLoss - entryPrice;
+        takeProfit = Number((entryPrice - (risk * rrRatio)).toFixed(5));
+      }
+
+      // Consume the zone so it cannot be repeatedly entered
+      this.activeZone = null;
+
+      const rawScore = decision.decision_score !== undefined ? decision.decision_score : 85;
+      const confidence = Math.round(rawScore <= 1 ? rawScore * 100 : rawScore);
 
       return {
         id: `gaks_sig_${index}_${direction.toLowerCase()}`,
@@ -244,7 +318,7 @@ export class GaksBacktestStrategy implements BacktestStrategy {
         stopLoss,
         takeProfit,
         reason,
-        confidence: Math.round((decision.decision_score || 0.8) * 100)
+        confidence
       };
     }
 

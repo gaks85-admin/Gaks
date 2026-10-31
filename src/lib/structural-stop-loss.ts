@@ -333,7 +333,7 @@ export function calculateStructuralStopLoss(
       }
 
       // Hard clamp: Stop loss MUST NOT exceed maxSlDistance from entry
-      if (finalSl <= entryPrice || (finalSl - entryPrice) > maxSlDistance) {
+      if (finalSl !== null && (finalSl <= entryPrice || (finalSl - entryPrice) > maxSlDistance)) {
         finalSl = entryPrice + maxSlDistance;
       }
 

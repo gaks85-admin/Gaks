@@ -27,6 +27,7 @@ export interface BacktestRunRecord {
   createdAt: string;
   completedAt: string;
   trades?: BacktestTradeRecord[];
+  restrictionsSummary?: any;
 }
 
 const FALLBACK_DIR = process.env.VERCEL || process.env.NODE_ENV === 'production' || process.cwd().startsWith('/var/task')
@@ -97,7 +98,8 @@ export async function saveBacktestRun(params: {
     analyticsSnapshot: analytics,
     createdAt: now,
     completedAt: now,
-    trades: engineResult.trades || []
+    trades: engineResult.trades || [],
+    restrictionsSummary: engineResult.restrictionsSummary
   };
 
   const supabase = getSupabase();

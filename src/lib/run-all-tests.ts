@@ -10,6 +10,7 @@ import { runGaksStrategyAdapterTests } from './backtest-gaks-strategy.test.js';
 import { runAnalyticsUnitTests } from './backtest-analytics.test.js';
 import { runPersistenceUnitTests } from './backtest-persistence-service.test.js';
 import { runBacktestSafetyTests } from './backtest-safety.test.js';
+import { runBacktestCostTests } from './backtest-costs.test.js';
 import { runPhase9Validation } from './backtest-phase9.test.js';
 
 async function runAllTestSuites() {
@@ -25,6 +26,7 @@ async function runAllTestSuites() {
   const analyticsRes = await runAnalyticsUnitTests();
   const persistenceRes = await runPersistenceUnitTests();
   const safetyRes = await runBacktestSafetyTests();
+  const costRes = await runBacktestCostTests();
   const phase9Res = await runPhase9Validation();
 
   console.log('\n==================================================');
@@ -38,15 +40,16 @@ async function runAllTestSuites() {
   console.log('6. Phase 6 Analytics:', analyticsRes);
   console.log('7. Phase 7 Persistence:', persistenceRes);
   console.log('8. Phase 8 Safety Isolation:', safetyRes);
-  console.log('9. Phase 9 Full 2025 Validation:', phase9Res);
+  console.log('9. Stage C1-C4 Trading Costs:', costRes);
+  console.log('10. Phase 9 Full 2025 Validation:', phase9Res);
   console.log('==================================================');
 
-  const totalFailed = csvRes.failed + apiRes.failed + engineRes.failed + simRes.failed + gaksRes.failed + analyticsRes.failed + persistenceRes.failed + safetyRes.failed + phase9Res.failed;
+  const totalFailed = csvRes.failed + apiRes.failed + engineRes.failed + simRes.failed + gaksRes.failed + analyticsRes.failed + persistenceRes.failed + safetyRes.failed + costRes.failed + phase9Res.failed;
   if (totalFailed > 0) {
     console.error(`\nTEST FAILURE DETECTED: ${totalFailed} assertions failed.`);
     process.exit(1);
   } else {
-    console.log('\nALL TEST SUITES AND PHASE 9 VALIDATION PASSED CLEANLY (100% SUCCESS)!');
+    console.log('\nALL TEST SUITES AND STAGE C1-C4 COST TESTS PASSED CLEANLY (100% SUCCESS)!');
   }
 }
 

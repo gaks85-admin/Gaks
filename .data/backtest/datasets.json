@@ -1,5 +1,20 @@
 [
   {
+    "id": "24ebb256-ec6b-44bd-8e2c-993196601347",
+    "created_by": "test-admin-id",
+    "name": "EURUSD 2025 Validation Dataset",
+    "symbol": "EURUSD",
+    "timeframe": "M5",
+    "source_filename": "eurusd_2025_validation.csv",
+    "row_count": 288,
+    "start_time": "2025-01-01T00:00:00.000Z",
+    "end_time": "2025-01-01T23:55:00.000Z",
+    "status": "ready",
+    "created_at": "2026-10-31T08:17:26.174Z",
+    "updated_at": "2026-10-31T08:17:26.174Z",
+    "covers_2025": true
+  },
+  {
     "id": "eurusd-2025-q1-benchmark",
     "created_by": "system",
     "name": "EURUSD 2025 Multi-Month Benchmark (1,500 H1 Candles)",

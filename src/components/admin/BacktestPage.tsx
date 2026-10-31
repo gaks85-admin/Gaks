@@ -1446,6 +1446,62 @@ export function BacktestPage({
                 </div>
               )}
 
+              {engineResult.restrictionsSummary && (
+                <div className="space-y-3 bg-zinc-950/40 p-4 rounded-2xl border border-zinc-800/80">
+                  <div className="flex items-center justify-between">
+                    <h4 className="font-bold text-zinc-100 flex items-center gap-2">
+                      <ShieldCheck className="w-4 h-4 text-sky-400" />
+                      Historical Restriction Gates (Phase B2)
+                    </h4>
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-sky-500/10 text-sky-400 border border-sky-500/20">
+                      Deterministic Parity
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs font-mono">
+                    <div className="p-2.5 bg-zinc-900/60 rounded-xl border border-zinc-800">
+                      <span className="text-zinc-500 text-[10px] block uppercase">Evaluated</span>
+                      <span className="text-white font-bold">{engineResult.restrictionsSummary.totalCandidatesEvaluated} Setups</span>
+                    </div>
+                    <div className="p-2.5 bg-zinc-900/60 rounded-xl border border-zinc-800">
+                      <span className="text-zinc-500 text-[10px] block uppercase">Passed Gates</span>
+                      <span className="text-emerald-400 font-bold">{engineResult.restrictionsSummary.totalSignalsPassed} Signals</span>
+                    </div>
+                    <div className="p-2.5 bg-zinc-900/60 rounded-xl border border-zinc-800">
+                      <span className="text-zinc-500 text-[10px] block uppercase">Quality Gate</span>
+                      <span className={engineResult.restrictionsSummary.rejectionsByGate.qualityGate > 0 ? 'text-amber-400 font-bold' : 'text-zinc-400'}>
+                        {engineResult.restrictionsSummary.rejectionsByGate.qualityGate} Blocked
+                      </span>
+                    </div>
+                    <div className="p-2.5 bg-zinc-900/60 rounded-xl border border-zinc-800">
+                      <span className="text-zinc-500 text-[10px] block uppercase">Risk / Cooldown</span>
+                      <span className={(engineResult.restrictionsSummary.rejectionsByGate.riskGovernor + engineResult.restrictionsSummary.rejectionsByGate.cooldown) > 0 ? 'text-amber-400 font-bold' : 'text-zinc-400'}>
+                        {engineResult.restrictionsSummary.rejectionsByGate.riskGovernor + engineResult.restrictionsSummary.rejectionsByGate.cooldown} Blocked
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
+                    <div className="p-2.5 bg-zinc-900/40 rounded-xl border border-zinc-800/60 flex items-center justify-between">
+                      <span className="text-zinc-400">Account Type & Prop Firm:</span>
+                      <span className="font-mono font-medium text-zinc-200">
+                        {engineResult.restrictionsSummary.propFirmAudit?.accountType === 'prop' ? (
+                          <span className={engineResult.restrictionsSummary.propFirmAudit.isBreached ? 'text-red-400' : 'text-emerald-400'}>
+                            Prop Firm ({engineResult.restrictionsSummary.propFirmAudit.isBreached ? 'BREACHED' : 'ACTIVE'})
+                          </span>
+                        ) : 'Personal (Bypassed)'}
+                      </span>
+                    </div>
+                    <div className="p-2.5 bg-zinc-900/40 rounded-xl border border-zinc-800/60 flex items-center justify-between">
+                      <span className="text-zinc-400">Economic News Gate:</span>
+                      <span className="font-mono text-[10px] px-2 py-0.5 rounded bg-zinc-800 text-zinc-400">
+                        {engineResult.restrictionsSummary.economicNewsStatus?.status === 'AVAILABLE' ? 'Historical Active' : 'NOT AVAILABLE (Reported)'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div>
                 <h4 className="font-bold text-zinc-200 mb-2">Simulated Trades ({engineResult.trades?.length || 0})</h4>
                 {engineResult.trades?.length === 0 ? (

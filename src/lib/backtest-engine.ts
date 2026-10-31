@@ -20,6 +20,7 @@ import { simulateTradeLifecycle } from './backtest-trade-simulator.js';
 import { calculateBacktestAnalytics } from './backtest-analytics.js';
 import { aggregateCandles } from './backtest-utils.js';
 import { timeframeToMinutes } from './timeframe.js';
+import { HistoricalRestrictionsGovernor } from './backtest-restrictions-engine.js';
 
 /**
  * Executes a deterministic backtest over a Phase 3 historical dataset.
@@ -118,8 +119,27 @@ export async function runBacktest(config: BacktestConfig): Promise<BacktestEngin
     openPositions: []
   };
 
-  // 5. Instantiate Deterministic Strategy Evaluator
+  // 5. Instantiate Deterministic Strategy Evaluator & Phase B2 Restrictions Governor
   const strategy: BacktestStrategy = resolveBacktestStrategy(config.strategyId, config.strategyText);
+  if (strategy.reset) {
+    strategy.reset();
+  }
+
+  const restrictionsGovernor = new HistoricalRestrictionsGovernor({
+    initialBalance: config.initialBalance,
+    symbol: normSymbol,
+    accountType: config.accountType,
+    propFirmSettings: config.propFirmSettings,
+    historicalNewsEvents: config.historicalNewsEvents,
+    toggles: {
+      marketHours: config.simulation?.enforceMarketHours ?? true,
+      sessionFilter: config.simulation?.enforceSessions ?? true,
+      qualityGate: config.simulation?.enforceQualityGate ?? true,
+      riskGovernor: config.simulation?.enforceRiskGovernor ?? true,
+      cooldown: config.simulation?.enforceCooldown ?? true,
+      propFirm: config.simulation?.enforcePropFirm ?? true
+    }
+  });
 
   const signals: BacktestSignal[] = [];
   const trades: BacktestTradeRecord[] = [];
@@ -134,6 +154,9 @@ export async function runBacktest(config: BacktestConfig): Promise<BacktestEngin
     const currentCandle = candles[i];
     state.currentTimestamp = currentCandle.timestamp;
     state.candleIndex = i;
+
+    // Advance chronological state in restrictions governor (daily resets, high-watermark)
+    restrictionsGovernor.onCandle(currentCandle.timestamp, state.balance, state.equity);
 
     // Do not evaluate new signals if a position is currently open
     if (i <= activeTradeUntilIndex) {
@@ -155,6 +178,25 @@ export async function runBacktest(config: BacktestConfig): Promise<BacktestEngin
     // Evaluate strategy
     const signal = strategy.evaluate(context, config.simulation);
     if (signal) {
+      // Phase B2 Gate Pipeline: Market Hours -> Session -> News -> Quality Gate -> Cooldown/Risk Gov -> Prop Firm
+      const restrictionEval = restrictionsGovernor.evaluateCandidate({
+        timestamp: currentCandle.timestamp,
+        symbol: normSymbol,
+        timeframe: normTimeframe,
+        direction: signal.direction,
+        confidence: signal.confidence,
+        strategyRules: (strategy as any).compiledStrategy?.compiled_rules
+      });
+
+      if (!restrictionEval.passed) {
+        rejectedSignals.push({
+          timestamp: currentCandle.timestamp,
+          reason: `[${restrictionEval.blockedGate}] ${restrictionEval.reason || 'Blocked by restriction gate'}`,
+          direction: signal.direction
+        });
+        continue;
+      }
+
       signals.push(signal);
       state.signalsGenerated++;
 
@@ -178,6 +220,9 @@ export async function runBacktest(config: BacktestConfig): Promise<BacktestEngin
         state.tradesCompleted++;
         state.balance = simTrade.balanceAfter;
         state.equity = simTrade.balanceAfter;
+
+        // Feed completed trade into restrictions governor (loss streaks, 4h cooldown, daily PnL, prop firm breach)
+        restrictionsGovernor.onTradeClosed(simTrade);
 
         // Use exit index provided by simulator to skip forward
         if (simResult.exitIndex !== undefined && simResult.exitIndex > i) {
@@ -225,6 +270,7 @@ export async function runBacktest(config: BacktestConfig): Promise<BacktestEngin
     signals,
     trades,
     rejectedSignals,
+    restrictionsSummary: restrictionsGovernor.getSummary(),
     analytics
   };
 }

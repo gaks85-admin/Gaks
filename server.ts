@@ -62,19 +62,30 @@ async function startServer() {
     const vite = await createViteServer({
       server: { 
         middlewareMode: true,
-        hmr: {
-          overlay: false
-        }
+        hmr: false
       },
       appType: 'spa',
     });
     app.use(vite.middlewares);
   }
 
-  app.listen(Number(port), '0.0.0.0', () => {
+  process.on('uncaughtException', (err) => {
+    console.error('[Gaks Dev Server Uncaught Exception]:', err);
+  });
+  process.on('unhandledRejection', (reason) => {
+    console.error('[Gaks Dev Server Unhandled Rejection]:', reason);
+  });
+
+  const server = app.listen(Number(port), '0.0.0.0', () => {
     console.log(`Server running at http://0.0.0.0:${port}`);
+  });
+
+  server.on('error', (err: any) => {
+    console.error('[Gaks Server Listen Error]:', err);
   });
 }
 
-startServer().catch(console.error);
+startServer().catch((err) => {
+  console.error('[Gaks Server Start Failed]:', err);
+});
 
