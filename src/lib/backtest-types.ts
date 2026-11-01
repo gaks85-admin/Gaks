@@ -77,17 +77,7 @@ export interface BacktestSimulationConfig {
   preferredLotSize?: number; // Default: 0.01
   spreadPips?: number; // Spread cost in pips/points
   slippagePips?: number; // Slippage cost in pips/points
-  commissionPerLot?: number; // USD per round-turn lot or per side
-  commissionType?: 'PER_LOT_PER_SIDE' | 'ROUND_TURN_PER_LOT' | 'FIXED_PER_TRADE' | 'ZERO'; // Default: ROUND_TURN_PER_LOT
-  fixedCommissionPerTrade?: number; // Fixed USD per trade if FIXED_PER_TRADE
-  swapLongPerLotPerNight?: number; // Swap cost per lot per night for long (USD)
-  swapShortPerLotPerNight?: number; // Swap cost per lot per night for short (USD)
-  tripleSwapDay?: number; // Day of week for triple swap (0=Sun, 3=Wed, etc.)
-  rolloverHourUtc?: number; // Hour of day in UTC for broker rollover (default 22)
-  instrumentSpreads?: Record<string, number>; // Instrument-specific spread overrides
-  instrumentSlippages?: Record<string, number>; // Instrument-specific slippage overrides
-  instrumentCommissions?: Record<string, number>; // Instrument-specific commission overrides
-  instrumentSwaps?: Record<string, { long: number; short: number }>; // Instrument-specific swap overrides
+  commissionPerLot?: number; // USD per round-turn lot
   sameCandlePolicy?: 'STOP_LOSS_FIRST' | 'TAKE_PROFIT_FIRST'; // Default: STOP_LOSS_FIRST
   executionModel?: 'NEXT_CANDLE_OPEN' | 'SAME_CANDLE_CLOSE'; // Default: NEXT_CANDLE_OPEN
   enforceMarketHours?: boolean; // Default: true
@@ -146,9 +136,7 @@ export interface BacktestTradeRecord {
   direction: 'LONG' | 'SHORT';
   entryTimestamp: string;
   exitTimestamp: string;
-  requestedEntryPrice: number;
   entryPrice: number;
-  requestedExitPrice: number;
   exitPrice: number;
   stopLoss: number;
   takeProfit: number;
@@ -157,14 +145,8 @@ export interface BacktestTradeRecord {
   riskRewardRatio: number;
   grossPnL: number;
   spreadCost: number;
-  entrySlippageCost: number;
-  exitSlippageCost: number;
   slippageCost: number;
-  entryCommission: number;
-  exitCommission: number;
   commissionCost: number;
-  swapCost: number;
-  rolloverNightsCount: number;
   netPnL: number;
   balanceBefore: number;
   balanceAfter: number;
@@ -276,14 +258,6 @@ export interface BacktestAnalyticsResult {
   // Best & Worst
   bestTrade: BestWorstTradeInfo | null;
   worstTrade: BestWorstTradeInfo | null;
-
-  // Trading Costs Breakdown
-  totalSpreadCost: number;
-  totalSlippageCost: number;
-  totalCommissionCost: number;
-  totalSwapCost: number;
-  totalTradingCosts: number;
-  costBreakdownByInstrument: Record<string, { spread: number; slippage: number; commission: number; swap: number; total: number }>;
 }
 
 export interface TradeSimulationResult {
