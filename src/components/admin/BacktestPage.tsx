@@ -717,11 +717,31 @@ export function BacktestPage({
                 className="w-full px-3.5 py-2 bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-800 rounded-xl text-xs font-mono font-bold text-zinc-900 dark:text-white focus:outline-none focus:border-sky-500"
               />
             </div>
-            {Number(accountCapital) < 50 && (
-              <p className="text-[10px] text-amber-500 font-medium leading-tight">
-                ⚠️ Micro-account detected ($50). Due to broker minimum lot limits (0.01), your actual risk per trade may exceed your configured {riskPercentage}% risk.
-              </p>
-            )}
+            {(() => {
+              const bal = Number(accountCapital) || 0;
+              const riskPct = Number(riskPercentage) || 0;
+              const riskBudget = (bal * riskPct) / 100;
+              const estimatedMinLotRisk = 2.22; // 0.01 lot min position on EURUSD (~20 pips SL $2.00 + 1 pip spread $0.10 + 0.5 pip slippage $0.05 + $0.07 comm)
+              if (bal > 0 && riskPct > 0 && positionMode !== 'FIXED_LOT' && riskBudget < estimatedMinLotRisk) {
+                const shortfall = (estimatedMinLotRisk - riskBudget).toFixed(2);
+                const suggestedBal = Math.ceil((estimatedMinLotRisk * 100) / riskPct);
+                return (
+                  <div className="p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-500 space-y-1">
+                    <p className="text-[11px] font-semibold flex items-center gap-1.5">
+                      <span>⚠️</span> Micro-Account Risk Budget Warning
+                    </p>
+                    <p className="text-[10px] leading-relaxed text-amber-400 font-mono">
+                      On a ${bal.toLocaleString()} account with {riskPct}% risk, your risk budget is <strong>${riskBudget.toFixed(2)}</strong>.
+                      A broker minimum 0.01 lot trade requires approximately <strong>~${estimatedMinLotRisk.toFixed(2)}</strong> risk (shortfall: <strong>${shortfall}</strong>).
+                    </p>
+                    <p className="text-[10px] text-amber-300 font-medium leading-relaxed">
+                      Trades will be rejected by the position sizing governor unless balance is increased (min ${suggestedBal} for {riskPct}% risk), risk % is raised, or Fixed Lot mode is selected.
+                    </p>
+                  </div>
+                );
+              }
+              return null;
+            })()}
             {/* Quick Presets */}
             <div className="flex items-center gap-1.5 flex-wrap">
               <span className="text-[10px] text-zinc-500 font-mono">Presets:</span>

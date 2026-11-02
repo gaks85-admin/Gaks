@@ -75,6 +75,14 @@ export function calculateBacktestAnalytics(params: CalculateAnalyticsParams): Ba
       endingBalance: startingBalance,
       netProfit: 0,
       returnPercent: 0,
+
+      // Cost Engine Breakdown
+      totalSpreadCost: 0,
+      totalSlippageCost: 0,
+      totalCommissionCost: 0,
+      totalSwapCost: 0,
+      totalTradingCosts: 0,
+      costBreakdownByInstrument: {},
       totalTrades: 0,
       winningTrades: 0,
       losingTrades: 0,
@@ -113,7 +121,15 @@ export function calculateBacktestAnalytics(params: CalculateAnalyticsParams): Ba
     };
   }
 
-  // 1. Classification and P/L Totals
+  // Cost Engine Breakdown Tracking (C1-C4)
+  let totalSpreadCost = 0;
+  let totalSlippageCost = 0;
+  let totalCommissionCost = 0;
+  let totalSwapCost = 0;
+
+  const costBreakdownByInstrument: Record<string, { symbol: string; spreadCost: number; slippageCost: number; commissionCost: number; swapCost: number; totalCosts: number; tradeCount: number }> = {};
+
+  // Classification and P/L Totals
   let winningTrades = 0;
   let losingTrades = 0;
   let breakevenTrades = 0;
@@ -170,6 +186,37 @@ export function calculateBacktestAnalytics(params: CalculateAnalyticsParams): Ba
 
   sortedTrades.forEach(t => {
     const netPnL = t.netPnL;
+
+    // Trading Costs Accumulation (C1-C4)
+    const spread = t.spreadCost || 0;
+    const slippage = t.slippageCost || 0;
+    const commission = t.commissionCost || 0;
+    const swap = t.swapCost || 0;
+
+    totalSpreadCost += spread;
+    totalSlippageCost += slippage;
+    totalCommissionCost += commission;
+    totalSwapCost += swap;
+
+    const instSym = (t.symbol || symbol || 'UNKNOWN').toUpperCase();
+    if (!costBreakdownByInstrument[instSym]) {
+      costBreakdownByInstrument[instSym] = {
+        symbol: instSym,
+        spreadCost: 0,
+        slippageCost: 0,
+        commissionCost: 0,
+        swapCost: 0,
+        totalCosts: 0,
+        tradeCount: 0
+      };
+    }
+    const inst = costBreakdownByInstrument[instSym];
+    inst.spreadCost = Math.round((inst.spreadCost + spread) * 100) / 100;
+    inst.slippageCost = Math.round((inst.slippageCost + slippage) * 100) / 100;
+    inst.commissionCost = Math.round((inst.commissionCost + commission) * 100) / 100;
+    inst.swapCost = Math.round((inst.swapCost + swap) * 100) / 100;
+    inst.totalCosts = Math.round((inst.totalCosts + spread + slippage + commission + swap) * 100) / 100;
+    inst.tradeCount += 1;
 
     // Classification
     if (netPnL > 0) {
@@ -348,6 +395,14 @@ export function calculateBacktestAnalytics(params: CalculateAnalyticsParams): Ba
     endingBalance: Math.round(endingBalance * 100) / 100,
     netProfit,
     returnPercent,
+
+    // Cost Engine Summary (C1-C4)
+    totalSpreadCost: Math.round(totalSpreadCost * 100) / 100,
+    totalSlippageCost: Math.round(totalSlippageCost * 100) / 100,
+    totalCommissionCost: Math.round(totalCommissionCost * 100) / 100,
+    totalSwapCost: Math.round(totalSwapCost * 100) / 100,
+    totalTradingCosts: Math.round((totalSpreadCost + totalSlippageCost + totalCommissionCost + totalSwapCost) * 100) / 100,
+    costBreakdownByInstrument,
     totalTrades,
     winningTrades,
     losingTrades,

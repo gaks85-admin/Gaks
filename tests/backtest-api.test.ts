@@ -49,7 +49,7 @@ export async function runBacktestAPITests(): Promise<{ total: number; passed: nu
 
   // Test 2: List Datasets
   try {
-    const list = await listBacktestDatasets();
+    const list = await listBacktestDatasets('test-admin-id');
     assert(Array.isArray(list) && list.some(d => d.id === createdDatasetId), 'Test 2: List Backtest Datasets includes created dataset');
   } catch (err: any) {
     assert(false, 'Test 2: List Backtest Datasets Exception', err.message);
@@ -58,7 +58,7 @@ export async function runBacktestAPITests(): Promise<{ total: number; passed: nu
   // Test 3: Get Dataset Details
   if (createdDatasetId) {
     try {
-      const details = await getBacktestDatasetDetails(createdDatasetId);
+      const details = await getBacktestDatasetDetails(createdDatasetId, 'test-admin-id');
       assert(details.success && !!details.dataset, 'Test 3: Get Dataset Details Success');
       assert(Array.isArray(details.sampleCandles) && details.sampleCandles.length === 3, 'Test 3b: Sample candles count === 3');
     } catch (err: any) {
@@ -86,10 +86,10 @@ export async function runBacktestAPITests(): Promise<{ total: number; passed: nu
   // Test 5: Delete Dataset
   if (createdDatasetId) {
     try {
-      const delRes = await deleteBacktestDataset(createdDatasetId);
-      assert(delRes.success, 'Test 5: Delete Dataset Success');
+      const delRes = await deleteBacktestDataset(createdDatasetId, 'test-admin-id');
+      assert(delRes.success, 'Test 5: Delete Dataset Success', delRes.error);
 
-      const details = await getBacktestDatasetDetails(createdDatasetId);
+      const details = await getBacktestDatasetDetails(createdDatasetId, 'test-admin-id');
       assert(!details.success, 'Test 5b: Deleted Dataset no longer found');
     } catch (err: any) {
       assert(false, 'Test 5: Delete Dataset Exception', err.message);

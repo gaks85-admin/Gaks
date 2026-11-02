@@ -415,6 +415,73 @@ export function evaluateDecision(
     }
   }
 
+  // Context-aware reconciliation for mutually exclusive structural conditions (BOS vs CHOCH)
+  // BOS is trend continuation; CHOCH is trend reversal. They represent mutually exclusive structural modes.
+  // When both rules are configured (e.g. Default Gaks Strategy), they must not inflate the scoring denominator.
+  const resBos = evaluatedRules.find(r => r.canonicalName === 'bos');
+  const resChoch = evaluatedRules.find(r => r.canonicalName === 'choch');
+
+  if (resBos || resChoch) {
+    const rawContext = (marketStructure?.structuralContext || marketStructure?.setupType || '').toString().toUpperCase();
+    let structuralMode: 'CONTINUATION' | 'REVERSAL' | 'NEITHER' | 'UNDETERMINED' = 'UNDETERMINED';
+
+    if (rawContext === 'CONTINUATION') {
+      structuralMode = 'CONTINUATION';
+    } else if (rawContext === 'REVERSAL') {
+      structuralMode = 'REVERSAL';
+    } else if (rawContext === 'NEITHER' || rawContext === 'NONE') {
+      structuralMode = 'NEITHER';
+    } else {
+      // Deduce from detected structural events
+      const hasBosPass = resBos?.status === 'PASS';
+      const hasChochPass = resChoch?.status === 'PASS';
+
+      if (hasBosPass && !hasChochPass) {
+        structuralMode = 'CONTINUATION';
+      } else if (hasChochPass && !hasBosPass) {
+        structuralMode = 'REVERSAL';
+      } else {
+        // Fallback to trend vs trade direction if available
+        const trend = (marketStructure?.trend || '').toString().toUpperCase();
+        const dir = (marketStructure?.direction || marketStructure?.markedZone?.direction || '').toString().toUpperCase();
+        if (trend === 'BULLISH' && dir === 'BUY') {
+          structuralMode = 'CONTINUATION';
+        } else if (trend === 'BEARISH' && dir === 'SELL') {
+          structuralMode = 'CONTINUATION';
+        } else if (trend === 'BULLISH' && dir === 'SELL') {
+          structuralMode = 'REVERSAL';
+        } else if (trend === 'BEARISH' && dir === 'BUY') {
+          structuralMode = 'REVERSAL';
+        } else if (!hasBosPass && !hasChochPass && (rawContext === '' || trend === 'SIDEWAYS')) {
+          if (resBos && resChoch) {
+            structuralMode = 'NEITHER';
+          }
+        }
+      }
+    }
+
+    if (structuralMode === 'CONTINUATION') {
+      if (resChoch) {
+        resChoch.status = 'NOT_APPLICABLE';
+        resChoch.reason = 'BOS continuation setup; CHOCH reversal not applicable';
+      }
+    } else if (structuralMode === 'REVERSAL') {
+      if (resBos) {
+        resBos.status = 'NOT_APPLICABLE';
+        resBos.reason = 'CHOCH reversal setup; BOS continuation not applicable';
+      }
+    } else if (structuralMode === 'NEITHER') {
+      if (resBos) {
+        resBos.status = 'NOT_APPLICABLE';
+        resBos.reason = 'Neither BOS nor CHOCH applicable to current market context';
+      }
+      if (resChoch) {
+        resChoch.status = 'NOT_APPLICABLE';
+        resChoch.reason = 'Neither BOS nor CHOCH applicable to current market context';
+      }
+    }
+  }
+
   // Mandatory Rules check: strictly match canonical IDs
   const failedMandatory = evaluatedRules.filter(
     r => evaluatorMandatoryIds.includes(r.canonicalName) && r.status === 'FAIL'

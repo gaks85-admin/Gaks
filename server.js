@@ -1,0 +1,77 @@
+import express from 'express';
+import { createServer as createViteServer } from 'vite';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import adminHandler from './api/admin.js';
+import watcherHandler from './api/watcher.js';
+import liveRatesHandler from './api/live-rates.js';
+import performanceSnapshotHandler from './api/performance/snapshot.js';
+import strategySummaryHandler from './api/strategy/summary.js';
+import telegramWebhookHandler from './api/telegram/webhook.js';
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+async function startServer() {
+    const app = express();
+    const port = 3000;
+    app.use(express.json({ limit: '50mb' }));
+    app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+    app.use((req, res, next) => {
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, PATCH, DELETE');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+        if (req.method === 'OPTIONS') {
+            return res.status(200).end();
+        }
+        next();
+    });
+    app.get('/api/health', (req, res) => {
+        res.json({ status: 'ok', time: new Date().toISOString() });
+    });
+    app.all('/api/admin*', (req, res) => adminHandler(req, res));
+    app.all('/api/watcher*', (req, res) => watcherHandler(req, res));
+    app.all('/api/live-rates*', (req, res) => liveRatesHandler(req, res));
+    app.all('/api/cron/market-watcher*', async (req, res) => {
+        try {
+            const { default: cronHandler } = await import('./api/cron/market-watcher.js');
+            return cronHandler(req, res);
+        }
+        catch (err) {
+            return res.status(500).json({ success: false, error: err.message });
+        }
+    });
+    app.all('/api/performance/snapshot*', (req, res) => performanceSnapshotHandler(req, res));
+    app.all('/api/strategy/summary*', (req, res) => strategySummaryHandler(req, res));
+    app.all('/api/telegram/webhook*', (req, res) => telegramWebhookHandler(req, res));
+    app.all('/api/telegram-webhook*', (req, res) => telegramWebhookHandler(req, res));
+    if (process.env.NODE_ENV === 'production') {
+        app.use(express.static(path.resolve(__dirname, 'dist')));
+        app.get('*', (req, res) => {
+            res.sendFile(path.resolve(__dirname, 'dist', 'index.html'));
+        });
+    }
+    else {
+        const vite = await createViteServer({
+            server: {
+                middlewareMode: true,
+                hmr: false
+            },
+            appType: 'spa',
+        });
+        app.use(vite.middlewares);
+    }
+    process.on('uncaughtException', (err) => {
+        console.error('[Gaks Dev Server Uncaught Exception]:', err);
+    });
+    process.on('unhandledRejection', (reason) => {
+        console.error('[Gaks Dev Server Unhandled Rejection]:', reason);
+    });
+    const server = app.listen(Number(port), '0.0.0.0', () => {
+        console.log(`Server running at http://0.0.0.0:${port}`);
+    });
+    server.on('error', (err) => {
+        console.error('[Gaks Server Listen Error]:', err);
+    });
+}
+startServer().catch((err) => {
+    console.error('[Gaks Server Start Failed]:', err);
+});

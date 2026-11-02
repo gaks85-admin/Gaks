@@ -12,7 +12,16 @@ export interface GlobalExecutionSettings {
   maintenanceMode: boolean;
 }
 
-const SETTINGS_FILE = path.join(process.cwd(), 'settings.json');
+function getSettingsFile(): string {
+  if (typeof window !== 'undefined' || typeof process === 'undefined' || !process.cwd) {
+    return 'settings.json';
+  }
+  try {
+    return path.join(process.cwd(), 'settings.json');
+  } catch {
+    return 'settings.json';
+  }
+}
 
 const DEFAULT_SETTINGS: GlobalExecutionSettings = {
   executionMode: 'HYBRID',
@@ -53,9 +62,11 @@ export async function getGlobalExecutionSettings(supabaseClient?: any): Promise<
   }
 
   try {
-    if (fs.existsSync(SETTINGS_FILE)) {
-      const data = fs.readFileSync(SETTINGS_FILE, 'utf-8');
-      const parsed = JSON.parse(data);
+    if (typeof window === 'undefined') {
+      const settingsFile = getSettingsFile();
+      if (fs.existsSync(settingsFile)) {
+        const data = fs.readFileSync(settingsFile, 'utf-8');
+        const parsed = JSON.parse(data);
       if (parsed) {
         return {
           executionMode: normalizeExecutionMode(parsed.executionMode),

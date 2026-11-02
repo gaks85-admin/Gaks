@@ -1,0 +1,100 @@
+export async function recordEvaluation(supabase, record) {
+    const startTime = Date.now();
+    let storedSuccessfully = false;
+    const payload = {
+        user_id: record.user_id,
+        watcher_id: record.watcher_id,
+        pair: record.pair,
+        timeframe: record.timeframe,
+        strategy_mode: record.strategy_mode,
+        decision_score: record.decision_score,
+        matched_weight: record.matched_weight,
+        possible_weight: record.possible_weight,
+        recommendation: record.recommendation,
+        mandatory_rules_passed: record.mandatory_rules_passed,
+        matched_rules: record.matched_rules,
+        failed_rules: record.failed_rules,
+        gemini_used: record.gemini_used,
+        gemini_result: record.gemini_result || null,
+        trade_sent: record.trade_sent,
+        trade_reason: record.trade_reason || null,
+        scan_duration_ms: record.scan_duration_ms,
+        gemini_duration_ms: record.gemini_duration_ms || null,
+        created_at: record.created_at || new Date().toISOString(),
+        decision_snapshot: record.decision_snapshot || {}
+    };
+    if (supabase && typeof supabase.from === 'function') {
+        try {
+            const { data, error } = await supabase
+                .from('watcher_evaluations')
+                .insert(payload)
+                .select();
+            if (!error) {
+                storedSuccessfully = true;
+            }
+            else {
+                console.warn(`[Explainability Engine] Database insert failed:`, error.message);
+            }
+        }
+        catch (dbErr) {
+            console.warn(`[Explainability Engine] Exception during database write:`, dbErr);
+        }
+    }
+    if (!storedSuccessfully && typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
+        try {
+            const storageKey = 'gaks_watcher_evaluations';
+            const existingStr = localStorage.getItem(storageKey) || '[]';
+            const existing = JSON.parse(existingStr);
+            const mockRecord = {
+                id: crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2) + '-' + Date.now(),
+                ...payload
+            };
+            existing.push(mockRecord);
+            localStorage.setItem(storageKey, JSON.stringify(existing));
+            storedSuccessfully = true;
+        }
+        catch (storageErr) {
+            console.error(`[Explainability Engine] LocalStorage write failed:`, storageErr);
+        }
+    }
+    const shortWatcher = record.watcher_id ? (record.watcher_id.length > 8 ? record.watcher_id.slice(0, 8) + '...' : record.watcher_id) : 'unknown';
+    console.log(`[EXPLAIN] saved | watcher=${shortWatcher} | decision=${record.recommendation || (record.trade_sent ? 'TRADE' : 'NO_TRADE')}`);
+    if (process.env.LOG_LEVEL === 'debug' || process.env.DEBUG === 'true') {
+        const snap = record.decision_snapshot || {};
+        const hp = record.historical_probability !== undefined ? record.historical_probability : (snap.historical_probability ?? 'N/A');
+        const ss = record.sample_size !== undefined ? record.sample_size : (snap.historical_sample_size ?? 'N/A');
+        const conf = record.confidence_level !== undefined ? record.confidence_level : (snap.confidence_level ?? 'N/A');
+        const failedMandatoryList = record.failed_mandatory_rules || snap.failed_mandatory_rules || (record.mandatory_rules_passed ? [] : record.failed_rules) || [];
+        const failedOptionalList = record.failed_optional_rules || snap.failed_optional_rules || [];
+        console.log(`\n========== EXPLAINABILITY ==========`);
+        console.log(`[DECISION SCORE TRACE]`);
+        console.log(`Watcher ID: ${record.watcher_id}`);
+        console.log(`Pair: ${record.pair}`);
+        console.log(`Timeframe: ${record.timeframe}`);
+        console.log(`Raw Score: ${record.matched_weight} / ${record.possible_weight}`);
+        console.log(`Matched Weight: ${record.matched_weight}`);
+        console.log(`Possible Weight: ${record.possible_weight}`);
+        console.log(`Score Percentage: ${record.decision_score}%`);
+        console.log(`Score Source: Deterministic Rule Engine`);
+        console.log(`Deterministic Decision: ${record.recommendation}`);
+        console.log(`Gemini Decision: ${record.gemini_used ? (record.trade_sent ? 'APPROVED' : 'REJECTED/NO_TRADE') : 'N/A'}`);
+        console.log(`Final Decision: ${record.trade_sent ? 'TRADE_EXECUTED' : 'NO_TRADE'}`);
+        console.log(`Mandatory Rules Passed: ${record.mandatory_rules_passed}`);
+        console.log(`Failed Mandatory Rules: ${failedMandatoryList.length > 0 ? failedMandatoryList.join(', ') : 'None'}`);
+        console.log(`Failed Optional Rules: ${failedOptionalList.length > 0 ? failedOptionalList.join(', ') : 'None'}`);
+        console.log(`------------------------------------`);
+        console.log(`Watcher:\n${record.watcher_id}`);
+        console.log(`Pair:\n${record.pair}`);
+        console.log(`Decision:\n${record.recommendation}`);
+        console.log(`Decision Score:\n${record.decision_score}%`);
+        console.log(`Gemini:\n${record.gemini_used ? 'YES' : 'NO'}`);
+        console.log(`Trade Sent:\n${record.trade_sent ? 'YES' : 'NO'}`);
+        console.log(`Historical Probability:\n${hp}%`);
+        console.log(`Sample Size:\n${ss}`);
+        console.log(`Confidence Level:\n${conf}`);
+        console.log(`Evaluation Stored:\n${storedSuccessfully ? 'YES' : 'NO'}`);
+        console.log(`Duration:\n${record.scan_duration_ms} ms`);
+        console.log(`====================================\n`);
+    }
+    return storedSuccessfully;
+}

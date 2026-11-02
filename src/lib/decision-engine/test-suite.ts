@@ -814,21 +814,24 @@ export const decisionTestCases: DecisionTestCase[] = [
   },
   {
     id: 38,
-    description: "Subjective elements present, RULE score 57 -> hard FAIL, requires gemini false",
+    description: "Subjective elements present, RULE score < 60% -> hard FAIL, requires gemini false",
     compiledStrategy: {
       strategy_mode: 'HYBRID',
       compiled_rules: {
         bos: true,
-        choch: true,
+        ema: { enabled: true, periods: [20] },
         subjective_elements: ["beautiful structure"]
       }
     },
     marketStructure: {
-      bos: true,
-      choch: false
+      structuralContext: 'CONTINUATION',
+      bos: false, // Fail BOS (20)
+      trend: "BULLISH",
+      fastEma: 1.101,
+      slowEma: 1.100
     },
-    // Total: bos(20) + choch(15) = 35. Matched: 20. 20/35 = 57% -> FAIL.
-    expectedScore: 57,
+    // Total: bos(20) + ema(5) = 25. Matched: 5. 5/25 = 20% -> FAIL (< 60%).
+    expectedScore: 20,
     expectedRecommendation: 'FAIL',
     expectedRequiresGemini: false
   },
@@ -1192,9 +1195,10 @@ export const decisionTestCases: DecisionTestCase[] = [
       rsi: 20,
       atr: false // Fail atr (6)
     },
-    // Total possible weight of 19 rules = 210. Failed: choch(15) + atr(6) = 21.
-    // Matched: 189. 189/210 = 90%
-    expectedScore: 90,
+    // Total possible weight with mutually exclusive structural reconciliation:
+    // With BOS continuation confirmed, CHOCH is NOT_APPLICABLE (15 excluded from denominator).
+    // Total possible: 195. Failed: atr(6) = 6. Matched: 189. 189/195 = 96.9% -> 97%
+    expectedScore: 97,
     expectedRecommendation: 'PASS',
     expectedRequiresGemini: false
   },
@@ -1358,8 +1362,10 @@ export const decisionTestCases: DecisionTestCase[] = [
       rsi: 20,
       atr: true
     },
-    // Total: 210. Failed: retest(20) + bos(20) + macd(4) = 44. Matched: 166. 166/210 = 79.04% -> 79%
-    expectedScore: 79,
+    // Total possible with mutually exclusive structural reconciliation:
+    // With CHOCH reversal confirmed, BOS is NOT_APPLICABLE (20 excluded from denominator).
+    // Total possible: 190. Failed: retest(20) + macd(4) = 24. Matched: 166. 166/190 = 87.3% -> 87%
+    expectedScore: 87,
     expectedRecommendation: 'LIKELY_PASS',
     expectedRequiresGemini: true
   },
@@ -1413,8 +1419,8 @@ export const decisionTestCases: DecisionTestCase[] = [
       rsi: 50, // Fail rsi (4)
       atr: true
     },
-    // Total: 210. Failed: trendline(25)+retest(20)+bos(20)+fvg(12)+rr(3)+rsi(4) = 84. Matched: 126. 126/210 = 60%
-    expectedScore: 60,
+    // Total possible: 190 (BOS excluded as not applicable). Failed: trendline(25)+retest(20)+fvg(12)+rr(3)+rsi(4) = 64. Matched: 126. 126/190 = 66%
+    expectedScore: 66,
     expectedRecommendation: 'AMBIGUOUS',
     expectedRequiresGemini: true
   },
@@ -1468,10 +1474,10 @@ export const decisionTestCases: DecisionTestCase[] = [
       rsi: 50, // Fail rsi (4)
       atr: true
     },
-    // Total: 210. Failed: trendline(25)+retest(20)+bos(20)+fvg(12)+ema(5)+rsi(4) = 86. Matched: 124. 124/210 = 59.04% -> 59%
-    expectedScore: 59,
-    expectedRecommendation: 'FAIL',
-    expectedRequiresGemini: false
+    // Total possible: 190 (BOS excluded as not applicable). Failed: trendline(25)+retest(20)+fvg(12)+ema(5)+rsi(4) = 66. Matched: 124. 124/190 = 65%
+    expectedScore: 65,
+    expectedRecommendation: 'AMBIGUOUS',
+    expectedRequiresGemini: true
   },
 
   // --- 31. Custom Central Weights (Editable) ---

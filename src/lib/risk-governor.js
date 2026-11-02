@@ -1,0 +1,131 @@
+export const GOVERNOR_THRESHOLDS = {
+    MIN_TRADES_ELIGIBLE: 20,
+    MIN_TRADES_WEAK: 10,
+    NEGATIVE_EXPECTANCY_RESTRICT: -0.05,
+    NEGATIVE_EXPECTANCY_NO_TRADE: -0.20,
+    CONSECUTIVE_LOSSES_RESTRICT: 2,
+    CONSECUTIVE_LOSSES_NO_TRADE: 3,
+    DRAWDOWN_RESTRICT_PERCENT: 10.0,
+    DRAWDOWN_NO_TRADE_PERCENT: 25.0,
+    PAIR_NEGATIVE_EXPECTANCY_THRESHOLD: -0.10,
+    SETUP_NEGATIVE_EXPECTANCY_THRESHOLD: -0.10
+};
+export function evaluateRiskGovernor(input) {
+    const { metrics, equityState, candidate } = input;
+    const reasonCodes = [];
+    let status = 'NORMAL';
+    const dailyPnL = equityState.dailyPnL ?? 0;
+    const maxDailyLoss = equityState.maxDailyLossAmount ?? 100;
+    if (dailyPnL < 0 && Math.abs(dailyPnL) >= maxDailyLoss) {
+        status = 'NO_TRADE';
+        reasonCodes.push('DAILY_LOSS_LIMIT_EXCEEDED');
+    }
+    const totalTrades = metrics.totalTrades || 0;
+    const sampleSizeSufficient = totalTrades >= GOVERNOR_THRESHOLDS.MIN_TRADES_ELIGIBLE;
+    const hasWeakSample = totalTrades >= GOVERNOR_THRESHOLDS.MIN_TRADES_WEAK;
+    if (!hasWeakSample && status !== 'NO_TRADE') {
+        return {
+            status: 'NORMAL',
+            reasonCodes: ['INSUFFICIENT_HISTORY_NORMAL'],
+            explanation: `Insufficient completed trades (${totalTrades}) for governor restriction. Operating in NORMAL mode.`,
+            metricsUsed: {
+                totalTrades,
+                expectancyR: metrics.expectancyR,
+                consecutiveLosses: metrics.consecutiveLosses,
+                drawdownPercent: equityState.estimatedDrawdownPercent,
+                sampleSizeTier: metrics.sampleSizeTier,
+                dailyPnL,
+                maxDailyLossAmount: maxDailyLoss
+            },
+            sampleSizeSufficient: false
+        };
+    }
+    if (metrics.consecutiveLosses >= GOVERNOR_THRESHOLDS.CONSECUTIVE_LOSSES_NO_TRADE) {
+        status = 'NO_TRADE';
+        reasonCodes.push('SEVERE_CONSECUTIVE_LOSSES');
+    }
+    else if (metrics.consecutiveLosses >= GOVERNOR_THRESHOLDS.CONSECUTIVE_LOSSES_RESTRICT) {
+        if (status === 'NORMAL')
+            status = 'RESTRICTED_SELECTIVITY';
+        reasonCodes.push('ELEVATED_CONSECUTIVE_LOSSES');
+    }
+    if (equityState.estimatedDrawdownPercent >= GOVERNOR_THRESHOLDS.DRAWDOWN_NO_TRADE_PERCENT) {
+        status = 'NO_TRADE';
+        reasonCodes.push('SEVERE_DRAWDOWN');
+    }
+    else if (equityState.estimatedDrawdownPercent >= GOVERNOR_THRESHOLDS.DRAWDOWN_RESTRICT_PERCENT) {
+        if (status === 'NORMAL')
+            status = 'RESTRICTED_SELECTIVITY';
+        reasonCodes.push('ELEVATED_DRAWDOWN');
+    }
+    if (sampleSizeSufficient) {
+        if (metrics.expectancyR <= GOVERNOR_THRESHOLDS.NEGATIVE_EXPECTANCY_NO_TRADE) {
+            status = 'NO_TRADE';
+            reasonCodes.push('SEVERE_NEGATIVE_EXPECTANCY');
+        }
+        else if (metrics.expectancyR <= GOVERNOR_THRESHOLDS.NEGATIVE_EXPECTANCY_RESTRICT) {
+            if (status === 'NORMAL')
+                status = 'RESTRICTED_SELECTIVITY';
+            reasonCodes.push('NEGATIVE_EXPECTANCY');
+        }
+    }
+    const pairKey = (candidate.pair || '').toUpperCase();
+    if (pairKey && metrics.performanceByPair && metrics.performanceByPair[pairKey]) {
+        const pairData = metrics.performanceByPair[pairKey];
+        if (pairData.trades >= 5 && pairData.expectancyR <= GOVERNOR_THRESHOLDS.PAIR_NEGATIVE_EXPECTANCY_THRESHOLD) {
+            if (status === 'NORMAL')
+                status = 'RESTRICTED_SELECTIVITY';
+            reasonCodes.push('PAIR_NEGATIVE_EXPECTANCY');
+        }
+    }
+    const setupKey = (candidate.strategySetup || 'HYBRID').toUpperCase();
+    if (setupKey && metrics.performanceBySetup && metrics.performanceBySetup[setupKey]) {
+        const setupData = metrics.performanceBySetup[setupKey];
+        if (setupData.trades >= 5 && setupData.expectancyR <= GOVERNOR_THRESHOLDS.SETUP_NEGATIVE_EXPECTANCY_THRESHOLD) {
+            if (status === 'NORMAL')
+                status = 'RESTRICTED_SELECTIVITY';
+            reasonCodes.push('SETUP_NEGATIVE_EXPECTANCY');
+        }
+    }
+    if (reasonCodes.length === 0) {
+        reasonCodes.push('METRICS_HEALTHY');
+    }
+    const explanation = status === 'NORMAL'
+        ? `Risk Governor evaluated ${totalTrades} trades: performance is healthy.`
+        : `Risk Governor status is ${status} due to: ${reasonCodes.join(', ')}.`;
+    console.log(`[Equity Learning]
+[Historical Performance]
+Total Trades: ${totalTrades}
+Win Rate: ${metrics.winRate}%
+Expectancy: ${metrics.expectancyR}R
+Consecutive Losses: ${metrics.consecutiveLosses}
+Status: ${metrics.expectancyR < 0 ? 'NEGATIVE_EXPECTANCY' : 'HEALTHY'}
+
+[Equity State]
+Configured Capital: $${equityState.configuredCapital}
+Estimated Equity: $${equityState.estimatedEquity}
+Estimated Drawdown: ${equityState.estimatedDrawdownPercent}%
+Daily PnL: $${dailyPnL.toFixed(2)}
+Max Daily Loss: $${maxDailyLoss.toFixed(2)}
+Status: ${equityState.estimatedDrawdownPercent > 10 || (dailyPnL < 0 && Math.abs(dailyPnL) >= maxDailyLoss * 0.8) ? 'ELEVATED_RISK' : 'NORMAL'}
+
+[Risk Governor]
+Status: ${status}
+Reason: ${reasonCodes.join(', ')}
+Sample Size: ${totalTrades} (${metrics.sampleSizeTier})`);
+    return {
+        status,
+        reasonCodes,
+        explanation,
+        metricsUsed: {
+            totalTrades,
+            expectancyR: metrics.expectancyR,
+            consecutiveLosses: metrics.consecutiveLosses,
+            drawdownPercent: equityState.estimatedDrawdownPercent,
+            sampleSizeTier: metrics.sampleSizeTier,
+            dailyPnL,
+            maxDailyLossAmount: maxDailyLoss
+        },
+        sampleSizeSufficient
+    };
+}

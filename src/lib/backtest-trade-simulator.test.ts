@@ -7,6 +7,10 @@
 import { simulateTradeLifecycle } from './backtest-trade-simulator.js';
 import { BacktestSignal, ParsedCandle } from './backtest-types.js';
 
+function sim(params: Parameters<typeof simulateTradeLifecycle>) {
+  return simulateTradeLifecycle(params).trade;
+}
+
 export async function runTradeSimulatorTests(): Promise<{ total: number; passed: number; failed: number; failures: string[] }> {
   const failures: string[] = [];
   let passed = 0;
@@ -46,7 +50,7 @@ export async function runTradeSimulatorTests(): Promise<{ total: number; passed:
 
   // Test 1: LONG trade reaches TP
   try {
-    const trade = simulateTradeLifecycle({
+    const trade = sim({
       signal: buySignal,
       datasetId: 'ds-test-1',
       signalIndex: 0,
@@ -57,6 +61,7 @@ export async function runTradeSimulatorTests(): Promise<{ total: number; passed:
       timeframe: 'M5'
     });
 
+    console.log('TEST 1 TRADE:', trade);
     assert(trade !== null && trade.exitReason === 'TAKE_PROFIT', 'Test 1: LONG trade reaches TP', trade?.exitReason);
     assert(trade !== null && trade.netPnL > 0, 'Test 1b: LONG TP produces positive net P/L');
   } catch (err: any) {
@@ -70,7 +75,7 @@ export async function runTradeSimulatorTests(): Promise<{ total: number; passed:
       { timestamp: '2025-01-01T00:05:00.000Z', open: 1.0505, high: 1.0510, low: 1.0440, close: 1.0445, volume: 110 } // SL hit
     ];
 
-    const trade = simulateTradeLifecycle({
+    const trade = sim({
       signal: buySignal,
       datasetId: 'ds-test-2',
       signalIndex: 0,
@@ -107,7 +112,7 @@ export async function runTradeSimulatorTests(): Promise<{ total: number; passed:
       { timestamp: '2025-01-01T00:05:00.000Z', open: 1.0505, high: 1.0510, low: 1.0440, close: 1.0445, volume: 110 } // TP hit for SHORT
     ];
 
-    const trade = simulateTradeLifecycle({
+    const trade = sim({
       signal: sellSignal,
       datasetId: 'ds-test-3',
       signalIndex: 0,
@@ -144,7 +149,7 @@ export async function runTradeSimulatorTests(): Promise<{ total: number; passed:
       { timestamp: '2025-01-01T00:05:00.000Z', open: 1.0505, high: 1.0560, low: 1.0495, close: 1.0555, volume: 110 } // SL hit for SHORT
     ];
 
-    const trade = simulateTradeLifecycle({
+    const trade = sim({
       signal: sellSignal,
       datasetId: 'ds-test-4',
       signalIndex: 0,
@@ -168,7 +173,7 @@ export async function runTradeSimulatorTests(): Promise<{ total: number; passed:
       { timestamp: '2025-01-01T00:05:00.000Z', open: 1.0505, high: 1.0600, low: 1.0400, close: 1.0520, volume: 200 } // Both SL (1.0450) and TP (1.0550) touched
     ];
 
-    const trade = simulateTradeLifecycle({
+    const trade = sim({
       signal: buySignal,
       datasetId: 'ds-test-5',
       signalIndex: 0,
@@ -186,7 +191,7 @@ export async function runTradeSimulatorTests(): Promise<{ total: number; passed:
 
   // Test 6: Entry occurs at next candle open
   try {
-    const trade = simulateTradeLifecycle({
+    const trade = sim({
       signal: buySignal,
       datasetId: 'ds-test-6',
       signalIndex: 0,
@@ -205,7 +210,7 @@ export async function runTradeSimulatorTests(): Promise<{ total: number; passed:
   // Test 7: Invalid LONG SL/TP geometry rejected
   try {
     const invalidBuySignal: BacktestSignal = { ...buySignal, stopLoss: 1.0520, takeProfit: 1.0400 }; // SL above entry, TP below entry
-    const trade = simulateTradeLifecycle({
+    const trade = sim({
       signal: invalidBuySignal,
       datasetId: 'ds-test-7',
       signalIndex: 0,
@@ -223,7 +228,7 @@ export async function runTradeSimulatorTests(): Promise<{ total: number; passed:
   // Test 8: Invalid SHORT SL/TP geometry rejected
   try {
     const invalidSellSignal: BacktestSignal = { ...buySignal, direction: 'SELL', stopLoss: 1.0400, takeProfit: 1.0520 };
-    const trade = simulateTradeLifecycle({
+    const trade = sim({
       signal: invalidSellSignal,
       datasetId: 'ds-test-8',
       signalIndex: 0,
@@ -240,7 +245,7 @@ export async function runTradeSimulatorTests(): Promise<{ total: number; passed:
 
   // Test 9: Risk-based position sizing
   try {
-    const trade1 = simulateTradeLifecycle({
+    const trade1 = sim({
       signal: buySignal,
       datasetId: 'ds-test-9a',
       signalIndex: 0,
@@ -251,7 +256,7 @@ export async function runTradeSimulatorTests(): Promise<{ total: number; passed:
       timeframe: 'M5'
     });
 
-    const trade2 = simulateTradeLifecycle({
+    const trade2 = sim({
       signal: buySignal,
       datasetId: 'ds-test-9b',
       signalIndex: 0,
@@ -270,7 +275,7 @@ export async function runTradeSimulatorTests(): Promise<{ total: number; passed:
   // Test 10: Minimum lot size is respected
   try {
     const smallBalanceSignal: BacktestSignal = { ...buySignal, entryPrice: 1.0505, stopLoss: 1.0000 }; // Very large SL distance
-    const trade = simulateTradeLifecycle({
+    const trade = sim({
       signal: smallBalanceSignal,
       datasetId: 'ds-test-10',
       signalIndex: 0,
@@ -288,7 +293,7 @@ export async function runTradeSimulatorTests(): Promise<{ total: number; passed:
 
   // Test 11: Lot step rounding is respected
   try {
-    const trade = simulateTradeLifecycle({
+    const trade = sim({
       signal: buySignal,
       datasetId: 'ds-test-11',
       signalIndex: 0,
@@ -329,7 +334,7 @@ export async function runTradeSimulatorTests(): Promise<{ total: number; passed:
       { timestamp: '2025-01-01T00:05:00.000Z', open: 2600.00, high: 2625.00, low: 2599.00, close: 2622.00, volume: 120 }
     ];
 
-    const trade = simulateTradeLifecycle({
+    const trade = sim({
       signal: goldSignal,
       datasetId: 'ds-test-12',
       signalIndex: 0,
@@ -346,7 +351,7 @@ export async function runTradeSimulatorTests(): Promise<{ total: number; passed:
 
   // Test 13: Spread affects net P/L
   try {
-    const noSpread = simulateTradeLifecycle({
+    const noSpread = sim({
       signal: buySignal,
       datasetId: 'ds-test-13a',
       signalIndex: 0,
@@ -357,7 +362,7 @@ export async function runTradeSimulatorTests(): Promise<{ total: number; passed:
       timeframe: 'M5'
     });
 
-    const withSpread = simulateTradeLifecycle({
+    const withSpread = sim({
       signal: buySignal,
       datasetId: 'ds-test-13b',
       signalIndex: 0,
@@ -375,7 +380,7 @@ export async function runTradeSimulatorTests(): Promise<{ total: number; passed:
 
   // Test 14: Slippage affects execution deterministically
   try {
-    const noSlippage = simulateTradeLifecycle({
+    const noSlippage = sim({
       signal: buySignal,
       datasetId: 'ds-test-14a',
       signalIndex: 0,
@@ -386,7 +391,7 @@ export async function runTradeSimulatorTests(): Promise<{ total: number; passed:
       timeframe: 'M5'
     });
 
-    const withSlippage = simulateTradeLifecycle({
+    const withSlippage = sim({
       signal: buySignal,
       datasetId: 'ds-test-14b',
       signalIndex: 0,
@@ -404,7 +409,7 @@ export async function runTradeSimulatorTests(): Promise<{ total: number; passed:
 
   // Test 15: Commission affects net P/L
   try {
-    const noComm = simulateTradeLifecycle({
+    const noComm = sim({
       signal: buySignal,
       datasetId: 'ds-test-15a',
       signalIndex: 0,
@@ -415,7 +420,7 @@ export async function runTradeSimulatorTests(): Promise<{ total: number; passed:
       timeframe: 'M5'
     });
 
-    const withComm = simulateTradeLifecycle({
+    const withComm = sim({
       signal: buySignal,
       datasetId: 'ds-test-15b',
       signalIndex: 0,
@@ -433,7 +438,7 @@ export async function runTradeSimulatorTests(): Promise<{ total: number; passed:
 
   // Test 16: Balance updates after completed trade
   try {
-    const trade = simulateTradeLifecycle({
+    const trade = sim({
       signal: buySignal,
       datasetId: 'ds-test-16',
       signalIndex: 0,
@@ -451,9 +456,9 @@ export async function runTradeSimulatorTests(): Promise<{ total: number; passed:
   // Test 17: Multiple sequential trades update balance correctly
   try {
     let bal = 100000;
-    const t1 = simulateTradeLifecycle({ signal: buySignal, datasetId: 'ds-seq-1', signalIndex: 0, candles: sampleCandles, currentBalance: bal, symbol: 'EURUSD', timeframe: 'M5' });
+    const t1 = sim({ signal: buySignal, datasetId: 'ds-seq-1', signalIndex: 0, candles: sampleCandles, currentBalance: bal, symbol: 'EURUSD', timeframe: 'M5' });
     if (t1) bal = t1.balanceAfter;
-    const t2 = simulateTradeLifecycle({ signal: buySignal, datasetId: 'ds-seq-2', signalIndex: 1, candles: sampleCandles, currentBalance: bal, symbol: 'EURUSD', timeframe: 'M5' });
+    const t2 = sim({ signal: buySignal, datasetId: 'ds-seq-2', signalIndex: 1, candles: sampleCandles, currentBalance: bal, symbol: 'EURUSD', timeframe: 'M5' });
 
     assert(t1 !== null && t2 !== null && t2.balanceBefore === t1.balanceAfter, 'Test 17: Sequential trades pass updated balance correctly');
   } catch (err: any) {
@@ -467,7 +472,7 @@ export async function runTradeSimulatorTests(): Promise<{ total: number; passed:
       { timestamp: '2025-01-01T00:05:00.000Z', open: 1.0505, high: 1.0520, low: 1.0490, close: 1.0510, volume: 110 } // Neither SL nor TP touched
     ];
 
-    const trade = simulateTradeLifecycle({
+    const trade = sim({
       signal: buySignal,
       datasetId: 'ds-test-18',
       signalIndex: 0,
@@ -490,8 +495,8 @@ export async function runTradeSimulatorTests(): Promise<{ total: number; passed:
       { timestamp: '2025-01-01T00:15:00.000Z', open: 1.0550, high: 1.0990, low: 1.0100, close: 1.0800, volume: 999 } // Extremely wild future candle AFTER trade exited at index 2
     ];
 
-    const tA = simulateTradeLifecycle({ signal: buySignal, datasetId: 'ds-lookahead-a', signalIndex: 0, candles: candlesA, currentBalance: 100000, symbol: 'EURUSD', timeframe: 'M5' });
-    const tB = simulateTradeLifecycle({ signal: buySignal, datasetId: 'ds-lookahead-b', signalIndex: 0, candles: candlesB, currentBalance: 100000, symbol: 'EURUSD', timeframe: 'M5' });
+    const tA = sim({ signal: buySignal, datasetId: 'ds-lookahead-a', signalIndex: 0, candles: candlesA, currentBalance: 100000, symbol: 'EURUSD', timeframe: 'M5' });
+    const tB = sim({ signal: buySignal, datasetId: 'ds-lookahead-b', signalIndex: 0, candles: candlesB, currentBalance: 100000, symbol: 'EURUSD', timeframe: 'M5' });
 
     assert(tA !== null && tB !== null && tA.exitTimestamp === tB.exitTimestamp && tA.netPnL === tB.netPnL, 'Test 19: Changing post-exit future candles does not affect completed trade');
   } catch (err: any) {
@@ -500,8 +505,8 @@ export async function runTradeSimulatorTests(): Promise<{ total: number; passed:
 
   // Test 20: Identical inputs produce identical outputs (100% Determinism)
   try {
-    const t1 = simulateTradeLifecycle({ signal: buySignal, datasetId: 'ds-det', signalIndex: 0, candles: sampleCandles, currentBalance: 100000, simConfig: { riskPercent: 1.0, spreadPips: 1.5, slippagePips: 0.5, commissionPerLot: 5.0 }, symbol: 'EURUSD', timeframe: 'M5' });
-    const t2 = simulateTradeLifecycle({ signal: buySignal, datasetId: 'ds-det', signalIndex: 0, candles: sampleCandles, currentBalance: 100000, simConfig: { riskPercent: 1.0, spreadPips: 1.5, slippagePips: 0.5, commissionPerLot: 5.0 }, symbol: 'EURUSD', timeframe: 'M5' });
+    const t1 = sim({ signal: buySignal, datasetId: 'ds-det', signalIndex: 0, candles: sampleCandles, currentBalance: 100000, simConfig: { riskPercent: 1.0, spreadPips: 1.5, slippagePips: 0.5, commissionPerLot: 5.0 }, symbol: 'EURUSD', timeframe: 'M5' });
+    const t2 = sim({ signal: buySignal, datasetId: 'ds-det', signalIndex: 0, candles: sampleCandles, currentBalance: 100000, simConfig: { riskPercent: 1.0, spreadPips: 1.5, slippagePips: 0.5, commissionPerLot: 5.0 }, symbol: 'EURUSD', timeframe: 'M5' });
 
     assert(JSON.stringify(t1) === JSON.stringify(t2), 'Test 20: Identical inputs produce 100% byte-for-byte identical trade records');
   } catch (err: any) {
@@ -510,13 +515,13 @@ export async function runTradeSimulatorTests(): Promise<{ total: number; passed:
 
   // Test 21: Different long/short P/L calculations are correct
   try {
-    const longTrade = simulateTradeLifecycle({ signal: buySignal, datasetId: 'ds-pnl-long', signalIndex: 0, candles: sampleCandles, currentBalance: 100000, symbol: 'EURUSD', timeframe: 'M5' });
+    const longTrade = sim({ signal: buySignal, datasetId: 'ds-pnl-long', signalIndex: 0, candles: sampleCandles, currentBalance: 100000, symbol: 'EURUSD', timeframe: 'M5' });
     const sellSignal: BacktestSignal = { ...buySignal, direction: 'SELL', stopLoss: 1.0550, takeProfit: 1.0450 };
     const shortCandles: ParsedCandle[] = [
       { timestamp: '2025-01-01T00:00:00.000Z', open: 1.0500, high: 1.0510, low: 1.0490, close: 1.0505, volume: 100 },
       { timestamp: '2025-01-01T00:05:00.000Z', open: 1.0505, high: 1.0510, low: 1.0440, close: 1.0445, volume: 110 }
     ];
-    const shortTrade = simulateTradeLifecycle({ signal: sellSignal, datasetId: 'ds-pnl-short', signalIndex: 0, candles: shortCandles, currentBalance: 100000, symbol: 'EURUSD', timeframe: 'M5' });
+    const shortTrade = sim({ signal: sellSignal, datasetId: 'ds-pnl-short', signalIndex: 0, candles: shortCandles, currentBalance: 100000, symbol: 'EURUSD', timeframe: 'M5' });
 
     assert(longTrade !== null && longTrade.grossPnL > 0, 'Test 21a: LONG gross P/L calculated correctly');
     assert(shortTrade !== null && shortTrade.grossPnL > 0, 'Test 21b: SHORT gross P/L calculated correctly');
@@ -526,7 +531,7 @@ export async function runTradeSimulatorTests(): Promise<{ total: number; passed:
 
   // Test 22: Zero spread/slippage/commission produces expected baseline result
   try {
-    const base = simulateTradeLifecycle({ signal: buySignal, datasetId: 'ds-base', signalIndex: 0, candles: sampleCandles, currentBalance: 100000, simConfig: { spreadPips: 0, slippagePips: 0, commissionPerLot: 0 }, symbol: 'EURUSD', timeframe: 'M5' });
+    const base = sim({ signal: buySignal, datasetId: 'ds-base', signalIndex: 0, candles: sampleCandles, currentBalance: 100000, simConfig: { spreadPips: 0, slippagePips: 0, commissionPerLot: 0 }, symbol: 'EURUSD', timeframe: 'M5' });
 
     assert(base !== null && base.spreadCost === 0 && base.slippageCost === 0 && base.commissionCost === 0 && base.netPnL === base.grossPnL, 'Test 22: Baseline zero cost results in netPnL === grossPnL');
   } catch (err: any) {
@@ -535,7 +540,7 @@ export async function runTradeSimulatorTests(): Promise<{ total: number; passed:
 
   // Test 23: Starting balance is isolated from live account state
   try {
-    const tCustom = simulateTradeLifecycle({ signal: buySignal, datasetId: 'ds-bal-iso', signalIndex: 0, candles: sampleCandles, currentBalance: 250000, symbol: 'EURUSD', timeframe: 'M5' });
+    const tCustom = sim({ signal: buySignal, datasetId: 'ds-bal-iso', signalIndex: 0, candles: sampleCandles, currentBalance: 250000, symbol: 'EURUSD', timeframe: 'M5' });
 
     assert(tCustom !== null && tCustom.balanceBefore === 250000, 'Test 23: Simulation starting balance is 100% isolated and uses configured $250,000');
   } catch (err: any) {
@@ -551,4 +556,8 @@ export async function runTradeSimulatorTests(): Promise<{ total: number; passed:
   }
 
   return { total, passed, failed: total - passed, failures };
+}
+
+if (import.meta.url === `file://${process.argv[1]}`) {
+  runTradeSimulatorTests().then(res => console.log('Simulator Test Result:', res));
 }

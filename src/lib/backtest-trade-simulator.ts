@@ -62,11 +62,25 @@ export function simulateTradeLifecycle(params: SimulateTradeParams): TradeSimula
 
   // 1. Determine Initial Entry Price
   const rawEntryPrice = executionModel === 'NEXT_CANDLE_OPEN' ? entryCandle.open : signal.entryPrice;
-  const stopLoss = signal.stopLoss;
-  const takeProfit = signal.takeProfit;
+  let stopLoss = signal.stopLoss;
+  let takeProfit = signal.takeProfit;
 
   if (stopLoss === undefined || takeProfit === undefined || isNaN(stopLoss) || isNaN(takeProfit)) {
     return { trade: null, rejectionReason: 'Missing or invalid SL/TP levels' };
+  }
+
+  // If executing at NEXT_CANDLE_OPEN, adapt SL/TP if minor opening tick gap occurred while preserving R:R
+  if (executionModel === 'NEXT_CANDLE_OPEN') {
+    const originalRisk = Math.abs(signal.entryPrice - signal.stopLoss);
+    const rrRatio = originalRisk > 0 ? Math.abs(signal.takeProfit - signal.entryPrice) / originalRisk : 2.0;
+
+    if (direction === 'LONG' && stopLoss >= rawEntryPrice) {
+      stopLoss = Number((rawEntryPrice - (originalRisk > 0 ? originalRisk : 0.0010)).toFixed(5));
+      takeProfit = Number((rawEntryPrice + (Math.abs(rawEntryPrice - stopLoss) * rrRatio)).toFixed(5));
+    } else if (direction === 'SHORT' && stopLoss <= rawEntryPrice) {
+      stopLoss = Number((rawEntryPrice + (originalRisk > 0 ? originalRisk : 0.0010)).toFixed(5));
+      takeProfit = Number((rawEntryPrice - (Math.abs(stopLoss - rawEntryPrice) * rrRatio)).toFixed(5));
+    }
   }
 
   // 2. Validate SL and TP Directional Geometry

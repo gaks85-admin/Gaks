@@ -124,6 +124,7 @@ export interface BacktestSignal {
   takeProfit?: number;
   reason: string;
   confidence: number;
+  marketStructure?: any;
 }
 
 export type TradeExitReason = 'STOP_LOSS' | 'TAKE_PROFIT' | 'SAME_CANDLE_STOP_LOSS' | 'DATASET_END' | 'BREAKEVEN';

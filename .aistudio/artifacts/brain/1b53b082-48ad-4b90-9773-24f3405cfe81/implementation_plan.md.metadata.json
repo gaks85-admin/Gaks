@@ -1,6 +1,6 @@
 {
-  "summary": "Revised implementation plan to make symbol validation fully dynamic, allowing users to add any currency pair, index, commodity, or crypto ticker without hardcoded restrictions.",
-  "updatedAt": "2026-10-19T18:00:56.097355180Z",
-  "requestFeedback": true,
-  "userFacing": true
+  "summary":  "Implementation plan for historical trading costs in backtesting engine.",
+  "updatedAt":  "2026-11-01T20:00:43.376564719Z",
+  "requestFeedback":  true,
+  "userFacing":  true
 }

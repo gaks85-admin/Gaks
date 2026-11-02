@@ -1,0 +1,366 @@
+export function calculateBacktestAnalytics(params) {
+    const { trades = [], startingBalance = 100000, datasetId = '', symbol = '', timeframe = '', startTime = '', endTime = '', strategyId = '', strategyName = '' } = params;
+    const sortedTrades = [...trades].sort((a, b) => new Date(a.entryTimestamp).getTime() - new Date(b.entryTimestamp).getTime());
+    const totalTrades = sortedTrades.length;
+    if (totalTrades === 0) {
+        const startPoint = {
+            timestamp: startTime || 'START',
+            balance: startingBalance,
+            drawdown: 0,
+            drawdownPercent: 0
+        };
+        const emptyDirectional = {
+            totalTrades: 0,
+            winningTrades: 0,
+            losingTrades: 0,
+            breakevenTrades: 0,
+            netPnL: 0,
+            winRate: null
+        };
+        return {
+            datasetId,
+            symbol,
+            timeframe,
+            startTime,
+            endTime,
+            strategyId,
+            strategyName,
+            startingBalance,
+            endingBalance: startingBalance,
+            netProfit: 0,
+            returnPercent: 0,
+            totalTrades: 0,
+            winningTrades: 0,
+            losingTrades: 0,
+            breakevenTrades: 0,
+            winRate: null,
+            lossRate: null,
+            grossProfit: 0,
+            grossLoss: 0,
+            profitFactor: null,
+            averageTrade: null,
+            averageWin: null,
+            averageLoss: null,
+            expectancy: null,
+            maxDrawdownCurrency: 0,
+            maxDrawdownPercent: 0,
+            peakBalanceAtMaxDrawdown: startingBalance,
+            troughBalanceAtMaxDrawdown: startingBalance,
+            equityCurve: [startPoint],
+            averageDurationMinutes: null,
+            longestDurationMinutes: null,
+            shortestDurationMinutes: null,
+            exitReasonBreakdown: {},
+            longTrades: emptyDirectional,
+            shortTrades: emptyDirectional,
+            averagePlannedRR: null,
+            averageRealizedR: null,
+            totalRealizedR: null,
+            winningTradeAverageR: null,
+            losingTradeAverageR: null,
+            longestWinningStreak: 0,
+            longestLosingStreak: 0,
+            currentWinningStreak: 0,
+            currentLosingStreak: 0,
+            bestTrade: null,
+            worstTrade: null,
+            totalSpreadCost: 0,
+            totalSlippageCost: 0,
+            totalCommissionCost: 0,
+            totalSwapCost: 0,
+            totalTradingCosts: 0,
+            costBreakdownByInstrument: {}
+        };
+    }
+    let winningTrades = 0;
+    let losingTrades = 0;
+    let breakevenTrades = 0;
+    let grossProfit = 0;
+    let grossLoss = 0;
+    let longTotal = 0, longWins = 0, longLosses = 0, longBreakeven = 0, longPnL = 0;
+    let shortTotal = 0, shortWins = 0, shortLosses = 0, shortBreakeven = 0, shortPnL = 0;
+    let totalPlannedRRSum = 0;
+    let plannedRRCount = 0;
+    let totalRealizedRSum = 0;
+    let realizedRCount = 0;
+    let winningRealizedRSum = 0;
+    let winningRCount = 0;
+    let losingRealizedRSum = 0;
+    let losingRCount = 0;
+    let totalDurationMs = 0;
+    let longestDurationMs = -1;
+    let shortestDurationMs = Infinity;
+    let longestWinStreak = 0;
+    let longestLossStreak = 0;
+    let currentWinStreak = 0;
+    let currentLossStreak = 0;
+    let bestTrade = null;
+    let worstTrade = null;
+    const exitReasonBreakdown = {};
+    let totalSpreadCost = 0;
+    let totalSlippageCost = 0;
+    let totalCommissionCost = 0;
+    let totalSwapCost = 0;
+    const costBreakdownByInstrument = {};
+    let runningPeak = startingBalance;
+    let maxDrawdownCurrency = 0;
+    let maxDrawdownPercent = 0;
+    let peakAtMaxDd = startingBalance;
+    let troughAtMaxDd = startingBalance;
+    const equityCurve = [
+        {
+            timestamp: startTime || sortedTrades[0].entryTimestamp,
+            balance: startingBalance,
+            drawdown: 0,
+            drawdownPercent: 0
+        }
+    ];
+    sortedTrades.forEach(t => {
+        const netPnL = t.netPnL;
+        const sCost = t.spreadCost || 0;
+        const slipCost = t.slippageCost || 0;
+        const commCost = t.commissionCost || 0;
+        const swCost = t.swapCost || 0;
+        totalSpreadCost += sCost;
+        totalSlippageCost += slipCost;
+        totalCommissionCost += commCost;
+        totalSwapCost += swCost;
+        const sym = (t.symbol || symbol || 'UNKNOWN').toUpperCase();
+        if (!costBreakdownByInstrument[sym]) {
+            costBreakdownByInstrument[sym] = { spread: 0, slippage: 0, commission: 0, swap: 0, total: 0 };
+        }
+        costBreakdownByInstrument[sym].spread += sCost;
+        costBreakdownByInstrument[sym].slippage += slipCost;
+        costBreakdownByInstrument[sym].commission += commCost;
+        costBreakdownByInstrument[sym].swap += swCost;
+        costBreakdownByInstrument[sym].total += (sCost + slipCost + commCost + swCost);
+        if (netPnL > 0) {
+            winningTrades++;
+            grossProfit += netPnL;
+            currentWinStreak++;
+            currentLossStreak = 0;
+            if (currentWinStreak > longestWinStreak)
+                longestWinStreak = currentWinStreak;
+        }
+        else if (netPnL < 0) {
+            losingTrades++;
+            grossLoss += Math.abs(netPnL);
+            currentLossStreak++;
+            currentWinStreak = 0;
+            if (currentLossStreak > longestLossStreak)
+                longestLossStreak = currentLossStreak;
+        }
+        else {
+            breakevenTrades++;
+            currentWinStreak = 0;
+            currentLossStreak = 0;
+        }
+        if (t.direction === 'LONG') {
+            longTotal++;
+            longPnL += netPnL;
+            if (netPnL > 0)
+                longWins++;
+            else if (netPnL < 0)
+                longLosses++;
+            else
+                longBreakeven++;
+        }
+        else {
+            shortTotal++;
+            shortPnL += netPnL;
+            if (netPnL > 0)
+                shortWins++;
+            else if (netPnL < 0)
+                shortLosses++;
+            else
+                shortBreakeven++;
+        }
+        const reason = t.exitReason || 'UNKNOWN';
+        exitReasonBreakdown[reason] = (exitReasonBreakdown[reason] || 0) + 1;
+        const entryTime = new Date(t.entryTimestamp).getTime();
+        const exitTime = new Date(t.exitTimestamp).getTime();
+        if (!isNaN(entryTime) && !isNaN(exitTime) && exitTime >= entryTime) {
+            const durationMs = exitTime - entryTime;
+            totalDurationMs += durationMs;
+            if (durationMs > longestDurationMs)
+                longestDurationMs = durationMs;
+            if (durationMs < shortestDurationMs)
+                shortestDurationMs = durationMs;
+        }
+        if (t.riskRewardRatio && !isNaN(t.riskRewardRatio)) {
+            totalPlannedRRSum += t.riskRewardRatio;
+            plannedRRCount++;
+        }
+        if (t.riskAmount && t.riskAmount > 0) {
+            const realizedR = netPnL / t.riskAmount;
+            totalRealizedRSum += realizedR;
+            realizedRCount++;
+            if (netPnL > 0) {
+                winningRealizedRSum += realizedR;
+                winningRCount++;
+            }
+            else if (netPnL < 0) {
+                losingRealizedRSum += realizedR;
+                losingRCount++;
+            }
+        }
+        if (!bestTrade || netPnL > bestTrade.netPnL) {
+            bestTrade = { id: t.id, netPnL, entryTimestamp: t.entryTimestamp };
+        }
+        if (!worstTrade || netPnL < worstTrade.netPnL) {
+            worstTrade = { id: t.id, netPnL, entryTimestamp: t.entryTimestamp };
+        }
+        const currBalance = t.balanceAfter;
+        if (currBalance > runningPeak) {
+            runningPeak = currBalance;
+        }
+        const currentDrawdown = runningPeak - currBalance;
+        const currentDrawdownPct = runningPeak > 0 ? (currentDrawdown / runningPeak) * 100 : 0;
+        if (currentDrawdown > maxDrawdownCurrency) {
+            maxDrawdownCurrency = currentDrawdown;
+            maxDrawdownPercent = currentDrawdownPct;
+            peakAtMaxDd = runningPeak;
+            troughAtMaxDd = currBalance;
+        }
+        equityCurve.push({
+            timestamp: t.exitTimestamp,
+            balance: Math.round(currBalance * 100) / 100,
+            tradeId: t.id,
+            drawdown: Math.round(currentDrawdown * 100) / 100,
+            drawdownPercent: Math.round(currentDrawdownPct * 100) / 100
+        });
+    });
+    const endingBalance = sortedTrades[sortedTrades.length - 1].balanceAfter;
+    const netProfit = Math.round((endingBalance - startingBalance) * 100) / 100;
+    const returnPercent = startingBalance > 0 ? Math.round((netProfit / startingBalance) * 10000) / 100 : 0;
+    const winRate = Math.round((winningTrades / totalTrades) * 10000) / 100;
+    const lossRate = Math.round((losingTrades / totalTrades) * 10000) / 100;
+    const roundedGrossProfit = Math.round(grossProfit * 100) / 100;
+    const roundedGrossLoss = Math.round(grossLoss * 100) / 100;
+    const profitFactor = roundedGrossLoss === 0
+        ? null
+        : Math.round((roundedGrossProfit / roundedGrossLoss) * 100) / 100;
+    const averageTrade = Math.round((netProfit / totalTrades) * 100) / 100;
+    const averageWin = winningTrades > 0 ? Math.round((roundedGrossProfit / winningTrades) * 100) / 100 : null;
+    const averageLoss = losingTrades > 0 ? Math.round((roundedGrossLoss / losingTrades) * 100) / 100 : null;
+    let expectancy = null;
+    if (winningTrades > 0 || losingTrades > 0) {
+        const winProb = winningTrades / totalTrades;
+        const lossProb = losingTrades / totalTrades;
+        const avgW = averageWin || 0;
+        const avgL = averageLoss || 0;
+        expectancy = Math.round((winProb * avgW - lossProb * avgL) * 100) / 100;
+    }
+    const averageDurationMinutes = totalDurationMs > 0 ? Math.round((totalDurationMs / totalTrades / (1000 * 60)) * 10) / 10 : null;
+    const longestDurationMinutes = longestDurationMs >= 0 ? Math.round((longestDurationMs / (1000 * 60)) * 10) / 10 : null;
+    const shortestDurationMinutes = shortestDurationMs !== Infinity ? Math.round((shortestDurationMs / (1000 * 60)) * 10) / 10 : null;
+    const longTrades = {
+        totalTrades: longTotal,
+        winningTrades: longWins,
+        losingTrades: longLosses,
+        breakevenTrades: longBreakeven,
+        netPnL: Math.round(longPnL * 100) / 100,
+        winRate: longTotal > 0 ? Math.round((longWins / longTotal) * 10000) / 100 : null
+    };
+    const shortTrades = {
+        totalTrades: shortTotal,
+        winningTrades: shortWins,
+        losingTrades: shortLosses,
+        breakevenTrades: shortBreakeven,
+        netPnL: Math.round(shortPnL * 100) / 100,
+        winRate: shortTotal > 0 ? Math.round((shortWins / shortTotal) * 10000) / 100 : null
+    };
+    const averagePlannedRR = plannedRRCount > 0 ? Math.round((totalPlannedRRSum / plannedRRCount) * 100) / 100 : null;
+    const averageRealizedR = realizedRCount > 0 ? Math.round((totalRealizedRSum / realizedRCount) * 100) / 100 : null;
+    const totalRealizedR = realizedRCount > 0 ? Math.round(totalRealizedRSum * 100) / 100 : null;
+    const winningTradeAverageR = winningRCount > 0 ? Math.round((winningRealizedRSum / winningRCount) * 100) / 100 : null;
+    const losingTradeAverageR = losingRCount > 0 ? Math.round((losingRealizedRSum / losingRCount) * 100) / 100 : null;
+    totalSpreadCost = Math.round(totalSpreadCost * 100) / 100;
+    totalSlippageCost = Math.round(totalSlippageCost * 100) / 100;
+    totalCommissionCost = Math.round(totalCommissionCost * 100) / 100;
+    totalSwapCost = Math.round(totalSwapCost * 100) / 100;
+    const totalTradingCosts = Math.round((totalSpreadCost + totalSlippageCost + totalCommissionCost + totalSwapCost) * 100) / 100;
+    for (const k of Object.keys(costBreakdownByInstrument)) {
+        const b = costBreakdownByInstrument[k];
+        b.spread = Math.round(b.spread * 100) / 100;
+        b.slippage = Math.round(b.slippage * 100) / 100;
+        b.commission = Math.round(b.commission * 100) / 100;
+        b.swap = Math.round(b.swap * 100) / 100;
+        b.total = Math.round(b.total * 100) / 100;
+    }
+    return {
+        datasetId,
+        symbol,
+        timeframe,
+        startTime: startTime || sortedTrades[0].entryTimestamp,
+        endTime: endTime || sortedTrades[sortedTrades.length - 1].exitTimestamp,
+        strategyId,
+        strategyName,
+        startingBalance,
+        endingBalance: Math.round(endingBalance * 100) / 100,
+        netProfit,
+        returnPercent,
+        totalTrades,
+        winningTrades,
+        losingTrades,
+        breakevenTrades,
+        winRate,
+        lossRate,
+        grossProfit: roundedGrossProfit,
+        grossLoss: roundedGrossLoss,
+        profitFactor,
+        averageTrade,
+        averageWin,
+        averageLoss,
+        expectancy,
+        maxDrawdownCurrency: Math.round(maxDrawdownCurrency * 100) / 100,
+        maxDrawdownPercent: Math.round(maxDrawdownPercent * 100) / 100,
+        peakBalanceAtMaxDrawdown: Math.round(peakAtMaxDd * 100) / 100,
+        troughBalanceAtMaxDrawdown: Math.round(troughAtMaxDd * 100) / 100,
+        equityCurve,
+        averageDurationMinutes,
+        longestDurationMinutes,
+        shortestDurationMinutes,
+        exitReasonBreakdown,
+        longTrades,
+        shortTrades,
+        averagePlannedRR,
+        averageRealizedR,
+        totalRealizedR,
+        winningTradeAverageR,
+        losingTradeAverageR,
+        longestWinningStreak: longestWinStreak,
+        longestLosingStreak: longestLossStreak,
+        currentWinningStreak: currentWinStreak,
+        currentLosingStreak: currentLossStreak,
+        bestTrade,
+        worstTrade,
+        totalSpreadCost,
+        totalSlippageCost,
+        totalCommissionCost,
+        totalSwapCost,
+        totalTradingCosts,
+        costBreakdownByInstrument
+    };
+}
+export function compareAnalytics(baseline, stressed) {
+    return {
+        netProfit: createStressComparisonMetric(baseline.netProfit, stressed.netProfit),
+        returnPercent: createStressComparisonMetric(baseline.returnPercent, stressed.returnPercent),
+        maxDrawdownPercent: createStressComparisonMetric(baseline.maxDrawdownPercent, stressed.maxDrawdownPercent),
+        profitFactor: createStressComparisonMetric(baseline.profitFactor ?? 0, stressed.profitFactor ?? 0),
+        winRate: createStressComparisonMetric(baseline.winRate ?? 0, stressed.winRate ?? 0),
+        expectancy: createStressComparisonMetric(baseline.expectancy ?? 0, stressed.expectancy ?? 0),
+        totalTradingCosts: createStressComparisonMetric(baseline.totalTradingCosts, stressed.totalTradingCosts)
+    };
+}
+function createStressComparisonMetric(baseline, stressed) {
+    const delta = stressed - baseline;
+    const deltaPercent = baseline !== 0 ? (delta / Math.abs(baseline)) * 100 : 0;
+    return {
+        baseline,
+        stressed,
+        delta: Math.round(delta * 100) / 100,
+        deltaPercent: Math.round(deltaPercent * 100) / 100
+    };
+}

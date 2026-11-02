@@ -486,6 +486,7 @@ export class HistoricalRestrictionsGovernor {
     }
 
     // 4. GATE 4: QUALITY GATE & LOSS-STREAK ELEVATION
+    let lastQualityGateResult: QualityGateResult | undefined = undefined;
     if (this.enableQualityGate) {
       const qgResult = evaluateQualityGate({
         ruleScore: candidate.confidence,
@@ -498,6 +499,7 @@ export class HistoricalRestrictionsGovernor {
         consecutiveLosses: this.consecutiveLosses,
         minQualityThreshold: candidate.strategyRules?.min_quality_threshold || 75
       });
+      lastQualityGateResult = qgResult;
 
       if (!qgResult.passed) {
         this.recordRejection('qualityGate', 'QUALITY_GATE', qgResult.reason, candidate);
@@ -633,7 +635,7 @@ export class HistoricalRestrictionsGovernor {
 
     // All gates passed!
     this.totalSignalsPassed++;
-    return { passed: true };
+    return { passed: true, qualityGateResult: lastQualityGateResult };
   }
 
   private recordRejection(

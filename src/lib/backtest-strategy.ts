@@ -238,10 +238,42 @@ export class DeterministicBreakoutStrategy implements BacktestStrategy {
 import { GaksBacktestStrategy } from './backtest-gaks-strategy.js';
 
 /**
+ * Test Strategy that always buys on the first available candle.
+ * Used for deterministic cost verification.
+ */
+export class TestAlwaysBuyStrategy implements BacktestStrategy {
+  id = 'test-always-buy';
+  name = 'Test Always Buy';
+
+  evaluate(context: BacktestCandleContext): BacktestSignal | null {
+    if (context.index === 0) {
+      const entryPrice = context.current.close;
+      return {
+        id: `test_sig_${context.index}`,
+        timestamp: context.current.timestamp,
+        symbol: context.symbol,
+        timeframe: context.timeframe,
+        direction: 'BUY',
+        entryPrice: entryPrice,
+        stopLoss: Math.round((entryPrice - 0.0050) * 100000) / 100000,
+        takeProfit: Math.round((entryPrice + 0.0100) * 100000) / 100000,
+        reason: 'Test always buy',
+        confidence: 100
+      };
+    }
+    return null;
+  }
+}
+
+/**
  * Resolves a deterministic strategy instance for a backtest run.
  */
 export function resolveBacktestStrategy(strategyId?: string, strategyText?: string): BacktestStrategy {
   const normId = (strategyId || '').toLowerCase();
+
+  if (normId === 'test-always-buy') {
+    return new TestAlwaysBuyStrategy();
+  }
 
   if (strategyText && strategyText.trim().length > 0) {
     return new GaksBacktestStrategy(strategyText, strategyId);

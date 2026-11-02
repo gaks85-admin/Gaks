@@ -144,10 +144,7 @@ function readFallbackDatasets(): BacktestDatasetRecord[] {
     const map = new Map<string, BacktestDatasetRecord>();
     for (const s of seeds) map.set(s.id, s);
     for (const d of diskDatasets) {
-      // Don't include old duplicate test datasets
-      if (!d.name.includes('Validation Dataset') || d.id === DAY1_DATASET_ID) {
-        map.set(d.id, d);
-      }
+      map.set(d.id, d);
     }
     return Array.from(map.values()).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
   } catch {

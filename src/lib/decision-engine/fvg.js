@@ -1,0 +1,19 @@
+export class FvgEvaluator {
+    evaluate(rules, market) {
+        if (!rules.fair_value_gap) {
+            return { matched: false, score: 0, reason: "Fair Value Gap (FVG) rule not active in strategy." };
+        }
+        const isFlatMatched = market.fair_value_gap === true || market.fvg === true || market.fair_value_gap?.matched === true || market.fvg?.matched === true;
+        const isNestedMatched = market.fairValueGaps && Array.isArray(market.fairValueGaps) &&
+            market.fairValueGaps.length > 0;
+        const isMarkedFvg = Boolean(market.markedZone && (market.markedZone.type === 'BULLISH_FVG' || market.markedZone.type === 'BEARISH_FVG'));
+        const matched = isFlatMatched || isNestedMatched || isMarkedFvg;
+        return {
+            matched,
+            score: matched ? 1 : 0,
+            reason: matched
+                ? "Fair Value Gap (FVG) or market imbalance detected."
+                : "No Fair Value Gap (FVG) found in current market structure."
+        };
+    }
+}

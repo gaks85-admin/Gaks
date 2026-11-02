@@ -1,0 +1,72 @@
+export class SupportEvaluator {
+    evaluateSupport(rules, market) {
+        if (!rules.support) {
+            return { matched: false, score: 0, scoreOutOf10: 0, reason: "Support Zone rule not active in strategy." };
+        }
+        const isFlatMatched = market.support === true || market.support?.matched === true;
+        const isNestedMatched = market.supportZones && Array.isArray(market.supportZones) &&
+            market.supportZones.length > 0;
+        const isSwingLowNear = market.swingLows && Array.isArray(market.swingLows) && market.swingLows.length > 0;
+        const isObNear = market.orderBlocks && Array.isArray(market.orderBlocks) && market.orderBlocks.some((b) => b.type === 'BULLISH' || b.type === 'BULLISH_ORDER_BLOCK');
+        const isMarkedSupportNear = Boolean(market.markedZone && (market.markedZone.direction === 'BUY' || market.markedZone.type === 'DEMAND' || market.markedZone.type === 'BULLISH_ORDER_BLOCK' || market.markedZone.type === 'SUPPORT'));
+        let scoreOutOf10 = 0;
+        let matched = false;
+        let reason = "";
+        if (isFlatMatched || isNestedMatched || isMarkedSupportNear) {
+            scoreOutOf10 = 10;
+            matched = true;
+            reason = "Price is trading directly at or in a key support/demand zone (10/10).";
+        }
+        else if (isObNear || isSwingLowNear) {
+            scoreOutOf10 = 7;
+            matched = true;
+            reason = "Bullish order block or swing low structure detected in close proximity (7/10).";
+        }
+        else {
+            scoreOutOf10 = 0;
+            matched = false;
+            reason = "No key support zone or swing low detected in immediate proximity (0/10).";
+        }
+        return {
+            matched,
+            score: scoreOutOf10 / 10,
+            scoreOutOf10,
+            reason
+        };
+    }
+    evaluateSupportRejection(rules, market) {
+        if (!rules.support_rejection) {
+            return { matched: false, score: 0, scoreOutOf10: 0, reason: "Support Rejection rule not active in strategy." };
+        }
+        const isFlatMatched = market.support_rejection === true || market.support_rejection?.matched === true;
+        const isNestedMatched = market.retests && Array.isArray(market.retests) && market.retests.length > 0;
+        const isCandleRejection = market.candlePatterns && Array.isArray(market.candlePatterns) &&
+            market.candlePatterns.some((p) => p.direction === 'BULLISH');
+        const isWickRejection = market.lowerWickRejection === true || market.wickRejection === true;
+        const isZoneRejection = market.zone_status === 'CONFIRMED' || market.isRejected === true || Boolean(market.rejectionReason);
+        let scoreOutOf10 = 0;
+        let matched = false;
+        let reason = "";
+        if (isFlatMatched || (isNestedMatched && isCandleRejection) || isZoneRejection) {
+            scoreOutOf10 = 10;
+            matched = true;
+            reason = "Strong bullish rejection & candle bounce from support zone confirmed (10/10).";
+        }
+        else if (isCandleRejection || isNestedMatched || isWickRejection) {
+            scoreOutOf10 = 8;
+            matched = true;
+            reason = "Bullish rejection wick or candle pattern detected near support (8/10).";
+        }
+        else {
+            scoreOutOf10 = 0;
+            matched = false;
+            reason = "No bullish rejection or bounce detected at support zone (0/10).";
+        }
+        return {
+            matched,
+            score: scoreOutOf10 / 10,
+            scoreOutOf10,
+            reason
+        };
+    }
+}

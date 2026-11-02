@@ -1,17 +1,26 @@
-# Revised Implementation Plan - Fully Dynamic Symbol Support in Gaks AI
+# Implementation Plan: Historical Trading Costs and Execution Cost Engine
 
-## Objective
-Remove hardcoded symbol whitelists in `src/lib/watcher-handlers/start.ts` and make symbol validation **fully dynamic**. Users will be able to add any currency pair (`USDCAD`, `AUDUSD`, `AUDCAD`, `EURGBP`, etc.), index (`US30`, `NAS100`, `SPX500`, `GER30`, `UK100`, `US2000`), commodity (`XAUUSD`, `XAGUSD`), or crypto ticker without restrictions.
+## 1. Scope
+Implement connected execution-cost components for the Gaks AI backtesting engine:
+- Spread modelling (bid/ask, fixed/variable)
+- Slippage modelling (fixed/configurable)
+- Commission modelling (per lot, round-turn, per-side)
+- Swap and overnight rollover modelling
 
-## Proposed Changes
+## 2. Changes
+- Update `BacktestSimulationConfig` in `src/lib/backtest-types.ts` to include granular cost settings.
+- Update `BacktestTradeRecord` to include all detailed cost components for inspection.
+- Update `src/lib/backtest-trade-simulator.ts` to implement the cost logic during trade entry, exit, and rollover.
+- Update `src/lib/backtest-analytics.ts` to use net PnL after all costs.
 
-### 1. Make `isSupportedSymbol` Dynamic in `src/lib/watcher-handlers/start.ts`
-- Instead of checking against a fixed array of 6 symbols, update `isSupportedSymbol` to accept any standard alphanumeric ticker symbol format (3 to 10 characters, supporting forex pairs, indices, metals, and crypto).
-- Rely on the robust Twelve Data gateway symbol validation during data fetching.
+## 3. Implementation Steps
+1.  Extend `BacktestSimulationConfig` and `BacktestTradeRecord` with new cost settings and fields.
+2.  Implement `calculateSpreadCost`, `calculateSlippageCost`, `calculateCommission`, and `calculateSwapCost` in a new utility or within `backtest-trade-simulator.ts`.
+3.  Integrate these functions into `backtest-trade-simulator.ts` to update `BacktestTradeRecord` during simulation.
+4.  Update `backtest-engine.ts` if necessary to propagate configuration.
+5.  Add unit tests for each cost component and integration tests.
+6.  Update UI if necessary to display cost breakdown.
 
-### 2. Update Quick-Add Pills & UI in `src/components/WatcherTab.tsx`
-- Ensure the UI allows typing any custom symbol smoothly.
-
-## Verification Plan
-- Compile applet with `compile_applet`.
-- Test watcher activation with custom symbols like `USDCAD`, `AUDUSD`, `AUDCAD`, and `GER30` to verify successful acceptance.
+## 4. Verification
+- Run regression tests for backtest engine, simulator, and analytics.
+- Ensure all deterministic requirements are met.

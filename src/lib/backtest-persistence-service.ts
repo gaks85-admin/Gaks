@@ -28,27 +28,50 @@ export interface BacktestRunRecord {
   completedAt: string;
   trades?: BacktestTradeRecord[];
   restrictionsSummary?: any;
+  datasetMetadata?: any;
+  validationReport?: any;
 }
 
-const FALLBACK_DIR = process.env.VERCEL || process.env.NODE_ENV === 'production' || process.cwd().startsWith('/var/task')
-  ? path.join('/tmp', '.data', 'backtest')
-  : path.join(process.cwd(), '.data', 'backtest');
+function getFallbackDir(): string {
+  if (typeof window !== 'undefined' || typeof process === 'undefined' || !process.cwd) {
+    return '/tmp/.data/backtest';
+  }
+  try {
+    return process.env.VERCEL || process.env.NODE_ENV === 'production' || process.cwd().startsWith('/var/task')
+      ? path.join('/tmp', '.data', 'backtest')
+      : path.join(process.cwd(), '.data', 'backtest');
+  } catch {
+    return '/tmp/.data/backtest';
+  }
+}
 
 function ensureFallbackDir() {
-  if (!fs.existsSync(FALLBACK_DIR)) {
-    fs.mkdirSync(FALLBACK_DIR, { recursive: true });
+  if (typeof window !== 'undefined') return;
+  try {
+    const dir = getFallbackDir();
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+  } catch {
+    // Ignore in non-filesystem environments
   }
 }
 
 function getFallbackRunsFile(): string {
+  if (typeof window !== 'undefined') return '';
   ensureFallbackDir();
-  return path.join(FALLBACK_DIR, 'runs.json');
+  try {
+    return path.join(getFallbackDir(), 'runs.json');
+  } catch {
+    return '';
+  }
 }
 
 function readFallbackRuns(): BacktestRunRecord[] {
+  if (typeof window !== 'undefined') return [];
   try {
     const file = getFallbackRunsFile();
-    if (!fs.existsSync(file)) return [];
+    if (!file || !fs.existsSync(file)) return [];
     return JSON.parse(fs.readFileSync(file, 'utf8'));
   } catch {
     return [];
@@ -56,9 +79,12 @@ function readFallbackRuns(): BacktestRunRecord[] {
 }
 
 function saveFallbackRuns(runs: BacktestRunRecord[]) {
+  if (typeof window !== 'undefined') return;
   try {
     ensureFallbackDir();
-    fs.writeFileSync(getFallbackRunsFile(), JSON.stringify(runs, null, 2), 'utf8');
+    const file = getFallbackRunsFile();
+    if (!file) return;
+    fs.writeFileSync(file, JSON.stringify(runs, null, 2), 'utf8');
   } catch (err) {
     console.error('[Backtest Persistence Fallback] Error saving runs:', err);
   }
@@ -99,7 +125,9 @@ export async function saveBacktestRun(params: {
     createdAt: now,
     completedAt: now,
     trades: engineResult.trades || [],
-    restrictionsSummary: engineResult.restrictionsSummary
+    restrictionsSummary: engineResult.restrictionsSummary,
+    datasetMetadata: engineResult.datasetMetadata,
+    validationReport: engineResult.validationReport
   };
 
   const supabase = getSupabase();
@@ -120,6 +148,8 @@ export async function saveBacktestRun(params: {
       return_percent: analytics.returnPercent,
       status: 'completed',
       analytics_snapshot: analytics,
+      dataset_metadata: engineResult.datasetMetadata,
+      validation_report: engineResult.validationReport,
       created_at: now,
       completed_at: now
     });
@@ -324,5 +354,114 @@ export async function deleteBacktestRun(runId: string): Promise<{ success: boole
     return { success: true };
   } catch {
     return { success: true };
+  }
+}
+
+export interface StressSuiteRecord {
+  id: string;
+  baselineRunId?: string;
+  result: BacktestStressSuiteResult;
+  createdAt: string;
+}
+
+function getFallbackStressFile(): string {
+  if (typeof window !== 'undefined') return '';
+  ensureFallbackDir();
+  try {
+    return path.join(getFallbackDir(), 'stress_suites.json');
+  } catch {
+    return '';
+  }
+}
+
+function readFallbackStressSuites(): StressSuiteRecord[] {
+  if (typeof window !== 'undefined') return [];
+  try {
+    const file = getFallbackStressFile();
+    if (!file || !fs.existsSync(file)) return [];
+    return JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch {
+    return [];
+  }
+}
+
+function saveFallbackStressSuites(suites: StressSuiteRecord[]) {
+  if (typeof window !== 'undefined') return;
+  try {
+    ensureFallbackDir();
+    const file = getFallbackStressFile();
+    if (!file) return;
+    fs.writeFileSync(file, JSON.stringify(suites, null, 2), 'utf8');
+  } catch (err) {
+    console.error('[Backtest Stress Fallback] Error saving stress suites:', err);
+  }
+}
+
+/**
+ * Persists a stress suite result.
+ */
+export async function saveStressSuiteResult(params: {
+  baselineRunId?: string;
+  result: BacktestStressSuiteResult;
+}): Promise<{ success: boolean; suiteId?: string; error?: string }> {
+  const { baselineRunId, result } = params;
+  const suiteId = crypto.randomUUID();
+  const now = new Date().toISOString();
+
+  const record: StressSuiteRecord = {
+    id: suiteId,
+    baselineRunId,
+    result,
+    createdAt: now
+  };
+
+  const supabase = getSupabase();
+  try {
+    const { error } = await supabase.from('backtest_stress_suites').insert({
+      id: suiteId,
+      baseline_run_id: baselineRunId,
+      result,
+      created_at: now
+    });
+
+    if (error) {
+      console.warn('[Backtest Stress Persistence] Supabase insert error (using fallback):', error.message);
+      throw error;
+    }
+
+    return { success: true, suiteId };
+  } catch {
+    // Fallback search
+    const suites = readFallbackStressSuites();
+    suites.unshift(record);
+    saveFallbackStressSuites(suites);
+    return { success: true, suiteId };
+  }
+}
+
+/**
+ * Retrieves a stress suite result by ID.
+ */
+export async function getStressSuiteResult(suiteId: string): Promise<StressSuiteRecord | null> {
+  if (!suiteId) return null;
+  const supabase = getSupabase();
+  try {
+    const { data, error } = await supabase
+      .from('backtest_stress_suites')
+      .select('*')
+      .eq('id', suiteId)
+      .maybeSingle();
+
+    if (error || !data) throw new Error('Not found in DB');
+
+    return {
+      id: data.id,
+      baselineRunId: data.baseline_run_id,
+      result: data.result,
+      createdAt: data.created_at
+    };
+  } catch {
+    const suites = readFallbackStressSuites();
+    return suites.find(s => s.id === suiteId) || null;
   }
 }

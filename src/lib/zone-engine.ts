@@ -981,40 +981,22 @@ export function evaluateZoneState(
   const effectiveAtr = atr || 0.0005;
 
   // =========================================================================
-  // 0. HIGHER TIMEFRAME TREND VALIDITY CHECK (User Rule: Sideways/Unclear = NO TRADE)
+  // 0. HIGHER TIMEFRAME TREND VALIDITY CHECK
+  // Do NOT invalidate zones simply because price is pulling back to retrace/tap the zone.
+  // Only invalidate if structural trend has definitively shifted with an opposing CHOCH.
   // =========================================================================
-  if (marketStructure?.htfTrend === 'SIDEWAYS' || marketStructure?.htfAllowedDirection === 'NONE') {
+  const hasOpposingChoch = (zone.direction === 'BUY' && marketStructure?.CHOCH?.some(c => c.type === 'BEARISH_CHOCH')) ||
+                           (zone.direction === 'SELL' && marketStructure?.CHOCH?.some(c => c.type === 'BULLISH_CHOCH'));
+
+  if (hasOpposingChoch && zone.status === 'WAITING_FOR_TAP') {
     updatedZone.status = 'INVALIDATED';
     return {
       status: 'INVALIDATED',
       isTapped: false,
       isInvalidated: true,
-      reason: `Zone invalidated: Higher timeframe (${marketStructure?.htfTimeframe || 'H4'}) trend is SIDEWAYS / unclear. System strictly defaults to NO TRADE in consolidation.`,
+      reason: `Zone invalidated: Structural CHOCH detected contrary to ${zone.direction} marked zone.`,
       updatedZone
     };
-  }
-
-  if (marketStructure?.htfTrend) {
-    if (zone.direction === 'BUY' && marketStructure.htfTrend === 'BEARISH') {
-      updatedZone.status = 'INVALIDATED';
-      return {
-        status: 'INVALIDATED',
-        isTapped: false,
-        isInvalidated: true,
-        reason: `Zone invalidated: Higher timeframe (${marketStructure?.htfTimeframe || 'H4'}) trend is BEARISH contrary to BUY marked zone.`,
-        updatedZone
-      };
-    }
-    if (zone.direction === 'SELL' && marketStructure.htfTrend === 'BULLISH') {
-      updatedZone.status = 'INVALIDATED';
-      return {
-        status: 'INVALIDATED',
-        isTapped: false,
-        isInvalidated: true,
-        reason: `Zone invalidated: Higher timeframe (${marketStructure?.htfTimeframe || 'H4'}) trend is BULLISH contrary to SELL marked zone.`,
-        updatedZone
-      };
-    }
   }
 
   // =========================================================================
@@ -1024,19 +1006,20 @@ export function evaluateZoneState(
     ? currentPrice
     : latestCandle.close;
 
-  // Check if previously CONFIRMED zone has already departed in profit direction
+  // Check if previously CONFIRMED zone has already departed far beyond entry window
   if (zone.status === 'CONFIRMED') {
     const pipSize = (zone.high > 50) ? 0.01 : 0.0001;
     const departure = zone.direction === 'SELL' ? (zone.low - activePrice) : (activePrice - zone.high);
     const departurePips = departure / pipSize;
-    if (departurePips > 4.0 || departure > effectiveAtr * 0.5) {
+    const maxDepartureTolerance = Math.max(effectiveAtr * 2.5, pipSize * 30);
+    if (departure > maxDepartureTolerance) {
       updatedZone.status = 'EXPIRED';
       return {
         status: 'EXPIRED',
         isTapped: true,
         isInvalidated: true,
         isRejected: false,
-        reason: `Zone expired: Confirmed ${zone.direction} zone [${zone.low.toFixed(5)} - ${zone.high.toFixed(5)}] has already moved ${departurePips.toFixed(1)} pips in target direction. Retest entry window has passed.`,
+        reason: `Zone expired: Confirmed ${zone.direction} zone [${zone.low.toFixed(5)} - ${zone.high.toFixed(5)}] has moved ${departurePips.toFixed(1)} pips past zone. Retest entry window has passed.`,
         updatedZone
       };
     }
@@ -1238,14 +1221,15 @@ export function evaluateZoneState(
       const pipSize = (zone.high > 50) ? 0.01 : 0.0001;
       const departure = zone.direction === 'SELL' ? (zone.low - currentPrice) : (currentPrice - zone.high);
       const departurePips = departure / pipSize;
-      if (departurePips > 4.0 || departure > effectiveAtr * 0.5) {
+      const maxDepartureTolerance = Math.max(effectiveAtr * 2.5, pipSize * 30);
+      if (departure > maxDepartureTolerance) {
         updatedZone.status = 'EXPIRED';
         return {
           status: 'EXPIRED',
           isTapped: true,
           isInvalidated: true,
           isRejected: false,
-          reason: `Zone expired: After tapping and rejecting, price has already moved ${departurePips.toFixed(1)} pips past marked ${zone.direction} zone [${zone.low.toFixed(5)} - ${zone.high.toFixed(5)}]. Retest entry window has passed.`,
+          reason: `Zone expired: After tapping and rejecting, price moved ${departurePips.toFixed(1)} pips past marked ${zone.direction} zone [${zone.low.toFixed(5)} - ${zone.high.toFixed(5)}]. Retest entry window has passed.`,
           updatedZone
         };
       }

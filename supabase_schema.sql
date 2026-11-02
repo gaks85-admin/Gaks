@@ -898,3 +898,158 @@ CREATE OR REPLACE TRIGGER update_economic_events_modtime
 
 
 
+
+-- =========================================================================
+-- BACKTESTING ENGINE SCHEMA (Phase 3-7)
+-- =========================================================================
+
+-- Table: public.backtest_datasets
+CREATE TABLE IF NOT EXISTS public.backtest_datasets (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  created_by UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  symbol TEXT NOT NULL,
+  timeframe TEXT NOT NULL,
+  source_filename TEXT,
+  row_count INTEGER DEFAULT 0,
+  start_time TIMESTAMPTZ,
+  end_time TIMESTAMPTZ,
+  status TEXT DEFAULT 'processing' NOT NULL,
+  version TEXT DEFAULT '1.0.0' NOT NULL,
+  parent_id UUID REFERENCES public.backtest_datasets(id) ON DELETE SET NULL,
+  metadata JSONB DEFAULT '{}'::jsonb,
+  validation_report JSONB DEFAULT '{}'::jsonb,
+  error_message TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
+  updated_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
+);
+
+ALTER TABLE public.backtest_datasets ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Users can manage own datasets" ON public.backtest_datasets FOR ALL USING (auth.uid() = created_by OR created_by = '00000000-0000-0000-0000-000000000000');
+
+-- Table: public.backtest_candles
+CREATE TABLE IF NOT EXISTS public.backtest_candles (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  dataset_id UUID NOT NULL REFERENCES public.backtest_datasets(id) ON DELETE CASCADE,
+  timestamp TIMESTAMPTZ NOT NULL,
+  open NUMERIC NOT NULL,
+  high NUMERIC NOT NULL,
+  low NUMERIC NOT NULL,
+  close NUMERIC NOT NULL,
+  volume NUMERIC,
+  UNIQUE (dataset_id, timestamp)
+);
+
+CREATE INDEX IF NOT EXISTS idx_backtest_candles_dataset_ts ON public.backtest_candles(dataset_id, timestamp ASC);
+
+-- Table: public.backtest_runs
+CREATE TABLE IF NOT EXISTS public.backtest_runs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  created_by UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+  dataset_id UUID REFERENCES public.backtest_datasets(id) ON DELETE SET NULL,
+  symbol TEXT NOT NULL,
+  timeframe TEXT NOT NULL,
+  strategy_snapshot JSONB DEFAULT '{}'::jsonb,
+  simulation_config JSONB DEFAULT '{}'::jsonb,
+  starting_balance NUMERIC NOT NULL,
+  ending_balance NUMERIC NOT NULL,
+  net_profit NUMERIC NOT NULL,
+  return_percent NUMERIC NOT NULL,
+  status TEXT DEFAULT 'completed' NOT NULL,
+  analytics_snapshot JSONB DEFAULT '{}'::jsonb,
+  dataset_metadata JSONB DEFAULT '{}'::jsonb,
+  validation_report JSONB DEFAULT '{}'::jsonb,
+  error_message TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
+  completed_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
+);
+
+ALTER TABLE public.backtest_runs ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Users can manage own runs" ON public.backtest_runs FOR ALL USING (auth.uid() = created_by);
+
+-- Table: public.backtest_trades
+CREATE TABLE IF NOT EXISTS public.backtest_trades (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  backtest_run_id UUID NOT NULL REFERENCES public.backtest_runs(id) ON DELETE CASCADE,
+  signal_id TEXT,
+  symbol TEXT NOT NULL,
+  timeframe TEXT NOT NULL,
+  direction TEXT NOT NULL,
+  entry_timestamp TIMESTAMPTZ NOT NULL,
+  exit_timestamp TIMESTAMPTZ NOT NULL,
+  entry_price NUMERIC NOT NULL,
+  exit_price NUMERIC NOT NULL,
+  stop_loss NUMERIC,
+  take_profit NUMERIC,
+  lot_size NUMERIC NOT NULL,
+  risk_amount NUMERIC,
+  risk_reward_ratio NUMERIC,
+  gross_pnl NUMERIC NOT NULL,
+  spread_cost NUMERIC DEFAULT 0,
+  slippage_cost NUMERIC DEFAULT 0,
+  commission_cost NUMERIC DEFAULT 0,
+  net_pnl NUMERIC NOT NULL,
+  balance_before NUMERIC NOT NULL,
+  balance_after NUMERIC NOT NULL,
+  exit_reason TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_backtest_trades_run_id ON public.backtest_trades(backtest_run_id);
+
+-- Table: public.backtest_stress_suites
+CREATE TABLE IF NOT EXISTS public.backtest_stress_suites (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  created_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+  baseline_run_id UUID REFERENCES public.backtest_runs(id) ON DELETE SET NULL,
+  result JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
+);
+
+ALTER TABLE public.backtest_stress_suites ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Admin full access on backtest_stress_suites"
+  ON public.backtest_stress_suites
+  FOR ALL
+  TO authenticated
+  USING (auth.email() = 'gaks6535@gmail.com')
+  WITH CHECK (auth.email() = 'gaks6535@gmail.com');
+
+CREATE POLICY "Service role full access on backtest_stress_suites"
+  ON public.backtest_stress_suites
+  FOR ALL
+  TO service_role
+  USING (true)
+  WITH CHECK (true);
+
+-- Table: public.backtest_scientific_experiments (Stage E)
+CREATE TABLE IF NOT EXISTS public.backtest_scientific_experiments (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  created_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+  name TEXT NOT NULL,
+  dataset_id UUID REFERENCES public.backtest_datasets(id) ON DELETE SET NULL,
+  symbol TEXT NOT NULL,
+  timeframe TEXT NOT NULL,
+  status TEXT DEFAULT 'completed' NOT NULL,
+  summary_reason TEXT,
+  results JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
+);
+
+ALTER TABLE public.backtest_scientific_experiments ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Admin full access on backtest_scientific_experiments"
+  ON public.backtest_scientific_experiments
+  FOR ALL
+  TO authenticated
+  USING (auth.email() = 'gaks6535@gmail.com')
+  WITH CHECK (auth.email() = 'gaks6535@gmail.com');
+
+CREATE POLICY "Service role full access on backtest_scientific_experiments"
+  ON public.backtest_scientific_experiments
+  FOR ALL
+  TO service_role
+  USING (true)
+  WITH CHECK (true);
+
+

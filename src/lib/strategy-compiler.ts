@@ -118,23 +118,10 @@ export function compileStrategy(strategyText: string): CompilerOutput {
     ai_only_elements: classificationResult.parsedRule.ai_only_elements
   };
 
-  // Determine if strategy contains any explicit confirmation rules.
-  // If the user does not specify a confirmation, fall back to default mode:
-  // Tap and Rejection of the marked zone!
-  const hasExplicitConfirmation = Boolean(
-    compiled_rules.confirmation_candle ||
-    compiled_rules.support_rejection ||
-    compiled_rules.resistance_rejection ||
-    compiled_rules.bos ||
-    compiled_rules.choch ||
-    compiled_rules.liquidity_sweep ||
-    compiled_rules.volume_confirmation ||
-    compiled_rules.rsi?.enabled ||
-    compiled_rules.macd?.enabled ||
-    compiled_rules.ema?.enabled
-  );
-
-  if (!hasExplicitConfirmation) {
+  // Tap and Rejection must ONLY be enabled when explicitly requested by the strategy text.
+  // Never silently auto-inject mandatory confirmation requirements not present in the user's strategy.
+  const explicitTapAndRejection = /\b(tap\s*(and|&)\s*rejection|zone\s*tap|rejection\s*of\s*(the\s*)?zone|tapped\s*and\s*rejected|tap\s*(and|&)\s*reject)\b/i.test(strategyText);
+  if (explicitTapAndRejection) {
     compiled_rules.tap_and_rejection = true;
   }
 
@@ -230,7 +217,7 @@ export function compileStrategy(strategyText: string): CompilerOutput {
     { id: 'resistance', name: 'Resistance Zone', phrase: 'resistance', weight: 10, active: !!compiled_rules.resistance },
     { id: 'support_rejection', name: 'Support Rejection', phrase: 'support rejection', weight: 10, active: !!compiled_rules.support_rejection },
     { id: 'resistance_rejection', name: 'Resistance Rejection', phrase: 'resistance rejection', weight: 10, active: !!compiled_rules.resistance_rejection },
-    { id: 'tap_and_rejection', name: 'Tap and Rejection (Default)', phrase: 'tap and rejection', weight: 20, active: !!compiled_rules.tap_and_rejection },
+    { id: 'tap_and_rejection', name: 'Tap and Rejection', phrase: 'tap and rejection', weight: 20, active: !!compiled_rules.tap_and_rejection },
     { id: 'ema', name: 'EMA Alignment', phrase: 'ema', weight: 5, active: !!compiled_rules.ema?.enabled },
     { id: 'rsi', name: 'RSI Filter', phrase: 'rsi', weight: 4, active: !!compiled_rules.rsi?.enabled },
     { id: 'macd', name: 'MACD Filter', phrase: 'macd', weight: 4, active: !!compiled_rules.macd?.enabled },
@@ -262,7 +249,7 @@ export function compileStrategy(strategyText: string): CompilerOutput {
     resistance: ['resistance zone', 'resistance level', 'resistance'],
     support_rejection: ['support rejection', 'bounce from support', 'demand rejection'],
     resistance_rejection: ['resistance rejection', 'bounce from resistance', 'supply rejection'],
-    tap_and_rejection: ['tap and rejection', 'tap & rejection', 'zone tap', 'tap', 'rejection'],
+    tap_and_rejection: ['tap and rejection', 'tap & rejection', 'zone tap', 'rejection of zone', 'tap and reject', 'tapped and rejected'],
     ema: ['ema alignment', 'ema'],
     rsi: ['rsi filter', 'rsi'],
     macd: ['macd filter', 'macd'],
@@ -360,9 +347,9 @@ export function compileStrategy(strategyText: string): CompilerOutput {
   let status: 'SUCCESS' | 'AMBIGUOUS_STRATEGY' | 'FAILURE' = 'SUCCESS';
   let error_message = undefined;
 
-  if (canonical_rules.length === 0 && strategyText.trim().length > 30) {
+  if (canonical_rules.length === 0) {
     status = 'AMBIGUOUS_STRATEGY';
-    error_message = "Strategy text is descriptive but no deterministic indicators were identified. Please mention specific rules like BOS, EMA, or FVG.";
+    error_message = "Strategy text is ambiguous or lacks actionable deterministic rules. Please specify concrete criteria (such as Order Blocks, BOS, CHOCH, EMA crossover, or Fair Value Gaps).";
   }
 
   // Diagnostic Log 1: Canonical Rule Set Output

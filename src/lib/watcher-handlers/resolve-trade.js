@@ -1,0 +1,269 @@
+import { createClient } from '@supabase/supabase-js';
+import { recordCompletedTrade, getUserWinRateStats } from '../learning-engine.js';
+import { validateActiveTradeState } from '../trade-validator.js';
+import { calculateUnrealizedPnlR, evaluateActiveTradeExit, calculatePipsDistance } from '../active-trade-monitor.js';
+import { buildTelegramTradeOutcomeMessage } from '../telegram-formatter.js';
+import { diagnoseLossOutcome } from '../trade-post-mortem-engine.js';
+async function sendTelegramMessage(chatId, text) {
+    const token = process.env.TELEGRAM_BOT_TOKEN;
+    if (!token)
+        return false;
+    const url = `https://api.telegram.org/bot${token}/sendMessage`;
+    try {
+        const res = await fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ chat_id: chatId, text: text, parse_mode: "Markdown" })
+        });
+        if (!res.ok) {
+            await fetch(url, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ chat_id: chatId, text: text })
+            });
+        }
+        return true;
+    }
+    catch {
+        return false;
+    }
+}
+const getSupabase = () => {
+    const url = process.env.VITE_SUPABASE_URL || "https://wkujrqmxivljnuvumfau.supabase.co";
+    const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+    if (!url || !key) {
+        throw new Error('Supabase configuration missing');
+    }
+    return createClient(url, key, {
+        auth: { persistSession: false, autoRefreshToken: false }
+    });
+};
+export default async function handler(req, res) {
+    const supabase = getSupabase();
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    if (req.method === "OPTIONS") {
+        return res.status(200).end();
+    }
+    if (req.method !== 'POST') {
+        return res.status(405).json({ success: false, error: 'Method Not Allowed' });
+    }
+    let userId = req.body.userId;
+    try {
+        const authHeader = req.headers.authorization || '';
+        const token = authHeader.startsWith('Bearer ') ? authHeader.substring(7) : authHeader;
+        if (token) {
+            const { data: { user } } = await supabase.auth.getUser(token);
+            if (user)
+                userId = user.id;
+        }
+    }
+    catch (err) {
+        console.warn("Auth token lookup failed:", err);
+    }
+    if (!userId) {
+        return res.status(401).json({ success: false, error: "Authentication required" });
+    }
+    const { watcherId, exitPrice, resolutionType, notes } = req.body;
+    if (!watcherId) {
+        return res.status(400).json({ success: false, error: "Missing watcherId" });
+    }
+    try {
+        const { data: watcher, error: watcherErr } = await supabase
+            .from('watchers')
+            .select('*')
+            .eq('id', watcherId)
+            .eq('user_id', userId)
+            .maybeSingle();
+        if (watcherErr || !watcher) {
+            return res.status(404).json({ success: false, error: "Active watcher not found" });
+        }
+        if (watcher.trade_status !== 'ACTIVE') {
+            return res.status(400).json({
+                success: false,
+                error: `Cannot resolve trade: watcher is currently in '${watcher.trade_status}' state (must be ACTIVE)`
+            });
+        }
+        const activeValidation = validateActiveTradeState(watcher);
+        if (!activeValidation.valid) {
+            await supabase.from('watchers').update({
+                trade_status: 'WAITING',
+                active_trade_id: null,
+                updated_at: new Date().toISOString()
+            }).eq('id', watcher.id);
+            return res.status(400).json({
+                success: false,
+                error: `Invalid active trade state healed to WAITING: ${activeValidation.reason}`
+            });
+        }
+        const entryPrice = parseFloat(String(watcher.entry_price));
+        const stopLoss = parseFloat(String(watcher.stop_loss));
+        const takeProfit = parseFloat(String(watcher.take_profit));
+        const direction = (watcher.direction || 'BUY').toUpperCase();
+        const finalExitPrice = typeof exitPrice === 'number' && !isNaN(exitPrice) ? exitPrice : entryPrice;
+        const tradeId = watcher.active_trade_id || watcher.last_signal_data?.trade_id || null;
+        let pnlR = 0;
+        let outcome = 'BREAKEVEN';
+        if (resolutionType === 'TP_HIT') {
+            outcome = 'WIN';
+            const exitEval = evaluateActiveTradeExit(direction, entryPrice, stopLoss, takeProfit, takeProfit);
+            pnlR = exitEval.realizedR;
+        }
+        else if (resolutionType === 'SL_HIT') {
+            outcome = 'LOSS';
+            pnlR = -1.0;
+        }
+        else if (resolutionType === 'BREAKEVEN') {
+            outcome = 'BREAKEVEN';
+            pnlR = 0.0;
+        }
+        else {
+            pnlR = calculateUnrealizedPnlR(direction, entryPrice, stopLoss, finalExitPrice);
+            if (pnlR > 0.05)
+                outcome = 'WIN';
+            else if (pnlR < -0.05)
+                outcome = 'LOSS';
+            else
+                outcome = 'BREAKEVEN';
+        }
+        let latestEval = null;
+        try {
+            const { data } = await supabase
+                .from('watcher_evaluations')
+                .select('*')
+                .eq('watcher_id', watcher.id)
+                .order('created_at', { ascending: false })
+                .limit(1)
+                .maybeSingle();
+            latestEval = data;
+        }
+        catch (e) {
+            console.warn("Could not fetch latest evaluation for resolution:", e);
+        }
+        let lossPostMortem = null;
+        if (outcome === 'LOSS') {
+            try {
+                lossPostMortem = diagnoseLossOutcome({
+                    pair: watcher.selected_pair,
+                    timeframe: watcher.selected_timeframe || 'H1',
+                    direction: direction,
+                    entryPrice: entryPrice,
+                    stopLoss: stopLoss,
+                    takeProfit: takeProfit,
+                    exitPrice: finalExitPrice,
+                    openedAt: watcher.opened_at,
+                    closedAt: new Date().toISOString(),
+                    matchedRules: latestEval?.matched_rules || [],
+                    failedRules: latestEval?.failed_rules || []
+                });
+            }
+            catch (pmErr) {
+                console.warn("[Post-Mortem Engine] Failed to diagnose loss:", pmErr);
+            }
+        }
+        const decisionSnapshotWithPM = {
+            ...(latestEval?.decision_snapshot || {}),
+            ...(lossPostMortem ? { loss_post_mortem: lossPostMortem } : {})
+        };
+        const notesWithPM = notes || (lossPostMortem
+            ? `Manual resolution: ${resolutionType || 'SL_HIT'} at ${finalExitPrice}. AI Post-Mortem: ${lossPostMortem.rootCauseTitle} - ${lossPostMortem.preventiveAdjustment}`
+            : `Manual resolution: ${resolutionType || 'MANUAL_CLOSE'} at price ${finalExitPrice}`);
+        await recordCompletedTrade(supabase, {
+            user_id: userId,
+            watcher_id: watcher.id,
+            trade_id: tradeId,
+            evaluation_id: latestEval?.id || null,
+            pair: watcher.selected_pair,
+            timeframe: watcher.selected_timeframe || 'H1',
+            strategy_mode: latestEval?.strategy_mode || 'HYBRID',
+            entry_price: entryPrice,
+            stop_loss: stopLoss,
+            take_profit: takeProfit,
+            exit_price: finalExitPrice,
+            direction: direction,
+            outcome: outcome,
+            opened_at: watcher.opened_at || new Date(Date.now() - 60000).toISOString(),
+            closed_at: new Date().toISOString(),
+            decision_score: latestEval?.decision_score || null,
+            matched_weight: latestEval?.matched_weight || null,
+            possible_weight: latestEval?.possible_weight || null,
+            matched_rules: latestEval?.matched_rules || [],
+            failed_rules: latestEval?.failed_rules || [],
+            gemini_used: latestEval?.gemini_used || false,
+            notes: notesWithPM,
+            decision_snapshot: decisionSnapshotWithPM
+        });
+        try {
+            const { data: conn } = await supabase
+                .from("telegram_connections")
+                .select("telegram_chat_id, connected")
+                .eq("user_id", userId)
+                .maybeSingle();
+            if (conn?.connected && conn?.telegram_chat_id) {
+                const stats = await getUserWinRateStats(supabase, userId, watcher.selected_pair);
+                const pipsDistance = Math.abs(calculatePipsDistance(watcher.selected_pair, entryPrice || finalExitPrice, finalExitPrice));
+                const outcomeMsg = buildTelegramTradeOutcomeMessage({
+                    pair: watcher.selected_pair,
+                    direction: direction,
+                    entryPrice,
+                    exitPrice: finalExitPrice,
+                    stopLoss,
+                    takeProfit,
+                    outcome: outcome,
+                    pips: pipsDistance,
+                    realizedR: pnlR,
+                    totalTrades: stats.totalTrades,
+                    wins: stats.wins,
+                    losses: stats.losses,
+                    winRate: stats.winRate,
+                    pairTotalTrades: stats.pairTotalTrades,
+                    pairWins: stats.pairWins,
+                    pairWinRate: stats.pairWinRate,
+                    lossPostMortem
+                });
+                await sendTelegramMessage(conn.telegram_chat_id, outcomeMsg);
+            }
+        }
+        catch (tgErr) {
+            console.error("[Resolve Trade] Telegram outcome notification failed:", tgErr);
+        }
+        const outcomeStr = String(outcome);
+        const isLoss = outcomeStr === 'LOSS' || outcomeStr === 'STOP_LOSS';
+        const cooldownMs = isLoss ? 4 * 60 * 60 * 1000 : 5 * 60 * 1000;
+        const cooldownUntil = new Date(Date.now() + cooldownMs).toISOString();
+        if (isLoss) {
+            console.log(`[LOSS COOLDOWN] Watcher ${watcher.id} entered 4-hour cooldown after STOP_LOSS.`);
+        }
+        await supabase
+            .from('watchers')
+            .update({
+            trade_status: 'COOLDOWN',
+            active_trade_id: null,
+            zone_data: null,
+            zone_status: 'NO_ZONE',
+            zone_high: null,
+            zone_low: null,
+            closed_at: new Date().toISOString(),
+            cooldown_until: cooldownUntil,
+            last_scan_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+        })
+            .eq('id', watcher.id);
+        return res.status(200).json({
+            success: true,
+            data: {
+                watcherId: watcher.id,
+                tradeId,
+                outcome,
+                pnlR,
+                exitPrice: finalExitPrice,
+                resolvedAt: new Date().toISOString()
+            }
+        });
+    }
+    catch (err) {
+        console.error("[Resolve Trade API] Error:", err);
+        return res.status(500).json({ success: false, error: err.message || "Internal server error" });
+    }
+}

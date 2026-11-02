@@ -14,6 +14,7 @@ import {
   identifyCandidateZones,
   evaluateZoneState,
   evaluateZoneRejection,
+  isPriceInOrTappingZone,
   MarkedZone,
   RejectedZoneRecord
 } from './zone-engine.js';
@@ -121,9 +122,10 @@ export class GaksBacktestStrategy implements BacktestStrategy {
     (marketStructure as any).timeframe = timeframe;
     marketStructure.latestCandles = allCandles.slice(-10);
 
+    const macroTrendEma = calculateDeterministicEMA(closes, 50);
     const calculatedTrend = marketStructure.trend !== 'SIDEWAYS'
       ? marketStructure.trend
-      : (fastEma && slowEma ? (fastEma > slowEma ? 'BULLISH' : 'BEARISH') : 'SIDEWAYS');
+      : (macroTrendEma ? (current.close > macroTrendEma ? 'BULLISH' : 'BEARISH') : (fastEma && slowEma ? (fastEma > slowEma ? 'BULLISH' : 'BEARISH') : 'SIDEWAYS'));
     marketStructure.trend = calculatedTrend;
     if (!(marketStructure as any).htfTrend && calculatedTrend !== 'SIDEWAYS') {
       (marketStructure as any).htfTrend = calculatedTrend;
@@ -148,6 +150,19 @@ export class GaksBacktestStrategy implements BacktestStrategy {
     const rules = this.compiledStrategy.compiled_rules;
     const hasZoneOrObRule = !!(rules?.order_block || rules?.supply_demand || rules?.unmitigated_zone || rules?.fair_value_gap);
 
+    // Prune rejected zones using historical candle time (4-hour expiration)
+    const currentCandleTime = new Date(current.timestamp).getTime();
+    this.rejectedZones = this.rejectedZones.filter(r => currentCandleTime - r.rejectedAt < 4 * 60 * 60 * 1000);
+
+    // Expire stale untriggered zones that have waited over 48 hours without a tap
+    if (this.activeZone && this.activeZone.status === 'WAITING_FOR_TAP') {
+      const zoneOriginTime = this.activeZone.createdCandleTime || this.activeZone.createdAt;
+      const originMs = zoneOriginTime ? new Date(zoneOriginTime).getTime() : 0;
+      if (originMs > 0 && (currentCandleTime - originMs > 48 * 60 * 60 * 1000)) {
+        this.activeZone = null;
+      }
+    }
+
     // Evaluate existing active zone if one is being tracked
     if (this.activeZone) {
       const zoneEval = evaluateZoneState(
@@ -165,13 +180,13 @@ export class GaksBacktestStrategy implements BacktestStrategy {
           low: this.activeZone.low,
           high: this.activeZone.high,
           direction: this.activeZone.direction,
-          rejectedAt: Date.now(),
+          rejectedAt: currentCandleTime,
           reason: zoneEval.reason || 'Zone invalidated'
         });
         this.activeZone = null;
-      } else if (zoneEval.isTapped || this.activeZone.status === 'ZONE_TAPPED') {
+      } else if (zoneEval.isTapped || this.activeZone.status === 'ZONE_TAPPED' || isPriceInOrTappingZone(this.activeZone, current, current.close)) {
         const rejection = evaluateZoneRejection(this.activeZone, current, current.close, prevCandle);
-        if (rejection.isRejected || zoneEval.isRejected) {
+        if (rejection.isRejected || zoneEval.isRejected || (this.activeZone.direction === 'BUY' && confirmationBullish) || (this.activeZone.direction === 'SELL' && confirmationBearish)) {
           this.activeZone.status = 'CONFIRMED';
         }
       }
@@ -188,7 +203,14 @@ export class GaksBacktestStrategy implements BacktestStrategy {
       );
       if (discoveredZone) {
         this.activeZone = discoveredZone;
-        // Newly discovered zone begins waiting for tap; does not trigger immediate trade on creation bar
+        // Check if current candle already entered/tapped this newly discovered zone
+        if (isPriceInOrTappingZone(this.activeZone, current, current.close)) {
+          this.activeZone.status = 'ZONE_TAPPED';
+          const rejection = evaluateZoneRejection(this.activeZone, current, current.close, prevCandle);
+          if (rejection.isRejected || (this.activeZone.direction === 'BUY' && confirmationBullish) || (this.activeZone.direction === 'SELL' && confirmationBearish)) {
+            this.activeZone.status = 'CONFIRMED';
+          }
+        }
       }
     }
 
@@ -216,6 +238,8 @@ export class GaksBacktestStrategy implements BacktestStrategy {
       zone_status: this.activeZone ? this.activeZone.status : 'NO_ZONE',
       isRejected: this.activeZone ? this.activeZone.status === 'CONFIRMED' : false,
       order_block: Boolean(this.activeZone),
+      supply_demand: Boolean(this.activeZone),
+      unmitigated_zone: Boolean(this.activeZone),
       support_rejection: this.activeZone?.direction === 'BUY' && this.activeZone.status === 'CONFIRMED',
       resistance_rejection: this.activeZone?.direction === 'SELL' && this.activeZone.status === 'CONFIRMED',
       tap_and_rejection: this.activeZone?.status === 'CONFIRMED',
@@ -274,6 +298,27 @@ export class GaksBacktestStrategy implements BacktestStrategy {
         triggerSignal = true;
         direction = (emaCrossoverBearish || hasBearishBos || isBearishEngulfing || isBearishPinbar) ? 'SELL' : 'BUY';
         reason = decision.explanation || `Deterministic Gaks Rule Passed (${decision.matched_rules.join(', ')})`;
+      }
+    }
+
+    // Condition D: High-Confluence SMC Continuation / Structural Breakouts
+    if (!triggerSignal && hasZoneOrObRule && !this.activeZone) {
+      if (hasBullishBos && confirmationBullish && (calculatedTrend === 'BULLISH' || (fastEma && slowEma && fastEma > slowEma))) {
+        triggerSignal = true;
+        direction = 'BUY';
+        reason = 'Bullish Break of Structure (BOS) with trend confirmation';
+      } else if (hasBearishBos && confirmationBearish && (calculatedTrend === 'BEARISH' || (fastEma && slowEma && fastEma < slowEma))) {
+        triggerSignal = true;
+        direction = 'SELL';
+        reason = 'Bearish Break of Structure (BOS) with trend confirmation';
+      } else if (hasBullishChoch && confirmationBullish) {
+        triggerSignal = true;
+        direction = 'BUY';
+        reason = 'Bullish Change of Character (CHOCH) reversal confirmation';
+      } else if (hasBearishChoch && confirmationBearish) {
+        triggerSignal = true;
+        direction = 'SELL';
+        reason = 'Bearish Change of Character (CHOCH) reversal confirmation';
       }
     }
 

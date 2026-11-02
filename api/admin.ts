@@ -15,13 +15,14 @@ import {
   getBacktestDatasetDetails,
   deleteBacktestDataset
 } from '../src/lib/backtest-service.js';
+import { runBacktest, runStressSuite } from '../src/lib/backtest-engine.js';
 import {
   saveBacktestRun,
   getBacktestRun,
   listBacktestRuns,
-  deleteBacktestRun
+  deleteBacktestRun,
+  saveStressSuiteResult
 } from '../src/lib/backtest-persistence-service.js';
-import { runBacktest } from '../src/lib/backtest-engine.js';
 
 export async function sendTelegramMessage(chatId: string | number, text: string): Promise<boolean> {
   const token = process.env.TELEGRAM_BOT_TOKEN;
@@ -656,6 +657,163 @@ async function backtest_dataset_handler(req: any, res: any) {
   }
 }
 
+async function backtest_dataset_validate_handler(req: any, res: any) {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Content-Type", "application/json");
+  if (req.method === "OPTIONS") return res.status(200).end();
+
+  try {
+    const { datasetId } = req.body || {};
+    if (!datasetId) return res.status(400).json({ success: false, error: 'Dataset ID required' });
+
+    const { runValidationForDataset } = await import('../src/lib/backtest-service.js');
+    const userId = req.userId || 'admin';
+    const result = await runValidationForDataset(datasetId, userId);
+
+    return res.status(200).json(result);
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+}
+
+async function backtest_dataset_append_handler(req: any, res: any) {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Content-Type", "application/json");
+  if (req.method === "OPTIONS") return res.status(200).end();
+
+  try {
+    const { datasetId, candles, complete } = req.body || {};
+    if (!datasetId || !candles || !Array.isArray(candles)) {
+      return res.status(400).json({ success: false, error: 'Dataset ID and candles array required' });
+    }
+
+    const supabase = getSupabase();
+
+    // Verify dataset exists and is in processing or validating status
+    const { data: dsData, error: dsErr } = await supabase
+      .from('backtest_datasets')
+      .select('id, status')
+      .eq('id', datasetId)
+      .single();
+
+    if (dsErr || !dsData) {
+      return res.status(404).json({ success: false, error: 'Dataset not found' });
+    }
+
+    // Deduplicate candles in incoming batch
+    const uniqueBatchMap = new Map<string, any>();
+    for (const c of candles) {
+      if (c && c.timestamp && !isNaN(new Date(c.timestamp).getTime())) {
+        uniqueBatchMap.set(c.timestamp, c);
+      }
+    }
+    const dedupedBatch = Array.from(uniqueBatchMap.values());
+
+    if (dedupedBatch.length > 0) {
+      // Upsert into backtest_candles with ignoreDuplicates to prevent duplicate key errors
+      const { error: batchErr } = await supabase.from('backtest_candles').upsert(
+        dedupedBatch.map((c: any) => ({
+          dataset_id: datasetId,
+          timestamp: c.timestamp,
+          open: Number(c.open),
+          high: Number(c.high),
+          low: Number(c.low),
+          close: Number(c.close),
+          volume: c.volume !== undefined && c.volume !== null ? Number(c.volume) : null
+        })),
+        { onConflict: 'dataset_id,timestamp', ignoreDuplicates: true }
+      );
+
+      if (batchErr) {
+        console.warn('[Admin Append] Supabase upsert notice:', batchErr.message);
+      }
+    }
+
+    // Get current total persisted count
+    const { count } = await supabase
+      .from('backtest_candles')
+      .select('*', { count: 'exact', head: true })
+      .eq('dataset_id', datasetId);
+
+    // Get earliest and latest timestamps
+    const { data: firstCandle } = await supabase
+      .from('backtest_candles')
+      .select('timestamp')
+      .eq('dataset_id', datasetId)
+      .order('timestamp', { ascending: true })
+      .limit(1)
+      .maybeSingle();
+
+    const { data: lastCandle } = await supabase
+      .from('backtest_candles')
+      .select('timestamp')
+      .eq('dataset_id', datasetId)
+      .order('timestamp', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    const start_time = firstCandle?.timestamp || null;
+    const end_time = lastCandle?.timestamp || null;
+
+    if (complete) {
+      // Final chunk complete - status locking prevents VALID while processing
+      await supabase.from('backtest_datasets').update({
+        row_count: count || 0,
+        start_time,
+        end_time,
+        status: 'validating'
+      }).eq('id', datasetId);
+
+      const { runValidationForDataset } = await import('../src/lib/backtest-service.js');
+      const valRes = await runValidationForDataset(datasetId, req.userId);
+
+      return res.status(200).json({ success: true, rowCount: count, complete: true, validation: valRes });
+    } else {
+      await supabase.from('backtest_datasets').update({
+        row_count: count || 0,
+        start_time,
+        end_time,
+        status: 'processing'
+      }).eq('id', datasetId);
+
+      return res.status(200).json({ success: true, rowCount: count, complete: false });
+    }
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+}
+
+async function backtest_stress_run_handler(req: any, res: any) {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Content-Type", "application/json");
+  if (req.method === "OPTIONS") return res.status(200).end();
+
+  if (req.method !== 'POST') {
+    return res.status(405).json({ success: false, error: 'Method Not Allowed' });
+  }
+
+  try {
+    const { config, scenarios } = req.body || {};
+    if (!config || !scenarios || !Array.isArray(scenarios)) {
+      return res.status(400).json({ success: false, error: 'Config and scenarios array are required' });
+    }
+
+    const result = await runStressSuite(config, scenarios);
+
+    const saveRes = await saveStressSuiteResult({
+      result
+    });
+
+    return res.status(200).json({
+      ...result,
+      suiteId: saveRes.suiteId
+    });
+  } catch (err: any) {
+    console.error('[Admin Backtest Stress Run Error]:', err);
+    return res.status(500).json({ success: false, error: err.message || 'Stress test execution failed' });
+  }
+}
+
 async function backtest_run_handler(req: any, res: any) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Content-Type", "application/json");
@@ -751,6 +909,88 @@ async function backtest_runs_handler(req: any, res: any) {
   }
 }
 
+async function backtest_validation_run_handler(req: any, res: any) {
+  if (req.method !== 'POST') return res.status(405).json({ success: false, error: 'Method Not Allowed' });
+  try {
+    const { datasetId, name, config } = req.body || {};
+    if (!datasetId) return res.status(400).json({ success: false, error: 'datasetId is required' });
+
+    const { getBacktestDatasetCandles, getBacktestDatasetDetails } = await import('../src/lib/backtest-service.js');
+    const { runScientificValidation } = await import('../src/lib/backtest-scientific-engine.js');
+    const { saveScientificExperiment } = await import('../src/lib/backtest-scientific-persistence.js');
+
+    const userId = req.userId || 'admin';
+    const datasetDetails = await getBacktestDatasetDetails(datasetId, userId);
+    if (!datasetDetails.success || !datasetDetails.dataset) {
+      return res.status(404).json({ success: false, error: 'Dataset not found' });
+    }
+
+    const candles = await getBacktestDatasetCandles(datasetId, userId);
+    if (!candles || candles.length === 0) {
+      return res.status(400).json({ success: false, error: 'Dataset has zero candles' });
+    }
+
+    const fullConfig = {
+      datasetId,
+      symbol: datasetDetails.dataset.symbol,
+      timeframe: datasetDetails.dataset.timeframe,
+      initialBalance: config?.initialBalance || 100000,
+      accountType: config?.accountType || 'personal',
+      strategyId: 'gaks-default',
+      ...config
+    };
+
+    const experiment = await runScientificValidation({
+      name: name || `Scientific Validation (${datasetDetails.dataset.symbol} ${datasetDetails.dataset.timeframe})`,
+      config: fullConfig,
+      candles
+    });
+
+    await saveScientificExperiment(experiment, userId);
+    return res.status(200).json({ success: true, experiment });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+}
+
+async function backtest_validation_list_handler(req: any, res: any) {
+  try {
+    const { listScientificExperiments } = await import('../src/lib/backtest-scientific-persistence.js');
+    const experiments = await listScientificExperiments();
+    return res.status(200).json({ success: true, experiments });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+}
+
+async function backtest_validation_get_handler(req: any, res: any) {
+  try {
+    const id = req.query?.id || req.body?.id;
+    if (!id) return res.status(400).json({ success: false, error: 'id query or body parameter is required' });
+
+    const { getScientificExperiment } = await import('../src/lib/backtest-scientific-persistence.js');
+    const experiment = await getScientificExperiment(String(id));
+    if (!experiment) return res.status(404).json({ success: false, error: 'Experiment not found' });
+
+    return res.status(200).json({ success: true, experiment });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+}
+
+async function backtest_validation_delete_handler(req: any, res: any) {
+  try {
+    const id = req.query?.id || req.body?.id;
+    if (!id) return res.status(400).json({ success: false, error: 'id parameter is required' });
+
+    const { deleteScientificExperiment } = await import('../src/lib/backtest-scientific-persistence.js');
+    await deleteScientificExperiment(String(id));
+    return res.status(200).json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+}
+
 export default async function handler(req: any, res: any) {
   // CORS configuration
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -780,10 +1020,20 @@ export default async function handler(req: any, res: any) {
     const parsedUrl = new URL(matchedPath, 'http://localhost');
     const pathname = parsedUrl.pathname || '';
 
+    // Stage E Validation Routes
+    if (pathname.endsWith('/backtest/validation/run')) return backtest_validation_run_handler(req, res);
+    if (pathname.endsWith('/backtest/validation/list')) return backtest_validation_list_handler(req, res);
+    if (pathname.endsWith('/backtest/validation/get')) return backtest_validation_get_handler(req, res);
+    if (pathname.endsWith('/backtest/validation/delete')) return backtest_validation_delete_handler(req, res);
+
     // Precise route matching to avoid overlap between /run and /runs
+    if (pathname.endsWith('/backtest/datasets/validate')) return backtest_dataset_validate_handler(req, res);
+    if (pathname.endsWith('/backtest/datasets/append')) return backtest_dataset_append_handler(req, res);
+    if (pathname.endsWith('/backtest/stress')) return backtest_stress_run_handler(req, res);
     if (pathname.endsWith('/backtest/runs')) return backtest_runs_handler(req, res);
     if (pathname.endsWith('/backtest/run')) return backtest_run_handler(req, res);
     if (pathname.endsWith('/backtest/datasets')) return backtest_dataset_handler(req, res);
+
     if (pathname.endsWith('/sync-economic-events')) return sync_economic_events_handler(req, res);
     if (pathname.endsWith('/logs')) return logs_handler(req, res);
     if (pathname.endsWith('/system-health')) return system_health_handler(req, res);

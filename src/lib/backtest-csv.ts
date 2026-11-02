@@ -288,7 +288,15 @@ export function parseAndValidateCSV(csvText: string): CSVParseResult {
 
     // Deduplicate duplicate timestamps from DST transitions / broker overlaps
     if (timestampSet.has(timestamp)) {
-      continue;
+      return {
+        success: false,
+        candles: [],
+        rowCount: 0,
+        startTime: null,
+        endTime: null,
+        covers2025: false,
+        error: `Duplicate timestamp detected at row ${rowNum}: ${timestamp}`
+      };
     }
     timestampSet.add(timestamp);
 
