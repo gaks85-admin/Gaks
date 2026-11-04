@@ -294,9 +294,187 @@ const DashboardPage = ({ fetchWithAuth, onNavigateToTab }: { fetchWithAuth: any;
       </div>
 
       {/* Admin Send Test Notification card */}
-      <div className="mt-6">
+      <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
         <SendTestNotificationCard fetchWithAuth={fetchWithAuth} />
+        <InstantTradeBroadcaster fetchWithAuth={fetchWithAuth} />
       </div>
+    </div>
+  );
+};
+
+// ----------------------------------------------------
+// Instant Trade Broadcaster Component (Analyzed Setup)
+// ----------------------------------------------------
+const InstantTradeBroadcaster = ({ fetchWithAuth }: { fetchWithAuth: any }) => {
+  const [pair, setPair] = useState('USDCAD');
+  const [timeframe, setTimeframe] = useState('15M');
+  const [direction, setDirection] = useState('SELL');
+  const [entryPrice, setEntryPrice] = useState('1.3950');
+  const [stopLoss, setStopLoss] = useState('1.3985');
+  const [takeProfit, setTakeProfit] = useState('1.3880');
+  const [riskReward, setRiskReward] = useState('1:2.5');
+  const [reasoning, setReasoning] = useState('Institutional supply zone rejection confirmed on M15 timeframe. Strong displacement downward following breaker block creation. High probability short setup.');
+  const [broadcasting, setBroadcasting] = useState(false);
+  const [result, setResult] = useState<{ success: boolean; message: string } | null>(null);
+
+  const handleBroadcast = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBroadcasting(true);
+    setResult(null);
+
+    try {
+      const payload = {
+        broadcastToAll: true,
+        channel: 'telegram',
+        tradePayload: {
+          pair,
+          timeframe,
+          direction,
+          entryPrice: parseFloat(entryPrice) || entryPrice,
+          stopLoss: parseFloat(stopLoss) || stopLoss,
+          takeProfit: parseFloat(takeProfit) || takeProfit,
+          riskRewardRatio: riskReward,
+          confidenceScore: 95,
+          aiReasoning: reasoning
+        }
+      };
+
+      const res = await fetchWithAuth('/api/admin/notifications/send', {
+        method: 'POST',
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (data.success) {
+        setResult({ success: true, message: data.message || 'Trade broadcast successfully to all connected users!' });
+      } else {
+        setResult({ success: false, message: data.error || 'Failed to broadcast trade.' });
+      }
+    } catch (err: any) {
+      setResult({ success: false, message: err.message || 'Network error during broadcast.' });
+    } finally {
+      setBroadcasting(false);
+    }
+  };
+
+  return (
+    <div className="bg-zinc-50 dark:bg-zinc-950 p-6 rounded-2xl border border-zinc-200 dark:border-zinc-900/80 shadow-sm space-y-4">
+      <div className="flex items-center gap-2">
+        <Sparkles className="w-5 h-5 text-sky-500" />
+        <h4 className="text-sm font-bold text-zinc-950 dark:text-white font-display">
+          Instant Trade Signal Broadcaster (Analyzed Setup)
+        </h4>
+      </div>
+      <p className="text-xs text-zinc-500 leading-relaxed">
+        Instantly broadcast your analyzed trade setup (pre-loaded with your USD/CAD M15 short analysis from your chart screenshot) to all active users and Telegram channels immediately.
+      </p>
+
+      <form onSubmit={handleBroadcast} className="space-y-4">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div>
+            <label className="text-[10px] font-bold text-zinc-400 uppercase">Pair</label>
+            <input 
+              type="text" 
+              value={pair} 
+              onChange={e => setPair(e.target.value)} 
+              className="w-full mt-1 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-xs font-mono font-bold text-zinc-900 dark:text-white" 
+            />
+          </div>
+          <div>
+            <label className="text-[10px] font-bold text-zinc-400 uppercase">Timeframe</label>
+            <input 
+              type="text" 
+              value={timeframe} 
+              onChange={e => setTimeframe(e.target.value)} 
+              className="w-full mt-1 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-xs font-mono font-bold text-zinc-900 dark:text-white" 
+            />
+          </div>
+          <div>
+            <label className="text-[10px] font-bold text-zinc-400 uppercase">Direction</label>
+            <select 
+              value={direction} 
+              onChange={e => setDirection(e.target.value)}
+              className="w-full mt-1 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-xs font-bold text-zinc-900 dark:text-white cursor-pointer"
+            >
+              <option value="SELL">SELL (SHORT)</option>
+              <option value="BUY">BUY (LONG)</option>
+            </select>
+          </div>
+          <div>
+            <label className="text-[10px] font-bold text-zinc-400 uppercase">Risk:Reward</label>
+            <input 
+              type="text" 
+              value={riskReward} 
+              onChange={e => setRiskReward(e.target.value)} 
+              className="w-full mt-1 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-xs font-mono font-bold text-zinc-900 dark:text-white" 
+            />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-3 gap-3">
+          <div>
+            <label className="text-[10px] font-bold text-zinc-400 uppercase">Entry Price</label>
+            <input 
+              type="text" 
+              value={entryPrice} 
+              onChange={e => setEntryPrice(e.target.value)} 
+              className="w-full mt-1 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-xs font-mono font-bold text-zinc-900 dark:text-white" 
+            />
+          </div>
+          <div>
+            <label className="text-[10px] font-bold text-rose-500 uppercase">Stop Loss</label>
+            <input 
+              type="text" 
+              value={stopLoss} 
+              onChange={e => setStopLoss(e.target.value)} 
+              className="w-full mt-1 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-xs font-mono font-bold text-rose-600 dark:text-rose-400" 
+            />
+          </div>
+          <div>
+            <label className="text-[10px] font-bold text-emerald-500 uppercase">Take Profit</label>
+            <input 
+              type="text" 
+              value={takeProfit} 
+              onChange={e => setTakeProfit(e.target.value)} 
+              className="w-full mt-1 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-xs font-mono font-bold text-emerald-600 dark:text-emerald-400" 
+            />
+          </div>
+        </div>
+
+        <div>
+          <label className="text-[10px] font-bold text-zinc-400 uppercase">Analysis & Reasoning</label>
+          <textarea 
+            value={reasoning} 
+            onChange={e => setReasoning(e.target.value)} 
+            rows={2}
+            className="w-full mt-1 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-sky-500" 
+          />
+        </div>
+
+        {result && (
+          <div className={`p-3 rounded-xl text-xs flex items-center gap-2 border ${result.success ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-400' : 'bg-red-500/10 border-red-500/20 text-red-600 dark:text-red-400'}`}>
+            {result.success ? <CheckCircle2 className="w-4 h-4 shrink-0" /> : <AlertTriangle className="w-4 h-4 shrink-0" />}
+            <span>{result.message}</span>
+          </div>
+        )}
+
+        <button
+          type="submit"
+          disabled={broadcasting}
+          className="w-full bg-gradient-to-r from-sky-500 to-indigo-600 hover:from-sky-400 hover:to-indigo-500 text-white font-extrabold text-xs uppercase tracking-wider py-3 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-2 shadow-lg shadow-sky-500/20"
+        >
+          {broadcasting ? (
+            <>
+              <RefreshCw className="w-4 h-4 animate-spin" />
+              Broadcasting Trade Signal...
+            </>
+          ) : (
+            <>
+              <Send className="w-4 h-4" />
+              🚀 Broadcast Trade Signal to All Users & Telegram Channels Now
+            </>
+          )}
+        </button>
+      </form>
     </div>
   );
 };

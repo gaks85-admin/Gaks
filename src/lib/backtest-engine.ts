@@ -304,3 +304,33 @@ function createFailedResult(config: Partial<BacktestConfig>, error: string): Bac
     error
   };
 }
+
+export async function runStressSuite(config: BacktestConfig, scenarios: any[]): Promise<any> {
+  const scenarioResults = [];
+  for (const scenario of scenarios) {
+    const modifiedConfig = {
+      ...config,
+      simulation: {
+        ...(config.simulation || {}),
+        ...(scenario.simulationOverrides || {})
+      }
+    };
+    const res = await runBacktest(modifiedConfig);
+    scenarioResults.push({
+      scenarioId: scenario.id || 'scenario',
+      scenarioName: scenario.name || 'Scenario',
+      success: res.success,
+      totalNetPnL: res.totalNetPnL,
+      tradesCompleted: res.tradesCompleted,
+      winRate: res.analytics?.winRate || 0,
+      maxDrawdownPercent: res.analytics?.maxDrawdownPercent || 0,
+      error: res.error
+    });
+  }
+  return {
+    success: true,
+    baseDatasetId: config.datasetId,
+    scenariosTested: scenarioResults.length,
+    results: scenarioResults
+  };
+}

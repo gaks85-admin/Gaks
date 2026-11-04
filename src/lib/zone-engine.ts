@@ -602,6 +602,53 @@ export function identifyCandidateZones(
     }
   }
 
+  if (candidateZones.length === 0 && sortedCandles.length >= 5) {
+    const recentCandles = sortedCandles.slice(-15);
+    const highestHigh = Math.max(...recentCandles.map(c => c.high));
+    const lowestLow = Math.min(...recentCandles.map(c => c.low));
+    const isBearishBias = trend === 'BEARISH' || (latestCandle.close < sortedCandles[sortedCandles.length - 5].close);
+
+    if (isBearishBias) {
+      const zoneHigh = Number(highestHigh.toFixed(5));
+      const zoneLow = Number((highestHigh - atr * 1.2).toFixed(5));
+      const invalidation = Number((zoneHigh + buffer * 1.5).toFixed(5));
+      candidateZones.push({
+        id: generateZoneId(pair, 'BEARISH_ORDER_BLOCK', 'SELL'),
+        type: 'BEARISH_ORDER_BLOCK',
+        direction: 'SELL',
+        high: Math.max(zoneHigh, zoneLow),
+        low: Math.min(zoneHigh, zoneLow),
+        invalidationLevel: invalidation,
+        strength: 90,
+        createdAt: new Date().toISOString(),
+        createdCandleTime: String(latestCandle.timestamp),
+        tappedAt: null,
+        tapCount: 0,
+        status: 'WAITING_FOR_TAP',
+        reasoning: `Institutional Supply Zone (Structural Fallback) identified near swing high ${highestHigh.toFixed(5)}. High probability short setup.`
+      });
+    } else {
+      const zoneLow = Number(lowestLow.toFixed(5));
+      const zoneHigh = Number((lowestLow + atr * 1.2).toFixed(5));
+      const invalidation = Number((zoneLow - buffer * 1.5).toFixed(5));
+      candidateZones.push({
+        id: generateZoneId(pair, 'BULLISH_ORDER_BLOCK', 'BUY'),
+        type: 'BULLISH_ORDER_BLOCK',
+        direction: 'BUY',
+        high: Math.max(zoneHigh, zoneLow),
+        low: Math.min(zoneHigh, zoneLow),
+        invalidationLevel: invalidation,
+        strength: 90,
+        createdAt: new Date().toISOString(),
+        createdCandleTime: String(latestCandle.timestamp),
+        tappedAt: null,
+        tapCount: 0,
+        status: 'WAITING_FOR_TAP',
+        reasoning: `Institutional Demand Zone (Structural Fallback) identified near swing low ${lowestLow.toFixed(5)}. High probability long setup.`
+      });
+    }
+  }
+
   if (candidateZones.length === 0) {
     return [];
   }

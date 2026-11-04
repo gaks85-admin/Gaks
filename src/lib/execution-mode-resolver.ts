@@ -67,14 +67,15 @@ export async function getGlobalExecutionSettings(supabaseClient?: any): Promise<
       if (fs.existsSync(settingsFile)) {
         const data = fs.readFileSync(settingsFile, 'utf-8');
         const parsed = JSON.parse(data);
-      if (parsed) {
-        return {
-          executionMode: normalizeExecutionMode(parsed.executionMode),
-          defaultGeminiModel: parsed.defaultGeminiModel || settings.defaultGeminiModel,
-          defaultStrategy: parsed.defaultStrategy || settings.defaultStrategy,
-          scanInterval: Number(parsed.scanInterval) || settings.scanInterval,
-          maintenanceMode: Boolean(parsed.maintenanceMode)
-        };
+        if (parsed) {
+          return {
+            executionMode: normalizeExecutionMode(parsed.executionMode),
+            defaultGeminiModel: parsed.defaultGeminiModel || settings.defaultGeminiModel,
+            defaultStrategy: parsed.defaultStrategy || settings.defaultStrategy,
+            scanInterval: Number(parsed.scanInterval) || settings.scanInterval,
+            maintenanceMode: Boolean(parsed.maintenanceMode)
+          };
+        }
       }
     }
   } catch (err) {
