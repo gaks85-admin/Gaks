@@ -71,7 +71,7 @@ import { getGlobalExecutionSettings, ExecutionMode } from '../../src/lib/executi
 
 // TEMPORARY MODE FLAG: Force Market Watcher into RULE_ONLY mode for diagnostic testing.
 // To restore original behavior, set this to null.
-const MARKET_WATCHER_DECISION_MODE_OVERRIDE: ExecutionMode | null = 'RULE_ONLY';
+const MARKET_WATCHER_DECISION_MODE_OVERRIDE: ExecutionMode | null = null;
 
 // In-memory runtime cache for marked zones to guarantee persistence across cron scans
 // even if the Supabase watchers table is temporarily missing the zone columns.

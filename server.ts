@@ -3,12 +3,12 @@ import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-import adminHandler from './api/admin.js';
-import watcherHandler from './api/watcher.js';
-import liveRatesHandler from './api/live-rates.js';
-import performanceSnapshotHandler from './api/performance/snapshot.js';
-import strategySummaryHandler from './api/strategy/summary.js';
-import telegramWebhookHandler from './api/telegram/webhook.js';
+import adminHandler from './api/admin.ts';
+import watcherHandler from './api/watcher.ts';
+import liveRatesHandler from './api/live-rates.ts';
+import performanceSnapshotHandler from './api/performance/snapshot.ts';
+import strategySummaryHandler from './api/strategy/summary.ts';
+import telegramWebhookHandler from './api/telegram/webhook.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -41,7 +41,7 @@ async function startServer() {
   app.all('/api/live-rates*', (req, res) => liveRatesHandler(req as any, res as any));
   app.all('/api/cron/market-watcher*', async (req, res) => {
     try {
-      const { default: cronHandler } = await import('./api/cron/market-watcher.js');
+      const { default: cronHandler } = await import('./api/cron/market-watcher.ts');
       return cronHandler(req as any, res as any);
     } catch (err: any) {
       return res.status(500).json({ success: false, error: err.message });
