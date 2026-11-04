@@ -16,12 +16,16 @@ export type ZoneType =
   | 'KEY_LEVEL';
 
 export type ZoneStatus =
+  | 'ACTIVE'
   | 'NO_ZONE'
   | 'WAITING_FOR_TAP'
   | 'ZONE_TAPPED'
   | 'CONFIRMED'
+  | 'MITIGATED'
+  | 'EXPIRED_WITHOUT_ENTRY'
   | 'INVALIDATED'
-  | 'EXPIRED';
+  | 'EXPIRED'
+  | 'ARCHIVED';
 
 export interface MarkedZone {
   id: string;
@@ -173,7 +177,7 @@ export function identifyCandidateZones(
   currentPrice?: number,
   rejectedZones?: RejectedZoneRecord[]
 ): MarkedZone[] {
-  if (!candles || candles.length < 5) return [];
+  if (!candles || candles.length < 2) return [];
 
   const sortedCandles = [...candles].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
   const latestCandle = sortedCandles[sortedCandles.length - 1];
@@ -602,53 +606,6 @@ export function identifyCandidateZones(
     }
   }
 
-  if (candidateZones.length === 0 && sortedCandles.length >= 5) {
-    const recentCandles = sortedCandles.slice(-15);
-    const highestHigh = Math.max(...recentCandles.map(c => c.high));
-    const lowestLow = Math.min(...recentCandles.map(c => c.low));
-    const isBearishBias = trend === 'BEARISH' || (latestCandle.close < sortedCandles[sortedCandles.length - 5].close);
-
-    if (isBearishBias) {
-      const zoneHigh = Number(highestHigh.toFixed(5));
-      const zoneLow = Number((highestHigh - atr * 1.2).toFixed(5));
-      const invalidation = Number((zoneHigh + buffer * 1.5).toFixed(5));
-      candidateZones.push({
-        id: generateZoneId(pair, 'BEARISH_ORDER_BLOCK', 'SELL'),
-        type: 'BEARISH_ORDER_BLOCK',
-        direction: 'SELL',
-        high: Math.max(zoneHigh, zoneLow),
-        low: Math.min(zoneHigh, zoneLow),
-        invalidationLevel: invalidation,
-        strength: 90,
-        createdAt: new Date().toISOString(),
-        createdCandleTime: String(latestCandle.timestamp),
-        tappedAt: null,
-        tapCount: 0,
-        status: 'WAITING_FOR_TAP',
-        reasoning: `Institutional Supply Zone (Structural Fallback) identified near swing high ${highestHigh.toFixed(5)}. High probability short setup.`
-      });
-    } else {
-      const zoneLow = Number(lowestLow.toFixed(5));
-      const zoneHigh = Number((lowestLow + atr * 1.2).toFixed(5));
-      const invalidation = Number((zoneLow - buffer * 1.5).toFixed(5));
-      candidateZones.push({
-        id: generateZoneId(pair, 'BULLISH_ORDER_BLOCK', 'BUY'),
-        type: 'BULLISH_ORDER_BLOCK',
-        direction: 'BUY',
-        high: Math.max(zoneHigh, zoneLow),
-        low: Math.min(zoneHigh, zoneLow),
-        invalidationLevel: invalidation,
-        strength: 90,
-        createdAt: new Date().toISOString(),
-        createdCandleTime: String(latestCandle.timestamp),
-        tappedAt: null,
-        tapCount: 0,
-        status: 'WAITING_FOR_TAP',
-        reasoning: `Institutional Demand Zone (Structural Fallback) identified near swing low ${lowestLow.toFixed(5)}. High probability long setup.`
-      });
-    }
-  }
-
   if (candidateZones.length === 0) {
     return [];
   }
@@ -672,21 +629,9 @@ export function identifyCandidateZones(
     }
 
     if (htfTrend === 'BULLISH') {
-      const buyCandidates = candidateZones.filter(z => z.direction === 'BUY');
-      if (buyCandidates.length > 0) {
-        filteredCandidates = buyCandidates;
-      } else {
-        console.log(`[HTF TREND FILTER] ${pair}: ${htfTimeframe} Trend is BULLISH. Filtered out ${candidateZones.length} counter-trend SELL zones. Waiting for fresh BUY/Demand zone aligned with HTF trend.`);
-        return [];
-      }
+      filteredCandidates = candidateZones.filter(z => z.direction === 'BUY');
     } else if (htfTrend === 'BEARISH') {
-      const sellCandidates = candidateZones.filter(z => z.direction === 'SELL');
-      if (sellCandidates.length > 0) {
-        filteredCandidates = sellCandidates;
-      } else {
-        console.log(`[HTF TREND FILTER] ${pair}: ${htfTimeframe} Trend is BEARISH. Filtered out ${candidateZones.length} counter-trend BUY zones. Waiting for fresh SELL/Supply zone aligned with HTF trend.`);
-        return [];
-      }
+      filteredCandidates = candidateZones.filter(z => z.direction === 'SELL');
     }
   } else {
     // If followHtfTrend is explicitly false or htfTrend is not provided, fall back to current timeframe structural trend
@@ -695,12 +640,14 @@ export function identifyCandidateZones(
       return [];
     }
     if (trend === 'BEARISH') {
-      const sellCandidates = candidateZones.filter(z => z.direction === 'SELL');
-      if (sellCandidates.length > 0) filteredCandidates = sellCandidates;
+      filteredCandidates = candidateZones.filter(z => z.direction === 'SELL');
     } else if (trend === 'BULLISH') {
-      const buyCandidates = candidateZones.filter(z => z.direction === 'BUY');
-      if (buyCandidates.length > 0) filteredCandidates = buyCandidates;
+      filteredCandidates = candidateZones.filter(z => z.direction === 'BUY');
     }
+  }
+
+  if (filteredCandidates.length === 0) {
+    return [];
   }
 
   // Filter out any candidate zones that were previously rejected by quality control features
@@ -1314,12 +1261,12 @@ export function evaluateZoneState(
   // has been detected moving away in target direction without retracing.
   const displacementCheck = detectLargeDisplacementAway(zone, candles, latestCandle, effectiveAtr, currentPrice);
   if (displacementCheck.hasDisplaced) {
-    updatedZone.status = 'EXPIRED';
+    updatedZone.status = 'EXPIRED_WITHOUT_ENTRY';
     return {
-      status: 'EXPIRED',
+      status: 'EXPIRED_WITHOUT_ENTRY',
       isTapped: false,
-      isInvalidated: true, // Clears zone because large displacement proved market departed
-      reason: displacementCheck.reason || `Zone expired: Large candle displacement detected departing without retrace.`,
+      isInvalidated: false,
+      reason: displacementCheck.reason || `Zone expired without entry: Large candle displacement detected departing without retrace.`,
       updatedZone
     };
   }

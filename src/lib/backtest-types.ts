@@ -18,6 +18,7 @@ export interface HistoricalEconomicEvent {
 }
 
 export interface HistoricalRestrictionsSummary {
+  violationsCount?: number;
   enabledGates: {
     marketHours: boolean;
     sessionFilter: boolean;
@@ -215,6 +216,10 @@ export interface BacktestAnalyticsResult {
   grossProfit: number;
   grossLoss: number;
   profitFactor: number | null;
+  totalSpreadCost?: number;
+  totalSlippageCost?: number;
+  totalCommissionCost?: number;
+  totalSwapCost?: number;
 
   // Averages & Expectancy
   averageTrade: number | null;

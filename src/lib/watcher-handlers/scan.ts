@@ -27,6 +27,7 @@ import { buildTelegramTradeOutcomeMessage } from "../telegram-formatter.js";
 import { diagnoseLossOutcome, LossPostMortem } from "../trade-post-mortem-engine.js";
 import { 
   identifyMarkedZone, 
+  identifyCandidateZones,
   evaluateZoneState, 
   isPriceInOrTappingZone, 
   MarkedZone,
@@ -40,7 +41,7 @@ import { evaluateEconomicNewsGate } from "../economic-news-gate.js";
 
 // TEMPORARY MODE FLAG: Force Market Watcher into RULE_ONLY mode for diagnostic testing.
 // To restore original behavior, set this to null.
-const MARKET_WATCHER_DECISION_MODE_OVERRIDE: 'RULE_ONLY' | 'HYBRID' | 'AI_ONLY' | null = 'RULE_ONLY';
+const MARKET_WATCHER_DECISION_MODE_OVERRIDE: 'RULE_ONLY' | 'HYBRID' | 'AI_ONLY' | null = null;
 
 
 /**
@@ -760,8 +761,8 @@ export default async function handler(req: any, res: any) {
     if (currentZone && currentZone.status !== 'INVALIDATED' && currentZone.status !== 'CONFIRMED') {
       const zoneEval = evaluateZoneState(currentZone, latestClosedCandle, activeCurrentPrice, marketStructure.volatilityInformation?.atr, candleData, marketStructure);
 
-      if (zoneEval.isInvalidated) {
-        console.log(`[ZONE INVALIDATED] Manual Scan - Watcher ${watcher.id} (${symbol}): Zone [${currentZone.low} - ${currentZone.high}] invalidated: ${zoneEval.reason}`);
+      if (zoneEval.isInvalidated || zoneEval.status === 'EXPIRED_WITHOUT_ENTRY' || zoneEval.status === 'EXPIRED') {
+        console.log(`[ZONE CLEARED/EXPIRED] Manual Scan - Watcher ${watcher.id} (${symbol}): Zone [${currentZone.low} - ${currentZone.high}] (${currentZone.type}) state transition: ${zoneEval.status} - ${zoneEval.reason}`);
         await supabase.from("watchers").update({
           zone_data: null,
           zone_status: 'NO_ZONE',
@@ -1661,7 +1662,7 @@ ${analysis.stopLossBasis === 'ATR_FALLBACK' ? `ATR: ${marketStructure.volatility
     }
 
     // === PROP FIRM V1 — PHASE 3: LIVE PROP FIRM RULE ENGINE GATE ===
-    let propFirmGateOutcome: WatcherPropFirmGateOutcome | null = null;
+    let propFirmGateOutcome: WatcherPropFirmGateResult | null = null;
     if (analysis.signal === 'BUY' || analysis.signal === 'SELL') {
       const proposedTradeRisk =
         typeof posSizeResult?.expectedLoss === 'number' &&
@@ -1810,15 +1811,12 @@ ${analysis.stopLossBasis === 'ATR_FALLBACK' ? `ATR: ${marketStructure.volatility
 
     const decisionSnapshot: Record<string, any> = {
       attribution,
-      ...(propFirmGateOutcome?.evaluated
+      ...(propFirmGateOutcome
         ? {
             propFirmEvaluation: {
-              accountType: propFirmGateOutcome.accountType,
               allowed: propFirmGateOutcome.allowed,
               blockReason: propFirmGateOutcome.blockReason,
-              firmName: propFirmGateOutcome.firmName,
-              accountPhase: propFirmGateOutcome.accountPhase,
-              resetBoundaryUtc: propFirmGateOutcome.resetBoundaryUtc,
+              details: propFirmGateOutcome.details,
               checks: propFirmGateOutcome.decision?.checks || []
             }
           }

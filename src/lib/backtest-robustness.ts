@@ -25,6 +25,7 @@ export interface RobustnessReport {
   isFragile: boolean; // True if fails at 1.5x cost multiplier
   status: 'PASS' | 'FAIL' | 'INSUFFICIENT_TRADES';
   isPassed: boolean;
+  passed?: boolean;
   timestamp: string;
 }
 

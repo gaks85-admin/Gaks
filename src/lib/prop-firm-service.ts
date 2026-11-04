@@ -106,3 +106,25 @@ export function computePropFirmResetBoundaryUtc(now = new Date()): Date {
 export function calculateSingleOpenWatcherRisk(watchers: any[]): number {
   return (watchers || []).reduce((sum, w) => sum + (Number(w.risk_amount) || 0), 0);
 }
+
+export function calculateSingleOpenWatcherFloatingPnl(watcher: any, quote: { bid: number; ask: number }): { success: boolean; pnl: number } {
+  if (!watcher || !quote) return { success: false, pnl: 0 };
+  const entryPrice = Number(watcher.entry_price);
+  const lotSize = Number(watcher.lot_size);
+  const exitPrice = watcher.direction === 'BUY' ? quote.bid : quote.ask;
+  const pnl = (exitPrice - entryPrice) * lotSize * (watcher.direction === 'BUY' ? 100000 : -100000);
+  return { success: true, pnl };
+}
+
+export async function computeAggregateOpenTradesFloatingPnl(watchers: any[], marketPrices: { marketPricesBySymbol: Record<string, number> }): Promise<{ success: boolean; pnl: number }> {
+  let totalPnl = 0;
+  for (const w of watchers) {
+    const price = marketPrices.marketPricesBySymbol[w.selected_pair];
+    if (!price) return { success: false, pnl: 0 };
+    const res = calculateSingleOpenWatcherFloatingPnl(w, { bid: price, ask: price });
+    if (!res.success) return { success: false, pnl: 0 };
+    totalPnl += res.pnl;
+  }
+  return { success: true, pnl: totalPnl };
+}
+

@@ -289,8 +289,9 @@ export function compileStrategy(strategyText: string): CompilerOutput {
         }
         return true;
       });
-      const isMand = phrasesToCheck.some(p => isMandatory(strategyText, p));
       const isOpt = phrasesToCheck.some(p => isOptional(strategyText, p));
+      const isPoiRule = ['order_block', 'supply_demand', 'unmitigated_zone', 'fair_value_gap'].includes(item.id);
+      const isMand = phrasesToCheck.some(p => isMandatory(strategyText, p)) || (isPoiRule && !isOpt);
 
       if (isMand) {
         canonicalRuleDefs.push({

@@ -83,7 +83,7 @@ export function runPropFirmTestSuite(): { passed: boolean; results: { name: stri
     };
 
     const saveRes = await savePropFirmSettings(mockSupabase, userId, testSettings);
-    assert(saveRes.success, 'Save must succeed');
+    assert(!saveRes.error, 'Save must succeed');
 
     const loaded = await getPropFirmSettings(mockSupabase, userId);
     assert(loaded !== null, 'Loaded settings must not be null');

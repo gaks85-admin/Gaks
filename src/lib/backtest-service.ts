@@ -392,7 +392,7 @@ function createFallbackDataset(
 /**
  * Lists all historical backtest datasets.
  */
-export async function listBacktestDatasets(): Promise<BacktestDatasetRecord[]> {
+export async function listBacktestDatasets(userId?: string): Promise<BacktestDatasetRecord[]> {
   const supabase = getSupabase();
   const fallback = readFallbackDatasets();
   try {
@@ -422,7 +422,7 @@ export async function listBacktestDatasets(): Promise<BacktestDatasetRecord[]> {
 /**
  * Gets details and candle sample preview for a dataset.
  */
-export async function getBacktestDatasetDetails(id: string): Promise<{
+export async function getBacktestDatasetDetails(id: string, userId?: string): Promise<{
   success: boolean;
   dataset?: BacktestDatasetRecord;
   sampleCandles?: ParsedCandle[];
@@ -525,7 +525,7 @@ export async function getBacktestDatasetCandles(id: string): Promise<ParsedCandl
     return readFallbackCandles(id);
   }
 }
-export async function deleteBacktestDataset(id: string): Promise<{ success: boolean; error?: string }> {
+export async function deleteBacktestDataset(id: string, userId?: string): Promise<{ success: boolean; error?: string }> {
   const supabase = getSupabase();
   try {
     deleteFallbackDataset(id);

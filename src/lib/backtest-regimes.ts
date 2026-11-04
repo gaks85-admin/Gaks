@@ -43,6 +43,8 @@ export interface MarketRegimeReport {
   minSampleThreshold: number;
   isPassed: boolean;
   timestamp: string;
+  regimes?: RegimeMetrics[];
+  isInconclusive?: boolean;
 }
 
 /**

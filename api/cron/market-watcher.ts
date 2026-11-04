@@ -2145,8 +2145,8 @@ Reason: ${activeValidation.reason}`);
           const zoneEval = evaluateZoneState(currentZone, latestClosedCandle, activeCurrentPrice, marketStructure.volatilityInformation?.atr, candleData, marketStructure);
           lastZoneEval = zoneEval;
 
-          if (zoneEval.isInvalidated) {
-            console.log(`[ZONE INVALIDATED] Watcher ID: ${watcher.id} (${selectedPair}) marked zone [${currentZone.low} - ${currentZone.high}] (${currentZone.type}) invalidated: ${zoneEval.reason}. Clearing zone.`);
+          if (zoneEval.isInvalidated || zoneEval.status === 'EXPIRED_WITHOUT_ENTRY' || zoneEval.status === 'EXPIRED') {
+            console.log(`[ZONE CLEARED/EXPIRED] Watcher ID: ${watcher.id} (${selectedPair}) marked zone [${currentZone.low} - ${currentZone.high}] (${currentZone.type}) transition: ${zoneEval.status} - ${zoneEval.reason}. Clearing zone.`);
             logWatcherEvent('ZONE INVALIDATED', logCtx, {
               'Zone Type': currentZone.type,
               'Zone High': currentZone.high,
