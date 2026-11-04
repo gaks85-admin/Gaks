@@ -47,6 +47,19 @@ export interface MarkedZone {
   htfTrend?: 'BULLISH' | 'BEARISH' | 'SIDEWAYS';
   htfTimeframe?: string;
   htfReason?: string;
+  displacementOrigin?: DisplacementOrigin;
+}
+
+export interface DisplacementOrigin {
+  timestamp: string;
+  direction: 'BULLISH' | 'BEARISH';
+  high: number;
+  low: number;
+  atr: number;
+  magnitude: number;
+  bodyRatio: number;
+  priorZoneId: string;
+  invalidationReason: string;
 }
 
 export interface ZoneEvaluationResult {
@@ -57,6 +70,7 @@ export interface ZoneEvaluationResult {
   rejectionReason?: string;
   reason: string;
   updatedZone: MarkedZone;
+  displacementOrigin?: DisplacementOrigin;
 }
 
 export interface RejectedZoneRecord {
@@ -898,7 +912,7 @@ export function detectLargeDisplacementAway(
   latestCandle?: Candle,
   effectiveAtr: number = 0.0005,
   currentPrice?: number
-): { hasDisplaced: boolean; reason?: string } {
+): { hasDisplaced: boolean; reason?: string; origin?: DisplacementOrigin } {
   const candidateCandles: Candle[] = [];
   if (candles && candles.length > 0) {
     candidateCandles.push(...candles);
@@ -937,7 +951,18 @@ export function detectLargeDisplacementAway(
         if (isBullish && departedFar) {
           return {
             hasDisplaced: true,
-            reason: `Large Bullish Displacement Candle detected (${range.toFixed(5)} range >= ${(effectiveAtr * 1.6).toFixed(5)}, body ${(body / range * 100).toFixed(0)}%) closing at ${c.close.toFixed(5)} (>3.5 ATR above Demand Zone [${zone.low} - ${zone.high}]). Institutional displacement departed away without retrace.`
+            reason: `Large Bullish Displacement Candle detected (${range.toFixed(5)} range >= ${(effectiveAtr * 1.6).toFixed(5)}, body ${(body / range * 100).toFixed(0)}%) closing at ${c.close.toFixed(5)} (>3.5 ATR above Demand Zone [${zone.low} - ${zone.high}]). Institutional displacement departed away without retrace.`,
+            origin: {
+              timestamp: String(c.timestamp),
+              direction: 'BULLISH',
+              high: c.high,
+              low: c.low,
+              atr: effectiveAtr,
+              magnitude: range,
+              bodyRatio: body / range,
+              priorZoneId: zone.id,
+              invalidationReason: '3.5 ATR Bullish Displacement Departure'
+            }
           };
         }
       } else if (zone.direction === 'SELL') {
@@ -946,7 +971,18 @@ export function detectLargeDisplacementAway(
         if (isBearish && departedFar) {
           return {
             hasDisplaced: true,
-            reason: `Large Bearish Displacement Candle detected (${range.toFixed(5)} range >= ${(effectiveAtr * 1.6).toFixed(5)}, body ${(body / range * 100).toFixed(0)}%) closing at ${c.close.toFixed(5)} (>3.5 ATR below Supply Zone [${zone.low} - ${zone.high}]). Institutional displacement departed away without retrace.`
+            reason: `Large Bearish Displacement Candle detected (${range.toFixed(5)} range >= ${(effectiveAtr * 1.6).toFixed(5)}, body ${(body / range * 100).toFixed(0)}%) closing at ${c.close.toFixed(5)} (>3.5 ATR below Supply Zone [${zone.low} - ${zone.high}]). Institutional displacement departed away without retrace.`,
+            origin: {
+              timestamp: String(c.timestamp),
+              direction: 'BEARISH',
+              high: c.high,
+              low: c.low,
+              atr: effectiveAtr,
+              magnitude: range,
+              bodyRatio: body / range,
+              priorZoneId: zone.id,
+              invalidationReason: '3.5 ATR Bearish Displacement Departure'
+            }
           };
         }
       }
@@ -1259,15 +1295,17 @@ export function evaluateZoneState(
   // If price has not tapped the zone and has not violated invalidation,
   // the system MUST NOT leave the entry position UNLESS a Large Candle Displacement
   // has been detected moving away in target direction without retracing.
-  const displacementCheck = detectLargeDisplacementAway(zone, candles, latestCandle, effectiveAtr, currentPrice);
+  const displacementCheck = detectLargeDisplacementAway(zone, candles?.slice(0, -1), latestCandle, effectiveAtr, currentPrice);
   if (displacementCheck.hasDisplaced) {
     updatedZone.status = 'EXPIRED_WITHOUT_ENTRY';
+    updatedZone.displacementOrigin = displacementCheck.origin;
     return {
       status: 'EXPIRED_WITHOUT_ENTRY',
       isTapped: false,
       isInvalidated: false,
       reason: displacementCheck.reason || `Zone expired without entry: Large candle displacement detected departing without retrace.`,
-      updatedZone
+      updatedZone,
+      displacementOrigin: displacementCheck.origin
     };
   }
 

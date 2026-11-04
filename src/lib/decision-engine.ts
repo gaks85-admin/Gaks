@@ -482,9 +482,10 @@ export function evaluateDecision(
     }
   }
 
-  // Mandatory Rules check: strictly match canonical IDs
+  // Mandatory Rules check: strictly match canonical IDs. 
+  // Any mandatory rule that is FAIL or UNKNOWN (missing data) must block the trade.
   const failedMandatory = evaluatedRules.filter(
-    r => evaluatorMandatoryIds.includes(r.canonicalName) && r.status === 'FAIL'
+    r => evaluatorMandatoryIds.includes(r.canonicalName) && (r.status === 'FAIL' || r.status === 'UNKNOWN')
   );
   const failedOptional = evaluatedRules.filter(
     r => evaluatorOptionalIds.includes(r.canonicalName) && r.status === 'FAIL'
@@ -510,29 +511,31 @@ export function evaluateDecision(
   if (!mandatory_rules_passed) {
     recommendation = 'FAIL';
     requires_gemini = false;
-    no_trade_reason = `Mandatory rules failed: ${failedMandatory.map(r => r.name).join(', ')}`;
+    no_trade_reason = `Mandatory rules failed: ${failedMandatory.map(r => r.name).join(', ')}.`;
     trace.push(`[FAILURE] Mandatory rules failed. Rejecting setup.`);
   } else if (decision_score < 60) {
     recommendation = 'FAIL';
     requires_gemini = false;
-    no_trade_reason = `Decision score too low: ${decision_score}% (Required: 60%)`;
-    trace.push(`[FAILURE] Score ${decision_score}% below threshold.`);
+    no_trade_reason = `Decision score too low: ${decision_score}% (Required: 60% for evaluation, 75% for approval).`;
+    trace.push(`[FAILURE] Score ${decision_score}% below evaluation threshold.`);
+  } else if (decision_score < 75) {
+    recommendation = 'AMBIGUOUS';
+    requires_gemini = true;
+    no_trade_reason = `Setup is ambiguous: quality score ${decision_score}% is below the 75% approval threshold.`;
+    trace.push(`[AMBIGUOUS] Score ${decision_score}% requires Gemini validation.`);
   } else {
     if (decision_score >= 90) {
       recommendation = 'PASS';
-    } else if (decision_score >= 75) {
-      recommendation = 'LIKELY_PASS';
-      requires_gemini = true;
     } else {
-      recommendation = 'AMBIGUOUS';
-      requires_gemini = true;
+      recommendation = 'LIKELY_PASS';
     }
+    requires_gemini = true; // Always validate with Gemini if 75%+ or explicitly required by mode
+  }
 
-    // Forced Gemini for Hybrid/AI modes
-    if (compiledStrategy.strategy_mode !== 'RULE_ONLY') {
-      requires_gemini = true;
-      trace.push(`[GEMINI] Required by strategy mode: ${compiledStrategy.strategy_mode}`);
-    }
+  // Forced Gemini for Hybrid/AI modes regardless of score (if score >= 60)
+  if (compiledStrategy.strategy_mode !== 'RULE_ONLY' && decision_score >= 60) {
+    requires_gemini = true;
+    trace.push(`[GEMINI] Required by strategy mode: ${compiledStrategy.strategy_mode}`);
   }
 
   const explanation = no_trade_reason || `Market satisfies ${decision_score}% of strategy rules.`;

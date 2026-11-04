@@ -290,8 +290,25 @@ export function compileStrategy(strategyText: string): CompilerOutput {
         return true;
       });
       const isOpt = phrasesToCheck.some(p => isOptional(strategyText, p));
+      const isMandatoryRequested = phrasesToCheck.some(p => isMandatory(strategyText, p));
+      
+      // POI rules (Order Blocks, FVGs, S&D) are only mandatory if:
+      // 1. Explicitly requested as mandatory.
+      // 2. OR the strategy seems zone-centric and doesn't mark them as optional.
+      // 3. AND no other rules are providing mandatory confluence.
       const isPoiRule = ['order_block', 'supply_demand', 'unmitigated_zone', 'fair_value_gap'].includes(item.id);
-      const isMand = phrasesToCheck.some(p => isMandatory(strategyText, p)) || (isPoiRule && !isOpt);
+      
+      let isMand = isMandatoryRequested;
+      if (!isMand && isPoiRule && !isOpt) {
+        // If it's a POI rule and not optional, it's only mandatory if there are NO other mandatory rules
+        // or if the strategy specifically mentions "entry on" or "wait for" the POI.
+        const entryTriggers = ['entry on', 'wait for', 'must test', 'trade from', 'only trade'];
+        const isPrimaryTrigger = entryTriggers.some(t => strategyText.toLowerCase().includes(`${t} ${item.phrase}`));
+        
+        if (isPrimaryTrigger) {
+          isMand = true;
+        }
+      }
 
       if (isMand) {
         canonicalRuleDefs.push({
@@ -302,7 +319,6 @@ export function compileStrategy(strategyText: string): CompilerOutput {
         });
         canonical_rules.push(item.id);
         weighted_rules.push({ rule: item.id, weight: item.weight });
-        mandatory_rules.push(item.id);
       } else if (isOpt) {
         canonicalRuleDefs.push({
           id: item.id,
@@ -312,19 +328,42 @@ export function compileStrategy(strategyText: string): CompilerOutput {
         });
         canonical_rules.push(item.id);
         weighted_rules.push({ rule: item.id, weight: item.weight });
-        optional_rules.push(item.id);
-      } else if (!hasAnyMandatoryRule) {
-        // Only if the strategy has NO mandatory declarations at all,
-        // treat detected rules as default weighted/optional rules.
+      } else {
+        // Rule detected but not explicitly mandatory or optional
         canonicalRuleDefs.push({
           id: item.id,
           name: item.name,
-          isMandatory: false,
+          isMandatory: false, // Initial state
           weight: item.weight
         });
         canonical_rules.push(item.id);
         weighted_rules.push({ rule: item.id, weight: item.weight });
-        optional_rules.push(item.id);
+      }
+    }
+  }
+
+  // FINAL PASS: If no mandatory rules were explicitly declared, apply defaults.
+  // For SMC strategies, Order Block/FVG/S&D should be mandatory.
+  if (!hasAnyMandatoryRule) {
+    const poiIds = ['order_block', 'supply_demand', 'unmitigated_zone', 'fair_value_gap', 'support', 'resistance'];
+    const hasPoi = canonicalRuleDefs.some(r => poiIds.includes(r.id));
+    
+    for (const ruleDef of canonicalRuleDefs) {
+      const isPoi = poiIds.includes(ruleDef.id);
+      if (hasPoi && isPoi) {
+        ruleDef.isMandatory = true;
+        mandatory_rules.push(ruleDef.id);
+      } else {
+        optional_rules.push(ruleDef.id);
+      }
+    }
+  } else {
+    // Fill the mandatory/optional lists based on the results from the first pass
+    for (const ruleDef of canonicalRuleDefs) {
+      if (ruleDef.isMandatory) {
+        mandatory_rules.push(ruleDef.id);
+      } else {
+        optional_rules.push(ruleDef.id);
       }
     }
   }

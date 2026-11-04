@@ -42,6 +42,11 @@ import { evaluateEconomicNewsGate } from "../economic-news-gate.js";
 // TEMPORARY MODE FLAG: Force Market Watcher into RULE_ONLY mode for diagnostic testing.
 // To restore original behavior, set this to null.
 const MARKET_WATCHER_DECISION_MODE_OVERRIDE: 'RULE_ONLY' | 'HYBRID' | 'AI_ONLY' | null = null;
+ 
+ // In-memory runtime cache for marked zones to guarantee persistence across scan cycles
+ // even if the Supabase watchers table is temporarily missing the zone columns.
+ const activeZonesMemoryMap: Map<string, MarkedZone> = (globalThis as any).__activeWatcherZones || new Map<string, MarkedZone>();
+ (globalThis as any).__activeWatcherZones = activeZonesMemoryMap;
 
 
 /**
@@ -709,19 +714,13 @@ export default async function handler(req: any, res: any) {
 
     // User Rule: If trend is sideways or is not clear, default to NO TRADE!
     if (htfTrendResult.trend === 'SIDEWAYS' || htfTrendResult.allowedDirection === 'NONE') {
-      console.log(`[HTF SIDEWAYS NO-TRADE] Manual Scan - Watcher ID: ${watcher.id} (${symbol}): ${htfTrendResult.timeframe} Trend is SIDEWAYS / unclear (${htfTrendResult.reason}). Defaulting strictly to NO TRADE.`);
-      if (watcher.zone_data) {
-        await supabase.from("watchers").update({
-          zone_data: null,
-          zone_status: 'NO_ZONE',
-          zone_high: null,
-          zone_low: null,
-          zone_type: null,
-          zone_invalidation_level: null,
-          last_scan_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        }).eq("id", watcher.id);
-      }
+      console.log(`[HTF SIDEWAYS NO-TRADE] Manual Scan - Watcher ID: ${watcher.id} (${symbol}): ${htfTrendResult.timeframe} Trend is SIDEWAYS / unclear (${htfTrendResult.reason}). Preservation mode: keeping existing zone but blocking new signals.`);
+      
+      await supabase.from("watchers").update({
+        last_scan_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      }).eq("id", watcher.id);
+
       return res.json({
         success: true,
         data: {
@@ -730,8 +729,7 @@ export default async function handler(req: any, res: any) {
           signal: 'NO_TRADE',
           confidence: 0,
           status: 'SIDEWAYS_NO_TRADE',
-          zone: null,
-          reasoning: [`Higher timeframe (${htfTrendResult.timeframe}) trend is SIDEWAYS / unclear: ${htfTrendResult.reason}. Defaulting strictly to NO TRADE until a clear trend is established.`]
+          reasoning: [`Higher timeframe (${htfTrendResult.timeframe}) trend is SIDEWAYS / unclear: ${htfTrendResult.reason}. Preservation mode active: existing structural POIs maintained; new setups blocked.`]
         }
       });
     }
@@ -757,22 +755,36 @@ export default async function handler(req: any, res: any) {
         currentZone = null;
       }
     }
+    // Restore from runtime memory cache if not present in database record
+    if (!currentZone && activeZonesMemoryMap.has(watcher.id)) {
+      currentZone = activeZonesMemoryMap.get(watcher.id) || null;
+      if (currentZone) {
+        console.log(`[Manual Scan ZONE MEMORY RESTORE] Watcher ID: ${watcher.id}: Retained active ${currentZone.type} zone from runtime memory.`);
+      }
+    }
 
-    if (currentZone && currentZone.status !== 'INVALIDATED' && currentZone.status !== 'CONFIRMED') {
+    let lastZoneEval: ZoneEvaluationResult | null = null;
+    if (currentZone && currentZone.status !== 'INVALIDATED') {
       const zoneEval = evaluateZoneState(currentZone, latestClosedCandle, activeCurrentPrice, marketStructure.volatilityInformation?.atr, candleData, marketStructure);
+      lastZoneEval = zoneEval;
 
       if (zoneEval.isInvalidated || zoneEval.status === 'EXPIRED_WITHOUT_ENTRY' || zoneEval.status === 'EXPIRED') {
         console.log(`[ZONE CLEARED/EXPIRED] Manual Scan - Watcher ${watcher.id} (${symbol}): Zone [${currentZone.low} - ${currentZone.high}] (${currentZone.type}) state transition: ${zoneEval.status} - ${zoneEval.reason}`);
+        
+        // Record rejected zone to prevent immediate re-discovery of same level in recovery cycle
+        recordRejectedZone(watcher.id, currentZone, zoneEval.reason);
+        activeZonesMemoryMap.set(watcher.id, zoneEval.updatedZone);
+
         await supabase.from("watchers").update({
-          zone_data: null,
-          zone_status: 'NO_ZONE',
+          zone_data: zoneEval.updatedZone,
+          zone_status: zoneEval.status,
           zone_high: null,
           zone_low: null,
           zone_type: null,
           zone_invalidation_level: null,
           updated_at: new Date().toISOString()
         }).eq("id", watcher.id);
-        currentZone = null;
+        currentZone = null; // Allows discovering fresh zone below in same cycle
       } else if (!zoneEval.isTapped) {
         console.log(`[WAITING FOR ZONE TAP] Manual Scan - Watcher ${watcher.id} (${symbol}): Price ${activeCurrentPrice} is outside zone [${currentZone.low} - ${currentZone.high}].`);
         await supabase.from("watchers").update({
@@ -824,34 +836,58 @@ export default async function handler(req: any, res: any) {
       const rejectedList = getRejectedZones(watcher.id);
       const discoveredZone = identifyMarkedZone(candleData, marketStructure, compiledStrategy, activeCurrentPrice, rejectedList);
       if (discoveredZone) {
-        discoveredZone.status = 'WAITING_FOR_TAP';
-        discoveredZone.tapCount = 0;
-        discoveredZone.tappedAt = null;
+        const isTappedImmediately = isPriceInOrTappingZone(discoveredZone, latestClosedCandle, activeCurrentPrice);
+        if (isTappedImmediately) {
+          discoveredZone.status = 'ZONE_TAPPED';
+          discoveredZone.tapCount = 1;
+          discoveredZone.tappedAt = new Date().toISOString();
 
-        await supabase.from("watchers").update({
-          zone_data: discoveredZone,
-          zone_status: 'WAITING_FOR_TAP',
-          zone_high: discoveredZone.high,
-          zone_low: discoveredZone.low,
-          zone_type: discoveredZone.type,
-          zone_invalidation_level: discoveredZone.invalidationLevel,
-          zone_marked_at: new Date().toISOString(),
-          zone_tapped_at: null,
-          updated_at: new Date().toISOString()
-        }).eq("id", watcher.id);
+          activeZonesMemoryMap.set(watcher.id, discoveredZone);
+          await supabase.from("watchers").update({
+            zone_data: discoveredZone,
+            zone_status: 'ZONE_TAPPED',
+            zone_high: discoveredZone.high,
+            zone_low: discoveredZone.low,
+            zone_type: discoveredZone.type,
+            zone_invalidation_level: discoveredZone.invalidationLevel,
+            zone_marked_at: new Date().toISOString(),
+            zone_tapped_at: discoveredZone.tappedAt,
+            updated_at: new Date().toISOString()
+          }).eq("id", watcher.id);
 
-        return res.json({
-          success: true,
-          data: {
-            watcher_id: watcher.id,
-            pair: symbol,
-            signal: 'NO_TRADE',
-            confidence: 0,
-            status: 'WAITING_FOR_TAP',
-            zone: discoveredZone,
-            reasoning: [`Marked ${discoveredZone.type} zone [${discoveredZone.low} - ${discoveredZone.high}]. Waiting for price tap before AI confirmation.`]
-          }
-        });
+          console.log(`[ZONE MARKED & TAPPED] Manual Scan - Watcher ID: ${watcher.id} (${symbol}): Newly discovered zone [${discoveredZone.low} - ${discoveredZone.high}] is already tapped by price (${activeCurrentPrice}). Proceeding to confirmation analysis in same cycle.`);
+          currentZone = discoveredZone;
+        } else {
+          discoveredZone.status = 'WAITING_FOR_TAP';
+          discoveredZone.tapCount = 0;
+          discoveredZone.tappedAt = null;
+
+          activeZonesMemoryMap.set(watcher.id, discoveredZone);
+          await supabase.from("watchers").update({
+            zone_data: discoveredZone,
+            zone_status: 'WAITING_FOR_TAP',
+            zone_high: discoveredZone.high,
+            zone_low: discoveredZone.low,
+            zone_type: discoveredZone.type,
+            zone_invalidation_level: discoveredZone.invalidationLevel,
+            zone_marked_at: new Date().toISOString(),
+            zone_tapped_at: null,
+            updated_at: new Date().toISOString()
+          }).eq("id", watcher.id);
+
+          return res.json({
+            success: true,
+            data: {
+              watcher_id: watcher.id,
+              pair: symbol,
+              signal: 'NO_TRADE',
+              confidence: 0,
+              status: 'WAITING_FOR_TAP',
+              zone: discoveredZone,
+              reasoning: [`Marked ${discoveredZone.type} zone [${discoveredZone.low} - ${discoveredZone.high}]. Waiting for price tap before AI confirmation.`]
+            }
+          });
+        }
       } else {
         const rules = compiledStrategy?.compiled_rules;
         const requiresZoneSetup = Boolean(
@@ -893,6 +929,12 @@ export default async function handler(req: any, res: any) {
     (marketStructure as any).pair = symbol;
     (marketStructure as any).timeframe = selectedTimeframe;
     (marketStructure as any).lastClosedCandleTimestamp = candleData[candleData.length - 2]?.timestamp || '';
+    (marketStructure as any).markedZone = currentZone;
+    (marketStructure as any).zone_status = currentZone?.status || 'NO_ZONE';
+    (marketStructure as any).zone_tapped = Boolean(currentZone && (currentZone.status === 'ZONE_TAPPED' || currentZone.status === 'CONFIRMED' || lastZoneEval?.isTapped));
+    (marketStructure as any).zone_rejected = Boolean(lastZoneEval?.isRejected || currentZone?.status === 'CONFIRMED');
+    (marketStructure as any).rejectionConfirmed = Boolean(lastZoneEval?.isRejected || currentZone?.status === 'CONFIRMED');
+    (marketStructure as any).zone_direction = currentZone?.direction;
     const initialResult = evaluateDecision(compiledStrategy, marketStructure);
 
     // Fetch Historical Probability from Learning Engine
@@ -950,10 +992,9 @@ export default async function handler(req: any, res: any) {
     const mandatoryPassed = decisionResult.mandatory_rules_passed !== false;
     const meetsQualityThreshold = (decisionResult.decision_score ?? 0) >= PRE_FILTER_MIN_SCORE;
     const isViableRecommendation = recommendation === 'PASS' || recommendation === 'LIKELY_PASS';
-    const isExplicitAiOnly = executionMode === 'AI_ONLY' && (decisionResult.decision_score ?? 0) >= 60;
 
-    const passesDeterministicGate = mandatoryPassed && (
-      (meetsQualityThreshold && isViableRecommendation) || isExplicitAiOnly
+    const passesDeterministicGate = executionMode === 'AI_ONLY' || (
+      mandatoryPassed && meetsQualityThreshold && isViableRecommendation
     );
 
     const requiresGemini = passesDeterministicGate && (executionMode !== 'RULE_ONLY');
@@ -999,16 +1040,26 @@ Reason: ${decisionResult.explanation || (requiresGemini ? 'Passed deterministic 
         try {
           const ai = new GoogleGenAI({ apiKey: geminiKey });
           const currentPrice = candleData[candleData.length - 1].close;
+          const evaluatorMandatoryIds = compiledStrategy.canonical_rule_set?.mandatory_rule_ids || [];
+          const mandatoryRulesList = (decisionResult.rule_details || [])
+            .filter(r => evaluatorMandatoryIds.includes(r.canonicalName))
+            .map(r => `- ${r.name}: ${r.status === 'PASS' ? 'SATISFIED' : 'NOT SATISFIED'}`)
+            .join('\n');
+
           const promptText = `
 You are an expert AI trading assistant.
 Evaluate whether the market conditions satisfy the user's strategy and derive structural trade levels.
 
 Current Price: ${currentPrice}
+Symbol: ${symbol}
+Timeframe: ${selectedTimeframe}
 
 Detailed Numeric Market Structure & Key Levels:
 - Trend: ${marketStructure.trend}
-- Support Zones (Min-Max): ${marketStructure.supportZones?.map(s => `[${s.priceMin.toFixed(5)} - ${s.priceMax.toFixed(5)}]`).join(', ') || 'None'}
-- Resistance Zones (Min-Max): ${marketStructure.resistanceZones?.map(r => `[${r.priceMin.toFixed(5)} - ${r.priceMax.toFixed(5)}]`).join(', ') || 'None'}
+- Marked Zone: ${currentZone ? `${currentZone.type} [${currentZone.low.toFixed(5)} - ${currentZone.high.toFixed(5)}] (${currentZone.direction})` : 'None'}
+- Zone Status: ${currentZone?.status || 'N/A'}
+- Support Zones: ${marketStructure.supportZones?.map(s => `[${s.priceMin.toFixed(5)} - ${s.priceMax.toFixed(5)}]`).join(', ') || 'None'}
+- Resistance Zones: ${marketStructure.resistanceZones?.map(r => `[${r.priceMin.toFixed(5)} - ${r.priceMax.toFixed(5)}]`).join(', ') || 'None'}
 - Swing Highs: ${marketStructure.swingHighs?.slice(-3).map(s => s.price.toFixed(5)).join(', ') || 'None'}
 - Swing Lows: ${marketStructure.swingLows?.slice(-3).map(s => s.price.toFixed(5)).join(', ') || 'None'}
 - Fair Value Gaps: ${marketStructure.fairValueGaps?.slice(-3).map(f => `${f.type} (${f.bottom.toFixed(5)} - ${f.top.toFixed(5)})`).join(', ') || 'None'}
@@ -1018,14 +1069,18 @@ Detailed Numeric Market Structure & Key Levels:
 User's Trading Strategy:
 ${strategyText}
 
+Mandatory Requirements (MUST be satisfied):
+${mandatoryRulesList}
+
 AI Instructions:
 1. Determine if conditions satisfy the strategy ('BUY', 'SELL', 'NO_TRADE').
-2. TIMEFRAME & STOP LOSS SCALING:
-- This is a ${selectedTimeframe} trade. Keep Stop Loss tight and proportionate to ${selectedTimeframe} (typically 5 to 10 pips for M5/M15). Never output wide H1/H4 swing stop losses.
-- If current price (${activeCurrentPrice}) has already moved significantly away from marked POI zone in the target direction (late entry / chasing after the move has started), evaluate as NO_TRADE. Do NOT chase late entries.
-3. For BUY: Stop Loss MUST be placed BELOW entry, below relevant support zone, swing low, or demand structure.
-4. For SELL: Stop Loss MUST be placed ABOVE entry, above relevant resistance zone, swing high, or supply structure.
-5. Identify stopLossBasis (SUPPORT_ZONE, RESISTANCE_ZONE, SWING_LOW, SWING_HIGH, DEMAND_ZONE, SUPPLY_ZONE, ORDER_BLOCK, STRUCTURAL_CANDLE, ATR_FALLBACK).
+2. MANDATORY CHECK: You CANNOT approve a setup if any mandatory requirement listed above is 'NOT SATISFIED'.
+3. TIMEFRAME & STOP LOSS SCALING:
+- This is a ${selectedTimeframe} trade. Keep Stop Loss tight and proportionate (typically 5-15 pips).
+- If current price has already moved significantly away from marked zone (late entry), evaluate as NO_TRADE.
+4. For BUY: Stop Loss MUST be BELOW entry, below relevant support/demand.
+5. For SELL: Stop Loss MUST be ABOVE entry, above relevant resistance/supply.
+6. Identify stopLossBasis (SUPPORT_ZONE, RESISTANCE_ZONE, SWING_LOW, SWING_HIGH, DEMAND_ZONE, SUPPLY_ZONE, ORDER_BLOCK, STRUCTURAL_CANDLE, ATR_FALLBACK).
 
 Answer with JSON matching schema.
 `;

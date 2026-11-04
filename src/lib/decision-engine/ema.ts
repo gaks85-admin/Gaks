@@ -8,10 +8,17 @@ export class EmaEvaluator {
     }
 
     const isFlatMatched = market.ema === true || market.ema_crossover === true;
+    const isFlatFailed = market.ema === false || market.ema_crossover === false;
     const isTrendMatched = market.trend && market.trend !== 'SIDEWAYS';
     
-    // Fallback matched condition if any of the above is true
-    const matched = isFlatMatched || isTrendMatched;
+    // Strict priority: If market data explicitly says it failed, then it failed.
+    // Otherwise, if it passed or if trend is strong, it passes.
+    let matched = false;
+    if (isFlatFailed) {
+      matched = false;
+    } else {
+      matched = isFlatMatched || isTrendMatched;
+    }
 
     const periodsStr = rules.ema.periods ? rules.ema.periods.join('/') : 'custom';
     return {
