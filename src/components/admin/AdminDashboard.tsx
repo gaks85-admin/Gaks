@@ -2932,9 +2932,9 @@ export default function AdminDashboard({
   userProfile: any, 
   session: any, 
   authLoading: boolean,
-  initialTab?: 'dashboard' | 'learning' | 'live-logs' | 'users' | 'notifications' | 'watchers' | 'signals' | 'health' | 'settings'
+  initialTab?: 'dashboard' | 'learning' | 'live-logs' | 'users' | 'notifications' | 'watchers' | 'signals' | 'health' | 'settings' | 'backtest' | 'zone-history'
 }) {
-  const [activeAdminTab, setActiveAdminTab] = useState<'dashboard' | 'zone-history' | 'learning' | 'live-logs' | 'users' | 'notifications' | 'watchers' | 'signals' | 'health' | 'settings'>(initialTab || 'dashboard');
+  const [activeAdminTab, setActiveAdminTab] = useState<'dashboard' | 'zone-history' | 'learning' | 'live-logs' | 'users' | 'notifications' | 'watchers' | 'signals' | 'health' | 'settings' | 'backtest'>(initialTab || 'dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 

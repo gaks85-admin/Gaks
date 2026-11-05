@@ -90,6 +90,7 @@ export async function runOutOfSampleValidation(
   if (partitions.inSample.length < 10 || partitions.holdout.length < 5) {
     return {
       success: false,
+      status: 'FAIL',
       error: 'Insufficient candles for meaningful Out-of-Sample partitioning.',
       datasetId: baseConfig.datasetId,
       datasetHash: '',

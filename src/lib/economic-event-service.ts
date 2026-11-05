@@ -14,6 +14,9 @@ export interface EconomicEventResult {
   minutesSinceEvent?: number;
   tradeBlocked: boolean;
   blockReason?: string;
+  status?: 'BLOCKED' | 'CLEAR';
+  event?: string | null;
+  reason?: string;
 }
 
 export class EconomicEventService {
@@ -22,29 +25,34 @@ export class EconomicEventService {
   private postEventBlockMinutes = 30; // 30 minutes after
   private supabaseClient: any;
 
-  constructor(provider?: EconomicEventProvider, supabaseClient?: any) {
-    if (supabaseClient) {
-      this.supabaseClient = supabaseClient;
-    } else {
-      // Server-side initialization check: use service role if available to bypass RLS for syncs
-      const isServer = typeof process !== 'undefined' && process.env;
-      const url = isServer ? (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL) : null;
-      const serviceKey = isServer ? process.env.SUPABASE_SERVICE_ROLE_KEY : null;
-
-      if (isServer && url && serviceKey) {
-        this.supabaseClient = createClient(url, serviceKey, {
-          auth: { persistSession: false, autoRefreshToken: false }
-        });
-      } else {
-        this.supabaseClient = getSupabase();
-      }
-    }
-
-    if (provider) {
-      this.provider = provider;
-    } else {
-      // Use FinanceCalendarProvider by default as it is free and reliable for Gaks AI
+  constructor(providerOrClient?: EconomicEventProvider | any, supabaseClient?: any) {
+    if (providerOrClient && typeof (providerOrClient as any).from === 'function' && !supabaseClient) {
+      this.supabaseClient = providerOrClient;
       this.provider = new FinanceCalendarProvider();
+    } else {
+      if (supabaseClient) {
+        this.supabaseClient = supabaseClient;
+      } else {
+        // Server-side initialization check: use service role if available to bypass RLS for syncs
+        const isServer = typeof process !== 'undefined' && process.env;
+        const url = isServer ? (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL) : null;
+        const serviceKey = isServer ? process.env.SUPABASE_SERVICE_ROLE_KEY : null;
+
+        if (isServer && url && serviceKey) {
+          this.supabaseClient = createClient(url, serviceKey, {
+            auth: { persistSession: false, autoRefreshToken: false }
+          });
+        } else {
+          this.supabaseClient = getSupabase();
+        }
+      }
+
+      if (providerOrClient && typeof (providerOrClient as any).getUpcomingEvents === 'function') {
+        this.provider = providerOrClient;
+      } else {
+        // Use FinanceCalendarProvider by default as it is free and reliable for Gaks AI
+        this.provider = new FinanceCalendarProvider();
+      }
     }
   }
 
@@ -123,12 +131,21 @@ export class EconomicEventService {
    */
   async checkNewsHardPause(
     symbol: string,
-    preMinutes?: number,
+    preMinutesOrOpts?: number | { bufferBeforeMinutes?: number; bufferAfterMinutes?: number },
     postMinutes?: number,
     nowOverride?: Date
   ): Promise<EconomicEventResult> {
-    const pre = preMinutes !== undefined ? preMinutes : this.preEventBlockMinutes;
-    const post = postMinutes !== undefined ? postMinutes : this.postEventBlockMinutes;
+    let pre = this.preEventBlockMinutes;
+    let post = this.postEventBlockMinutes;
+
+    if (typeof preMinutesOrOpts === 'object' && preMinutesOrOpts !== null) {
+      if (preMinutesOrOpts.bufferBeforeMinutes !== undefined) pre = preMinutesOrOpts.bufferBeforeMinutes;
+      if (preMinutesOrOpts.bufferAfterMinutes !== undefined) post = preMinutesOrOpts.bufferAfterMinutes;
+    } else if (typeof preMinutesOrOpts === 'number') {
+      pre = preMinutesOrOpts;
+      if (postMinutes !== undefined) post = postMinutes;
+    }
+
     const currencies = this.extractCurrencies(symbol);
     const now = nowOverride || new Date();
     
@@ -157,8 +174,13 @@ export class EconomicEventService {
         const minutesDiff = (scheduledAt.getTime() - now.getTime()) / 60000;
 
         const isUpcoming = minutesDiff > 0;
+        const blockReason = isUpcoming 
+          ? `NEWS_HARD_PAUSE: HIGH impact event ${event.event_name} in ${Math.round(minutesDiff)} minutes`
+          : `NEWS_HARD_PAUSE: HIGH impact event ${event.event_name} released ${Math.round(Math.abs(minutesDiff))} minutes ago`;
 
         return {
+          status: 'BLOCKED',
+          event: event.event_name,
           eventDetected: true,
           eventName: event.event_name,
           currency: event.currency,
@@ -167,21 +189,29 @@ export class EconomicEventService {
           minutesUntilEvent: isUpcoming ? Math.round(minutesDiff) : 0,
           minutesSinceEvent: !isUpcoming ? Math.round(Math.abs(minutesDiff)) : 0,
           tradeBlocked: true,
-          blockReason: isUpcoming 
-            ? `NEWS_HARD_PAUSE: HIGH impact event ${event.event_name} in ${Math.round(minutesDiff)} minutes`
-            : `NEWS_HARD_PAUSE: HIGH impact event ${event.event_name} released ${Math.round(Math.abs(minutesDiff))} minutes ago`
+          blockReason,
+          reason: blockReason
         };
       }
     } catch (err: any) {
       console.error(`Error checking economic events for ${symbol}:`, err);
+      const errMsg = err?.message || 'Failed to verify economic news';
       return { 
+        status: 'BLOCKED',
+        event: null,
         eventDetected: false, 
         tradeBlocked: true, 
-        blockReason: `NEWS_RESTRICTION_UNAVAILABLE: Failed to verify economic news for ${symbol}.` 
+        blockReason: `NEWS_RESTRICTION_UNAVAILABLE: Failed to verify economic news for ${symbol}. ${errMsg}`,
+        reason: errMsg
       };
     }
 
-    return { eventDetected: false, tradeBlocked: false };
+    return { 
+      status: 'CLEAR',
+      event: null,
+      eventDetected: false, 
+      tradeBlocked: false 
+    };
   }
 
   public extractCurrencies(symbol: string): string[] {

@@ -38,6 +38,7 @@ async function runStage7Tests() {
   };
 
   const baseState: FinalExecutionState = {
+    status: 'PENDING',
     marketDataAvailable: true,
     marketDataFreshness: { isValid: true, dataAgeMs: 100, signalAgeMs: 100, entryDistance: 0 },
     currentPrice: 1.0502,

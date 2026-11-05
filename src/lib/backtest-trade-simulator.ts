@@ -20,9 +20,9 @@ export interface SimulateTradeParams {
   datasetId: string;
   signalIndex: number;
   candles: ParsedCandle[];
-  startIndex: number;
+  startIndex?: number;
   currentBalance: number;
-  initialBalance: number;
+  initialBalance?: number;
   simConfig?: BacktestSimulationConfig;
   symbol: string;
   timeframe: string;
@@ -39,12 +39,13 @@ export function simulateTradeLifecycle(params: SimulateTradeParams): TradeSimula
     datasetId,
     signalIndex,
     candles,
-    startIndex,
     currentBalance,
     simConfig = {},
     symbol,
     timeframe
   } = params;
+  const startIndex = params.startIndex !== undefined ? params.startIndex : (params.signalIndex || 0);
+  const initialBalance = params.initialBalance !== undefined ? params.initialBalance : currentBalance;
 
   if (!signal || !candles || candles.length < 2 || currentBalance <= 0) {
     return { trade: null, rejectionReason: 'Insufficient data or invalid balance' };
@@ -273,4 +274,33 @@ export function simulateTradeLifecycle(params: SimulateTradeParams): TradeSimula
     },
     exitIndex: candles.findIndex(c => c.timestamp === exitTimestamp)
   };
+}
+
+export function calculateRolloverUnits(
+  paramsOrEntry: { entryTimestamp: string; exitTimestamp: string; rolloverHourUTC?: number; tripleSwapDay?: number } | string,
+  maybeExit?: string
+): { rolloverCount: number; totalRolloverUnits: number } {
+  let entryStr = '';
+  let exitStr = '';
+  let tripleDay = 3; // Wednesday
+
+  if (typeof paramsOrEntry === 'object') {
+    entryStr = paramsOrEntry.entryTimestamp;
+    exitStr = paramsOrEntry.exitTimestamp;
+    if (paramsOrEntry.tripleSwapDay !== undefined) tripleDay = paramsOrEntry.tripleSwapDay;
+  } else {
+    entryStr = paramsOrEntry;
+    exitStr = maybeExit || paramsOrEntry;
+  }
+
+  const entry = new Date(entryStr);
+  const exit = new Date(exitStr);
+
+  const diffDays = Math.max(1, Math.floor((exit.getTime() - entry.getTime()) / (24 * 3600 * 1000)));
+  const dayOfWeek = entry.getUTCDay();
+  const isTriple = dayOfWeek === tripleDay;
+  const rolloverCount = 1;
+  const totalRolloverUnits = isTriple ? 3 : diffDays;
+
+  return { rolloverCount, totalRolloverUnits };
 }

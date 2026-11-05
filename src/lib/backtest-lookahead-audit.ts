@@ -62,6 +62,7 @@ export function auditFutureCandleMutation(
     const ctx: BacktestCandleContext = {
       current,
       previous,
+      index: i,
       symbol: 'EURUSD',
       timeframe: 'M5'
     };
@@ -95,6 +96,7 @@ export function auditFutureCandleMutation(
     const ctx: BacktestCandleContext = {
       current,
       previous,
+      index: i,
       symbol: 'EURUSD',
       timeframe: 'M5'
     };

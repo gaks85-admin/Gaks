@@ -22,6 +22,7 @@ export interface PreExecutionValidationParams {
   maxSpreadThreshold?: number;
   maxEntryDriftThreshold?: number;
   intendedEntryPrice?: number;
+  temporaryBypassAllPostSignalConfirmations?: boolean;
 }
 
 export interface FinalExecutionState {
@@ -52,6 +53,7 @@ export interface FinalExecutionState {
   lotSize?: number;
   stopLoss?: number;
   takeProfit?: number;
+  temporaryBypassAllPostSignalConfirmations?: boolean;
 }
 
 export function validatePreExecution(params: PreExecutionValidationParams | FinalExecutionState): {

@@ -15,6 +15,8 @@ export interface WatcherPropFirmGateParams {
     tradeHistoryLoader?: () => Promise<{ trades: any[]; error: any }>;
     openWatchersLoader?: () => Promise<{ watchers: any[]; error: any }>;
     newsChecker?: (symbol: string) => Promise<any>;
+    marketPricesBySymbol?: Record<string, number>;
+    priceQuoteLoader?: () => Promise<any>;
   };
 }
 
@@ -34,6 +36,8 @@ export interface WatcherPropFirmGateResult {
   highWatermarkEquity?: number;
   liveFloatingPnl?: number;
 }
+
+export type WatcherPropFirmGateOutcome = WatcherPropFirmGateResult;
 
 export async function evaluateWatcherPropFirmGate(
   params: WatcherPropFirmGateParams

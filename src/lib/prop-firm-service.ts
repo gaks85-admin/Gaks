@@ -82,23 +82,60 @@ export async function savePropFirmSettings(
   }
 }
 
-export async function syncPropFirmHighWatermarks(supabaseClient: any, userId: string, balance: number) {
-  if (!supabaseClient || !userId) return { error: null };
-  try {
-    await supabaseClient
-      .from('prop_firm_settings')
-      .update({
-        high_watermark_balance: balance,
-        updated_at: new Date().toISOString()
-      })
-      .eq('user_id', userId);
-    return { error: null };
-  } catch {
-    return { error: null };
-  }
+export interface HwmSyncParams {
+  accountSize?: number;
+  currentBalance?: number;
+  currentEquity?: number;
+  existingHwmBalance?: number;
+  existingHwmEquity?: number;
 }
 
-export function computePropFirmResetBoundaryUtc(now = new Date()): Date {
+export async function syncPropFirmHighWatermarks(
+  supabaseClient: any,
+  userId: string,
+  balanceOrParams: number | HwmSyncParams
+): Promise<{ error: any; highWatermarkBalance?: number; highWatermarkEquity?: number }> {
+  let bal: number;
+  let eq: number | undefined;
+
+  if (typeof balanceOrParams === 'number') {
+    bal = balanceOrParams;
+    eq = balanceOrParams;
+  } else {
+    const existingBal = balanceOrParams.existingHwmBalance ?? balanceOrParams.accountSize ?? 0;
+    const existingEq = balanceOrParams.existingHwmEquity ?? balanceOrParams.accountSize ?? 0;
+    bal = Math.max(existingBal, balanceOrParams.currentBalance ?? 0);
+    eq = Math.max(existingEq, balanceOrParams.currentEquity ?? 0);
+  }
+
+  if (supabaseClient && userId) {
+    try {
+      await supabaseClient
+        .from('prop_firm_settings')
+        .update({
+          high_watermark_balance: bal,
+          high_watermark_equity: eq,
+          updated_at: new Date().toISOString()
+        })
+        .eq('user_id', userId);
+    } catch (err: any) {
+      return { error: err, highWatermarkBalance: bal, highWatermarkEquity: eq };
+    }
+  }
+  return { error: null, highWatermarkBalance: bal, highWatermarkEquity: eq };
+}
+
+export function computePropFirmResetBoundaryUtc(
+  resetTimeOrNow?: string | Date,
+  nowOrTz?: Date | string,
+  _tz?: string
+): Date {
+  let now = new Date();
+  if (resetTimeOrNow instanceof Date) {
+    now = resetTimeOrNow;
+  } else if (nowOrTz instanceof Date) {
+    now = nowOrTz;
+  }
   const boundary = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 0));
   return boundary;
 }

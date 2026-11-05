@@ -163,6 +163,17 @@ export interface PositionSizeResult {
   riskAmount: number;
   expectedLoss: number;
   reason?: string;
+  skipReason?: string;
+  executableLotDisplay?: string;
+  positionMode?: 'AUTO_RISK' | 'FIXED_LOT';
+  exactLotSize?: number;
+  rrValidationPassed?: boolean;
+  stopDistance?: number;
+  minLot?: number;
+  lotType?: string;
+  contractSize?: number;
+  expectedLossAtRequiredLot?: number;
+  expectedLossAtMinLot?: number;
 }
 
 export function extractRiskPreferences(prefsRecord?: Partial<TradingPreferences> | null, userId?: string) {
@@ -381,6 +392,8 @@ export function calculatePositionSize(params: PositionSizeParams): PositionSizeR
         calculatedLotSize: minLot,
         riskAmount: roundedRiskBudget,
         expectedLoss: minLotExpectedLoss,
+        executableLotDisplay: 'NONE',
+        positionMode: params.positionMode || 'AUTO_RISK',
         reason: `Order rejected: On a $${accountSize.toFixed(2)} account, the smallest trade (0.01 lot) risks $${minLotExpectedLoss.toFixed(2)} (including commissions/costs), which exceeds your ${riskPercentage}% budget ($${roundedRiskBudget.toFixed(2)}).`
       };
     }
@@ -395,6 +408,8 @@ export function calculatePositionSize(params: PositionSizeParams): PositionSizeR
         calculatedLotSize: minLot,
         riskAmount: Math.round(riskAmount * 100) / 100,
         expectedLoss: minLotExpectedLoss,
+        executableLotDisplay: 'NONE',
+        positionMode: params.positionMode || 'AUTO_RISK',
         reason: `Insufficient balance: Broker minimum lot (${minLot}) risks $${minLotExpectedLoss.toFixed(2)} but you only have $${accountSize.toFixed(2)} available.`
       };
     }
@@ -412,6 +427,8 @@ export function calculatePositionSize(params: PositionSizeParams): PositionSizeR
       calculatedLotSize: finalLots,
       riskAmount: Math.round(riskAmount * 100) / 100,
       expectedLoss,
+      executableLotDisplay: 'NONE',
+      positionMode: params.positionMode || 'AUTO_RISK',
       reason: `Order rejected: Expected loss ($${expectedLoss.toFixed(2)}) exceeds available account balance ($${accountSize.toFixed(2)}).`
     };
   }
@@ -426,6 +443,8 @@ export function calculatePositionSize(params: PositionSizeParams): PositionSizeR
       calculatedLotSize: finalLots,
       riskAmount: roundedRiskBudget,
       expectedLoss,
+      executableLotDisplay: 'NONE',
+      positionMode: params.positionMode || 'AUTO_RISK',
       reason: `Order rejected: Calculated risk ($${expectedLoss.toFixed(2)}) exceeds your strict ${riskPercentage}% budget ($${roundedRiskBudget.toFixed(2)}). Try increasing balance or reducing stop loss distance.`
     };
   }
@@ -447,6 +466,8 @@ export function calculatePositionSize(params: PositionSizeParams): PositionSizeR
     stopLoss,
     takeProfit: params.takeProfit,
     riskAmount: Math.round(riskAmount * 100) / 100,
-    expectedLoss
+    expectedLoss,
+    executableLotDisplay: finalLots.toFixed(2),
+    positionMode: params.positionMode || 'AUTO_RISK'
   };
 }

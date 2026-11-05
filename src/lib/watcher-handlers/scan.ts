@@ -31,6 +31,7 @@ import {
   evaluateZoneState, 
   isPriceInOrTappingZone, 
   MarkedZone,
+  ZoneEvaluationResult,
   recordRejectedZone,
   getRejectedZones,
   clearRejectedZones

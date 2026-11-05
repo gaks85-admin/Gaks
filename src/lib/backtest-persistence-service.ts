@@ -7,7 +7,7 @@
 import fs from 'fs';
 import path from 'path';
 import { getSupabase } from '../../lib/supabase-server.js';
-import { BacktestEngineResult, BacktestTradeRecord, BacktestAnalyticsResult } from './backtest-types.js';
+import { BacktestEngineResult, BacktestTradeRecord, BacktestAnalyticsResult, BacktestStressSuiteResult } from './backtest-types.js';
 
 export interface BacktestRunRecord {
   id: string;

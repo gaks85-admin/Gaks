@@ -5,6 +5,53 @@
  */
 
 import { ParsedCandle } from './backtest-csv.js';
+export type { ParsedCandle };
+
+export type DatasetValidationStatus = 'VALID' | 'WARNING' | 'INVALID' | 'PENDING' | 'PARTIAL' | 'VALID_WITH_WARNINGS';
+
+export interface DatasetValidationReport {
+  status: DatasetValidationStatus;
+  totalCandles: number;
+  validCandles?: number;
+  firstCandle?: any;
+  lastCandle?: any;
+  duplicateTimestamps?: number;
+  duplicateCount?: number;
+  unorderedTimestamps?: number;
+  timestampIssues?: number;
+  missingIntervals?: number;
+  missingCandleCount?: number;
+  longestGapMinutes?: number;
+  coveragePercent?: number;
+  invalidCandleStructures?: number;
+  invalidOHLCCount?: number;
+  extremeSpikes?: number;
+  zeroVolumeCandles?: number;
+  firstTimestamp?: string;
+  lastTimestamp?: string;
+  errors: string[];
+  warnings: string[];
+  details?: any;
+}
+
+export interface ExecutionStressConfig {
+  latencyMs?: number;
+  slippageMultiplier?: number;
+  spreadMultiplier?: number;
+  rejectProb?: number;
+  [key: string]: any;
+}
+
+export interface DatasetMetadata {
+  id?: string;
+  name?: string;
+  symbol?: string;
+  timeframe?: string;
+  rowCount?: number;
+  [key: string]: any;
+}
+
+export type BacktestStressSuiteResult = any;
 
 import { PropFirmSettings } from './prop-firm-service.js';
 
@@ -87,6 +134,20 @@ export interface BacktestSimulationConfig {
   enforceRiskGovernor?: boolean; // Default: true
   enforceCooldown?: boolean; // Default: true
   enforcePropFirm?: boolean; // Default: true
+  spreadSettings?: any;
+  swapSettings?: any;
+  entrySlippagePips?: number;
+  commissionType?: string;
+  swapLongPoints?: number;
+  stress?: any;
+  qualityGateThreshold?: number;
+  slippageSettings?: any;
+  commissionSettings?: any;
+  exitSlippagePips?: number;
+  rolloverHourUTC?: number;
+  swapType?: string;
+  swapShortPoints?: number;
+  tripleSwapDay?: number;
 }
 
 export interface BacktestConfig {
@@ -102,6 +163,7 @@ export interface BacktestConfig {
   startTime?: string;
   endTime?: string;
   simulation?: BacktestSimulationConfig;
+  candles?: ParsedCandle[];
 }
 
 export interface BacktestCandleContext {
@@ -154,6 +216,19 @@ export interface BacktestTradeRecord {
   balanceAfter: number;
   exitReason: TradeExitReason;
   outcome?: 'WIN' | 'LOSS' | 'BREAKEVEN';
+  swapCost?: number;
+  collisionPolicyApplied?: boolean;
+  collisionPolicy?: string;
+  marketStructure?: any;
+  confidence?: number;
+  reason?: string;
+  actualEntryPrice?: number;
+  actualExitPrice?: number;
+  entryCommission?: number;
+  exitCommission?: number;
+  rolloverCount?: number;
+  requestedEntryPrice?: number;
+  entrySlippageCost?: number;
 }
 
 export interface BacktestState {
@@ -220,6 +295,8 @@ export interface BacktestAnalyticsResult {
   totalSlippageCost?: number;
   totalCommissionCost?: number;
   totalSwapCost?: number;
+  totalTradingCosts?: number;
+  costBreakdownByInstrument?: Record<string, any>;
 
   // Averages & Expectancy
   averageTrade: number | null;
@@ -294,6 +371,8 @@ export interface BacktestEngineResult {
   }[];
   restrictionsSummary?: HistoricalRestrictionsSummary;
   analytics?: BacktestAnalyticsResult;
+  datasetMetadata?: any;
+  validationReport?: any;
   error?: string;
 }
 

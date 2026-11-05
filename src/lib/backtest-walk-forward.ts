@@ -53,6 +53,7 @@ export async function runWalkForwardValidation(
   if (!candles || candles.length < trainCandles + testCandles) {
     return {
       success: false,
+      status: 'FAIL',
       error: `Insufficient historical candles (${candles?.length || 0}) for required train (${trainCandles}) + test (${testCandles}) window size.`,
       windowType,
       totalWindows: 0,

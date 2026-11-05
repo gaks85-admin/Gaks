@@ -21,6 +21,8 @@ export interface BacktestDatasetRecord {
   status: 'processing' | 'ready' | 'failed';
   error_message?: string | null;
   covers_2025?: boolean;
+  validation_report?: any;
+  version?: string;
   created_at: string;
   updated_at: string;
 }

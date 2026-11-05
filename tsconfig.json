@@ -21,5 +21,6 @@
     "esModuleInterop": true,
     "types": ["vite/client", "vite-plugin-pwa/client"]
   },
-  "include": ["src", "api", "server.ts"]
+  "include": ["src", "api", "server.ts"],
+  "exclude": ["node_modules", "src/lib/*test*.ts"]
 }

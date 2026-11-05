@@ -62,7 +62,7 @@ export async function runDatasetInventoryAndReadinessGate(): Promise<{
       timeframe: ds.timeframe,
       expectedIntervalMinutes: expectedMinutes,
       isCrypto: ds.symbol.includes('BTC') || ds.symbol.includes('ETH')
-    });
+    } as any);
 
     const missingCount = valReport.missingCandleCount || 0;
     const dupCount = valReport.duplicateCount || 0;

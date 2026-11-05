@@ -55,7 +55,7 @@ function generateSampleTrades(count: number = 20): BacktestTradeRecord[] {
       signalId: `sig_${i}`,
       symbol: 'EURUSD',
       timeframe: 'M5',
-      direction: i % 2 === 0 ? 'BUY' : 'SELL',
+      direction: i % 2 === 0 ? 'LONG' : 'SHORT',
       entryTimestamp: new Date(startMs + i * 30 * 60 * 1000).toISOString(),
       exitTimestamp: new Date(startMs + (i * 30 + 15) * 60 * 1000).toISOString(),
       entryPrice: 1.0800,

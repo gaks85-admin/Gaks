@@ -552,7 +552,7 @@ export default function App() {
       prevSelectedId.current = selectedStrategyId;
     }
   }, [selectedStrategyId, strategies]);
-  const [showNotification, setShowNotification] = useState<{message: string; type: 'success' | 'info'} | null>(null);
+  const [showNotification, setShowNotification] = useState<{message: string; type: 'success' | 'info' | 'error'} | null>(null);
 
   // Market Watcher States
   const [watcherSearch, setWatcherSearch] = useState<string>('');
@@ -930,7 +930,7 @@ export default function App() {
   }, []);
 
   // Show auto-dismiss notifications
-  const triggerNotification = (message: string, type: 'success' | 'info' = 'success') => {
+  const triggerNotification = (message: string, type: 'success' | 'info' | 'error' = 'success') => {
     setShowNotification({ message, type });
     setTimeout(() => {
       setShowNotification(null);
@@ -2192,7 +2192,7 @@ export default function App() {
             };
 
             const propRes = await savePropFirmSettings(supabase, session.user.id, propPayload);
-            if (!propRes.success) {
+            if (propRes.error) {
               triggerNotification(`Preferences saved, but Prop Firm settings failed: ${propRes.error || 'Unknown error'}`, "info");
               return;
             }

@@ -95,7 +95,7 @@ export class GaksBacktestStrategy implements BacktestStrategy {
     const prevCandle = previous.length > 0 ? previous[previous.length - 1] : undefined;
 
     // 1. Calculate Deterministic Indicators over available historical candles
-    const atr = calculateDeterministicATR(allCandles, 14);
+    const atr = calculateDeterministicATR(allCandles as any, 14);
     const rsi = calculateDeterministicRSI(closes, 14);
 
     const emaPeriods = this.compiledStrategy.compiled_rules?.ema?.periods || [9, 21];

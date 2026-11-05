@@ -1,4 +1,5 @@
-import type { VercelRequest, VercelResponse } from '@vercel/node';
+type VercelRequest = any;
+type VercelResponse = any;
 import { getSupabase } from '../lib/supabase-server.js';
 import { determineMarketBias, Candle } from '../src/lib/strategy-engine.js';
 import { toCanonicalSymbol, toDisplaySymbol } from '../lib/market-utils.js';

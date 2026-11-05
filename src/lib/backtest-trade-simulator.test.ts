@@ -7,7 +7,7 @@
 import { simulateTradeLifecycle } from './backtest-trade-simulator.js';
 import { BacktestSignal, ParsedCandle } from './backtest-types.js';
 
-function sim(params: Parameters<typeof simulateTradeLifecycle>) {
+function sim(params: Parameters<typeof simulateTradeLifecycle>[0]) {
   return simulateTradeLifecycle(params).trade;
 }
 
