@@ -56,17 +56,24 @@ export default async function handler(req: any, res: any) {
     let query = supabase.from("watchers").select("*");
     if (watcherId) {
       query = query.eq("id", watcherId);
-    } else if (userId && selectedPair) {
-      query = query.eq("user_id", userId).eq("selected_pair", selectedPair);
     } else if (userId) {
       query = query.eq("user_id", userId);
     }
 
-    const { data: watchers, error: fetchError } = await query;
+    const { data: allWatchers, error: fetchError } = await query;
 
     if (fetchError) {
       console.error("[Watcher Stop] Error fetching watchers:", fetchError.message);
       return res.status(500).json({ success: false, error: fetchError.message });
+    }
+
+    let watchers = allWatchers || [];
+    if (selectedPair && !watcherId) {
+      const cleanTarget = String(selectedPair).replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+      watchers = watchers.filter((w: any) => {
+        const p = w.selected_pair || w.symbol || '';
+        return String(p).replace(/[^a-zA-Z0-9]/g, '').toUpperCase() === cleanTarget;
+      });
     }
 
     if (!watchers || watchers.length === 0) {
