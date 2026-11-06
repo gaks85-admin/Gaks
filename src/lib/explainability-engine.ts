@@ -118,7 +118,6 @@ export async function recordEvaluation(
     const failedOptionalList = record.failed_optional_rules || snap.failed_optional_rules || [];
 
     console.log(`\n========== EXPLAINABILITY ==========`);
-    console.log(`[DECISION SCORE TRACE]`);
     console.log(`Watcher ID: ${record.watcher_id}`);
     console.log(`Pair: ${record.pair}`);
     console.log(`Timeframe: ${record.timeframe}`);

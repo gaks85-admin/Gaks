@@ -2129,8 +2129,26 @@ Reason: ${activeValidation.reason}`);
 
         // 1. If an active zone already exists, evaluate its state
         if (currentZone && currentZone.status !== 'INVALIDATED') {
-          const zoneEval = evaluateZoneState(currentZone, latestClosedCandle, activeCurrentPrice, marketStructure.volatilityInformation?.atr, candleData, marketStructure);
-          lastZoneEval = zoneEval;
+          // Check if existing zone mismatches HTF trend direction or is an obsolete micro-zone compared to the dominant institutional zone
+          const expectedDirection = htfTrendResult.trend === 'BEARISH' ? 'SELL' : htfTrendResult.trend === 'BULLISH' ? 'BUY' : null;
+          const directionMismatch = expectedDirection && currentZone.direction !== expectedDirection;
+
+          const rejectedList = getRejectedZones(watcher.id);
+          const candidates = identifyCandidateZones(candleData, marketStructure, compiledStrategy, activeCurrentPrice, rejectedList);
+          const topCandidate = candidates[0] || null;
+
+          const isSuboptimalZone = topCandidate && (
+            (topCandidate.strength >= 80 && (currentZone.strength || 0) < 65) ||
+            (currentZone.status === 'WAITING_FOR_TAP' && topCandidate.id !== currentZone.id && (topCandidate.strength || 0) >= (currentZone.strength || 0) + 15)
+          );
+
+          if (directionMismatch || isSuboptimalZone) {
+            console.log(`[ZONE SELF-CORRECTION] Watcher ID: ${watcher.id} (${selectedPair}): Upgrading active zone [${currentZone.low} - ${currentZone.high}] (${currentZone.type}) to superior institutional zone [${topCandidate?.low} - ${topCandidate?.high}] (Strength: ${topCandidate?.strength} vs ${currentZone.strength || 'N/A'}).`);
+            recordRejectedZone(watcher.id, currentZone, 'Self-corrected to dominant structural zone');
+            currentZone = null;
+          } else {
+            const zoneEval = evaluateZoneState(currentZone, latestClosedCandle, activeCurrentPrice, marketStructure.volatilityInformation?.atr, candleData, marketStructure);
+            lastZoneEval = zoneEval;
 
           if (zoneEval.isInvalidated || zoneEval.status === 'EXPIRED_WITHOUT_ENTRY' || zoneEval.status === 'EXPIRED') {
             console.log(`[ZONE CLEARED/EXPIRED] Watcher ID: ${watcher.id} (${selectedPair}) marked zone [${currentZone.low} - ${currentZone.high}] (${currentZone.type}) transition: ${zoneEval.status} - ${zoneEval.reason}. Clearing zone.`);
@@ -2256,6 +2274,8 @@ Reason: ${activeValidation.reason}`);
             }
           }
         }
+      }
+
 
         // 2. If NO active zone exists, identify and mark a fresh high-quality structural zone
         // CRITICAL: A trade must hit either TP or stop loss before marking another zone.

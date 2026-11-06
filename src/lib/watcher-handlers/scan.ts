@@ -763,38 +763,82 @@ export default async function handler(req: any, res: any) {
       }
     }
 
+    const expectedDirection = htfTrendResult.trend === 'BEARISH' ? 'SELL' : htfTrendResult.trend === 'BULLISH' ? 'BUY' : null;
+    const rejectedList = getRejectedZones(watcher.id);
+    const candidateZones = identifyCandidateZones(candleData, marketStructure, compiledStrategy, activeCurrentPrice, rejectedList);
+    const topCandidate = candidateZones[0] || null;
+
     let lastZoneEval: ZoneEvaluationResult | null = null;
     if (currentZone && currentZone.status !== 'INVALIDATED') {
-      const zoneEval = evaluateZoneState(currentZone, latestClosedCandle, activeCurrentPrice, marketStructure.volatilityInformation?.atr, candleData, marketStructure);
-      lastZoneEval = zoneEval;
+      // Check if existing zone mismatches HTF trend direction or is an obsolete micro-zone compared to the dominant institutional zone
+      const directionMismatch = expectedDirection && currentZone.direction !== expectedDirection;
+      const isSuboptimalZone = topCandidate && (
+        (topCandidate.strength >= 80 && (currentZone.strength || 0) < 65) ||
+        (currentZone.status === 'WAITING_FOR_TAP' && topCandidate.id !== currentZone.id && (topCandidate.strength || 0) >= (currentZone.strength || 0) + 15)
+      );
 
-      if (zoneEval.isInvalidated || zoneEval.status === 'EXPIRED_WITHOUT_ENTRY' || zoneEval.status === 'EXPIRED') {
-        console.log(`[ZONE CLEARED/EXPIRED] Manual Scan - Watcher ${watcher.id} (${symbol}): Zone [${currentZone.low} - ${currentZone.high}] (${currentZone.type}) state transition: ${zoneEval.status} - ${zoneEval.reason}`);
-        
-        // Record rejected zone to prevent immediate re-discovery of same level in recovery cycle
-        recordRejectedZone(watcher.id, currentZone, zoneEval.reason);
-        activeZonesMemoryMap.set(watcher.id, zoneEval.updatedZone);
-
-        await supabase.from("watchers").update({
-          zone_data: zoneEval.updatedZone,
-          zone_status: zoneEval.status,
-          zone_high: null,
-          zone_low: null,
-          zone_type: null,
-          zone_invalidation_level: null,
-          updated_at: new Date().toISOString()
-        }).eq("id", watcher.id);
-        currentZone = null; // Allows discovering fresh zone below in same cycle
+      if (directionMismatch || isSuboptimalZone) {
+        console.log(`[ZONE SELF-CORRECTION] Manual Scan - Watcher ${watcher.id} (${symbol}): Upgrading active zone [${currentZone.low} - ${currentZone.high}] (${currentZone.type}) to superior institutional zone [${topCandidate?.low} - ${topCandidate?.high}] (Strength: ${topCandidate?.strength} vs ${currentZone.strength || 'N/A'}).`);
+        recordRejectedZone(watcher.id, currentZone, 'Self-corrected to dominant structural zone');
+        currentZone = null;
       } else {
-        // Proceed to confirmation analysis in the same scan cycle
-        currentZone = zoneEval.updatedZone;
-        await supabase.from("watchers").update({
-          zone_data: currentZone,
-          zone_status: zoneEval.isTapped ? 'ZONE_TAPPED' : 'WAITING_FOR_TAP',
-          zone_tapped_at: zoneEval.isTapped ? new Date().toISOString() : null,
-          last_scan_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        }).eq("id", watcher.id);
+        const zoneEval = evaluateZoneState(currentZone, latestClosedCandle, activeCurrentPrice, marketStructure.volatilityInformation?.atr, candleData, marketStructure);
+        lastZoneEval = zoneEval;
+
+        if (zoneEval.isInvalidated || zoneEval.status === 'EXPIRED_WITHOUT_ENTRY' || zoneEval.status === 'EXPIRED') {
+          console.log(`[ZONE CLEARED/EXPIRED] Manual Scan - Watcher ${watcher.id} (${symbol}): Zone [${currentZone.low} - ${currentZone.high}] (${currentZone.type}) state transition: ${zoneEval.status} - ${zoneEval.reason}`);
+          
+          // Record rejected zone to prevent immediate re-discovery of same level in recovery cycle
+          recordRejectedZone(watcher.id, currentZone, zoneEval.reason);
+          activeZonesMemoryMap.set(watcher.id, zoneEval.updatedZone);
+
+          await supabase.from("watchers").update({
+            zone_data: zoneEval.updatedZone,
+            zone_status: zoneEval.status,
+            zone_high: null,
+            zone_low: null,
+            zone_type: null,
+            zone_invalidation_level: null,
+            updated_at: new Date().toISOString()
+          }).eq("id", watcher.id);
+          currentZone = null; // Allows discovering fresh zone below in same cycle
+        } else if (!zoneEval.isTapped) {
+          // Zone is intact, but price has NOT tapped/retested the zone yet. Wait for retest!
+          currentZone = zoneEval.updatedZone;
+          activeZonesMemoryMap.set(watcher.id, currentZone);
+          await supabase.from("watchers").update({
+            zone_data: currentZone,
+            zone_status: 'WAITING_FOR_TAP',
+            zone_tapped_at: null,
+            last_scan_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          }).eq("id", watcher.id);
+
+          console.log(`[WAITING FOR ZONE TAP] Manual Scan - Watcher ${watcher.id} (${symbol}): Price ${activeCurrentPrice} is outside marked zone [${currentZone.low} - ${currentZone.high}] (${currentZone.type} ${currentZone.direction}). Waiting for price retest to trigger reversal.`);
+
+          return res.json({
+            success: true,
+            data: {
+              watcher_id: watcher.id,
+              pair: symbol,
+              signal: 'NO_TRADE',
+              confidence: 0,
+              status: 'WAITING_FOR_TAP',
+              zone: currentZone,
+              reasoning: [`Price ${activeCurrentPrice} is outside marked ${currentZone.type} zone [${currentZone.low} - ${currentZone.high}]. Waiting for price retest to trigger reversal.`]
+            }
+          });
+        } else {
+          // Zone is tapped! Proceed to confirmation analysis in the same scan cycle
+          currentZone = zoneEval.updatedZone;
+          await supabase.from("watchers").update({
+            zone_data: currentZone,
+            zone_status: 'ZONE_TAPPED',
+            zone_tapped_at: new Date().toISOString(),
+            last_scan_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          }).eq("id", watcher.id);
+        }
       }
     }
 
