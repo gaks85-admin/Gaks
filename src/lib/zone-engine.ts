@@ -414,7 +414,7 @@ export function identifyCandidateZones(
       const isUpCandle = c.close > c.open || (c.close === c.open && body <= atr * 0.1);
       if (isUpCandle && zoneHeight >= minZoneHeight) {
         const obHigh = Number(c.high.toFixed(5));
-        const obLow = Number(Math.min(c.open, c.low).toFixed(5));
+        const obLow = Number(c.low.toFixed(5));
 
         // Downward institutional displacement check:
         // Must show genuine impulsive expansion (not just a 0.1-pip micro-close)
