@@ -712,10 +712,26 @@ export default async function handler(req: any, res: any) {
 
     console.log(`[HTF TREND] Manual Scan - Watcher ID: ${watcher.id} (${symbol}): ${htfTrendResult.timeframe} Trend is ${htfTrendResult.trend} (${htfTrendResult.reason}). Enforcing trend-following zone markout.`);
 
-    // User Rule: If trend is sideways or is not clear, allow trading/zone-marking in high-speed mode
+    // User Rule: If trend is sideways or is not clear, default to NO TRADE!
     if (htfTrendResult.trend === 'SIDEWAYS' || htfTrendResult.allowedDirection === 'NONE') {
-      console.log(`[HTF SIDEWAYS OVERRIDE] Manual Scan - Watcher ID: ${watcher.id} (${symbol}): ${htfTrendResult.timeframe} Trend is SIDEWAYS (${htfTrendResult.reason}). Overriding restriction to allow immediate zone marking and trade execution.`);
-      marketStructure.htfAllowedDirection = 'BOTH' as any;
+      console.log(`[HTF SIDEWAYS NO-TRADE] Manual Scan - Watcher ID: ${watcher.id} (${symbol}): ${htfTrendResult.timeframe} Trend is SIDEWAYS / unclear (${htfTrendResult.reason}). Preservation mode: keeping existing zone but blocking new signals.`);
+      
+      await supabase.from("watchers").update({
+        last_scan_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      }).eq("id", watcher.id);
+
+      return res.json({
+        success: true,
+        data: {
+          watcher_id: watcher.id,
+          pair: symbol,
+          signal: 'NO_TRADE',
+          confidence: 0,
+          status: 'SIDEWAYS_NO_TRADE',
+          reasoning: [`Higher timeframe (${htfTrendResult.timeframe}) trend is SIDEWAYS / unclear: ${htfTrendResult.reason}. Preservation mode active: existing structural POIs maintained; new setups blocked.`]
+        }
+      });
     }
     const strategyCompilationConfidenceRecord = normalizeConfidence(
       compiledStrategy.overall_confidence ?? compiledStrategy.confidence,
