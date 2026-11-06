@@ -2052,6 +2052,8 @@ Reason: ${activeValidation.reason}`);
         marketStructure.htfReason = htfTrendResult.reason;
         marketStructure.htfAllowedDirection = htfTrendResult.allowedDirection;
         marketStructure.htfBiasAligned = true;
+        marketStructure.htfCandles = htfTrendResult.htfCandles;
+        marketStructure.htfMarketStructure = htfTrendResult.htfMarketStructure;
 
         console.log(`[HTF TREND] Watcher ID: ${watcher.id} (${selectedPair}): ${htfTrendResult.timeframe} Trend is ${htfTrendResult.trend} (${htfTrendResult.reason}). Enforcing trend-following zone markout.`);
         logWatcherEvent('HTF TREND EVALUATION', logCtx, {
@@ -2488,6 +2490,46 @@ Reason: ${activeValidation.reason}`);
               return;
             }
           }
+        }
+
+        // GUARD: If no active zone exists or if active zone is currently WAITING_FOR_TAP,
+        // bypass Stage 2 trade decision evaluation. A trade decision engine run is ONLY permitted when price taps/retests the zone.
+        if (!currentZone || currentZone.status === 'WAITING_FOR_TAP') {
+          console.log(`[ZONE RETEST GUARD] Watcher ID: ${watcher.id} (${selectedPair}): Zone status is ${currentZone?.status || 'NO_ZONE'}. Awaiting price retest of marked zone before decision evaluation.`);
+          const scanDurationMs = Date.now() - scanStart;
+          await recordEvaluation(supabase, {
+            user_id: userId,
+            watcher_id: watcher.id,
+            pair: selectedPair,
+            timeframe: selectedTimeframe,
+            strategy_mode: executionMode,
+            decision_score: 0,
+            matched_weight: 0,
+            possible_weight: 0,
+            recommendation: 'FAIL',
+            mandatory_rules_passed: false,
+            matched_rules: [],
+            failed_rules: [currentZone ? `Price has not retested marked ${currentZone.type} zone [${currentZone.low} - ${currentZone.high}]` : 'No active zone identified'],
+            gemini_used: false,
+            trade_sent: false,
+            trade_reason: currentZone ? `Waiting for price to enter marked ${currentZone.type} zone [${currentZone.low} - ${currentZone.high}].` : 'Waiting for structural zone formation.',
+            scan_duration_ms: scanDurationMs,
+            decision_snapshot: null
+          });
+
+          await supabase
+            .from("watchers")
+            .update({
+              last_scan_at: new Date().toISOString(),
+              last_analyzed_closed_candle_time: latestClosedCandleTime,
+              updated_at: new Date().toISOString()
+            })
+            .eq("id", watcher.id);
+
+          watchersProcessedCount++;
+          isWatcherSkipped = false;
+          results.push({ userId, symbol: selectedPair, tradeStatus: currentZone ? 'WAITING_FOR_TAP' : 'WAITING_FOR_SETUP', result: 'Awaiting price retest of marked zone.' });
+          return;
         }
 
         // Stage 2

@@ -1,5 +1,5 @@
 import { Candle } from './strategy-engine.js';
-import { MarketStructure, FVG, SwingLevel } from './market-structure-engine.js';
+import { MarketStructure, FVG, SwingLevel, extractMarketStructure } from './market-structure-engine.js';
 import { CompilerOutput } from './strategy-compiler/types.js';
 
 export type ZoneType =
@@ -669,6 +669,33 @@ export function identifyCandidateZones(
           reasoning: `Structural Resistance Zone [${low} - ${high}].`
         });
       }
+    }
+  }
+
+  // =========================================================================
+  // 4b. HIGHER TIMEFRAME (HTF) STRUCTURAL POI DISCOVERY
+  // When operating on lower timeframes (M5/M15), evaluate HTF (H4/D1) candles to identify
+  // dominant institutional zones (e.g. H4 origin supply/demand) spanning prior days.
+  // =========================================================================
+  if (marketStructure?.htfCandles && marketStructure.htfCandles.length >= 10 && candles !== marketStructure.htfCandles) {
+    try {
+      const htfMs = marketStructure.htfMarketStructure || extractMarketStructure(marketStructure.htfCandles);
+      htfMs.trend = marketStructure.htfTrend || htfMs.trend;
+      htfMs.htfTrend = marketStructure.htfTrend;
+      htfMs.htfTimeframe = marketStructure.htfTimeframe || 'H4';
+      htfMs.htfAllowedDirection = marketStructure.htfAllowedDirection;
+      htfMs.pair = pair;
+
+      const htfCandidates = identifyCandidateZones(marketStructure.htfCandles, htfMs, compiledStrategy, activePrice, rejectedZones);
+      for (const htfCand of htfCandidates) {
+        htfCand.htfTimeframe = marketStructure.htfTimeframe || 'H4';
+        htfCand.strength = Math.min(100, (htfCand.strength || 80) + 10);
+        if (!candidateZones.some(cz => cz.id === htfCand.id || (cz.low === htfCand.low && cz.high === htfCand.high))) {
+          candidateZones.push(htfCand);
+        }
+      }
+    } catch (e) {
+      console.warn(`[ZONE ENGINE] Error evaluating HTF candidate zones:`, e);
     }
   }
 

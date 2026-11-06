@@ -15,6 +15,8 @@ export interface HtfTrendResult {
   currentPrice: number;
   swingsSummary?: string;
   source: 'REMOTE_H4' | 'REMOTE_D1' | 'CURRENT_TIMEFRAME' | 'SYNTHESIZED';
+  htfCandles?: Candle[];
+  htfMarketStructure?: MarketStructure;
 }
 
 interface CachedHtfTrend {
@@ -175,7 +177,9 @@ export function evaluateHtfCandles(
     ema200: latestEma200,
     currentPrice,
     swingsSummary,
-    source
+    source,
+    htfCandles: sorted,
+    htfMarketStructure: ms
   };
 }
 

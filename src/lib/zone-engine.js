@@ -1,3 +1,4 @@
+import { extractMarketStructure } from "./market-structure-engine.js";
 const watcherRejectedZonesMap = globalThis.__watcherRejectedZonesMap || /* @__PURE__ */ new Map();
 globalThis.__watcherRejectedZonesMap = watcherRejectedZonesMap;
 function recordRejectedZone(watcherId, zone, reason) {
@@ -453,6 +454,26 @@ function identifyCandidateZones(candles, marketStructure, compiledStrategy, curr
           reasoning: `Structural Resistance Zone [${low} - ${high}].`
         });
       }
+    }
+  }
+  if (marketStructure?.htfCandles && marketStructure.htfCandles.length >= 10 && candles !== marketStructure.htfCandles) {
+    try {
+      const htfMs = marketStructure.htfMarketStructure || extractMarketStructure(marketStructure.htfCandles);
+      htfMs.trend = marketStructure.htfTrend || htfMs.trend;
+      htfMs.htfTrend = marketStructure.htfTrend;
+      htfMs.htfTimeframe = marketStructure.htfTimeframe || "H4";
+      htfMs.htfAllowedDirection = marketStructure.htfAllowedDirection;
+      htfMs.pair = pair;
+      const htfCandidates = identifyCandidateZones(marketStructure.htfCandles, htfMs, compiledStrategy, activePrice, rejectedZones);
+      for (const htfCand of htfCandidates) {
+        htfCand.htfTimeframe = marketStructure.htfTimeframe || "H4";
+        htfCand.strength = Math.min(100, (htfCand.strength || 80) + 10);
+        if (!candidateZones.some((cz) => cz.id === htfCand.id || cz.low === htfCand.low && cz.high === htfCand.high)) {
+          candidateZones.push(htfCand);
+        }
+      }
+    } catch (e) {
+      console.warn(`[ZONE ENGINE] Error evaluating HTF candidate zones:`, e);
     }
   }
   if (candidateZones.length === 0) {

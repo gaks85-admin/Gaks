@@ -709,6 +709,8 @@ export default async function handler(req: any, res: any) {
     marketStructure.htfReason = htfTrendResult.reason;
     marketStructure.htfAllowedDirection = htfTrendResult.allowedDirection;
     marketStructure.htfBiasAligned = true;
+    marketStructure.htfCandles = htfTrendResult.htfCandles;
+    marketStructure.htfMarketStructure = htfTrendResult.htfMarketStructure;
 
     console.log(`[HTF TREND] Manual Scan - Watcher ID: ${watcher.id} (${symbol}): ${htfTrendResult.timeframe} Trend is ${htfTrendResult.trend} (${htfTrendResult.reason}). Enforcing trend-following zone markout.`);
 
@@ -942,6 +944,22 @@ export default async function handler(req: any, res: any) {
           });
         }
       }
+    }
+
+    if (!currentZone || currentZone.status === 'WAITING_FOR_TAP') {
+      console.log(`[ZONE RETEST GUARD] Manual Scan - Watcher ID: ${watcher.id} (${symbol}): Zone status is ${currentZone?.status || 'NO_ZONE'}. Awaiting price retest of marked zone before decision evaluation.`);
+      return res.json({
+        success: true,
+        data: {
+          watcher_id: watcher.id,
+          pair: symbol,
+          signal: 'NO_TRADE',
+          confidence: 0,
+          status: currentZone ? 'WAITING_FOR_TAP' : 'WAITING_FOR_SETUP',
+          zone: currentZone,
+          reasoning: [currentZone ? `Price is outside marked ${currentZone.type} zone [${currentZone.low} - ${currentZone.high}]. Waiting for price retest to trigger reversal.` : 'Awaiting structural zone formation.']
+        }
+      });
     }
 
     // Stage 2

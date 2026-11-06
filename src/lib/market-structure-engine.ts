@@ -27,6 +27,8 @@ export interface MarketStructure {
   htfReason?: string;
   htfAllowedDirection?: 'BUY' | 'SELL' | 'BOTH' | 'NONE';
   htfBiasAligned?: boolean;
+  htfCandles?: Candle[];
+  htfMarketStructure?: MarketStructure;
   swingHighs: SwingLevel[];
   swingLows: SwingLevel[];
   supportZones: { priceMin: number; priceMax: number; strength: number }[];

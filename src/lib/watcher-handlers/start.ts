@@ -6,6 +6,10 @@ import { timeframeToMinutes } from '../timeframe.js';
 import { defaultMarketDataService } from '../market-data-service.js';
 import { getMarketSchedule } from '../market-hours.js';
 import { toCanonicalSymbol, toDisplaySymbol } from '../market-data-gateway.js';
+import { compileStrategy } from '../strategy-compiler.js';
+import { extractMarketStructure } from '../market-structure-engine.js';
+import { resolveHigherTimeframeTrend } from '../htf-trend-engine.js';
+import { identifyMarkedZone } from '../zone-engine.js';
 
 /**
  * Self-contained Supabase client initialization.
@@ -651,12 +655,76 @@ export default async function handler(req: any, res: any) {
 
     console.log("[Watcher Activation] Watcher created successfully");
 
+    // Perform immediate initial trend resolution & structural zone markout upon watcher activation
+    let initialTrendNotice = '';
+    let initialZoneData: any = null;
+    try {
+      const canonicalSym = toCanonicalSymbol(selectedPair);
+      const candlesRes = await defaultMarketDataService.getMarketData({
+        symbol: canonicalSym,
+        timeframe: finalTimeframe,
+        requiredCount: 150,
+        purpose: 'Watcher Activation Zone Markout'
+      });
+
+      if (candlesRes.isValid && candlesRes.candles && candlesRes.candles.length >= 10) {
+        const compiledStrategy = compileStrategy(strategyDetails.text);
+        const marketStructure = extractMarketStructure(candlesRes.candles);
+        const htfTrendResult = await resolveHigherTimeframeTrend(
+          canonicalSym,
+          candlesRes.candles,
+          finalTimeframe,
+          { preferredHtf: compiledStrategy.compiled_rules?.preferred_htf || 'H4' }
+        );
+
+        marketStructure.htfTrend = htfTrendResult.trend;
+        marketStructure.htfTimeframe = htfTrendResult.timeframe;
+        marketStructure.htfReason = htfTrendResult.reason;
+        marketStructure.htfAllowedDirection = htfTrendResult.allowedDirection;
+        marketStructure.htfCandles = htfTrendResult.htfCandles;
+        marketStructure.htfMarketStructure = htfTrendResult.htfMarketStructure;
+
+        const latestCandle = candlesRes.candles[candlesRes.candles.length - 1];
+        const activePrice = latestCandle?.close || 0;
+
+        if (htfTrendResult.trend === 'SIDEWAYS' || htfTrendResult.allowedDirection === 'NONE') {
+          initialTrendNotice = `\n\n*HTF Trend:* ${htfTrendResult.timeframe} SIDEWAYS / Consolidation\n*Status:* Defaulting to NO TRADE (Awaiting clear trend alignment)`;
+        } else {
+          const markedZone = identifyMarkedZone(candlesRes.candles, marketStructure, compiledStrategy, activePrice);
+          if (markedZone) {
+            markedZone.status = 'WAITING_FOR_TAP';
+            initialZoneData = markedZone;
+
+            await supabase.from("watchers").update({
+              zone_data: markedZone,
+              zone_status: 'WAITING_FOR_TAP',
+              zone_high: markedZone.high,
+              zone_low: markedZone.low,
+              zone_type: markedZone.type,
+              zone_invalidation_level: markedZone.invalidationLevel,
+              zone_marked_at: new Date().toISOString(),
+              updated_at: nowString
+            }).eq("id", savedWatcherRow.id);
+
+            initialTrendNotice = `\n\n*HTF Trend:* ${htfTrendResult.timeframe} ${htfTrendResult.trend}\n*Marked Zone:* ${markedZone.type} [${markedZone.low} - ${markedZone.high}] (${markedZone.direction})\n*Status:* WAITING FOR RETEST 🎯 (Price: ${activePrice})`;
+            console.log(`[Watcher Activation Zone Markout] Watcher ID ${savedWatcherRow.id}: Immediately marked ${markedZone.type} [${markedZone.low} - ${markedZone.high}] (${markedZone.direction})`);
+          } else {
+            initialTrendNotice = `\n\n*HTF Trend:* ${htfTrendResult.timeframe} ${htfTrendResult.trend}\n*Status:* Trend verified. Awaiting new structural POI/Zone formation.`;
+          }
+        }
+      }
+    } catch (initErr) {
+      console.warn("[Watcher Activation] Initial zone markout notice:", initErr);
+    }
+
     console.log(`[Watcher Start] AI Market Watcher activated successfully for user ${userId}.`);
 
     const displayPair = toDisplaySymbol(selectedPair);
     const marketSchedule = getMarketSchedule(displayPair);
     let marketNoticeTelegram = '';
-    let activationMessage = "AI Market Watcher activated successfully.";
+    let activationMessage = initialZoneData 
+      ? `AI Market Watcher activated! Marked ${initialZoneData.type} [${initialZoneData.low} - ${initialZoneData.high}]. Waiting for price retest.` 
+      : "AI Market Watcher activated successfully.";
 
     if (!marketSchedule.isOpen && marketSchedule.closesOnWeekends) {
       marketNoticeTelegram = `\n\n*Market Notice (Nigeria Time / WAT):*\n⚠️ ${displayPair} is currently closed for the weekend (${marketSchedule.reasonWat}). Reopens *${marketSchedule.nextOpenWatFormatted || 'Sunday 10:00 PM WAT'}*. Watcher is active and candle downloads will automatically begin once markets reopen.`;
@@ -672,8 +740,9 @@ export default async function handler(req: any, res: any) {
       `*Account Size:* $${accountSize || 'Not set'}\n` +
       `*Risk:* ${riskPercentage ? riskPercentage + '%' : 'Not set'}\n` +
       `*Scan Interval:* Every ${computedInterval} minutes` +
+      initialTrendNotice +
       marketNoticeTelegram + `\n\n` +
-      `I will now monitor the markets and alert you of any high-probability setups matching your strategy.`
+      `I will now monitor the markets and alert you when price retests your marked zone.`
     );
 
     return res.json({
