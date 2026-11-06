@@ -513,23 +513,18 @@ export function evaluateDecision(
     requires_gemini = false;
     no_trade_reason = `Mandatory rules failed: ${failedMandatory.map(r => r.name).join(', ')}.`;
     trace.push(`[FAILURE] Mandatory rules failed. Rejecting setup.`);
-  } else if (decision_score < 60) {
+  } else if (decision_score < 50) {
     recommendation = 'FAIL';
     requires_gemini = false;
-    no_trade_reason = `Decision score too low: ${decision_score}% (Required: 60% for evaluation, 75% for approval).`;
+    no_trade_reason = `Decision score too low: ${decision_score}% (Required: 50% for high-speed evaluation).`;
     trace.push(`[FAILURE] Score ${decision_score}% below evaluation threshold.`);
-  } else if (decision_score < 75) {
-    recommendation = 'AMBIGUOUS';
-    requires_gemini = true;
-    no_trade_reason = `Setup is ambiguous: quality score ${decision_score}% is below the 75% approval threshold.`;
-    trace.push(`[AMBIGUOUS] Score ${decision_score}% requires Gemini validation.`);
   } else {
-    if (decision_score >= 90) {
+    if (decision_score >= 75) {
       recommendation = 'PASS';
     } else {
-      recommendation = 'LIKELY_PASS';
+      recommendation = 'LIKELY_PASS'; // 50% - 74.9% marked as LIKELY_PASS for immediate zone marking & execution
     }
-    requires_gemini = true; // Always validate with Gemini if 75%+ or explicitly required by mode
+    requires_gemini = false; // Rule-only high-speed execution mode bypasses external AI roundtrips
   }
 
   // Forced Gemini for Hybrid/AI modes regardless of score (if score >= 60)

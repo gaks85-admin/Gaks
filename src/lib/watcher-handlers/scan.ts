@@ -40,9 +40,8 @@ import { resolveHigherTimeframeTrend } from "../htf-trend-engine.js";
 import { evaluateWatcherPropFirmGate, WatcherPropFirmGateResult } from "../prop-firm-watcher-gate.js";
 import { evaluateEconomicNewsGate } from "../economic-news-gate.js";
 
-// TEMPORARY MODE FLAG: Force Market Watcher into RULE_ONLY mode for diagnostic testing.
-// To restore original behavior, set this to null.
-const MARKET_WATCHER_DECISION_MODE_OVERRIDE: 'RULE_ONLY' | 'HYBRID' | 'AI_ONLY' | null = null;
+// TEMPORARY MODE FLAG: Force Market Watcher into RULE_ONLY mode for immediate zone marking and high-speed execution.
+const MARKET_WATCHER_DECISION_MODE_OVERRIDE: 'RULE_ONLY' | 'HYBRID' | 'AI_ONLY' | null = 'RULE_ONLY';
  
  // In-memory runtime cache for marked zones to guarantee persistence across scan cycles
  // even if the Supabase watchers table is temporarily missing the zone columns.
@@ -1371,6 +1370,7 @@ Fallback: NO_TRADE`.trim());
         slValid: Boolean(analysis.stopLoss),
         tpValid: Boolean(analysis.takeProfit),
         rrValid: true,
+        minQualityThreshold: 60,
         historicalProbability: histResult?.historical_probability || 50,
         ruleDetails: decisionResult.rule_details
       });
