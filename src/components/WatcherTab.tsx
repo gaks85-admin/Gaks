@@ -311,6 +311,16 @@ export const WatcherTab: React.FC<WatcherTabProps> = ({
         </div>
       )}
 
+      {/* No Distinct Zone Found Banner */}
+      {isWatcherActive && watcherTradeStatus === 'NO_DISTINCT_ZONE_FOUND' && !watcherZone && (
+        <div className="p-4 rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/60 flex items-center gap-3 shadow-xs animate-fade-in">
+          <Info className="w-4 h-4 text-zinc-500 shrink-0" />
+          <p className="text-xs font-medium text-zinc-700 dark:text-zinc-300">
+            No distinct zone identified.
+          </p>
+        </div>
+      )}
+
       {/* Marked Trading Zone Card (When waiting for tap or tapped) */}
       {isWatcherActive && watcherTradeStatus !== 'ACTIVE' && watcherZone && (
         <div className={`p-5 rounded-3xl border ${

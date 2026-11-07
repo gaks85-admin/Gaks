@@ -2473,14 +2473,14 @@ Reason: ${activeValidation.reason}`);
                 failed_rules: ['No qualifying Supply or Demand zone was identified.'],
                 gemini_used: false,
                 trade_sent: false,
-                trade_reason: 'NO_DISTINCT_ZONE_FOUND — No qualifying Supply or Demand zone was identified. Continuing market monitoring.',
+                trade_reason: 'No distinct zone identified.',
                 scan_duration_ms: scanDurationMs,
                 decision_snapshot: null
               });
 
               watchersProcessedCount++;
               isWatcherSkipped = false;
-              results.push({ userId, symbol, tradeStatus: 'NO_DISTINCT_ZONE_FOUND', result: 'NO_DISTINCT_ZONE_FOUND — No qualifying Supply or Demand zone was identified.' });
+              results.push({ userId, symbol, tradeStatus: 'NO_DISTINCT_ZONE_FOUND', result: 'No distinct zone identified.' });
               return;
             } else {
               console.log(`[ZONE SEARCH] Watcher ID: ${watcher.id} (${selectedPair}): No zone required by strategy. Proceeding to indicator evaluation.`);
@@ -2508,7 +2508,7 @@ Reason: ${activeValidation.reason}`);
             failed_rules: [currentZone ? `Price has not retested marked ${currentZone.type} zone [${currentZone.low} - ${currentZone.high}]` : 'No active zone identified'],
             gemini_used: false,
             trade_sent: false,
-            trade_reason: currentZone ? `WAITING_FOR_TAP — Waiting for price to enter marked ${currentZone.type} zone [${currentZone.low} - ${currentZone.high}].` : 'NO_DISTINCT_ZONE_FOUND — Waiting for structural zone formation.',
+            trade_reason: currentZone ? `WAITING_FOR_TAP — Waiting for price to enter marked ${currentZone.type} zone [${currentZone.low} - ${currentZone.high}].` : 'No distinct zone identified.',
             scan_duration_ms: scanDurationMs,
             decision_snapshot: null
           });
@@ -2524,7 +2524,7 @@ Reason: ${activeValidation.reason}`);
 
           watchersProcessedCount++;
           isWatcherSkipped = false;
-          results.push({ userId, symbol: selectedPair, tradeStatus: currentZone ? 'WAITING_FOR_TAP' : 'NO_DISTINCT_ZONE_FOUND', result: currentZone ? 'WAITING_FOR_TAP — Awaiting price retest of marked zone.' : 'NO_DISTINCT_ZONE_FOUND' });
+          results.push({ userId, symbol: selectedPair, tradeStatus: currentZone ? 'WAITING_FOR_TAP' : 'NO_DISTINCT_ZONE_FOUND', result: currentZone ? 'WAITING_FOR_TAP — Awaiting price retest of marked zone.' : 'No distinct zone identified.' });
           return;
         }
 
@@ -2625,14 +2625,15 @@ Reason: ${activeValidation.reason}`);
 
         if (!passesDeterministicGate) {
           const failedMandatory = decisionResult.failed_mandatory_rules || [];
-          const isOnlySupplyDemandFailure = failedMandatory.length === 1 && failedMandatory[0] === 'Supply and Demand';
+          const isSupplyDemandFailure = failedMandatory.includes('Supply and Demand') || failedMandatory.includes('Order Block') || failedMandatory.includes('Unmitigated Zone');
           const isNoZone = !currentZone;
 
-          if (isOnlySupplyDemandFailure && isNoZone) {
-            console.log(`[NO_DISTINCT_ZONE_FOUND] Watcher ID: ${watcher.id} (${selectedPair}): NO_DISTINCT_ZONE_FOUND — No qualifying Supply or Demand zone was identified. Continuing market monitoring.`);
+          if (isNoZone || isSupplyDemandFailure) {
+            console.log(`[NO_DISTINCT_ZONE_FOUND] Watcher ID: ${watcher.id} (${selectedPair}): No distinct zone identified. Continuing market monitoring.`);
+            console.log(`[INTERNAL PRE-FILTER DIAGNOSTIC] Watcher ID: ${watcher.id} | Score: ${decisionResult.decision_score?.toFixed(1) || '0.0'}% | Rec: ${recommendation} | Failed: ${decisionResult.failed_mandatory_rules?.join(', ') || 'None'}`);
             analysis.signal = 'NO_TRADE';
             analysis.confidence = 0;
-            analysis.reasoning = ["NO_DISTINCT_ZONE_FOUND — No qualifying Supply or Demand zone was identified. Continuing market monitoring."];
+            analysis.reasoning = ["No distinct zone identified."];
           } else {
             console.log(`
 [DETERMINISTIC PRE-FILTER GATE: REJECTED (NO_TRADE)]

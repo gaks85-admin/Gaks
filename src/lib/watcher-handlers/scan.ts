@@ -924,7 +924,7 @@ export default async function handler(req: any, res: any) {
               confidence: 0,
               status: 'NO_DISTINCT_ZONE_FOUND',
               zone: null,
-              reasoning: ['NO_DISTINCT_ZONE_FOUND — No qualifying Supply or Demand zone was identified. Continuing market monitoring.']
+              reasoning: ['No distinct zone identified.']
             }
           });
         } else {
@@ -944,7 +944,7 @@ export default async function handler(req: any, res: any) {
           confidence: 0,
           status: currentZone ? 'WAITING_FOR_TAP' : 'NO_DISTINCT_ZONE_FOUND',
           zone: currentZone,
-          reasoning: [currentZone ? `WAITING_FOR_TAP — Price is outside marked ${currentZone.type} zone [${currentZone.low} - ${currentZone.high}]. Waiting for price retest to trigger reversal.` : 'NO_DISTINCT_ZONE_FOUND — No qualifying Supply or Demand zone was identified. Continuing market monitoring.']
+          reasoning: [currentZone ? `WAITING_FOR_TAP — Price is outside marked ${currentZone.type} zone [${currentZone.low} - ${currentZone.high}]. Waiting for price retest to trigger reversal.` : 'No distinct zone identified.']
         }
       });
     }
@@ -1299,6 +1299,14 @@ Fallback: NO_TRADE`.trim());
       // Gemini NOT required! Check recommendation
       if (recommendation === 'FAIL' || recommendation === 'AMBIGUOUS' || !passesDeterministicGate) {
         console.log(`[Decision Engine] Recommendation is ${recommendation} (Passes Gate: ${passesDeterministicGate}). Forcing NO_TRADE without Gemini approval.`);
+        const isNoZone = !currentZone;
+        const failedMandatory = decisionResult.failed_mandatory_rules || [];
+        const isSupplyDemandFailure = failedMandatory.includes('Supply and Demand') || failedMandatory.includes('Order Block') || failedMandatory.includes('Unmitigated Zone');
+        
+        const userFacingReason = (isNoZone || isSupplyDemandFailure)
+          ? "No distinct zone identified."
+          : (decisionResult.no_trade_reason || decisionResult.explanation || "Setup does not satisfy strategy requirements.");
+
         analysis = {
           signal: 'NO_TRADE',
           confidence: 0,
@@ -1306,7 +1314,7 @@ Fallback: NO_TRADE`.trim());
           stopLoss: null,
           takeProfit: null,
           riskReward: null,
-          reasoning: [decisionResult.no_trade_reason || decisionResult.explanation || `Rejected by Deterministic Pre-Filter (${recommendation}, score: ${decisionResult.decision_score}%)`]
+          reasoning: [userFacingReason]
         };
       } else {
         console.log(`[Decision Engine] Recommendation is ${recommendation}. Evaluating local strategy engine.`);
