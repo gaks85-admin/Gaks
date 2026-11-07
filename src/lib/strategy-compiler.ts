@@ -342,29 +342,12 @@ export function compileStrategy(strategyText: string): CompilerOutput {
     }
   }
 
-  // FINAL PASS: If no mandatory rules were explicitly declared, apply defaults.
-  // For SMC strategies, Order Block/FVG/S&D should be mandatory.
-  if (!hasAnyMandatoryRule) {
-    const poiIds = ['order_block', 'supply_demand', 'unmitigated_zone', 'fair_value_gap', 'support', 'resistance'];
-    const hasPoi = canonicalRuleDefs.some(r => poiIds.includes(r.id));
-    
-    for (const ruleDef of canonicalRuleDefs) {
-      const isPoi = poiIds.includes(ruleDef.id);
-      if (hasPoi && isPoi) {
-        ruleDef.isMandatory = true;
-        mandatory_rules.push(ruleDef.id);
-      } else {
-        optional_rules.push(ruleDef.id);
-      }
-    }
-  } else {
-    // Fill the mandatory/optional lists based on the results from the first pass
-    for (const ruleDef of canonicalRuleDefs) {
-      if (ruleDef.isMandatory) {
-        mandatory_rules.push(ruleDef.id);
-      } else {
-        optional_rules.push(ruleDef.id);
-      }
+  // Fill the mandatory/optional lists based on the results from the first pass
+  for (const ruleDef of canonicalRuleDefs) {
+    if (ruleDef.isMandatory) {
+      mandatory_rules.push(ruleDef.id);
+    } else {
+      optional_rules.push(ruleDef.id);
     }
   }
 
