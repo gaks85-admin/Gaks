@@ -98,10 +98,12 @@ export function extractMarketStructure(candles: Candle[], supportedDetectors?: s
   for (let i = 2; i < sortedCandles.length - 2; i++) {
     const h = highs[i];
     const l = lows[i];
-    if (h >= highs[i - 1] && h >= highs[i - 2] && h >= highs[i + 1] && h >= highs[i + 2]) {
+    const isHighPeak = h >= highs[i - 1] && h >= highs[i - 2] && h >= highs[i + 1] && h >= highs[i + 2] && (h > highs[i - 1] || h > highs[i + 1]);
+    if (isHighPeak) {
       swingHighs.push({ index: i, price: h, timestamp: sortedCandles[i].timestamp, isBroken: false });
     }
-    if (l <= lows[i - 1] && l <= lows[i - 2] && l <= lows[i + 1] && l <= lows[i + 2]) {
+    const isLowValley = l <= lows[i - 1] && l <= lows[i - 2] && l <= lows[i + 1] && l <= lows[i + 2] && (l < lows[i - 1] || l < lows[i + 1]);
+    if (isLowValley) {
       swingLows.push({ index: i, price: l, timestamp: sortedCandles[i].timestamp, isBroken: false });
     }
   }

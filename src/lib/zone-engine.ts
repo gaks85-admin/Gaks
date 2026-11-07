@@ -17,7 +17,8 @@ export type ZoneType =
 
 export type ZoneStatus =
   | 'ACTIVE'
-  | 'NO_ZONE'
+  | 'FRESH'
+  | 'WAITING_FOR_RETEST'
   | 'WAITING_FOR_TAP'
   | 'ZONE_TAPPED'
   | 'CONFIRMED'
@@ -25,7 +26,8 @@ export type ZoneStatus =
   | 'EXPIRED_WITHOUT_ENTRY'
   | 'INVALIDATED'
   | 'EXPIRED'
-  | 'ARCHIVED';
+  | 'ARCHIVED'
+  | 'NO_ZONE';
 
 export interface MarkedZone {
   id: string;
@@ -44,6 +46,9 @@ export interface MarkedZone {
   status: ZoneStatus;
   reasoning: string;
   candleIndex?: number;
+  timeframe?: string;
+  evidence?: string[];
+  originCandle?: string;
   htfTrend?: 'BULLISH' | 'BEARISH' | 'SIDEWAYS';
   htfTimeframe?: string;
   htfReason?: string;
@@ -263,6 +268,9 @@ export function identifyCandidateZones(
           tappedAt: null,
           tapCount: 0,
           status: 'WAITING_FOR_TAP',
+          timeframe: marketStructure?.timeframe || 'M5',
+          originCandle: String(latestCandle.timestamp),
+          evidence: [`Bullish Fair Value Gap [${low} - ${high}]`],
           reasoning: `Fresh Unmitigated Bullish Fair Value Gap [${low} - ${high}].`,
           candleIndex: fvg.candleIndex
         });
@@ -301,6 +309,9 @@ export function identifyCandidateZones(
           tappedAt: null,
           tapCount: 0,
           status: 'WAITING_FOR_TAP',
+          timeframe: marketStructure?.timeframe || 'M5',
+          originCandle: String(latestCandle.timestamp),
+          evidence: [`Bearish Fair Value Gap [${low} - ${high}]`],
           reasoning: `Fresh Unmitigated Bearish Fair Value Gap [${low} - ${high}].`,
           candleIndex: fvg.candleIndex
         });
@@ -312,35 +323,41 @@ export function identifyCandidateZones(
   // 2. ORDER BLOCKS & SUPPLY / DEMAND (Strict Unmitigated Discovery)
   // =========================================================================
   if (allowOrderBlocks) {
-    // Scan historical candles for fresh, unmitigated order blocks across recent swing structure (up to 120 candles)
+    // Scan historical candles for fresh, unmitigated zones across recent swing structure (up to 120 candles)
     for (let i = sortedCandles.length - 2; i >= Math.max(0, sortedCandles.length - 120); i--) {
       const c = sortedCandles[i];
       const body = Math.abs(c.close - c.open);
+      const zoneHeight = c.high - c.low;
+      // Do not reject compact, precise zones (e.g. 3-cent zones on SOLUSD like 89.62 - 89.65)
+      const minZoneHeight = Math.max(atr * 0.04, 0.00001);
 
       // --- BULLISH ORDER BLOCK (DEMAND / BUY) ---
-      const isDownCandle = c.close < c.open || (c.close === c.open && body <= atr * 0.1);
-      const zoneHeight = c.high - c.low;
-      const minZoneHeight = Math.max(atr * 0.35, buffer * 1.5);
-
-      if (isDownCandle && zoneHeight >= minZoneHeight) {
-        const obHigh = Number(Math.max(c.open, c.high).toFixed(5));
-        const obLow = Number(c.low.toFixed(5));
-
-        // Detect if this candle formed at a Swing Low / local valley (Origin of the impulse)
-        const isSwingLow = (marketStructure?.swingLows || []).some(
-          sl => Math.abs(sl.index - i) <= 2 || (c.low <= sl.price && Math.abs(sl.index - i) <= 5)
-        );
-        let isLocalValley = true;
-        for (let w = Math.max(0, i - 4); w <= Math.min(sortedCandles.length - 1, i + 4); w++) {
-          if (sortedCandles[w].low < c.low) {
-            isLocalValley = false;
-            break;
-          }
+      const isDownCandle = c.close <= c.open || (c.close > c.open && body <= atr * 0.25);
+      const isSwingLow = (marketStructure?.swingLows || []).some(
+        sl => Math.abs(sl.index - i) <= 2 || (c.low <= sl.price && Math.abs(sl.index - i) <= 5)
+      );
+      let isLocalValley = true;
+      for (let w = Math.max(0, i - 3); w <= Math.min(sortedCandles.length - 1, i + 3); w++) {
+        if (sortedCandles[w].low < c.low) {
+          isLocalValley = false;
+          break;
         }
-        const isOrigin = isSwingLow || isLocalValley;
+      }
+      const isOriginLow = isSwingLow || isLocalValley;
+      const isLowerWickRejection = zoneHeight > 0 && ((Math.min(c.open, c.close) - c.low) / zoneHeight) >= 0.25;
+      const qualifiesDemand = isDownCandle || isOriginLow || isLowerWickRejection;
 
-        // Institutional displacement check:
-        // Loosened for Stage 8: Allow zones with clear structure even if displacement is moderate.
+      if (qualifiesDemand && zoneHeight >= minZoneHeight) {
+        const obLow = Number(c.low.toFixed(5));
+        let obHigh = Number(Math.max(c.open, c.close).toFixed(5));
+        if (obHigh - obLow < minZoneHeight) {
+          obHigh = Number(Math.min(c.high, obLow + minZoneHeight).toFixed(5));
+        }
+        if (obHigh <= obLow) {
+          obHigh = Number(c.high.toFixed(5));
+        }
+
+        // Upward institutional displacement check:
         let displacementIdx = -1;
         let hasStructuralBreak = false;
         let highestHigh = obHigh;
@@ -353,8 +370,7 @@ export function identifyCandidateZones(
           const dispExpansion = dispCandle.close - obHigh;
           const dispBody = dispCandle.close - dispCandle.open;
 
-          // Loosened thresholds (Stage 8): 0.5 ATR expansion instead of 0.75
-          const hasDecisiveExpansion = dispExpansion >= Math.max(atr * 0.50, buffer * 1.2) && dispBody >= atr * 0.3;
+          const hasDecisiveExpansion = (dispExpansion >= Math.max(atr * 0.35, buffer * 0.8) && dispBody >= atr * 0.15) || dispExpansion >= atr * 0.6;
 
           const brokeSwingHigh = (marketStructure?.swingHighs || []).some(
             sh => sh.index < d && sh.index >= Math.max(0, i - 30) && dispCandle.high > sh.price
@@ -368,7 +384,7 @@ export function identifyCandidateZones(
             f => f.type === 'BULLISH_FVG' && f.candleIndex >= i && f.candleIndex <= d
           );
 
-          if (displacementIdx === -1 && (hasDecisiveExpansion || dispExpansion >= atr * 0.8)) {
+          if (displacementIdx === -1 && (hasDecisiveExpansion || brokeSwingHigh || hasBosOrChoch || createdFvg)) {
             displacementIdx = d;
             hasStructuralBreak = brokeSwingHigh || hasBosOrChoch || createdFvg;
           } else if (brokeSwingHigh || hasBosOrChoch || createdFvg) {
@@ -383,34 +399,41 @@ export function identifyCandidateZones(
         }
 
         const maxDisplacement = highestHigh - obHigh;
-        if (displacementIdx === -1 && maxDisplacement >= atr * 1.0) {
+        if (displacementIdx === -1 && maxDisplacement >= atr * 0.8) {
           displacementIdx = i + 1;
         }
 
         if (displacementIdx !== -1) {
-          // Strict Mitigation Check:
-          // Check ALL subsequent candles from (displacementIdx + 1) to the latest closed candle.
-          // If ANY candle pulled back down into the demand zone (low <= obHigh), it has been MITIGATED.
-          let isMitigated = false;
+          const invalidation = Number((obLow - buffer).toFixed(5));
+          let isInvalidated = false;
+          let tapCount = 0;
           for (let k = displacementIdx + 1; k < sortedCandles.length; k++) {
-            if (sortedCandles[k].low <= obHigh) {
-              isMitigated = true;
+            // Invalidation: Candle closed below invalidation level
+            if (sortedCandles[k].close < invalidation) {
+              isInvalidated = true;
               break;
+            }
+            // Retest tap
+            if (sortedCandles[k].low <= obHigh) {
+              tapCount++;
             }
           }
 
-          // In unmitigated mode, completely skip any zone that has already been mitigated
-          if (!enforceUnmitigated || !isMitigated) {
-            // Price position check: For a fresh demand setup, active price must sit at or above demand base (obLow)
-            if (activePrice >= obLow - buffer * 0.2) {
-              const invalidation = Number((obLow - buffer).toFixed(5));
+          // Mitigated if price broke through zone base or tapped 4+ times without reversing
+          const isMitigated = tapCount >= 4;
+
+          if (!isInvalidated && (!enforceUnmitigated || !isMitigated)) {
+            // Price position check: For a demand setup, active price must be above or inside demand
+            if (activePrice >= obLow - buffer * 0.5) {
+              const isCurrentlyInZone = activePrice <= obHigh && activePrice >= obLow;
+              const zoneStatus: ZoneStatus = isCurrentlyInZone ? 'ZONE_TAPPED' : (tapCount > 0 ? 'WAITING_FOR_RETEST' : 'WAITING_FOR_TAP');
               const displacementInAtr = maxDisplacement / Math.max(0.0001, atr);
               const displacementScore = Math.min(35, Math.round(displacementInAtr * 8));
-              const originBonus = isOrigin ? 30 : 0;
+              const originBonus = isOriginLow ? 30 : 0;
               const structuralBonus = hasStructuralBreak ? 20 : 0;
-              const freshnessBonus = 15;
+              const freshnessBonus = tapCount === 0 ? 15 : 10;
               const distanceInAtr = Math.abs(activePrice - obHigh) / Math.max(0.0001, atr);
-              const proximityScore = Math.max(0, 10 - distanceInAtr * 0.5);
+              const proximityScore = Math.max(0, 15 - distanceInAtr * 1.0);
 
               const strength = Math.round(Math.min(100, (displacementScore + originBonus + structuralBonus + freshnessBonus + proximityScore) * (trend === 'BULLISH' ? 1.0 : 0.85)));
 
@@ -426,10 +449,18 @@ export function identifyCandidateZones(
                 createdCandleTime: String(c.timestamp),
                 displacementCandleTime: String(sortedCandles[displacementIdx].timestamp),
                 displacementIndex: displacementIdx,
-                tappedAt: null,
-                tapCount: 0,
-                status: 'WAITING_FOR_TAP',
-                reasoning: `Institutional Demand Zone / Bullish Order Block [${obLow} - ${obHigh}] confirmed with structural displacement.${hasStructuralBreak ? ' (BOS / Swing High Broken)' : ''}${isOrigin ? ' [Origin Swing Low]' : ''}`,
+                tappedAt: tapCount > 0 ? new Date().toISOString() : null,
+                tapCount,
+                status: zoneStatus,
+                timeframe: marketStructure?.timeframe || 'M5',
+                originCandle: String(c.timestamp),
+                evidence: [
+                  `Institutional Demand Zone [${obLow} - ${obHigh}]`,
+                  hasStructuralBreak ? 'BOS / Swing High Broken' : 'Structural Expansion',
+                  isOriginLow ? 'Origin Swing Low' : 'Consolidation Base',
+                  `Displacement: +${maxDisplacement.toFixed(4)}`
+                ],
+                reasoning: `Institutional Demand Zone / Bullish Order Block [${obLow} - ${obHigh}] confirmed with structural displacement.${hasStructuralBreak ? ' (BOS / Swing High Broken)' : ''}${isOriginLow ? ' [Origin Swing Low]' : ''}`,
                 candleIndex: i
               });
             }
@@ -438,26 +469,32 @@ export function identifyCandidateZones(
       }
 
       // --- BEARISH ORDER BLOCK (SUPPLY / SELL) ---
-      const isUpCandle = c.close > c.open || (c.close === c.open && body <= atr * 0.1);
-      if (isUpCandle && zoneHeight >= minZoneHeight) {
-        const obHigh = Number(c.high.toFixed(5));
-        const obLow = Number(c.low.toFixed(5));
-
-        // Detect if this candle formed at a Swing High / local peak (Origin of the drop)
-        const isSwingHigh = (marketStructure?.swingHighs || []).some(
-          sh => Math.abs(sh.index - i) <= 2 || (c.high >= sh.price && Math.abs(sh.index - i) <= 5)
-        );
-        let isLocalPeak = true;
-        for (let w = Math.max(0, i - 4); w <= Math.min(sortedCandles.length - 1, i + 4); w++) {
-          if (sortedCandles[w].high > c.high) {
-            isLocalPeak = false;
-            break;
-          }
+      const isUpCandle = c.close >= c.open || (c.close < c.open && body <= atr * 0.25);
+      const isSwingHigh = (marketStructure?.swingHighs || []).some(
+        sh => Math.abs(sh.index - i) <= 2 || (c.high >= sh.price && Math.abs(sh.index - i) <= 5)
+      );
+      let isLocalPeak = true;
+      for (let w = Math.max(0, i - 3); w <= Math.min(sortedCandles.length - 1, i + 3); w++) {
+        if (sortedCandles[w].high > c.high) {
+          isLocalPeak = false;
+          break;
         }
-        const isOrigin = isSwingHigh || isLocalPeak;
+      }
+      const isOriginHigh = isSwingHigh || isLocalPeak;
+      const isUpperWickRejection = zoneHeight > 0 && ((c.high - Math.max(c.open, c.close)) / zoneHeight) >= 0.25;
+      const qualifiesSupply = isUpCandle || isOriginHigh || isUpperWickRejection;
+
+      if (qualifiesSupply && zoneHeight >= minZoneHeight) {
+        const obHigh = Number(c.high.toFixed(5));
+        let obLow = Number(Math.min(c.open, c.close).toFixed(5));
+        if (obHigh - obLow < minZoneHeight) {
+          obLow = Number(Math.max(c.low, obHigh - minZoneHeight).toFixed(5));
+        }
+        if (obHigh <= obLow) {
+          obLow = Number(c.low.toFixed(5));
+        }
 
         // Downward institutional displacement check:
-        // Must show genuine impulsive expansion that breaks structure or leaves an FVG
         let displacementIdx = -1;
         let hasStructuralBreak = false;
         let lowestLow = obLow;
@@ -470,7 +507,7 @@ export function identifyCandidateZones(
           const dispExpansion = obLow - dispCandle.close;
           const dispBody = dispCandle.open - dispCandle.close;
 
-          const hasDecisiveExpansion = dispExpansion >= Math.max(atr * 0.75, buffer * 1.5) && dispBody >= atr * 0.4;
+          const hasDecisiveExpansion = (dispExpansion >= Math.max(atr * 0.35, buffer * 0.8) && dispBody >= atr * 0.15) || dispExpansion >= atr * 0.6;
 
           const brokeSwingLow = (marketStructure?.swingLows || []).some(
             sl => sl.index < d && sl.index >= Math.max(0, i - 30) && dispCandle.low < sl.price
@@ -484,7 +521,7 @@ export function identifyCandidateZones(
             f => f.type === 'BEARISH_FVG' && f.candleIndex >= i && f.candleIndex <= d
           );
 
-          if (displacementIdx === -1 && (hasDecisiveExpansion || dispExpansion >= atr * 1.0)) {
+          if (displacementIdx === -1 && (hasDecisiveExpansion || brokeSwingLow || hasBosOrChoch || createdFvg)) {
             displacementIdx = d;
             hasStructuralBreak = brokeSwingLow || hasBosOrChoch || createdFvg;
           } else if (brokeSwingLow || hasBosOrChoch || createdFvg) {
@@ -499,34 +536,41 @@ export function identifyCandidateZones(
         }
 
         const maxDisplacement = obLow - lowestLow;
-        if (displacementIdx === -1 && maxDisplacement >= atr * 1.25) {
+        if (displacementIdx === -1 && maxDisplacement >= atr * 0.8) {
           displacementIdx = i + 1;
         }
 
         if (displacementIdx !== -1) {
-          // Strict Mitigation Check:
-          // Check ALL subsequent candles from (displacementIdx + 1) to the latest closed candle.
-          // If ANY candle rallied back up into the supply zone (high >= obLow), it has been MITIGATED.
-          let isMitigated = false;
+          const invalidation = Number((obHigh + buffer).toFixed(5));
+          let isInvalidated = false;
+          let tapCount = 0;
           for (let k = displacementIdx + 1; k < sortedCandles.length; k++) {
-            if (sortedCandles[k].high >= obLow) {
-              isMitigated = true;
+            // Invalidation: Candle closed above invalidation level
+            if (sortedCandles[k].close > invalidation) {
+              isInvalidated = true;
               break;
+            }
+            // Retest tap
+            if (sortedCandles[k].high >= obLow) {
+              tapCount++;
             }
           }
 
-          // In unmitigated mode, completely skip any zone that has already been mitigated
-          if (!enforceUnmitigated || !isMitigated) {
-            // Price position check: For a fresh supply setup, active price must sit at or below supply top (obHigh)
-            if (activePrice <= obHigh + buffer * 0.2) {
-              const invalidation = Number((obHigh + buffer).toFixed(5));
+          // Mitigated if price broke through zone ceiling or tapped 4+ times without reversing
+          const isMitigated = tapCount >= 4;
+
+          if (!isInvalidated && (!enforceUnmitigated || !isMitigated)) {
+            // Price position check: For a supply setup, active price must sit at or below supply top (obHigh)
+            if (activePrice <= obHigh + buffer * 0.5) {
+              const isCurrentlyInZone = activePrice >= obLow && activePrice <= obHigh;
+              const zoneStatus: ZoneStatus = isCurrentlyInZone ? 'ZONE_TAPPED' : (tapCount > 0 ? 'WAITING_FOR_RETEST' : 'WAITING_FOR_TAP');
               const displacementInAtr = maxDisplacement / Math.max(0.0001, atr);
               const displacementScore = Math.min(35, Math.round(displacementInAtr * 8));
-              const originBonus = isOrigin ? 30 : 0;
+              const originBonus = isOriginHigh ? 30 : 0;
               const structuralBonus = hasStructuralBreak ? 20 : 0;
-              const freshnessBonus = 15;
+              const freshnessBonus = tapCount === 0 ? 15 : 10;
               const distanceInAtr = Math.abs(obLow - activePrice) / Math.max(0.0001, atr);
-              const proximityScore = Math.max(0, 10 - distanceInAtr * 0.5);
+              const proximityScore = Math.max(0, 15 - distanceInAtr * 1.0);
 
               const strength = Math.round(Math.min(100, (displacementScore + originBonus + structuralBonus + freshnessBonus + proximityScore) * (trend === 'BEARISH' ? 1.0 : 0.85)));
 
@@ -542,10 +586,18 @@ export function identifyCandidateZones(
                 createdCandleTime: String(c.timestamp),
                 displacementCandleTime: String(sortedCandles[displacementIdx].timestamp),
                 displacementIndex: displacementIdx,
-                tappedAt: null,
-                tapCount: 0,
-                status: 'WAITING_FOR_TAP',
-                reasoning: `Institutional Supply Zone / Bearish Order Block [${obLow} - ${obHigh}] confirmed with structural displacement.${hasStructuralBreak ? ' (BOS / Swing Low Broken)' : ''}${isOrigin ? ' [Origin Swing High]' : ''}`,
+                tappedAt: tapCount > 0 ? new Date().toISOString() : null,
+                tapCount,
+                status: zoneStatus,
+                timeframe: marketStructure?.timeframe || 'M5',
+                originCandle: String(c.timestamp),
+                evidence: [
+                  `Institutional Supply Zone [${obLow} - ${obHigh}]`,
+                  hasStructuralBreak ? 'BOS / Swing Low Broken' : 'Structural Expansion',
+                  isOriginHigh ? 'Origin Swing High' : 'Consolidation Base',
+                  `Displacement: -${maxDisplacement.toFixed(4)}`
+                ],
+                reasoning: `Institutional Supply Zone / Bearish Order Block [${obLow} - ${obHigh}] confirmed with structural displacement.${hasStructuralBreak ? ' (BOS / Swing Low Broken)' : ''}${isOriginHigh ? ' [Origin Swing High]' : ''}`,
                 candleIndex: i
               });
             }
@@ -582,6 +634,9 @@ export function identifyCandidateZones(
         tappedAt: null,
         tapCount: 0,
         status: 'WAITING_FOR_TAP',
+        timeframe: marketStructure?.timeframe || 'M5',
+        originCandle: String(nearestLow.timestamp),
+        evidence: [`Protected Swing Low at ${lowPrice}`],
         reasoning: `Protected Swing Low liquidity zone at price ${lowPrice}.`,
         candleIndex: nearestLow.index
       });
@@ -612,6 +667,9 @@ export function identifyCandidateZones(
         tappedAt: null,
         tapCount: 0,
         status: 'WAITING_FOR_TAP',
+        timeframe: marketStructure?.timeframe || 'M5',
+        originCandle: String(nearestHigh.timestamp),
+        evidence: [`Protected Swing High at ${highPrice}`],
         reasoning: `Protected Swing High liquidity zone at price ${highPrice}.`,
         candleIndex: nearestHigh.index
       });
@@ -717,26 +775,30 @@ export function identifyCandidateZones(
   let filteredCandidates = candidateZones;
 
   if (followHtfTrend && htfTrend) {
-    if (htfTrend === 'SIDEWAYS' || marketStructure?.htfAllowedDirection === 'NONE') {
-      console.log(`[HTF TREND FILTER] ${pair}: ${htfTimeframe} Trend is SIDEWAYS / unclear (${marketStructure?.htfReason || 'consolidation'}). Defaulting to NO TRADE. No zones marked.`);
-      return [];
-    }
-
     if (htfTrend === 'BULLISH') {
-      filteredCandidates = candidateZones.filter(z => z.direction === 'BUY');
+      const buyZones = candidateZones.filter(z => z.direction === 'BUY');
+      if (buyZones.length > 0) {
+        filteredCandidates = buyZones;
+      }
     } else if (htfTrend === 'BEARISH') {
-      filteredCandidates = candidateZones.filter(z => z.direction === 'SELL');
+      const sellZones = candidateZones.filter(z => z.direction === 'SELL');
+      if (sellZones.length > 0) {
+        filteredCandidates = sellZones;
+      }
+    } else {
+      // In sideways / consolidation conditions, both supply and demand zones exist
+      console.log(`[HTF TREND NOTICE] ${pair}: ${htfTimeframe} Trend is SIDEWAYS / consolidating. Retaining all discovered structural zones.`);
     }
   } else {
-    // If followHtfTrend is explicitly false or htfTrend is not provided, fall back to current timeframe structural trend
-    if (trend === 'SIDEWAYS') {
-      console.log(`[TREND FILTER] ${pair}: Current timeframe trend is SIDEWAYS / unclear. Defaulting to NO TRADE.`);
-      return [];
-    }
+    // Current timeframe structural trend
     if (trend === 'BEARISH') {
-      filteredCandidates = candidateZones.filter(z => z.direction === 'SELL');
+      const sellZones = candidateZones.filter(z => z.direction === 'SELL');
+      if (sellZones.length > 0) filteredCandidates = sellZones;
     } else if (trend === 'BULLISH') {
-      filteredCandidates = candidateZones.filter(z => z.direction === 'BUY');
+      const buyZones = candidateZones.filter(z => z.direction === 'BUY');
+      if (buyZones.length > 0) filteredCandidates = buyZones;
+    } else {
+      console.log(`[TREND NOTICE] ${pair}: Current timeframe trend is SIDEWAYS / consolidating. Retaining all discovered structural zones.`);
     }
   }
 
@@ -767,11 +829,46 @@ export function identifyCandidateZones(
     }
   }
 
-  // Sort by highest strength and closest proximity
-  filteredCandidates.sort((a, b) => b.strength - a.strength);
+  // Deduplicate overlapping candidate zones:
+  // Multiple adjacent candles in a single swing must NOT flood candidate list with duplicate levels.
+  // Merge overlapping candidates and preserve the true structural peak (SELL) or valley (BUY).
+  const distinctCandidates: MarkedZone[] = [];
+  for (const candidate of filteredCandidates) {
+    const overlappingIdx = distinctCandidates.findIndex(existing => 
+      existing.direction === candidate.direction &&
+      Math.max(existing.low, candidate.low) <= Math.min(existing.high, candidate.high)
+    );
 
-  // Return top 5 candidates for curation
-  return filteredCandidates.slice(0, 5).map(z => {
+    if (overlappingIdx === -1) {
+      distinctCandidates.push(candidate);
+    } else {
+      const existing = distinctCandidates[overlappingIdx];
+      if (candidate.direction === 'SELL') {
+        // For supply, retain the candidate with the higher structural peak (or higher strength)
+        if (candidate.high > existing.high || (candidate.high === existing.high && candidate.strength > existing.strength)) {
+          distinctCandidates[overlappingIdx] = candidate;
+        }
+      } else {
+        // For demand, retain the candidate with the lower structural valley (or higher strength)
+        if (candidate.low < existing.low || (candidate.low === existing.low && candidate.strength > existing.strength)) {
+          distinctCandidates[overlappingIdx] = candidate;
+        }
+      }
+    }
+  }
+
+  // Sort by combination of strength and proximity to active current price
+  distinctCandidates.sort((a, b) => {
+    // If one zone is currently tapped or waiting for immediate retest within 1.5 ATR, prioritize it
+    const distA = Math.abs((a.direction === 'SELL' ? a.low : a.high) - activePrice);
+    const distB = Math.abs((b.direction === 'SELL' ? b.low : b.high) - activePrice);
+    const scoreA = a.strength + (distA <= atr * 2.0 ? 15 : 0);
+    const scoreB = b.strength + (distB <= atr * 2.0 ? 15 : 0);
+    return scoreB - scoreA;
+  });
+
+  // Return top 10 distinct structural candidates for curation & display
+  return distinctCandidates.slice(0, 10).map(z => {
     z.htfTrend = htfTrend || 'SIDEWAYS';
     z.htfTimeframe = htfTimeframe;
     z.htfReason = marketStructure?.htfReason;
@@ -993,82 +1090,8 @@ export function detectLargeDisplacementAway(
   effectiveAtr: number = 0.0005,
   currentPrice?: number
 ): { hasDisplaced: boolean; reason?: string; origin?: DisplacementOrigin } {
-  const candidateCandles: Candle[] = [];
-  if (candles && candles.length > 0) {
-    candidateCandles.push(...candles);
-  } else if (latestCandle) {
-    candidateCandles.push(latestCandle);
-  }
-
-  if (candidateCandles.length === 0) {
-    return { hasDisplaced: false };
-  }
-
-  const originTime = zone.displacementCandleTime || zone.createdCandleTime;
-  const originTimestamp = originTime ? new Date(originTime).getTime() : 0;
-
-  // Filter post-creation candles (if timestamps are available)
-  const postCandles = candidateCandles.filter(c => {
-    if (!c.timestamp || isNaN(originTimestamp) || originTimestamp === 0) return true;
-    const cTime = new Date(c.timestamp).getTime();
-    return !isNaN(cTime) && cTime > originTimestamp;
-  });
-
-  const checkList = postCandles.length > 0 ? postCandles : (latestCandle ? [latestCandle] : candidateCandles.slice(-3));
-
-  for (let i = checkList.length - 1; i >= 0; i--) {
-    const c = checkList[i];
-    const range = c.high - c.low;
-    const body = Math.abs(c.close - c.open);
-
-    const isLargeCandle = range >= effectiveAtr * 1.6;
-    const isStrongBody = range > 0 && (body / range) >= 0.55;
-
-    if (isLargeCandle && isStrongBody) {
-      if (zone.direction === 'BUY') {
-        const isBullish = c.close > c.open;
-        const departedFar = c.close > zone.high + (effectiveAtr * 3.5);
-        if (isBullish && departedFar) {
-          return {
-            hasDisplaced: true,
-            reason: `Large Bullish Displacement Candle detected (${range.toFixed(5)} range >= ${(effectiveAtr * 1.6).toFixed(5)}, body ${(body / range * 100).toFixed(0)}%) closing at ${c.close.toFixed(5)} (>3.5 ATR above Demand Zone [${zone.low} - ${zone.high}]). Institutional displacement departed away without retrace.`,
-            origin: {
-              timestamp: String(c.timestamp),
-              direction: 'BULLISH',
-              high: c.high,
-              low: c.low,
-              atr: effectiveAtr,
-              magnitude: range,
-              bodyRatio: body / range,
-              priorZoneId: zone.id,
-              invalidationReason: '3.5 ATR Bullish Displacement Departure'
-            }
-          };
-        }
-      } else if (zone.direction === 'SELL') {
-        const isBearish = c.close < c.open;
-        const departedFar = c.close < zone.low - (effectiveAtr * 3.5);
-        if (isBearish && departedFar) {
-          return {
-            hasDisplaced: true,
-            reason: `Large Bearish Displacement Candle detected (${range.toFixed(5)} range >= ${(effectiveAtr * 1.6).toFixed(5)}, body ${(body / range * 100).toFixed(0)}%) closing at ${c.close.toFixed(5)} (>3.5 ATR below Supply Zone [${zone.low} - ${zone.high}]). Institutional displacement departed away without retrace.`,
-            origin: {
-              timestamp: String(c.timestamp),
-              direction: 'BEARISH',
-              high: c.high,
-              low: c.low,
-              atr: effectiveAtr,
-              magnitude: range,
-              bodyRatio: body / range,
-              priorZoneId: zone.id,
-              invalidationReason: '3.5 ATR Bearish Displacement Departure'
-            }
-          };
-        }
-      }
-    }
-  }
-
+  // Displacement away in trade direction is the normal initial structural move that leaves the zone fresh.
+  // It must NOT automatically expire or invalidate the marked zone.
   return { hasDisplaced: false };
 }
 
