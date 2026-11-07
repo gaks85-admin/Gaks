@@ -2644,11 +2644,20 @@ Action: LOCAL_NO_TRADE (Gemini API Bypassed - Quota 100% Preserved)
 
           analysis.signal = 'NO_TRADE';
           analysis.confidence = 0;
-          analysis.reasoning = [
-            decisionResult.no_trade_reason ||
-            decisionResult.explanation ||
-            `Deterministic pre-filter rejected setup: Score ${decisionResult.decision_score}% is below ${PRE_FILTER_MIN_SCORE}% threshold or recommendation is ${recommendation}.`
-          ];
+
+          const failedMandatory = decisionResult.failed_mandatory_rules || [];
+          const isOnlySupplyDemandFailure = failedMandatory.length === 1 && failedMandatory[0] === 'Supply and Demand';
+          const isNoZone = !currentZone;
+
+          if (isOnlySupplyDemandFailure && isNoZone) {
+            analysis.reasoning = ["NO_VALID_ZONE — No qualifying Supply or Demand zone was identified. Continuing market monitoring."];
+          } else {
+            analysis.reasoning = [
+              decisionResult.no_trade_reason ||
+              decisionResult.explanation ||
+              `Deterministic pre-filter rejected setup: Score ${decisionResult.decision_score}% is below ${PRE_FILTER_MIN_SCORE}% threshold or recommendation is ${recommendation}.`
+            ];
+          }
 
           geminiCallsSavedCount++;
           geminiCallsSavedByPreFilterCount++;
