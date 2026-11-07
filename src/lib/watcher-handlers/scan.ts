@@ -929,7 +929,7 @@ export default async function handler(req: any, res: any) {
         );
 
         if (requiresZoneSetup) {
-          console.log(`[ZONE SEARCH] Watcher ID: ${watcher.id} (${symbol}): No distinct structural POI/Zone identified. Waiting for new structural formation.`);
+          console.log(`[ZONE SEARCH] Watcher ID: ${watcher.id} (${symbol}): No qualifying Supply or Demand zone was identified. Strategy requires a structural zone.`);
           return res.json({
             success: true,
             data: {
@@ -937,11 +937,13 @@ export default async function handler(req: any, res: any) {
               pair: symbol,
               signal: 'NO_TRADE',
               confidence: 0,
-              status: 'ZONE_SEARCH',
+              status: 'NO_DISTINCT_ZONE_FOUND',
               zone: null,
-              reasoning: ['No distinct structural POI/Zone identified in current market structure. Waiting for new structural formation.']
+              reasoning: ['NO_VALID_ZONE — No qualifying Supply or Demand zone was identified. Continuing market monitoring.']
             }
           });
+        } else {
+          console.log(`[ZONE SEARCH] Watcher ID: ${watcher.id} (${symbol}): No zone required by strategy. Proceeding to indicator evaluation.`);
         }
       }
     }

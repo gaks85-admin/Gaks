@@ -2436,8 +2436,8 @@ Reason: ${activeValidation.reason}`);
               return;
             }
           } else {
-            console.log(`[ZONE SEARCH] Watcher ID: ${watcher.id} (${selectedPair}): No distinct structural POI/Zone identified in current market structure. Waiting for new structural formation.`);
-            logWatcherEvent('ZONE SEARCH', logCtx, 'No high-quality structural POI/Zone identified in current candles.');
+            console.log(`[ZONE SEARCH] Watcher ID: ${watcher.id} (${selectedPair}): No distinct structural POI/Zone identified.`);
+            logWatcherEvent('ZONE SEARCH', logCtx, 'No high-quality structural POI/Zone identified.');
 
             const rules = compiledStrategy?.compiled_rules;
             const requiresZoneSetup = Boolean(
@@ -2453,7 +2453,8 @@ Reason: ${activeValidation.reason}`);
             );
 
             if (requiresZoneSetup) {
-              console.log(`[WAITING FOR SETUP] Watcher ID: ${watcher.id} (${selectedPair}): Strategy requires a structural zone/setup. Bypassing decision score trace and AI evaluation.`);
+              console.log(`[NO_VALID_ZONE] Watcher ID: ${watcher.id} (${selectedPair}): Strategy requires a structural zone. No qualifying Supply or Demand zone was identified.`);
+              
               const scanDurationMs = Date.now() - scanStart;
               await recordEvaluation(supabase, {
                 user_id: userId,
@@ -2467,27 +2468,20 @@ Reason: ${activeValidation.reason}`);
                 recommendation: 'FAIL',
                 mandatory_rules_passed: false,
                 matched_rules: [],
-                failed_rules: ['No distinct structural POI/Zone identified in current market structure'],
+                failed_rules: ['No qualifying Supply or Demand zone was identified.'],
                 gemini_used: false,
                 trade_sent: false,
-                trade_reason: 'No distinct structural POI/Zone identified in current market structure. Waiting for new structural formation.',
+                trade_reason: 'NO_VALID_ZONE — No qualifying Supply or Demand zone was identified. Continuing market monitoring.',
                 scan_duration_ms: scanDurationMs,
                 decision_snapshot: null
               });
 
-              await supabase
-                .from("watchers")
-                .update({
-                  last_scan_at: new Date().toISOString(),
-                  last_analyzed_closed_candle_time: latestClosedCandleTime,
-                  updated_at: new Date().toISOString()
-                })
-                .eq("id", watcher.id);
-
               watchersProcessedCount++;
               isWatcherSkipped = false;
-              results.push({ userId, symbol, tradeStatus: 'WAITING_FOR_SETUP', result: 'No structural POI/Zone identified. Waiting for new formation.' });
+              results.push({ userId, symbol, tradeStatus: 'NO_DISTINCT_ZONE_FOUND', result: 'NO_VALID_ZONE — No qualifying Supply or Demand zone was identified.' });
               return;
+            } else {
+              console.log(`[ZONE SEARCH] Watcher ID: ${watcher.id} (${selectedPair}): No zone required by strategy. Proceeding to indicator evaluation.`);
             }
           }
         }
