@@ -957,7 +957,7 @@ export default async function handler(req: any, res: any) {
           confidence: 0,
           status: currentZone ? 'WAITING_FOR_TAP' : 'WAITING_FOR_SETUP',
           zone: currentZone,
-          reasoning: [currentZone ? `Price is outside marked ${currentZone.type} zone [${currentZone.low} - ${currentZone.high}]. Waiting for price retest to trigger reversal.` : 'Awaiting structural zone formation.']
+          reasoning: [currentZone ? `Price is outside marked ${currentZone.type} zone [${currentZone.low} - ${currentZone.high}]. Waiting for price retest to trigger reversal.` : 'NO_VALID_ZONE — No qualifying Supply or Demand zone was identified. Continuing market monitoring.']
         }
       });
     }

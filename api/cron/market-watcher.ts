@@ -2629,7 +2629,17 @@ Reason: ${activeValidation.reason}`);
         const passesDeterministicGate = executionMode === 'AI_ONLY' || (mandatoryPassed && meetsQualityThreshold && isViableRecommendation);
 
         if (!passesDeterministicGate) {
-          console.log(`
+          const failedMandatory = decisionResult.failed_mandatory_rules || [];
+          const isOnlySupplyDemandFailure = failedMandatory.length === 1 && failedMandatory[0] === 'Supply and Demand';
+          const isNoZone = !currentZone;
+
+          if (isOnlySupplyDemandFailure && isNoZone) {
+            console.log(`[ZONE SEARCH] Watcher ID: ${watcher.id} (${selectedPair}): NO_VALID_ZONE — No qualifying Supply or Demand zone was identified. Continuing market monitoring.`);
+            analysis.signal = 'NO_TRADE';
+            analysis.confidence = 0;
+            analysis.reasoning = ["NO_VALID_ZONE — No qualifying Supply or Demand zone was identified. Continuing market monitoring."];
+          } else {
+            console.log(`
 [DETERMINISTIC PRE-FILTER GATE: REJECTED (NO_TRADE)]
 Watcher ID: ${watcher.id}
 Pair: ${selectedPair}
@@ -2642,16 +2652,8 @@ Failed Mandatory: ${decisionResult.failed_mandatory_rules?.join(', ') || 'None'}
 Action: LOCAL_NO_TRADE (Gemini API Bypassed - Quota 100% Preserved)
 `.trim());
 
-          analysis.signal = 'NO_TRADE';
-          analysis.confidence = 0;
-
-          const failedMandatory = decisionResult.failed_mandatory_rules || [];
-          const isOnlySupplyDemandFailure = failedMandatory.length === 1 && failedMandatory[0] === 'Supply and Demand';
-          const isNoZone = !currentZone;
-
-          if (isOnlySupplyDemandFailure && isNoZone) {
-            analysis.reasoning = ["NO_VALID_ZONE — No qualifying Supply or Demand zone was identified. Continuing market monitoring."];
-          } else {
+            analysis.signal = 'NO_TRADE';
+            analysis.confidence = 0;
             analysis.reasoning = [
               decisionResult.no_trade_reason ||
               decisionResult.explanation ||
