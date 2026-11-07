@@ -7,6 +7,7 @@ export interface EvaluationResult {
   scoreOutOf10?: number; // Continuous 0 to 10 score for the confluence requirement
   reason: string;
   weight?: number;
+  status?: 'NO_DISTINCT_ZONE_FOUND' | 'ZONE_IDENTIFIED' | 'WAITING_FOR_TAP' | 'ENTRY_CONDITION_MET' | 'INVALIDATED' | 'MITIGATED' | 'PASS' | 'FAIL';
 }
 
 export interface RuleEvaluator {

@@ -630,6 +630,21 @@ export default async function handler(req: any, res: any) {
     // 5. Compiled Strategy Loaded
     const compiledStrategy = compileStrategy(strategyText);
 
+    // Pre-calculate if strategy requires a structural zone setup
+    const rules = compiledStrategy?.compiled_rules;
+    const mandatoryIds = compiledStrategy?.canonical_rule_set?.mandatory_rule_ids || [];
+    const requiresZoneSetup = Boolean(
+      (rules?.order_block && mandatoryIds.includes('order_block')) ||
+      (rules?.supply_demand && mandatoryIds.includes('supply_demand')) ||
+      (rules?.unmitigated_zone && mandatoryIds.includes('unmitigated_zone')) ||
+      (rules?.fair_value_gap && mandatoryIds.includes('fair_value_gap')) ||
+      (rules?.support && mandatoryIds.includes('support')) ||
+      (rules?.resistance && mandatoryIds.includes('resistance')) ||
+      (rules?.support_rejection && mandatoryIds.includes('support_rejection')) ||
+      (rules?.resistance_rejection && mandatoryIds.includes('resistance_rejection')) ||
+      (rules?.liquidity_sweep && mandatoryIds.includes('liquidity_sweep'))
+    );
+
     // 6. Candle Data Downloaded
     const symbol = watcher.selected_pair;
     const mappedSymbol = symbol; // Simplified for logging
@@ -915,18 +930,8 @@ export default async function handler(req: any, res: any) {
           });
         }
       } else {
-        const rules = compiledStrategy?.compiled_rules;
-        const requiresZoneSetup = Boolean(
-          rules?.order_block ||
-          rules?.supply_demand ||
-          rules?.unmitigated_zone ||
-          rules?.fair_value_gap ||
-          rules?.support ||
-          rules?.resistance ||
-          rules?.support_rejection ||
-          rules?.resistance_rejection ||
-          rules?.liquidity_sweep
-        );
+        // uses pre-calculated requiresZoneSetup from above scope
+
 
         if (requiresZoneSetup) {
           console.log(`[ZONE SEARCH] Watcher ID: ${watcher.id} (${symbol}): No qualifying Supply or Demand zone was identified. Strategy requires a structural zone.`);
@@ -948,7 +953,7 @@ export default async function handler(req: any, res: any) {
       }
     }
 
-    if (!currentZone || currentZone.status === 'WAITING_FOR_TAP') {
+    if (requiresZoneSetup && (!currentZone || currentZone.status === 'WAITING_FOR_TAP')) {
       console.log(`[ZONE RETEST GUARD] Manual Scan - Watcher ID: ${watcher.id} (${symbol}): Zone status is ${currentZone?.status || 'NO_ZONE'}. Awaiting price retest of marked zone before decision evaluation.`);
       return res.json({
         success: true,

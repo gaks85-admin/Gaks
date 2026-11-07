@@ -2038,6 +2038,21 @@ Reason: ${activeValidation.reason}`);
 
         const marketStructure = extractMarketStructure(candleData, compiledStrategy.detector_validation?.supported_detectors);
 
+        // Pre-calculate if strategy requires a structural zone setup
+        const rules = compiledStrategy?.compiled_rules;
+        const mandatoryIds = compiledStrategy?.canonical_rule_set?.mandatory_rule_ids || [];
+        const requiresZoneSetup = Boolean(
+          (rules?.order_block && mandatoryIds.includes('order_block')) ||
+          (rules?.supply_demand && mandatoryIds.includes('supply_demand')) ||
+          (rules?.unmitigated_zone && mandatoryIds.includes('unmitigated_zone')) ||
+          (rules?.fair_value_gap && mandatoryIds.includes('fair_value_gap')) ||
+          (rules?.support && mandatoryIds.includes('support')) ||
+          (rules?.resistance && mandatoryIds.includes('resistance')) ||
+          (rules?.support_rejection && mandatoryIds.includes('support_rejection')) ||
+          (rules?.resistance_rejection && mandatoryIds.includes('resistance_rejection')) ||
+          (rules?.liquidity_sweep && mandatoryIds.includes('liquidity_sweep'))
+        );
+
         // Enforce Higher Timeframe (HTF: 4H / 1D) Trend Alignment (User Default Requirement)
         const htfPreference = compiledStrategy.compiled_rules?.preferred_htf || 'H4';
         const htfTrendResult = await resolveHigherTimeframeTrend(
@@ -2439,18 +2454,8 @@ Reason: ${activeValidation.reason}`);
             console.log(`[ZONE SEARCH] Watcher ID: ${watcher.id} (${selectedPair}): No distinct structural POI/Zone identified.`);
             logWatcherEvent('ZONE SEARCH', logCtx, 'No high-quality structural POI/Zone identified.');
 
-            const rules = compiledStrategy?.compiled_rules;
-            const requiresZoneSetup = Boolean(
-              rules?.order_block ||
-              rules?.supply_demand ||
-              rules?.unmitigated_zone ||
-              rules?.fair_value_gap ||
-              rules?.support ||
-              rules?.resistance ||
-              rules?.support_rejection ||
-              rules?.resistance_rejection ||
-              rules?.liquidity_sweep
-            );
+            // uses pre-calculated requiresZoneSetup from above scope
+
 
             if (requiresZoneSetup) {
               console.log(`[NO_VALID_ZONE] Watcher ID: ${watcher.id} (${selectedPair}): Strategy requires a structural zone. No qualifying Supply or Demand zone was identified.`);
@@ -2486,9 +2491,9 @@ Reason: ${activeValidation.reason}`);
           }
         }
 
-        // GUARD: If no active zone exists or if active zone is currently WAITING_FOR_TAP,
-        // bypass Stage 2 trade decision evaluation. A trade decision engine run is ONLY permitted when price taps/retests the zone.
-        if (!currentZone || currentZone.status === 'WAITING_FOR_TAP') {
+        // GUARD: If strategy REQUIRES a zone and no active zone exists or is currently WAITING_FOR_TAP,
+        // bypass Stage 2 trade decision evaluation. 
+        if (requiresZoneSetup && (!currentZone || currentZone.status === 'WAITING_FOR_TAP')) {
           console.log(`[ZONE RETEST GUARD] Watcher ID: ${watcher.id} (${selectedPair}): Zone status is ${currentZone?.status || 'NO_ZONE'}. Awaiting price retest of marked zone before decision evaluation.`);
           const scanDurationMs = Date.now() - scanStart;
           await recordEvaluation(supabase, {
@@ -2618,9 +2623,8 @@ Reason: ${activeValidation.reason}`);
         const meetsQualityThreshold = (decisionResult.decision_score ?? 0) >= PRE_FILTER_MIN_SCORE;
         const isViableRecommendation = recommendation === 'PASS' || recommendation === 'LIKELY_PASS';
 
-        // In AI_ONLY mode, we send it to Gemini regardless of strict rule-engine score
-        // In RULE_ONLY and HYBRID, we require passing the rule-engine threshold
-        const passesDeterministicGate = executionMode === 'AI_ONLY' || (mandatoryPassed && meetsQualityThreshold && isViableRecommendation);
+        // All modes (RULE_ONLY, HYBRID, AI_ONLY) must satisfy mandatory rules and 75% quality score
+        const passesDeterministicGate = mandatoryPassed && meetsQualityThreshold && isViableRecommendation;
 
         if (!passesDeterministicGate) {
           const failedMandatory = decisionResult.failed_mandatory_rules || [];
@@ -3471,7 +3475,7 @@ Output ONLY valid JSON.
           )
         );
 
-        if ((recommendation === 'FAIL' || recommendation === 'AMBIGUOUS') && !isBreakRetestConfirmed) {
+        if (((recommendation as any) === 'FAIL' || (recommendation as any) === 'AMBIGUOUS') && !isBreakRetestConfirmed) {
           console.log(`[Decision Engine] Recommendation is ${recommendation}. Forcing NO_TRADE without Gemini approval.`);
           analysis = {
             signal: 'NO_TRADE',
@@ -4375,8 +4379,8 @@ Source: ${brokerQuote.source}`);
           },
           {
             gate: 'STRATEGY',
-            status: recommendation !== 'FAIL' ? 'PASS' : 'REJECT',
-            reasonCode: recommendation !== 'FAIL' ? 'STRATEGY_PASSED' : 'STRATEGY_FAILED',
+            status: (recommendation as any) !== 'FAIL' ? 'PASS' : 'REJECT',
+            reasonCode: (recommendation as any) !== 'FAIL' ? 'STRATEGY_PASSED' : 'STRATEGY_FAILED',
             reason: decisionResult.explanation || `Strategy recommendation: ${recommendation}`,
             timestamp: new Date().toISOString()
           },
@@ -4522,7 +4526,7 @@ Source: ${brokerQuote.source}`);
         let signal: any = null;
         let isRegistered = false;
 
-        if (analysis.signal === 'BUY' || analysis.signal === 'SELL' || recommendation !== 'FAIL') {
+        if (analysis.signal === 'BUY' || analysis.signal === 'SELL' || (recommendation as any) !== 'FAIL') {
           if (analysis.signal === 'BUY' || analysis.signal === 'SELL') {
             signalsGeneratedCount++;
           }

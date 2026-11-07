@@ -36,7 +36,7 @@ export class OrderBlockEvaluator {
       reason = "Price is aligned with and/or has tapped an unmitigated institutional Order Block / Supply-Demand zone (10/10).";
     } else if (isWaiting) {
       scoreOutOf10 = 2; // Exist but not ready
-      matched = true; // Changed from false to true to satisfy mandatory rules
+      matched = false;
       reason = "Structural Order Block identified but price has not yet tapped the zone (2/10).";
     } else {
       scoreOutOf10 = 0;
@@ -44,11 +44,17 @@ export class OrderBlockEvaluator {
       reason = "No active unmitigated Order Block or Supply-Demand zone found in immediate price structure (0/10).";
     }
 
+    let status: 'NO_DISTINCT_ZONE_FOUND' | 'ZONE_IDENTIFIED' | 'WAITING_FOR_TAP' | 'ENTRY_CONDITION_MET' | 'INVALIDATED' | 'MITIGATED' | 'PASS' | 'FAIL' = 'NO_DISTINCT_ZONE_FOUND';
+    if (isTapped) status = 'ENTRY_CONDITION_MET';
+    else if (isWaiting) status = 'WAITING_FOR_TAP';
+    else if (hasBullishOb || hasBearishOb || hasSupplyDemand) status = 'ZONE_IDENTIFIED';
+
     return {
       matched,
       score: scoreOutOf10 / 10,
       scoreOutOf10,
-      reason
+      reason,
+      status
     };
   }
 }

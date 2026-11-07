@@ -299,16 +299,6 @@ export function compileStrategy(strategyText: string): CompilerOutput {
       const isPoiRule = ['order_block', 'supply_demand', 'unmitigated_zone', 'fair_value_gap'].includes(item.id);
       
       let isMand = isMandatoryRequested;
-      if (!isMand && isPoiRule && !isOpt) {
-        // If it's a POI rule and not optional, it's only mandatory if there are NO other mandatory rules
-        // or if the strategy specifically mentions "entry on" or "wait for" the POI.
-        const entryTriggers = ['entry on', 'wait for', 'must test', 'trade from', 'only trade'];
-        const isPrimaryTrigger = entryTriggers.some(t => strategyText.toLowerCase().includes(`${t} ${item.phrase}`));
-        
-        if (isPrimaryTrigger) {
-          isMand = true;
-        }
-      }
 
       if (isMand) {
         canonicalRuleDefs.push({
