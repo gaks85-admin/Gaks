@@ -898,24 +898,7 @@ export default async function handler(req: any, res: any) {
 
           console.log(`[ZONE MARKED & TAPPED] Manual Scan - Watcher ID: ${watcher.id} (${symbol}): Newly discovered zone [${discoveredZone.low} - ${discoveredZone.high}] is already tapped by price (${activeCurrentPrice}). Proceeding to confirmation analysis in same cycle.`);
           currentZone = discoveredZone;
-        } else {
-          discoveredZone.status = 'WAITING_FOR_TAP';
-          discoveredZone.tapCount = 0;
-          discoveredZone.tappedAt = null;
-
-          activeZonesMemoryMap.set(watcher.id, discoveredZone);
-          await supabase.from("watchers").update({
-            zone_data: discoveredZone,
-            zone_status: 'WAITING_FOR_TAP',
-            zone_high: discoveredZone.high,
-            zone_low: discoveredZone.low,
-            zone_type: discoveredZone.type,
-            zone_invalidation_level: discoveredZone.invalidationLevel,
-            zone_marked_at: new Date().toISOString(),
-            zone_tapped_at: null,
-            updated_at: new Date().toISOString()
-          }).eq("id", watcher.id);
-
+          console.log(`[ZONE_IDENTIFIED] Manual Scan - Watcher ID: ${watcher.id} (${symbol}): Newly discovered zone [${discoveredZone.low} - ${discoveredZone.high}]. Status: WAITING_FOR_TAP.`);
           return res.json({
             success: true,
             data: {
@@ -925,16 +908,13 @@ export default async function handler(req: any, res: any) {
               confidence: 0,
               status: 'WAITING_FOR_TAP',
               zone: discoveredZone,
-              reasoning: [`Marked ${discoveredZone.type} zone [${discoveredZone.low} - ${discoveredZone.high}]. Waiting for price tap before AI confirmation.`]
+              reasoning: [`ZONE_IDENTIFIED — Marked ${discoveredZone.type} zone [${discoveredZone.low} - ${discoveredZone.high}]. Waiting for price tap before AI confirmation.`]
             }
           });
         }
       } else {
-        // uses pre-calculated requiresZoneSetup from above scope
-
-
         if (requiresZoneSetup) {
-          console.log(`[ZONE SEARCH] Watcher ID: ${watcher.id} (${symbol}): No qualifying Supply or Demand zone was identified. Strategy requires a structural zone.`);
+          console.log(`[NO_DISTINCT_ZONE_FOUND] Manual Scan - Watcher ID: ${watcher.id} (${symbol}): No qualifying Supply or Demand zone was identified. Strategy requires a structural zone.`);
           return res.json({
             success: true,
             data: {
@@ -944,11 +924,11 @@ export default async function handler(req: any, res: any) {
               confidence: 0,
               status: 'NO_DISTINCT_ZONE_FOUND',
               zone: null,
-              reasoning: ['NO_VALID_ZONE — No qualifying Supply or Demand zone was identified. Continuing market monitoring.']
+              reasoning: ['NO_DISTINCT_ZONE_FOUND — No qualifying Supply or Demand zone was identified. Continuing market monitoring.']
             }
           });
         } else {
-          console.log(`[ZONE SEARCH] Watcher ID: ${watcher.id} (${symbol}): No zone required by strategy. Proceeding to indicator evaluation.`);
+          console.log(`[ZONE SEARCH] Manual Scan - Watcher ID: ${watcher.id} (${symbol}): No zone required by strategy. Proceeding to indicator evaluation.`);
         }
       }
     }
@@ -962,9 +942,9 @@ export default async function handler(req: any, res: any) {
           pair: symbol,
           signal: 'NO_TRADE',
           confidence: 0,
-          status: currentZone ? 'WAITING_FOR_TAP' : 'WAITING_FOR_SETUP',
+          status: currentZone ? 'WAITING_FOR_TAP' : 'NO_DISTINCT_ZONE_FOUND',
           zone: currentZone,
-          reasoning: [currentZone ? `Price is outside marked ${currentZone.type} zone [${currentZone.low} - ${currentZone.high}]. Waiting for price retest to trigger reversal.` : 'NO_VALID_ZONE — No qualifying Supply or Demand zone was identified. Continuing market monitoring.']
+          reasoning: [currentZone ? `WAITING_FOR_TAP — Price is outside marked ${currentZone.type} zone [${currentZone.low} - ${currentZone.high}]. Waiting for price retest to trigger reversal.` : 'NO_DISTINCT_ZONE_FOUND — No qualifying Supply or Demand zone was identified. Continuing market monitoring.']
         }
       });
     }

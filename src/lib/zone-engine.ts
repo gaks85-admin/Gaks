@@ -339,8 +339,8 @@ export function identifyCandidateZones(
         }
         const isOrigin = isSwingLow || isLocalValley;
 
-        // Upward institutional displacement check:
-        // Must show genuine impulsive expansion that breaks structure or creates FVG
+        // Institutional displacement check:
+        // Loosened for Stage 8: Allow zones with clear structure even if displacement is moderate.
         let displacementIdx = -1;
         let hasStructuralBreak = false;
         let highestHigh = obHigh;
@@ -353,7 +353,8 @@ export function identifyCandidateZones(
           const dispExpansion = dispCandle.close - obHigh;
           const dispBody = dispCandle.close - dispCandle.open;
 
-          const hasDecisiveExpansion = dispExpansion >= Math.max(atr * 0.75, buffer * 1.5) && dispBody >= atr * 0.4;
+          // Loosened thresholds (Stage 8): 0.5 ATR expansion instead of 0.75
+          const hasDecisiveExpansion = dispExpansion >= Math.max(atr * 0.50, buffer * 1.2) && dispBody >= atr * 0.3;
 
           const brokeSwingHigh = (marketStructure?.swingHighs || []).some(
             sh => sh.index < d && sh.index >= Math.max(0, i - 30) && dispCandle.high > sh.price
@@ -367,7 +368,7 @@ export function identifyCandidateZones(
             f => f.type === 'BULLISH_FVG' && f.candleIndex >= i && f.candleIndex <= d
           );
 
-          if (displacementIdx === -1 && (hasDecisiveExpansion || dispExpansion >= atr * 1.0)) {
+          if (displacementIdx === -1 && (hasDecisiveExpansion || dispExpansion >= atr * 0.8)) {
             displacementIdx = d;
             hasStructuralBreak = brokeSwingHigh || hasBosOrChoch || createdFvg;
           } else if (brokeSwingHigh || hasBosOrChoch || createdFvg) {
@@ -382,7 +383,7 @@ export function identifyCandidateZones(
         }
 
         const maxDisplacement = highestHigh - obHigh;
-        if (displacementIdx === -1 && maxDisplacement >= atr * 1.25) {
+        if (displacementIdx === -1 && maxDisplacement >= atr * 1.0) {
           displacementIdx = i + 1;
         }
 

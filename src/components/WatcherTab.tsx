@@ -801,10 +801,42 @@ export const WatcherTab: React.FC<WatcherTabProps> = ({
 
                   {/* Bid/Ask Price display & tiny sparkline wave */}
                   <div className="flex justify-between items-end">
-                    {/* Wave graphics */}
-                    <div className="h-6 w-24 opacity-80 pointer-events-none">
+                    {/* Wave graphics & Zone Marking */}
+                    <div className="h-6 w-24 opacity-90 pointer-events-none">
                       {pair.status !== 'unavailable' && pair.history.length > 0 && (
                         <svg className="w-full h-full overflow-visible" viewBox="0 0 100 24" preserveAspectRatio="none">
+                          {/* Zone Marking Logic (Stage 8) */}
+                          {(() => {
+                            if (watcherZone && normalizeSymbol(pair.symbol) === normalizeSymbol(watcherSearch)) {
+                              if (pair.history && pair.history.length >= 2 && watcherZone.high && watcherZone.low) {
+                                const min = Math.min(...pair.history);
+                                const max = Math.max(...pair.history);
+                                const range = max - min || 1;
+                                const height = 24;
+                                
+                                const yHigh = height - ((watcherZone.high - min) / range) * (height - 6) - 3;
+                                const yLow = height - ((watcherZone.low - min) / range) * (height - 6) - 3;
+                                
+                                const rectY = Math.min(yHigh, yLow);
+                                const rectH = Math.max(2, Math.abs(yHigh - yLow));
+                                const isBuyZone = watcherZone.direction === 'BUY' || watcherZone.type?.includes('DEMAND') || watcherZone.type?.includes('BULLISH');
+                                
+                                return (
+                                  <rect 
+                                    x="0" 
+                                    y={rectY} 
+                                    width="100" 
+                                    height={rectH} 
+                                    fill={isBuyZone ? "#10b981" : "#f43f5e"} 
+                                    fillOpacity="0.25"
+                                    className="animate-pulse"
+                                  />
+                                );
+                              }
+                            }
+                            return null;
+                          })()}
+
                           <defs>
                             <linearGradient id={`watcher-grad-${pair.symbol}`} x1="0" y1="0" x2="0" y2="1">
                               <stop offset="0%" stopColor={isBearish ? "#ef4444" : "#10b981"} stopOpacity="0.25"/>
