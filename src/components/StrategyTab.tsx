@@ -259,6 +259,49 @@ export const StrategyTab: React.FC<StrategyTabProps> = ({
               </div>
 
               <div className="flex items-center gap-2">
+                {/* Templates Selector Dropdown */}
+                <div className="relative group">
+                  <button
+                    type="button"
+                    className="px-3 py-1.5 rounded-xl border border-zinc-200 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700 bg-white dark:bg-zinc-950/40 text-zinc-700 dark:text-zinc-300 hover:text-zinc-950 dark:hover:text-white transition-all cursor-pointer flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider shadow-xs"
+                    title="Load a common trading template"
+                  >
+                    <span>Load Template ▾</span>
+                  </button>
+                  <div className="absolute right-0 mt-1 w-48 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl shadow-xl py-1.5 z-50 hidden group-hover:block animate-fade-in">
+                    <button
+                      onClick={() => handleStrategyTextChange(`# Supply & Demand Strategy
+## Rules
+- Identify institutional unmitigated Supply and Demand zones
+- Wait for price retest and rejection wick
+- Minimum RR 1:2`)}
+                      className="w-full text-left px-4 py-2 text-xs font-semibold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+                    >
+                      Supply & Demand
+                    </button>
+                    <button
+                      onClick={() => handleStrategyTextChange(`# Breakout Scalping Strategy
+## Rules
+- Identify key support or resistance level
+- Wait for impulsive breakout candle with high volume
+- Enter on retest of broken level with confirmation candle`)}
+                      className="w-full text-left px-4 py-2 text-xs font-semibold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+                    >
+                      Breakout Scalping
+                    </button>
+                    <button
+                      onClick={() => handleStrategyTextChange(`# Order Block Reversal Strategy
+## Rules
+- Locate higher timeframe unmitigated Order Block
+- Wait for market structure shift (CHOCH)
+- Enter when price taps Order Block with RSI confirmation`)}
+                      className="w-full text-left px-4 py-2 text-xs font-semibold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+                    >
+                      Order Block Reversal
+                    </button>
+                  </div>
+                </div>
+
                 {/* Delete Button */}
                 <button
                   onClick={handleClearStrategy}
