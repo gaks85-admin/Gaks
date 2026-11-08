@@ -2078,45 +2078,9 @@ Reason: ${activeValidation.reason}`);
           'Reason': htfTrendResult.reason
         });
 
-        // User Rule: If trend is sideways or is not clear, default to NO TRADE!
+        // User Rule: If trend is sideways or is not clear, allow structural zone discovery while maintaining cautious execution.
         if (htfTrendResult.trend === 'SIDEWAYS' || htfTrendResult.allowedDirection === 'NONE') {
-          console.log(`[HTF SIDEWAYS NO-TRADE] Watcher ID: ${watcher.id} (${selectedPair}): ${htfTrendResult.timeframe} Trend is SIDEWAYS / unclear (${htfTrendResult.reason}). Preservation mode: keeping existing zone but blocking new signals.`);
-          logWatcherEvent('SIDEWAYS NO TRADE', logCtx, `Higher timeframe (${htfTrendResult.timeframe}) trend is SIDEWAYS / unclear. Preservation mode active.`);
-
-          const scanDurationMs = Date.now() - scanStart;
-          await recordEvaluation(supabase, {
-            watcher_id: watcher.id,
-            user_id: userId,
-            pair: selectedPair,
-            timeframe: selectedTimeframe,
-            strategy_mode: executionMode,
-            decision_score: 0,
-            matched_weight: 0,
-            possible_weight: 0,
-            recommendation: 'FAIL',
-            mandatory_rules_passed: false,
-            matched_rules: [],
-            failed_rules: [`Higher timeframe (${htfTrendResult.timeframe}) trend is SIDEWAYS / unclear`],
-            gemini_used: false,
-            trade_sent: false,
-            trade_reason: `Higher timeframe (${htfTrendResult.timeframe}) trend is SIDEWAYS / unclear: ${htfTrendResult.reason}. Blocking signals while preserving any existing structural POIs.`,
-            scan_duration_ms: scanDurationMs,
-            decision_snapshot: null
-          });
-
-          await supabase
-            .from("watchers")
-            .update({
-              last_scan_at: new Date().toISOString(),
-              last_analyzed_closed_candle_time: latestClosedCandleTime,
-              updated_at: new Date().toISOString()
-            })
-            .eq("id", watcher.id);
-
-          watchersProcessedCount++;
-          isWatcherSkipped = false;
-          results.push({ userId, symbol: selectedPair, tradeStatus: 'SIDEWAYS_NO_TRADE', result: 'Trend is sideways or unclear. Existing zones preserved; new setups blocked.' });
-          return;
+          console.log(`[HTF SIDEWAYS NOTICE] Watcher ID: ${watcher.id} (${selectedPair}): ${htfTrendResult.timeframe} Trend is SIDEWAYS / unclear (${htfTrendResult.reason}). Proceeding with structural zone discovery.`);
         }
 
         // =====================================================================
