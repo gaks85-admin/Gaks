@@ -2579,7 +2579,7 @@ Reason: ${activeValidation.reason}`);
         // are allowed to invoke the Gemini AI Gate. All non-viable setups immediately
         // resolve locally as NO_TRADE without calling the Gemini API.
         // This preserves 100% of the Gemini free-tier RPM quota and cuts cron latency.
-        const PRE_FILTER_MIN_SCORE = 75;
+        const PRE_FILTER_MIN_SCORE = 60;
         const mandatoryPassed = decisionResult.mandatory_rules_passed !== false;
         const meetsQualityThreshold = (decisionResult.decision_score ?? 0) >= PRE_FILTER_MIN_SCORE;
         const isViableRecommendation = recommendation === 'PASS' || recommendation === 'LIKELY_PASS';
