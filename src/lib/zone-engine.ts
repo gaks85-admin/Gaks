@@ -762,45 +762,11 @@ export function identifyCandidateZones(
     return [];
   }
 
-  // =========================================================================
-  // 5. HIGHER TIMEFRAME (HTF) TREND ALIGNMENT (Default User Requirement)
-  // Always follow the trend of the higher timeframe (4hr / 1day) to mark out zones.
-  // Never flip-flop between Bearish and Bullish zones on micro 5-minute candle oscillations.
-  // =========================================================================
-  const followHtfTrend = compiledStrategy?.compiled_rules?.follow_htf_trend !== false;
-  const htfTrend = marketStructure?.htfTrend;
+  // Independent zone discovery: retain all genuine supply and demand candidates.
+  // Higher-timeframe trend is preserved as metadata for trade qualification, but must not erase valid zones.
+  const htfTrend = marketStructure?.htfTrend || 'SIDEWAYS';
   const htfTimeframe = marketStructure?.htfTimeframe || 'H4';
-  const effectiveTrend = (followHtfTrend && htfTrend) ? htfTrend : trend;
-
   let filteredCandidates = candidateZones;
-
-  if (followHtfTrend && htfTrend) {
-    if (htfTrend === 'BULLISH') {
-      const buyZones = candidateZones.filter(z => z.direction === 'BUY');
-      if (buyZones.length > 0) {
-        filteredCandidates = buyZones;
-      }
-    } else if (htfTrend === 'BEARISH') {
-      const sellZones = candidateZones.filter(z => z.direction === 'SELL');
-      if (sellZones.length > 0) {
-        filteredCandidates = sellZones;
-      }
-    } else {
-      // In sideways / consolidation conditions, both supply and demand zones exist
-      console.log(`[HTF TREND NOTICE] ${pair}: ${htfTimeframe} Trend is SIDEWAYS / consolidating. Retaining all discovered structural zones.`);
-    }
-  } else {
-    // Current timeframe structural trend
-    if (trend === 'BEARISH') {
-      const sellZones = candidateZones.filter(z => z.direction === 'SELL');
-      if (sellZones.length > 0) filteredCandidates = sellZones;
-    } else if (trend === 'BULLISH') {
-      const buyZones = candidateZones.filter(z => z.direction === 'BUY');
-      if (buyZones.length > 0) filteredCandidates = buyZones;
-    } else {
-      console.log(`[TREND NOTICE] ${pair}: Current timeframe trend is SIDEWAYS / consolidating. Retaining all discovered structural zones.`);
-    }
-  }
 
   if (filteredCandidates.length === 0) {
     return [];

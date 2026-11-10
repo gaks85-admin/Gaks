@@ -7,9 +7,14 @@ export type TrendDirection = 'BULLISH' | 'BEARISH' | 'SIDEWAYS';
 export interface HtfTrendResult {
   trend: TrendDirection;
   timeframe: 'H4' | 'D1';
-  allowedDirection: 'BUY' | 'SELL' | 'NONE';
+  allowedDirection: 'BUY' | 'SELL' | 'BOTH' | 'NONE';
   reason: string;
   confidence: number;
+  structuralTrend: 'BULLISH' | 'BEARISH' | 'SIDEWAYS' | 'TRANSITIONAL';
+  emaTrend: 'BULLISH' | 'BEARISH' | 'SIDEWAYS';
+  momentum: 'BULLISH' | 'BEARISH' | 'NEUTRAL';
+  trendConfidence: number;
+  ema37?: number;
   ema50?: number;
   ema200?: number;
   currentPrice: number;
@@ -24,13 +29,9 @@ interface CachedHtfTrend {
   timestamp: number;
 }
 
-// In-memory cache for HTF trend results (TTL 15 minutes = 900,000ms)
 const htfTrendCache = new Map<string, CachedHtfTrend>();
 const HTF_CACHE_TTL_MS = 15 * 60 * 1000;
 
-/**
- * Calculates exponential moving average (EMA)
- */
 function calculateEma(values: number[], period: number): number[] {
   if (values.length === 0) return [];
   const k = 2 / (period + 1);
@@ -43,7 +44,8 @@ function calculateEma(values: number[], period: number): number[] {
 }
 
 /**
- * Analyzes market structure & indicators on HTF candles to evaluate dominant institutional trend.
+ * Analyzes market structure & indicators on HTF candles to evaluate dominant institutional trend
+ * using confirmed chronological swing sequences (HH/HL vs LH/LL) and EMA alignment.
  */
 export function evaluateHtfCandles(
   candles: Candle[],
@@ -54,9 +56,13 @@ export function evaluateHtfCandles(
     return {
       trend: 'SIDEWAYS',
       timeframe,
-      allowedDirection: 'NONE',
-      reason: 'Insufficient higher timeframe candle data to determine clear trend. Defaulting to NO TRADE.',
-      confidence: 0,
+      allowedDirection: 'BOTH',
+      reason: 'Insufficient higher timeframe candle data to determine definitive trend. Permitting independent zone discovery.',
+      confidence: 50,
+      structuralTrend: 'SIDEWAYS',
+      emaTrend: 'SIDEWAYS',
+      momentum: 'NEUTRAL',
+      trendConfidence: 50,
       currentPrice: 0,
       source
     };
@@ -68,125 +74,119 @@ export function evaluateHtfCandles(
 
   const ms: MarketStructure = extractMarketStructure(sorted);
 
-  // Indicators: 50 EMA and 200 EMA (or 20/50 if fewer candles)
-  const ema50Period = Math.min(50, Math.max(10, Math.floor(closes.length * 0.75)));
-  const ema200Period = Math.min(200, closes.length);
+  // Indicators: 37 EMA, 50 EMA, and 200 EMA
+  const ema37Series = calculateEma(closes, Math.min(37, closes.length));
+  const ema50Series = calculateEma(closes, Math.min(50, closes.length));
+  const ema200Series = calculateEma(closes, Math.min(200, closes.length));
 
-  const ema50Series = calculateEma(closes, ema50Period);
-  const ema200Series = calculateEma(closes, ema200Period);
-
+  const latestEma37 = ema37Series[ema37Series.length - 1];
   const latestEma50 = ema50Series[ema50Series.length - 1];
   const latestEma200 = ema200Series[ema200Series.length - 1];
 
-  let bullishScore = 0;
-  let bearishScore = 0;
-  const reasonNotes: string[] = [];
-
-  // 1. Price vs EMA
-  if (latestEma50 && latestEma200) {
-    if (currentPrice > latestEma50 && latestEma50 > latestEma200) {
-      bullishScore += 3;
-      reasonNotes.push(`Price (${currentPrice.toFixed(2)}) above ${ema50Period}/${ema200Period} EMA alignment`);
-    } else if (currentPrice < latestEma50 && latestEma50 < latestEma200) {
-      bearishScore += 3;
-      reasonNotes.push(`Price (${currentPrice.toFixed(2)}) below ${ema50Period}/${ema200Period} EMA alignment`);
-    } else if (currentPrice > latestEma50) {
-      bullishScore += 1.5;
-      reasonNotes.push(`Price above ${ema50Period} EMA`);
-    } else if (currentPrice < latestEma50) {
-      bearishScore += 1.5;
-      reasonNotes.push(`Price below ${ema50Period} EMA`);
+  // EMA Trend Evaluation
+  let emaTrend: 'BULLISH' | 'BEARISH' | 'SIDEWAYS' = 'SIDEWAYS';
+  if (latestEma37 && latestEma50) {
+    if (currentPrice > latestEma37 && latestEma37 > latestEma50) {
+      emaTrend = 'BULLISH';
+    } else if (currentPrice < latestEma37 && latestEma37 < latestEma50) {
+      emaTrend = 'BEARISH';
     }
   }
 
-  // 2. Swing Highs & Swing Lows Progression (Higher Highs / Higher Lows vs Lower Highs / Lower Lows)
+  // Swing Structure Evaluation (Chronological Confirmed Swings: HH+HL vs LH+LL)
   const highs = ms.swingHighs || [];
   const lows = ms.swingLows || [];
 
-  if (lows.length >= 2) {
-    const lastLow = lows[lows.length - 1].price;
-    const prevLow = lows[lows.length - 2].price;
-    if (lastLow > prevLow) {
-      bullishScore += 2.5;
-      reasonNotes.push(`Higher Low formed (${prevLow.toFixed(2)} -> ${lastLow.toFixed(2)})`);
-    } else if (lastLow < prevLow) {
-      bearishScore += 2.5;
-      reasonNotes.push(`Lower Low formed (${prevLow.toFixed(2)} -> ${lastLow.toFixed(2)})`);
+  let structuralTrend: 'BULLISH' | 'BEARISH' | 'SIDEWAYS' | 'TRANSITIONAL' = 'SIDEWAYS';
+  let hasHigherHigh = false;
+  let hasHigherLow = false;
+  let hasLowerLow = false;
+  let hasLowerHigh = false;
+
+  if (highs.length >= 2 && lows.length >= 2) {
+    const lastH = highs[highs.length - 1].price;
+    const prevH = highs[highs.length - 2].price;
+    const lastL = lows[lows.length - 1].price;
+    const prevL = lows[lows.length - 2].price;
+
+    hasHigherHigh = lastH > prevH;
+    hasLowerHigh = lastH < prevH;
+    hasHigherLow = lastL > prevL;
+    hasLowerLow = lastL < prevL;
+
+    if (hasHigherHigh && hasHigherLow) {
+      structuralTrend = 'BULLISH';
+    } else if (hasLowerLow && hasLowerHigh) {
+      structuralTrend = 'BEARISH';
+    } else if ((hasHigherHigh && hasLowerLow) || (hasLowerHigh && hasHigherLow)) {
+      structuralTrend = 'TRANSITIONAL';
+    } else {
+      structuralTrend = 'SIDEWAYS';
     }
-  }
-
-  if (highs.length >= 2) {
-    const lastHigh = highs[highs.length - 1].price;
-    const prevHigh = highs[highs.length - 2].price;
-    if (lastHigh > prevHigh) {
-      bullishScore += 2.0;
-      reasonNotes.push(`Higher High formed (${prevHigh.toFixed(2)} -> ${lastHigh.toFixed(2)})`);
-    } else if (lastHigh < prevHigh) {
-      bearishScore += 2.0;
-      reasonNotes.push(`Lower High formed (${prevHigh.toFixed(2)} -> ${lastHigh.toFixed(2)})`);
-    }
-  }
-
-  // 3. Break of Structure (BOS)
-  if (ms.BOS && ms.BOS.length > 0) {
-    const recentBOS = ms.BOS.slice(-2);
-    const hasBullishBOS = recentBOS.some(b => b.type === 'BULLISH_BOS');
-    const hasBearishBOS = recentBOS.some(b => b.type === 'BEARISH_BOS');
-    if (hasBullishBOS && !hasBearishBOS) {
-      bullishScore += 2.5;
-      reasonNotes.push('Recent Bullish BOS');
-    } else if (hasBearishBOS && !hasBullishBOS) {
-      bearishScore += 2.5;
-      reasonNotes.push('Recent Bearish BOS');
-    }
-  }
-
-  // Final trend determination
-  let trend: TrendDirection = 'SIDEWAYS';
-  let allowedDirection: 'BUY' | 'SELL' | 'NONE' = 'NONE';
-  let confidence = 50;
-
-  // Strict trend threshold: require decisive directional bias and confidence
-  if (bullishScore >= bearishScore + 2.0 && bullishScore >= 4.0) {
-    trend = 'BULLISH';
-    allowedDirection = 'BUY';
-    confidence = Math.min(95, Math.round(65 + bullishScore * 4));
-  } else if (bearishScore >= bullishScore + 2.0 && bearishScore >= 4.0) {
-    trend = 'BEARISH';
-    allowedDirection = 'SELL';
-    confidence = Math.min(95, Math.round(65 + bearishScore * 4));
   } else {
-    // Trend is sideways, consolidating, or unclear: default to NO TRADE!
-    trend = 'SIDEWAYS';
-    allowedDirection = 'NONE';
-    confidence = 45;
+    structuralTrend = 'SIDEWAYS';
   }
 
-  const swingsSummary = `${highs.length} swing highs, ${lows.length} swing lows on ${timeframe}`;
-  const reason = trend === 'SIDEWAYS'
-    ? `${timeframe} Trend is SIDEWAYS / unclear (${reasonNotes.join(', ') || 'Mixed structural momentum / consolidation'}). Defaulting to NO TRADE.`
-    : `${timeframe} Trend is ${trend}: ${reasonNotes.join(', ') || 'Aligned institutional signals'}.`;
+  // Momentum
+  const momentum: 'BULLISH' | 'BEARISH' | 'NEUTRAL' = 
+    currentPrice > (closes[closes.length - 3] || currentPrice) ? 'BULLISH' :
+    currentPrice < (closes[closes.length - 3] || currentPrice) ? 'BEARISH' : 'NEUTRAL';
+
+  // Final Trend & Allowed Direction Synthesis
+  let finalTrend: TrendDirection = 'SIDEWAYS';
+  let allowedDirection: 'BUY' | 'SELL' | 'BOTH' | 'NONE' = 'BOTH';
+  let trendConfidence = 65;
+
+  if (structuralTrend === 'BULLISH') {
+    finalTrend = 'BULLISH';
+    allowedDirection = 'BOTH';
+    trendConfidence = emaTrend === 'BULLISH' ? 85 : 70;
+  } else if (structuralTrend === 'BEARISH') {
+    finalTrend = 'BEARISH';
+    allowedDirection = 'BOTH';
+    trendConfidence = emaTrend === 'BEARISH' ? 85 : 70;
+  } else if (structuralTrend === 'TRANSITIONAL') {
+    finalTrend = 'SIDEWAYS';
+    allowedDirection = 'BOTH';
+    trendConfidence = 60;
+  } else {
+    finalTrend = 'SIDEWAYS';
+    allowedDirection = 'BOTH';
+    trendConfidence = 50;
+  }
+
+  const reasonNotes: string[] = [
+    `Structural Trend: ${structuralTrend}`,
+    `EMA Trend: ${emaTrend}`,
+    `Momentum: ${momentum}`
+  ];
+  if (highs.length >= 2 && lows.length >= 2) {
+    reasonNotes.push(`Swings: HH=${hasHigherHigh}, HL=${hasHigherLow}, LH=${hasLowerHigh}, LL=${hasLowerLow}`);
+  }
+
+  const reason = `${timeframe} Structure evaluated as ${structuralTrend} (${reasonNotes.join(', ')})`;
 
   return {
-    trend,
+    trend: finalTrend,
     timeframe,
     allowedDirection,
     reason,
-    confidence,
+    confidence: trendConfidence,
+    structuralTrend,
+    emaTrend,
+    momentum,
+    trendConfidence,
+    ema37: latestEma37,
     ema50: latestEma50,
     ema200: latestEma200,
     currentPrice,
-    swingsSummary,
+    swingsSummary: `${highs.length} swing highs, ${lows.length} swing lows on ${timeframe}`,
     source,
     htfCandles: sorted,
     htfMarketStructure: ms
   };
 }
 
-/**
- * Resolves the Higher Timeframe (4hr or 1day) trend for any given pair.
- * Checks in-memory cache first to avoid repeating remote API calls.
- */
 export async function resolveHigherTimeframeTrend(
   symbol: string,
   currentCandles: Candle[],
@@ -197,7 +197,6 @@ export async function resolveHigherTimeframeTrend(
   const cacheKey = `${symbol.toUpperCase()}_${preferredHtf}`;
   const now = Date.now();
 
-  // 1. Check in-memory cache
   if (!options?.forceRefresh && htfTrendCache.has(cacheKey)) {
     const cached = htfTrendCache.get(cacheKey)!;
     if (now - cached.timestamp < HTF_CACHE_TTL_MS) {
@@ -206,15 +205,12 @@ export async function resolveHigherTimeframeTrend(
   }
 
   const tfUpper = currentTimeframe.toUpperCase().trim();
-
-  // 2. If current timeframe is ALREADY H4 or D1, evaluate directly
   if (tfUpper === preferredHtf || tfUpper === 'H4' || tfUpper === 'D1' || tfUpper === 'DAILY') {
     const result = evaluateHtfCandles(currentCandles, preferredHtf, 'CURRENT_TIMEFRAME');
     htfTrendCache.set(cacheKey, { result, timestamp: now });
     return result;
   }
 
-  // 3. Attempt fetching real H4 / D1 candles via defaultMarketDataService
   try {
     const remoteRes = await defaultMarketDataService.getMarketData({
       symbol,
@@ -233,7 +229,6 @@ export async function resolveHigherTimeframeTrend(
     console.warn(`[HTF TREND ENGINE] Failed to fetch remote ${preferredHtf} candles for ${symbol}:`, err);
   }
 
-  // 4. Fallback: Synthesize HTF trend from available current candles
   const synthesized = evaluateHtfCandles(currentCandles, preferredHtf, 'SYNTHESIZED');
   htfTrendCache.set(cacheKey, { result: synthesized, timestamp: now });
   return synthesized;

@@ -3,8 +3,8 @@ import { GoogleGenAI } from '@google/genai';
 import { sendTelegramMessage } from './telegramWrapper.js';
 import { resolveUserGeminiKey, classifyAndRedactGeminiError, GeminiQuotaDetails, redactApiKeyInText } from './gemini-key-resolver.js';
 
-export const GEMINI_API_DEADLINE_MS = 10_000;
-export const GEMINI_APPLICATION_TIMEOUT_MS = 8_000;
+export const GEMINI_API_DEADLINE_MS = 14_000;
+export const GEMINI_APPLICATION_TIMEOUT_MS = 12_000;
 export const GEMINI_MARKET_WATCHER_MODEL = 'gemini-3.6-flash';
 
 // Simplified Error Classification
