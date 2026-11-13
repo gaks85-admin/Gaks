@@ -1000,7 +1000,7 @@ export default async function handler(req: any, res: any) {
     console.log(`[DECISION MODE] ${executionMode}${MARKET_WATCHER_DECISION_MODE_OVERRIDE ? ' (TEMPORARY OVERRIDE)' : ''}`);
 
     // Deterministic Pre-Filtering Gate
-    const PRE_FILTER_MIN_SCORE = 60;
+    const PRE_FILTER_MIN_SCORE = 70;
     const mandatoryPassed = decisionResult.mandatory_rules_passed !== false;
     const meetsQualityThreshold = (decisionResult.decision_score ?? 0) >= PRE_FILTER_MIN_SCORE;
     const isViableRecommendation = recommendation === 'PASS' || recommendation === 'LIKELY_PASS';

@@ -71,7 +71,7 @@ import { getGlobalExecutionSettings, ExecutionMode } from '../../src/lib/executi
 
 // TEMPORARY MODE FLAG: Force Market Watcher into RULE_ONLY mode for diagnostic testing.
 // To restore original behavior, set this to null.
-const MARKET_WATCHER_DECISION_MODE_OVERRIDE: ExecutionMode | null = null;
+const MARKET_WATCHER_DECISION_MODE_OVERRIDE: ExecutionMode | null = 'RULE_ONLY';
 
 // In-memory runtime cache for marked zones to guarantee persistence across cron scans
 // even if the Supabase watchers table is temporarily missing the zone columns.
@@ -2579,7 +2579,7 @@ Reason: ${activeValidation.reason}`);
         // are allowed to invoke the Gemini AI Gate. All non-viable setups immediately
         // resolve locally as NO_TRADE without calling the Gemini API.
         // This preserves 100% of the Gemini free-tier RPM quota and cuts cron latency.
-        const PRE_FILTER_MIN_SCORE = 60;
+        const PRE_FILTER_MIN_SCORE = 70;
         const mandatoryPassed = decisionResult.mandatory_rules_passed !== false;
         const meetsQualityThreshold = (decisionResult.decision_score ?? 0) >= PRE_FILTER_MIN_SCORE;
         const isViableRecommendation = recommendation === 'PASS' || recommendation === 'LIKELY_PASS';
