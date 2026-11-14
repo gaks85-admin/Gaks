@@ -1770,7 +1770,7 @@ Reason: ${activeValidation.reason}`);
 
         const rawStrategyText = prefsRecord?.strategy_text;
 
-        let executionMode: ExecutionMode = 'HYBRID';
+        let executionMode: ExecutionMode = 'RULE_ONLY';
         if (prefsRecord?.account_type) {
           const amMatch = prefsRecord.account_type.match(/ANALYSIS:([^|]+)/);
           if (amMatch) {
@@ -3380,7 +3380,7 @@ Output ONLY valid JSON.
                 reasoning: [proximityValidation.lateReason || 'Late entry rejected to prevent chasing market move.']
               };
             } else if (proximityValidation.isSlTooWide) {
-              console.log(`[STOP LOSS TOO WIDE] Watcher ID: ${watcher.id} (${selectedPair}): Stop loss distance (${proximityValidation.slDistancePips.toFixed(1)} pips) exceeds maximum allowable limit for ${selectedTimeframe}. Setup rejected.`);
+              console.log(`[STOP LOSS TOO WIDE] Watcher ID: ${watcher.id} (${selectedPair}): Stop loss distance (${proximityValidation.slDistancePips?.toFixed(1) || '0.0'} pips) exceeds maximum allowable limit for ${selectedTimeframe}. Setup rejected.`);
               analysis = {
                 signal: 'NO_TRADE',
                 confidence: 0,
@@ -3388,7 +3388,7 @@ Output ONLY valid JSON.
                 stopLoss: null,
                 takeProfit: null,
                 riskReward: null,
-                reasoning: [`Stop loss distance (${proximityValidation.slDistancePips.toFixed(1)} pips) is too wide for ${selectedTimeframe}. Setup rejected.`]
+                reasoning: [`Stop loss distance (${proximityValidation.slDistancePips?.toFixed(1) || '0.0'} pips) is too wide for ${selectedTimeframe}. Setup rejected.`]
               };
             } else {
               const entry = proximityValidation.entryPrice;
@@ -3407,7 +3407,7 @@ Output ONLY valid JSON.
                 structuralLevel: proximityValidation.structuralLevel,
                 riskReward: riskRewardStr,
                 reasoning: [
-                  `[Break & Retest Confirmation] Price tapped marked ${currentZone.type} [${currentZone.low.toFixed(5)} - ${currentZone.high.toFixed(5)}] and confirmed retest in ${signalDir} direction holding tight structural Stop Loss (${sl.toFixed(5)} - ${proximityValidation.slDistancePips.toFixed(1)} pips).`
+                  `[Break & Retest Confirmation] Price tapped marked ${currentZone?.type || 'Zone'} [${currentZone?.low?.toFixed(5) || '0.00000'} - ${currentZone?.high?.toFixed(5) || '0.00000'}] and confirmed retest in ${signalDir} direction holding tight structural Stop Loss (${sl?.toFixed(5) || '0.00000'} - ${proximityValidation.slDistancePips?.toFixed(1) || '0.0'} pips).`
                 ]
               };
             }
@@ -3500,7 +3500,7 @@ Output ONLY valid JSON.
                   stopLossBasis: proximityValidation.stopLossBasis,
                   structuralLevel: proximityValidation.structuralLevel,
                   riskReward: riskRewardStr,
-                  reasoning: [`[Break & Retest Confirmation] Price tapped marked ${currentZone.type} [${currentZone.low.toFixed(5)} - ${currentZone.high.toFixed(5)}] and confirmed retest in ${signalDir} direction while holding tight structural Stop Loss (${sl.toFixed(5)}).`]
+                  reasoning: [`[Break & Retest Confirmation] Price tapped marked ${currentZone?.type || 'Zone'} [${currentZone?.low?.toFixed(5) || '0.00000'} - ${currentZone?.high?.toFixed(5) || '0.00000'}] and confirmed retest in ${signalDir} direction while holding tight structural Stop Loss (${sl?.toFixed(5) || '0.00000'}).`]
                 } as any;
               }
             }
@@ -3670,7 +3670,7 @@ Output ONLY valid JSON.
             });
 
             adaptiveReq = calculateAdaptiveQualityRequirement({
-              baseThreshold: 75,
+              baseThreshold: 70,
               classification: adaptiveResult.classification,
               tier: adaptiveResult.tier,
               expectancyR: adaptiveResult.expectancyR,

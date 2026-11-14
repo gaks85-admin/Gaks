@@ -24,7 +24,7 @@ function getSettingsFile(): string {
 }
 
 const DEFAULT_SETTINGS: GlobalExecutionSettings = {
-  executionMode: 'HYBRID',
+  executionMode: 'RULE_ONLY',
   defaultGeminiModel: 'gemini-3.5-flash-lite',
   defaultStrategy: 'Gaks AI Default Strategy',
   scanInterval: 15,
@@ -86,10 +86,10 @@ export async function getGlobalExecutionSettings(supabaseClient?: any): Promise<
 }
 
 export function normalizeExecutionMode(rawMode?: string | null): ExecutionMode {
-  if (!rawMode) return 'HYBRID';
+  if (!rawMode) return 'RULE_ONLY';
   const clean = String(rawMode).trim().toUpperCase();
   if (clean === 'RULE_ONLY') return 'RULE_ONLY';
   if (clean === 'AI_ONLY') return 'AI_ONLY';
   if (clean === 'HYBRID') return 'HYBRID';
-  return 'HYBRID';
+  return 'RULE_ONLY';
 }

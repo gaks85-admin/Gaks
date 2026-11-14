@@ -13,7 +13,7 @@ export interface QualityGateInput {
   tpValid: boolean;
   rrValid: boolean;
   historicalProbability?: number; // 0-100 if available
-  minQualityThreshold?: number; // Default 75
+  minQualityThreshold?: number; // Default 70
   consecutiveLosses?: number; // Optional consecutive losses from watcher history
   ruleDetails?: EvaluatedRuleDetail[];
 }
@@ -40,7 +40,7 @@ export interface QualityGateResult {
 }
 
 export interface AdaptiveQualityInput {
-  baseThreshold?: number; // default 75
+  baseThreshold?: number; // default 70
   classification: string; // 'HEALTHY' | 'NEUTRAL' | 'DETERIORATING' | 'POOR' | 'INSUFFICIENT_DATA'
   tier: string; // 'INSUFFICIENT_DATA' | 'WEAK_SAMPLE' | 'ELIGIBLE' | 'STRONG_SAMPLE'
   expectancyR: number;
@@ -52,7 +52,7 @@ export function calculateAdaptiveQualityRequirement(input: AdaptiveQualityInput)
   minRequired: number;
   reason: string;
 } {
-  const baseThreshold = Math.max(0, Math.min(100, Number.isFinite(input.baseThreshold) ? (input.baseThreshold ?? 75) : 75));
+  const baseThreshold = Math.max(0, Math.min(100, Number.isFinite(input.baseThreshold) ? (input.baseThreshold ?? 70) : 70));
   const sampleSize = Number.isFinite(input.sampleSize) ? input.sampleSize : 0;
   const classification = input.classification || 'INSUFFICIENT_DATA';
   const tier = input.tier || 'INSUFFICIENT_DATA';
@@ -94,7 +94,7 @@ export function calculateAdaptiveQualityRequirement(input: AdaptiveQualityInput)
  * Evaluates high-confluence setup quality before risk validation and execution.
  */
 export function evaluateQualityGate(input: QualityGateInput): QualityGateResult {
-  const baseThreshold = input.minQualityThreshold ?? 75;
+  const baseThreshold = input.minQualityThreshold ?? 70;
   const consecutiveLosses = input.consecutiveLosses ?? 0;
 
   // Calculate deterministic loss-streak safety overlay

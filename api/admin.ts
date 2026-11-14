@@ -120,7 +120,7 @@ async function loadSettingsFromSupabaseOrFile() {
     defaultGeminiModel: "gemini-3.5-flash-lite",
     scanInterval: 15,
     maintenanceMode: false,
-    executionMode: "HYBRID"
+    executionMode: "RULE_ONLY"
   };
 
   try {
