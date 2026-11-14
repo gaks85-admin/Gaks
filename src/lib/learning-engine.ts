@@ -162,8 +162,24 @@ export async function recordCompletedTrade(
     const dir = (params.direction || '').toUpperCase().trim();
     const isBuy = dir === 'BUY' || dir === 'LONG';
     const cleanSym = (params.pair || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-    const isJpyOrGold = cleanSym.includes('JPY') || cleanSym.includes('XAU') || cleanSym.includes('GOLD');
-    const pipSize = isJpyOrGold ? 0.01 : 0.0001;
+    const isIndex =
+      cleanSym.includes('US30') || cleanSym.includes('NAS') || cleanSym.includes('NDX') ||
+      cleanSym.includes('US100') || cleanSym.includes('US500') || cleanSym.includes('SPX') ||
+      cleanSym.includes('US2000') || cleanSym.includes('GER') || cleanSym.includes('DE30') ||
+      cleanSym.includes('DE40') || cleanSym.includes('UK100') || cleanSym.includes('JP225') ||
+      cleanSym.includes('HK50') || cleanSym.includes('INDEX');
+    const isSubTenCrypto =
+      cleanSym.includes('XRP') || cleanSym.includes('ADA') || cleanSym.includes('DOGE') ||
+      cleanSym.includes('SHIB') || cleanSym.includes('TRX') || cleanSym.includes('XLM');
+    const isHundredthQuoted =
+      !isSubTenCrypto && (
+        cleanSym.includes('JPY') || cleanSym.includes('XAU') || cleanSym.includes('GOLD') ||
+        cleanSym.includes('XAG') || cleanSym.includes('SILVER') || cleanSym.includes('BTC') ||
+        cleanSym.includes('ETH') || cleanSym.includes('SOL') || cleanSym.includes('LTC') ||
+        cleanSym.includes('BNB') || cleanSym.includes('AVAX') || cleanSym.includes('BCH') ||
+        cleanSym.endsWith('USDT') || cleanSym.endsWith('USDC') || cleanSym.endsWith('BUSD')
+      );
+    const pipSize = isIndex ? 1.0 : (isHundredthQuoted ? 0.01 : 0.0001);
 
     // Calculate PIPs
     const diff = params.exit_price - params.entry_price;

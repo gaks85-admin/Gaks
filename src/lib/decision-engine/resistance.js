@@ -1,72 +1,69 @@
-export class ResistanceEvaluator {
-    evaluateResistance(rules, market) {
-        if (!rules.resistance) {
-            return { matched: false, score: 0, scoreOutOf10: 0, reason: "Resistance Zone rule not active in strategy." };
-        }
-        const isFlatMatched = market.resistance === true || market.resistance?.matched === true;
-        const isNestedMatched = market.resistanceZones && Array.isArray(market.resistanceZones) &&
-            market.resistanceZones.length > 0;
-        const isSwingHighNear = market.swingHighs && Array.isArray(market.swingHighs) && market.swingHighs.length > 0;
-        const isObNear = market.orderBlocks && Array.isArray(market.orderBlocks) && market.orderBlocks.some((b) => b.type === 'BEARISH' || b.type === 'BEARISH_ORDER_BLOCK');
-        const isMarkedResistanceNear = Boolean(market.markedZone && (market.markedZone.direction === 'SELL' || market.markedZone.type === 'SUPPLY' || market.markedZone.type === 'BEARISH_ORDER_BLOCK' || market.markedZone.type === 'RESISTANCE'));
-        let scoreOutOf10 = 0;
-        let matched = false;
-        let reason = "";
-        if (isFlatMatched || isNestedMatched || isMarkedResistanceNear) {
-            scoreOutOf10 = 10;
-            matched = true;
-            reason = "Price is trading directly at or in a key resistance/supply zone (10/10).";
-        }
-        else if (isObNear || isSwingHighNear) {
-            scoreOutOf10 = 7;
-            matched = true;
-            reason = "Bearish order block or swing high structure detected in close proximity (7/10).";
-        }
-        else {
-            scoreOutOf10 = 0;
-            matched = false;
-            reason = "No key resistance zone or swing high detected in immediate proximity (0/10).";
-        }
-        return {
-            matched,
-            score: scoreOutOf10 / 10,
-            scoreOutOf10,
-            reason
-        };
+class ResistanceEvaluator {
+  evaluateResistance(rules, market) {
+    if (!rules.resistance) {
+      return { matched: false, score: 0, scoreOutOf10: 0, reason: "Resistance Zone rule not active in strategy." };
     }
-    evaluateResistanceRejection(rules, market) {
-        if (!rules.resistance_rejection) {
-            return { matched: false, score: 0, scoreOutOf10: 0, reason: "Resistance Rejection rule not active in strategy." };
-        }
-        const isFlatMatched = market.resistance_rejection === true || market.resistance_rejection?.matched === true;
-        const isNestedMatched = market.retests && Array.isArray(market.retests) && market.retests.length > 0;
-        const isCandleRejection = market.candlePatterns && Array.isArray(market.candlePatterns) &&
-            market.candlePatterns.some((p) => p.direction === 'BEARISH');
-        const isWickRejection = market.upperWickRejection === true || market.wickRejection === true;
-        const isZoneRejection = market.zone_status === 'CONFIRMED' || market.isRejected === true || Boolean(market.rejectionReason);
-        let scoreOutOf10 = 0;
-        let matched = false;
-        let reason = "";
-        if (isFlatMatched || (isNestedMatched && isCandleRejection) || isZoneRejection) {
-            scoreOutOf10 = 10;
-            matched = true;
-            reason = "Strong bearish rejection & candle bounce from resistance zone confirmed (10/10).";
-        }
-        else if (isCandleRejection || isNestedMatched || isWickRejection) {
-            scoreOutOf10 = 8;
-            matched = true;
-            reason = "Bearish rejection wick or candle pattern detected near resistance (8/10).";
-        }
-        else {
-            scoreOutOf10 = 0;
-            matched = false;
-            reason = "No bearish rejection or bounce detected at resistance zone (0/10).";
-        }
-        return {
-            matched,
-            score: scoreOutOf10 / 10,
-            scoreOutOf10,
-            reason
-        };
+    const isFlatMatched = market.resistance === true || market.resistance?.matched === true;
+    const isNestedMatched = market.resistanceZones && Array.isArray(market.resistanceZones) && market.resistanceZones.length > 0;
+    const isSwingHighNear = market.swingHighs && Array.isArray(market.swingHighs) && market.swingHighs.length > 0;
+    const isObNear = market.orderBlocks && Array.isArray(market.orderBlocks) && market.orderBlocks.some((b) => b.type === "BEARISH" || b.type === "BEARISH_ORDER_BLOCK");
+    const isMarkedResistanceNear = Boolean(market.markedZone && (market.markedZone.direction === "SELL" || market.markedZone.type === "SUPPLY" || market.markedZone.type === "BEARISH_ORDER_BLOCK" || market.markedZone.type === "RESISTANCE"));
+    let scoreOutOf10 = 0;
+    let matched = false;
+    let reason = "";
+    if (isFlatMatched || isNestedMatched || isMarkedResistanceNear) {
+      scoreOutOf10 = 10;
+      matched = true;
+      reason = "Price is trading directly at or in a key resistance/supply zone (10/10).";
+    } else if (isObNear || isSwingHighNear) {
+      scoreOutOf10 = 7;
+      matched = true;
+      reason = "Bearish order block or swing high structure detected in close proximity (7/10).";
+    } else {
+      scoreOutOf10 = 0;
+      matched = false;
+      reason = "No key resistance zone or swing high detected in immediate proximity (0/10).";
     }
+    return {
+      matched,
+      score: scoreOutOf10 / 10,
+      scoreOutOf10,
+      reason
+    };
+  }
+  evaluateResistanceRejection(rules, market) {
+    if (!rules.resistance_rejection) {
+      return { matched: false, score: 0, scoreOutOf10: 0, reason: "Resistance Rejection rule not active in strategy." };
+    }
+    const isFlatMatched = market.resistance_rejection === true || market.resistance_rejection?.matched === true;
+    const isNestedMatched = market.retests && Array.isArray(market.retests) && market.retests.length > 0;
+    const isCandleRejection = market.candlePatterns && Array.isArray(market.candlePatterns) && market.candlePatterns.some((p) => p.direction === "BEARISH");
+    const isWickRejection = market.upperWickRejection === true || market.wickRejection === true;
+    const isZoneRejection = market.zone_status === "CONFIRMED" || market.isRejected === true || Boolean(market.rejectionReason);
+    let scoreOutOf10 = 0;
+    let matched = false;
+    let reason = "";
+    if (isFlatMatched || isNestedMatched && isCandleRejection || isZoneRejection) {
+      scoreOutOf10 = 10;
+      matched = true;
+      reason = "Strong bearish rejection & candle bounce from resistance zone confirmed (10/10).";
+    } else if (isCandleRejection || isNestedMatched || isWickRejection) {
+      scoreOutOf10 = 8;
+      matched = true;
+      reason = "Bearish rejection wick or candle pattern detected near resistance (8/10).";
+    } else {
+      scoreOutOf10 = 0;
+      matched = false;
+      reason = "No bearish rejection or bounce detected at resistance zone (0/10).";
+    }
+    return {
+      matched,
+      score: scoreOutOf10 / 10,
+      scoreOutOf10,
+      reason
+    };
+  }
 }
+export {
+  ResistanceEvaluator
+};

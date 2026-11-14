@@ -141,7 +141,17 @@ export function diagnoseLossOutcome(input: LossDiagnosticInput): LossPostMortem 
   }
 
   // 4. Tightness Thresholds
-  const isGoldOrIndex = pair.includes('XAU') || pair.includes('GOLD') || pair.includes('US30') || pair.includes('NAS100') || pair.includes('BTC');
+  const cleanPair = pair.replace(/[^A-Z0-9]/g, '');
+  const isGoldOrIndex =
+    cleanPair.includes('XAU') || cleanPair.includes('GOLD') ||
+    cleanPair.includes('XAG') || cleanPair.includes('SILVER') ||
+    cleanPair.includes('US30') || cleanPair.includes('NAS') || cleanPair.includes('NDX') ||
+    cleanPair.includes('US100') || cleanPair.includes('SPX') || cleanPair.includes('US500') ||
+    cleanPair.includes('US2000') || cleanPair.includes('GER') || cleanPair.includes('DE30') ||
+    cleanPair.includes('DE40') || cleanPair.includes('UK100') || cleanPair.includes('JP225') ||
+    cleanPair.includes('HK50') || cleanPair.includes('BTC') || cleanPair.includes('ETH') ||
+    cleanPair.includes('SOL') || cleanPair.includes('XRP') || cleanPair.includes('LTC') ||
+    cleanPair.endsWith('USDT') || cleanPair.endsWith('USDC') || cleanPair.endsWith('BUSD');
   const minThresholdPips = isGoldOrIndex ? 18.0 : 7.0;
   const normalThresholdPips = isGoldOrIndex ? 45.0 : 18.0;
 

@@ -52,16 +52,41 @@ export const toDisplaySymbol = (symbol: string): string => {
     'NZDUSD': 'NZD/USD',
     'BTCUSD': 'BTC/USD',
     'ETHUSD': 'ETH/USD',
+    'SOLUSD': 'SOL/USD',
+    'XRPUSD': 'XRP/USD',
+    'LTCUSD': 'LTC/USD',
+    'ADAUSD': 'ADA/USD',
+    'DOGEUSD': 'DOGE/USD',
+    'BNBUSD': 'BNB/USD',
+    'AVAXUSD': 'AVAX/USD',
+    'DOTUSD': 'DOT/USD',
+    'LINKUSD': 'LINK/USD',
     'XAUUSD': 'XAU/USD',
     'XAGUSD': 'XAG/USD',
     'NAS100': 'NAS100',
+    'US100': 'US100',
     'US30': 'US30',
     'SPX500': 'SPX500',
+    'US500': 'US500',
     'GER30': 'GER30',
+    'GER40': 'GER40',
     'UK100': 'UK100'
   };
 
   if (mappings[canonical]) return mappings[canonical];
+
+  if (canonical.endsWith('USDT') && canonical.length > 4) {
+    return `${canonical.slice(0, -4)}/USDT`;
+  }
+  if (canonical.endsWith('USDC') && canonical.length > 4) {
+    return `${canonical.slice(0, -4)}/USDC`;
+  }
+  if (canonical.endsWith('BUSD') && canonical.length > 4) {
+    return `${canonical.slice(0, -4)}/BUSD`;
+  }
+  if (canonical.endsWith('USD') && canonical.length >= 6 && !/^(US|XAU|XAG)/.test(canonical) && !/\d/.test(canonical)) {
+    return `${canonical.slice(0, -3)}/USD`;
+  }
 
   // Heuristic for 6-letter Forex pairs not in mapping
   if (canonical.length === 6 && /^[A-Z]{6}$/.test(canonical)) {

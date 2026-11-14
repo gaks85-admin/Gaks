@@ -1,6 +1,9 @@
-export const chochSynonyms = [
-    "change of character",
-    "choch",
-    "character change",
-    "change in character"
+const chochSynonyms = [
+  "change of character",
+  "choch",
+  "character change",
+  "change in character"
 ];
+export {
+  chochSynonyms
+};

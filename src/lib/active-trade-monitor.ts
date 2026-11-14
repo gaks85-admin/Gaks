@@ -25,11 +25,32 @@ export interface ActiveTradeTelemetry {
  */
 export function getPipSize(symbol: string): number {
   const clean = (symbol || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-  if (clean.includes('JPY') || clean.includes('XAU') || clean.includes('GOLD') || clean.includes('BTC')) {
-    return 0.01;
-  }
-  if (clean.includes('US30') || clean.includes('NAS100') || clean.includes('SPX500') || clean.includes('GER40')) {
+  if (
+    clean.includes('US30') || clean.includes('DJ30') || clean.includes('DOW') ||
+    clean.includes('NAS') || clean.includes('NDX') || clean.includes('US100') ||
+    clean.includes('SPX') || clean.includes('SP500') || clean.includes('US500') ||
+    clean.includes('US2000') || clean.includes('GER') || clean.includes('DE30') ||
+    clean.includes('DE40') || clean.includes('DAX') || clean.includes('UK100') ||
+    clean.includes('FTSE') || clean.includes('JP225') || clean.includes('HK50') ||
+    clean.includes('AUS200') || clean.includes('INDEX')
+  ) {
     return 1.0;
+  }
+  if (
+    clean.includes('XRP') || clean.includes('ADA') || clean.includes('DOGE') ||
+    clean.includes('SHIB') || clean.includes('TRX') || clean.includes('XLM') ||
+    clean.includes('VET') || clean.includes('HBAR')
+  ) {
+    return 0.0001;
+  }
+  if (
+    clean.includes('JPY') || clean.includes('XAU') || clean.includes('GOLD') ||
+    clean.includes('XAG') || clean.includes('SILVER') || clean.includes('BTC') ||
+    clean.includes('ETH') || clean.includes('SOL') || clean.includes('LTC') ||
+    clean.includes('BNB') || clean.includes('AVAX') || clean.includes('BCH') ||
+    clean.endsWith('USDT') || clean.endsWith('USDC') || clean.endsWith('BUSD')
+  ) {
+    return 0.01;
   }
   return 0.0001;
 }

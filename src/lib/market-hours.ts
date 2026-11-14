@@ -36,8 +36,13 @@ export interface MarketSchedule {
 
 const CRYPTO_ROOTS = new Set([
   'BTC', 'ETH', 'SOL', 'XRP', 'LTC', 'DOGE', 'BNB', 'ADA',
-  'AVAX', 'DOT', 'LINK', 'MATIC', 'SHIB', 'UNI', 'NEAR', 'TRX', 'ATOM', 'BCH'
+  'AVAX', 'DOT', 'LINK', 'MATIC', 'POL', 'SHIB', 'UNI', 'NEAR', 'TRX', 'ATOM', 'BCH',
+  'TON', 'SUI', 'PEPE', 'ARB', 'OP', 'APT', 'AAVE', 'ALGO', 'FIL', 'ICP', 'VET',
+  'HBAR', 'XLM', 'FTM', 'SAND', 'MANA', 'AXS', 'CRV', 'MKR', 'SNX', 'COMP', 'INJ',
+  'RUNE', 'SEI', 'TIA', 'WIF', 'BONK', 'FLOKI', 'ETC', 'XMR', 'ZEC', 'DASH', 'EOS', 'XTZ', 'THETA'
 ]);
+
+const CRYPTO_QUOTE_SUFFIXES = ['USDT', 'USDC', 'BUSD', 'FDUSD', 'USD', 'EUR', 'GBP', 'JPY', 'BTC', 'ETH'];
 
 /**
  * Checks whether a given symbol is an always-open cryptocurrency pair.
@@ -47,15 +52,18 @@ export function isCryptoPair(symbol: string): boolean {
   if (!symbol) return false;
   const canonical = toCanonicalSymbol(symbol);
 
-  // Check prefix or contains known crypto tokens
-  for (const root of CRYPTO_ROOTS) {
-    if (canonical.startsWith(root) || canonical.includes(root)) {
-      return true;
-    }
+  if (canonical.endsWith('USDT') || canonical.endsWith('USDC') || canonical.endsWith('BUSD') || canonical.endsWith('FDUSD')) {
+    return true;
   }
 
-  if (canonical.endsWith('USDT') || canonical.endsWith('USDC') || canonical.endsWith('BUSD')) {
-    return true;
+  for (const root of CRYPTO_ROOTS) {
+    if (canonical === root) return true;
+    if (canonical.startsWith(root)) {
+      const rest = canonical.slice(root.length);
+      if (CRYPTO_QUOTE_SUFFIXES.includes(rest)) {
+        return true;
+      }
+    }
   }
 
   try {
@@ -285,12 +293,14 @@ export function getMarketSchedule(symbol: string, referenceDate: Date = new Date
   const isCrypto = isCryptoPair(canonical);
 
   let assetClass: AssetClassType = 'Forex';
+  let isMetal = false;
   if (isCrypto) {
     assetClass = 'Crypto';
   } else {
     try {
       const spec = resolveInstrumentSpec(canonical);
-      assetClass = spec.assetClass;
+      isMetal = String(spec.assetClass) === 'Gold' || String(spec.assetClass) === 'Silver' || canonical.includes('XAG') || canonical.includes('SILVER');
+      assetClass = isMetal ? 'Gold' : (spec.assetClass as AssetClassType);
     } catch {
       assetClass = 'Forex';
     }

@@ -1,6 +1,9 @@
-export const atrSynonyms = [
-    "atr",
-    "average true range",
-    "atr volatility",
-    "atr filter"
+const atrSynonyms = [
+  "atr",
+  "average true range",
+  "atr volatility",
+  "atr filter"
 ];
+export {
+  atrSynonyms
+};

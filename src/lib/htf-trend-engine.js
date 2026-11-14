@@ -17,9 +17,13 @@ function evaluateHtfCandles(candles, timeframe, source) {
     return {
       trend: "SIDEWAYS",
       timeframe,
-      allowedDirection: "NONE",
-      reason: "Insufficient higher timeframe candle data to determine clear trend. Defaulting to NO TRADE.",
-      confidence: 0,
+      allowedDirection: "BOTH",
+      reason: "Insufficient higher timeframe candle data to determine definitive trend. Permitting independent zone discovery.",
+      confidence: 50,
+      structuralTrend: "SIDEWAYS",
+      emaTrend: "SIDEWAYS",
+      momentum: "NEUTRAL",
+      trendConfidence: 50,
       currentPrice: 0,
       source
     };
@@ -28,94 +32,93 @@ function evaluateHtfCandles(candles, timeframe, source) {
   const closes = sorted.map((c) => c.close);
   const currentPrice = closes[closes.length - 1];
   const ms = extractMarketStructure(sorted);
-  const ema50Period = Math.min(50, Math.max(10, Math.floor(closes.length * 0.75)));
-  const ema200Period = Math.min(200, closes.length);
-  const ema50Series = calculateEma(closes, ema50Period);
-  const ema200Series = calculateEma(closes, ema200Period);
+  const ema37Series = calculateEma(closes, Math.min(37, closes.length));
+  const ema50Series = calculateEma(closes, Math.min(50, closes.length));
+  const ema200Series = calculateEma(closes, Math.min(200, closes.length));
+  const latestEma37 = ema37Series[ema37Series.length - 1];
   const latestEma50 = ema50Series[ema50Series.length - 1];
   const latestEma200 = ema200Series[ema200Series.length - 1];
-  let bullishScore = 0;
-  let bearishScore = 0;
-  const reasonNotes = [];
-  if (latestEma50 && latestEma200) {
-    if (currentPrice > latestEma50 && latestEma50 > latestEma200) {
-      bullishScore += 3;
-      reasonNotes.push(`Price (${currentPrice.toFixed(2)}) above ${ema50Period}/${ema200Period} EMA alignment`);
-    } else if (currentPrice < latestEma50 && latestEma50 < latestEma200) {
-      bearishScore += 3;
-      reasonNotes.push(`Price (${currentPrice.toFixed(2)}) below ${ema50Period}/${ema200Period} EMA alignment`);
-    } else if (currentPrice > latestEma50) {
-      bullishScore += 1.5;
-      reasonNotes.push(`Price above ${ema50Period} EMA`);
-    } else if (currentPrice < latestEma50) {
-      bearishScore += 1.5;
-      reasonNotes.push(`Price below ${ema50Period} EMA`);
+  let emaTrend = "SIDEWAYS";
+  if (latestEma37 && latestEma50) {
+    if (currentPrice > latestEma37 && latestEma37 > latestEma50) {
+      emaTrend = "BULLISH";
+    } else if (currentPrice < latestEma37 && latestEma37 < latestEma50) {
+      emaTrend = "BEARISH";
     }
   }
   const highs = ms.swingHighs || [];
   const lows = ms.swingLows || [];
-  if (lows.length >= 2) {
-    const lastLow = lows[lows.length - 1].price;
-    const prevLow = lows[lows.length - 2].price;
-    if (lastLow > prevLow) {
-      bullishScore += 2.5;
-      reasonNotes.push(`Higher Low formed (${prevLow.toFixed(2)} -> ${lastLow.toFixed(2)})`);
-    } else if (lastLow < prevLow) {
-      bearishScore += 2.5;
-      reasonNotes.push(`Lower Low formed (${prevLow.toFixed(2)} -> ${lastLow.toFixed(2)})`);
+  let structuralTrend = "SIDEWAYS";
+  let hasHigherHigh = false;
+  let hasHigherLow = false;
+  let hasLowerLow = false;
+  let hasLowerHigh = false;
+  if (highs.length >= 2 && lows.length >= 2) {
+    const lastH = highs[highs.length - 1].price;
+    const prevH = highs[highs.length - 2].price;
+    const lastL = lows[lows.length - 1].price;
+    const prevL = lows[lows.length - 2].price;
+    hasHigherHigh = lastH > prevH;
+    hasLowerHigh = lastH < prevH;
+    hasHigherLow = lastL > prevL;
+    hasLowerLow = lastL < prevL;
+    if (hasHigherHigh && hasHigherLow) {
+      structuralTrend = "BULLISH";
+    } else if (hasLowerLow && hasLowerHigh) {
+      structuralTrend = "BEARISH";
+    } else if (hasHigherHigh && hasLowerLow || hasLowerHigh && hasHigherLow) {
+      structuralTrend = "TRANSITIONAL";
+    } else {
+      structuralTrend = "SIDEWAYS";
     }
-  }
-  if (highs.length >= 2) {
-    const lastHigh = highs[highs.length - 1].price;
-    const prevHigh = highs[highs.length - 2].price;
-    if (lastHigh > prevHigh) {
-      bullishScore += 2;
-      reasonNotes.push(`Higher High formed (${prevHigh.toFixed(2)} -> ${lastHigh.toFixed(2)})`);
-    } else if (lastHigh < prevHigh) {
-      bearishScore += 2;
-      reasonNotes.push(`Lower High formed (${prevHigh.toFixed(2)} -> ${lastHigh.toFixed(2)})`);
-    }
-  }
-  if (ms.BOS && ms.BOS.length > 0) {
-    const recentBOS = ms.BOS.slice(-2);
-    const hasBullishBOS = recentBOS.some((b) => b.type === "BULLISH_BOS");
-    const hasBearishBOS = recentBOS.some((b) => b.type === "BEARISH_BOS");
-    if (hasBullishBOS && !hasBearishBOS) {
-      bullishScore += 2.5;
-      reasonNotes.push("Recent Bullish BOS");
-    } else if (hasBearishBOS && !hasBullishBOS) {
-      bearishScore += 2.5;
-      reasonNotes.push("Recent Bearish BOS");
-    }
-  }
-  let trend = "SIDEWAYS";
-  let allowedDirection = "NONE";
-  let confidence = 50;
-  if (bullishScore >= bearishScore + 2 && bullishScore >= 4) {
-    trend = "BULLISH";
-    allowedDirection = "BUY";
-    confidence = Math.min(95, Math.round(65 + bullishScore * 4));
-  } else if (bearishScore >= bullishScore + 2 && bearishScore >= 4) {
-    trend = "BEARISH";
-    allowedDirection = "SELL";
-    confidence = Math.min(95, Math.round(65 + bearishScore * 4));
   } else {
-    trend = "SIDEWAYS";
-    allowedDirection = "NONE";
-    confidence = 45;
+    structuralTrend = "SIDEWAYS";
   }
-  const swingsSummary = `${highs.length} swing highs, ${lows.length} swing lows on ${timeframe}`;
-  const reason = trend === "SIDEWAYS" ? `${timeframe} Trend is SIDEWAYS / unclear (${reasonNotes.join(", ") || "Mixed structural momentum / consolidation"}). Defaulting to NO TRADE.` : `${timeframe} Trend is ${trend}: ${reasonNotes.join(", ") || "Aligned institutional signals"}.`;
+  const momentum = currentPrice > (closes[closes.length - 3] || currentPrice) ? "BULLISH" : currentPrice < (closes[closes.length - 3] || currentPrice) ? "BEARISH" : "NEUTRAL";
+  let finalTrend = "SIDEWAYS";
+  let allowedDirection = "BOTH";
+  let trendConfidence = 65;
+  if (structuralTrend === "BULLISH") {
+    finalTrend = "BULLISH";
+    allowedDirection = "BOTH";
+    trendConfidence = emaTrend === "BULLISH" ? 85 : 70;
+  } else if (structuralTrend === "BEARISH") {
+    finalTrend = "BEARISH";
+    allowedDirection = "BOTH";
+    trendConfidence = emaTrend === "BEARISH" ? 85 : 70;
+  } else if (structuralTrend === "TRANSITIONAL") {
+    finalTrend = "SIDEWAYS";
+    allowedDirection = "BOTH";
+    trendConfidence = 60;
+  } else {
+    finalTrend = "SIDEWAYS";
+    allowedDirection = "BOTH";
+    trendConfidence = 50;
+  }
+  const reasonNotes = [
+    `Structural Trend: ${structuralTrend}`,
+    `EMA Trend: ${emaTrend}`,
+    `Momentum: ${momentum}`
+  ];
+  if (highs.length >= 2 && lows.length >= 2) {
+    reasonNotes.push(`Swings: HH=${hasHigherHigh}, HL=${hasHigherLow}, LH=${hasLowerHigh}, LL=${hasLowerLow}`);
+  }
+  const reason = `${timeframe} Structure evaluated as ${structuralTrend} (${reasonNotes.join(", ")})`;
   return {
-    trend,
+    trend: finalTrend,
     timeframe,
     allowedDirection,
     reason,
-    confidence,
+    confidence: trendConfidence,
+    structuralTrend,
+    emaTrend,
+    momentum,
+    trendConfidence,
+    ema37: latestEma37,
     ema50: latestEma50,
     ema200: latestEma200,
     currentPrice,
-    swingsSummary,
+    swingsSummary: `${highs.length} swing highs, ${lows.length} swing lows on ${timeframe}`,
     source,
     htfCandles: sorted,
     htfMarketStructure: ms

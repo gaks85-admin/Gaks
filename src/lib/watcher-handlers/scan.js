@@ -2,7 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 import { GoogleGenAI, Type } from "@google/genai";
 import { defaultMarketDataService, getRequiredCandleCountForTimeframe } from "../market-data-service.js";
 import { analyzeMarket } from "../strategy-engine.js";
-import { extractRiskPreferences, calculatePositionSize, parseRiskRewardRatio } from "../risk-engine.js";
+import { extractRiskPreferences, calculatePositionSize, parseRiskRewardRatio, resolveInstrumentSpec } from "../risk-engine.js";
 import { calculateStructuralStopLoss, validateAndResolveStopLoss, validateZoneProximityAndStopLoss } from "../structural-stop-loss.js";
 import { compileStrategy } from "../strategy-compiler.js";
 import { evaluateDecision } from "../decision-engine.js";
@@ -519,6 +519,11 @@ async function handler(req, res) {
     const positionMode = riskPrefs.positionMode;
     const preferredLotSize = riskPrefs.preferredLotSize;
     const compiledStrategy = compileStrategy(strategyText);
+    const rules = compiledStrategy?.compiled_rules;
+    const mandatoryIds = compiledStrategy?.canonical_rule_set?.mandatory_rule_ids || [];
+    const requiresZoneSetup = Boolean(
+      rules?.order_block && mandatoryIds.includes("order_block") || rules?.supply_demand && mandatoryIds.includes("supply_demand") || rules?.unmitigated_zone && mandatoryIds.includes("unmitigated_zone") || rules?.fair_value_gap && mandatoryIds.includes("fair_value_gap") || rules?.support && mandatoryIds.includes("support") || rules?.resistance && mandatoryIds.includes("resistance") || rules?.support_rejection && mandatoryIds.includes("support_rejection") || rules?.resistance_rejection && mandatoryIds.includes("resistance_rejection") || rules?.liquidity_sweep && mandatoryIds.includes("liquidity_sweep")
+    );
     const symbol = watcher.selected_pair;
     const mappedSymbol = symbol;
     const selectedTimeframe = watcher.selected_timeframe || "H1";
@@ -588,22 +593,7 @@ async function handler(req, res) {
     marketStructure.htfMarketStructure = htfTrendResult.htfMarketStructure;
     console.log(`[HTF TREND] Manual Scan - Watcher ID: ${watcher.id} (${symbol}): ${htfTrendResult.timeframe} Trend is ${htfTrendResult.trend} (${htfTrendResult.reason}). Enforcing trend-following zone markout.`);
     if (htfTrendResult.trend === "SIDEWAYS" || htfTrendResult.allowedDirection === "NONE") {
-      console.log(`[HTF SIDEWAYS NO-TRADE] Manual Scan - Watcher ID: ${watcher.id} (${symbol}): ${htfTrendResult.timeframe} Trend is SIDEWAYS / unclear (${htfTrendResult.reason}). Preservation mode: keeping existing zone but blocking new signals.`);
-      await supabase.from("watchers").update({
-        last_scan_at: (/* @__PURE__ */ new Date()).toISOString(),
-        updated_at: (/* @__PURE__ */ new Date()).toISOString()
-      }).eq("id", watcher.id);
-      return res.json({
-        success: true,
-        data: {
-          watcher_id: watcher.id,
-          pair: symbol,
-          signal: "NO_TRADE",
-          confidence: 0,
-          status: "SIDEWAYS_NO_TRADE",
-          reasoning: [`Higher timeframe (${htfTrendResult.timeframe}) trend is SIDEWAYS / unclear: ${htfTrendResult.reason}. Preservation mode active: existing structural POIs maintained; new setups blocked.`]
-        }
-      });
+      console.log(`[HTF SIDEWAYS NOTICE] Manual Scan - Watcher ID: ${watcher.id} (${symbol}): ${htfTrendResult.timeframe} Trend is SIDEWAYS / unclear (${htfTrendResult.reason}). Proceeding with structural zone discovery.`);
     }
     const strategyCompilationConfidenceRecord = normalizeConfidence(
       compiledStrategy.overall_confidence ?? compiledStrategy.confidence,
@@ -628,15 +618,13 @@ async function handler(req, res) {
         console.log(`[Manual Scan ZONE MEMORY RESTORE] Watcher ID: ${watcher.id}: Retained active ${currentZone.type} zone from runtime memory.`);
       }
     }
-    const expectedDirection = htfTrendResult.trend === "BEARISH" ? "SELL" : htfTrendResult.trend === "BULLISH" ? "BUY" : null;
     const rejectedList = getRejectedZones(watcher.id);
     const candidateZones = identifyCandidateZones(candleData, marketStructure, compiledStrategy, activeCurrentPrice, rejectedList);
     const topCandidate = candidateZones[0] || null;
     let lastZoneEval = null;
     if (currentZone && currentZone.status !== "INVALIDATED") {
-      const directionMismatch = expectedDirection && currentZone.direction !== expectedDirection;
       const isSuboptimalZone = topCandidate && (topCandidate.strength >= 80 && (currentZone.strength || 0) < 65 || currentZone.status === "WAITING_FOR_TAP" && topCandidate.id !== currentZone.id && (topCandidate.strength || 0) >= (currentZone.strength || 0) + 15);
-      if (directionMismatch || isSuboptimalZone) {
+      if (isSuboptimalZone) {
         console.log(`[ZONE SELF-CORRECTION] Manual Scan - Watcher ${watcher.id} (${symbol}): Upgrading active zone [${currentZone.low} - ${currentZone.high}] (${currentZone.type}) to superior institutional zone [${topCandidate?.low} - ${topCandidate?.high}] (Strength: ${topCandidate?.strength} vs ${currentZone.strength || "N/A"}).`);
         recordRejectedZone(watcher.id, currentZone, "Self-corrected to dominant structural zone");
         currentZone = null;
@@ -743,6 +731,7 @@ async function handler(req, res) {
             zone_tapped_at: null,
             updated_at: (/* @__PURE__ */ new Date()).toISOString()
           }).eq("id", watcher.id);
+          console.log(`[ZONE_IDENTIFIED] Manual Scan - Watcher ID: ${watcher.id} (${symbol}): Newly discovered zone [${discoveredZone.low} - ${discoveredZone.high}]. Status: WAITING_FOR_TAP.`);
           return res.json({
             success: true,
             data: {
@@ -752,17 +741,13 @@ async function handler(req, res) {
               confidence: 0,
               status: "WAITING_FOR_TAP",
               zone: discoveredZone,
-              reasoning: [`Marked ${discoveredZone.type} zone [${discoveredZone.low} - ${discoveredZone.high}]. Waiting for price tap before AI confirmation.`]
+              reasoning: [`ZONE_IDENTIFIED \u2014 Marked ${discoveredZone.type} zone [${discoveredZone.low} - ${discoveredZone.high}]. Waiting for price tap before AI confirmation.`]
             }
           });
         }
       } else {
-        const rules = compiledStrategy?.compiled_rules;
-        const requiresZoneSetup = Boolean(
-          rules?.order_block || rules?.supply_demand || rules?.unmitigated_zone || rules?.fair_value_gap || rules?.support || rules?.resistance || rules?.support_rejection || rules?.resistance_rejection || rules?.liquidity_sweep
-        );
         if (requiresZoneSetup) {
-          console.log(`[ZONE SEARCH] Watcher ID: ${watcher.id} (${symbol}): No distinct structural POI/Zone identified. Waiting for new structural formation.`);
+          console.log(`[NO_DISTINCT_ZONE_FOUND] Manual Scan - Watcher ID: ${watcher.id} (${symbol}): No qualifying Supply or Demand zone was identified. Strategy requires a structural zone.`);
           return res.json({
             success: true,
             data: {
@@ -770,15 +755,17 @@ async function handler(req, res) {
               pair: symbol,
               signal: "NO_TRADE",
               confidence: 0,
-              status: "ZONE_SEARCH",
+              status: "NO_DISTINCT_ZONE_FOUND",
               zone: null,
-              reasoning: ["No distinct structural POI/Zone identified in current market structure. Waiting for new structural formation."]
+              reasoning: ["No distinct zone identified."]
             }
           });
+        } else {
+          console.log(`[ZONE SEARCH] Manual Scan - Watcher ID: ${watcher.id} (${symbol}): No zone required by strategy. Proceeding to indicator evaluation.`);
         }
       }
     }
-    if (!currentZone || currentZone.status === "WAITING_FOR_TAP") {
+    if (requiresZoneSetup && (!currentZone || currentZone.status === "WAITING_FOR_TAP")) {
       console.log(`[ZONE RETEST GUARD] Manual Scan - Watcher ID: ${watcher.id} (${symbol}): Zone status is ${currentZone?.status || "NO_ZONE"}. Awaiting price retest of marked zone before decision evaluation.`);
       return res.json({
         success: true,
@@ -787,14 +774,13 @@ async function handler(req, res) {
           pair: symbol,
           signal: "NO_TRADE",
           confidence: 0,
-          status: currentZone ? "WAITING_FOR_TAP" : "WAITING_FOR_SETUP",
+          status: currentZone ? "WAITING_FOR_TAP" : "NO_DISTINCT_ZONE_FOUND",
           zone: currentZone,
-          reasoning: [currentZone ? `Price is outside marked ${currentZone.type} zone [${currentZone.low} - ${currentZone.high}]. Waiting for price retest to trigger reversal.` : "Awaiting structural zone formation."]
+          reasoning: [currentZone ? `WAITING_FOR_TAP \u2014 Price is outside marked ${currentZone.type} zone [${currentZone.low} - ${currentZone.high}]. Waiting for price retest to trigger reversal.` : "No distinct zone identified."]
         }
       });
     }
-    const cleanSymUpper = (symbol || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
-    const pipSize = cleanSymUpper.includes("JPY") || cleanSymUpper.includes("XAU") || cleanSymUpper.includes("GOLD") ? 0.01 : 1e-4;
+    const pipSize = resolveInstrumentSpec(symbol, activeCurrentPrice).pipSize;
     marketStructure.watcherId = watcher.id;
     marketStructure.pair = symbol;
     marketStructure.timeframe = selectedTimeframe;
@@ -847,7 +833,7 @@ async function handler(req, res) {
       executionMode = MARKET_WATCHER_DECISION_MODE_OVERRIDE;
     }
     console.log(`[DECISION MODE] ${executionMode}${MARKET_WATCHER_DECISION_MODE_OVERRIDE ? " (TEMPORARY OVERRIDE)" : ""}`);
-    const PRE_FILTER_MIN_SCORE = 75;
+    const PRE_FILTER_MIN_SCORE = 70;
     const mandatoryPassed = decisionResult.mandatory_rules_passed !== false;
     const meetsQualityThreshold = (decisionResult.decision_score ?? 0) >= PRE_FILTER_MIN_SCORE;
     const isViableRecommendation = recommendation === "PASS" || recommendation === "LIKELY_PASS";
@@ -901,15 +887,15 @@ Timeframe: ${selectedTimeframe}
 
 Detailed Numeric Market Structure & Key Levels:
 - Trend: ${marketStructure.trend}
-- Marked Zone: ${currentZone ? `${currentZone.type} [${currentZone.low.toFixed(5)} - ${currentZone.high.toFixed(5)}] (${currentZone.direction})` : "None"}
+- Marked Zone: ${currentZone ? `${currentZone.type} [${typeof currentZone.low === "number" ? currentZone.low.toFixed(5) : "0.00000"} - ${typeof currentZone.high === "number" ? currentZone.high.toFixed(5) : "0.00000"}] (${currentZone.direction})` : "None"}
 - Zone Status: ${currentZone?.status || "N/A"}
-- Support Zones: ${marketStructure.supportZones?.map((s) => `[${s.priceMin.toFixed(5)} - ${s.priceMax.toFixed(5)}]`).join(", ") || "None"}
-- Resistance Zones: ${marketStructure.resistanceZones?.map((r) => `[${r.priceMin.toFixed(5)} - ${r.priceMax.toFixed(5)}]`).join(", ") || "None"}
-- Swing Highs: ${marketStructure.swingHighs?.slice(-3).map((s) => s.price.toFixed(5)).join(", ") || "None"}
-- Swing Lows: ${marketStructure.swingLows?.slice(-3).map((s) => s.price.toFixed(5)).join(", ") || "None"}
-- Fair Value Gaps: ${marketStructure.fairValueGaps?.slice(-3).map((f) => `${f.type} (${f.bottom.toFixed(5)} - ${f.top.toFixed(5)})`).join(", ") || "None"}
-- Volume Confirmation: ${marketStructure.volumeInformation.volumeSpike ? "Confirmed" : "Normal"}
-- ATR: ${marketStructure.volatilityInformation.atr.toFixed(5)}
+- Support Zones: ${marketStructure.supportZones?.map((s) => `[${typeof s.priceMin === "number" ? s.priceMin.toFixed(5) : "0.00000"} - ${typeof s.priceMax === "number" ? s.priceMax.toFixed(5) : "0.00000"}]`).join(", ") || "None"}
+- Resistance Zones: ${marketStructure.resistanceZones?.map((r) => `[${typeof r.priceMin === "number" ? r.priceMin.toFixed(5) : "0.00000"} - ${typeof r.priceMax === "number" ? r.priceMax.toFixed(5) : "0.00000"}]`).join(", ") || "None"}
+- Swing Highs: ${marketStructure.swingHighs?.slice(-3).map((s) => typeof s.price === "number" ? s.price.toFixed(5) : "0.00000").join(", ") || "None"}
+- Swing Lows: ${marketStructure.swingLows?.slice(-3).map((s) => typeof s.price === "number" ? s.price.toFixed(5) : "0.00000").join(", ") || "None"}
+- Fair Value Gaps: ${marketStructure.fairValueGaps?.slice(-3).map((f) => `${f.type} (${typeof f.bottom === "number" ? f.bottom.toFixed(5) : "0.00000"} - ${typeof f.top === "number" ? f.top.toFixed(5) : "0.00000"})`).join(", ") || "None"}
+- Volume Confirmation: ${marketStructure.volumeInformation?.volumeSpike ? "Confirmed" : "Normal"}
+- ATR: ${typeof marketStructure.volatilityInformation?.atr === "number" ? marketStructure.volatilityInformation.atr.toFixed(5) : "0.00000"}
 
 User's Trading Strategy:
 ${strategyText}
@@ -1096,6 +1082,10 @@ Fallback: NO_TRADE`.trim());
     } else {
       if (recommendation === "FAIL" || recommendation === "AMBIGUOUS" || !passesDeterministicGate) {
         console.log(`[Decision Engine] Recommendation is ${recommendation} (Passes Gate: ${passesDeterministicGate}). Forcing NO_TRADE without Gemini approval.`);
+        const isNoZone = !currentZone;
+        const failedMandatory = decisionResult.failed_mandatory_rules || [];
+        const isSupplyDemandFailure = failedMandatory.includes("Supply and Demand") || failedMandatory.includes("Order Block") || failedMandatory.includes("Unmitigated Zone");
+        const userFacingReason = isNoZone || isSupplyDemandFailure ? "No distinct zone identified." : decisionResult.no_trade_reason || decisionResult.explanation || "Setup does not satisfy strategy requirements.";
         analysis = {
           signal: "NO_TRADE",
           confidence: 0,
@@ -1103,7 +1093,7 @@ Fallback: NO_TRADE`.trim());
           stopLoss: null,
           takeProfit: null,
           riskReward: null,
-          reasoning: [decisionResult.no_trade_reason || decisionResult.explanation || `Rejected by Deterministic Pre-Filter (${recommendation}, score: ${decisionResult.decision_score}%)`]
+          reasoning: [userFacingReason]
         };
       } else {
         console.log(`[Decision Engine] Recommendation is ${recommendation}. Evaluating local strategy engine.`);
@@ -1142,12 +1132,12 @@ Fallback: NO_TRADE`.trim());
                 riskReward: rr,
                 stopLossBasis: proximityValidation.stopLossBasis,
                 structuralLevel: proximityValidation.structuralLevel,
-                reasoning: [`[Break & Retest Confirmation] Price tapped marked ${currentZone.type} [${currentZone.low.toFixed(5)} - ${currentZone.high.toFixed(5)}] and confirmed retest in ${signalDir} direction while holding tight structural Stop Loss (${sl.toFixed(5)}).`]
+                reasoning: [`[Break & Retest Confirmation] Price tapped marked ${currentZone.type} [${typeof currentZone.low === "number" ? currentZone.low.toFixed(5) : "0.00000"} - ${typeof currentZone.high === "number" ? currentZone.high.toFixed(5) : "0.00000"}] and confirmed retest in ${signalDir} direction while holding tight structural Stop Loss (${typeof sl === "number" ? sl.toFixed(5) : "0.00000"}).`]
               };
             }
           }
         }
-        if (localAnalysis && localAnalysis.signal !== "NO_TRADE" && localAnalysis.entryPrice) {
+        if (localAnalysis && localAnalysis.signal !== "NO_TRADE" && localAnalysis.entryPrice && !localAnalysis.stopLoss) {
           const slResult = calculateStructuralStopLoss(
             localAnalysis.signal,
             localAnalysis.entryPrice,
@@ -1215,7 +1205,7 @@ Fallback: NO_TRADE`.trim());
           completedTrades
         });
         adaptiveReq = calculateAdaptiveQualityRequirement({
-          baseThreshold: 75,
+          baseThreshold: 70,
           classification: adaptiveResult.classification,
           tier: adaptiveResult.tier,
           expectancyR: adaptiveResult.expectancyR,
@@ -1228,8 +1218,8 @@ Requested: ${symbol} + ${selectedTimeframe} + ${compiledStrategy?.strategy_mode 
 Specific Sample: ${adaptiveResult.sampleSize}
 Fallback: ${adaptiveResult.fallbackLevelUsed}
 Classification: ${adaptiveResult.classification}
-Expectancy: ${adaptiveResult.expectancyR.toFixed(2)}R
-Recent Expectancy: ${adaptiveResult.recentExpectancyR.toFixed(2)}R
+Expectancy: ${typeof adaptiveResult?.expectancyR === "number" && Number.isFinite(adaptiveResult.expectancyR) ? adaptiveResult.expectancyR.toFixed(2) : "0.00"}R
+Recent Expectancy: ${typeof adaptiveResult?.recentExpectancyR === "number" && Number.isFinite(adaptiveResult.recentExpectancyR) ? adaptiveResult.recentExpectancyR.toFixed(2) : "0.00"}R
 Base Quality: ${analysis.confidence}%
 Adaptive Requirement: ${adaptiveReq.minRequired}%
 Reason: ${adaptiveReq.reason}
@@ -1352,8 +1342,8 @@ Reason: ${adaptiveReq.reason}
             analysis.signal = "NO_TRADE";
           }
         } else if (calibrationResult.recommendedAction === "SELECTIVE") {
-          if (analysis.confidence < 75) {
-            console.log(`[Closed-Loop Calibration] Rejecting ${symbol} under SELECTIVE recommendation because confidence (${analysis.confidence}%) < 75% threshold.`);
+          if (analysis.confidence < 70) {
+            console.log(`[Closed-Loop Calibration] Rejecting ${symbol} under SELECTIVE recommendation because confidence (${analysis.confidence}%) < 70% threshold.`);
             analysis.signal = "NO_TRADE";
           }
         }
@@ -1431,16 +1421,16 @@ SL: ${posSizeResult.stopLoss}
 TP: ${posSizeResult.takeProfit}
 SL Basis: ${analysis.stopLossBasis || "STRUCTURAL"}
 Structural Level: ${analysis.structuralLevel !== null && analysis.structuralLevel !== void 0 ? analysis.structuralLevel : "N/A"}
-Stop Distance: ${posSizeResult.stopDistance.toFixed(5)}
-Risk Amount: ${posSizeResult.riskAmount.toFixed(2)}
-Required Lot: ${posSizeResult.exactLotSize}
-Minimum Lot: ${posSizeResult.minLot}
-Executable Lot: ${posSizeResult.accepted ? posSizeResult.calculatedLotSize : "NONE"}
-Theoretical Expected Loss: ${posSizeResult.expectedLossAtRequiredLot.toFixed(2)}
-Minimum Lot Expected Loss: ${posSizeResult.expectedLossAtMinLot.toFixed(2)}
-Expected Loss: ${posSizeResult.accepted ? posSizeResult.expectedLoss.toFixed(2) : posSizeResult.expectedLossAtRequiredLot.toFixed(2)}
-Accepted: ${posSizeResult.accepted ? "YES" : "NO"}
-${analysis.stopLossBasis === "ATR_FALLBACK" ? `ATR: ${marketStructure.volatilityInformation.atr.toFixed(5)}
+Stop Distance: ${posSizeResult?.stopDistance !== void 0 && posSizeResult?.stopDistance !== null ? Number(posSizeResult.stopDistance).toFixed(5) : "0.00000"}
+Risk Amount: ${posSizeResult?.riskAmount !== void 0 && posSizeResult?.riskAmount !== null ? Number(posSizeResult.riskAmount).toFixed(2) : "0.00"}
+Required Lot: ${posSizeResult?.exactLotSize ?? "0.01"}
+Minimum Lot: ${posSizeResult?.minLot ?? "0.01"}
+Executable Lot: ${posSizeResult?.accepted ? posSizeResult?.calculatedLotSize : "NONE"}
+Theoretical Expected Loss: ${posSizeResult?.expectedLossAtRequiredLot !== void 0 && posSizeResult?.expectedLossAtRequiredLot !== null ? Number(posSizeResult.expectedLossAtRequiredLot).toFixed(2) : "0.00"}
+Minimum Lot Expected Loss: ${posSizeResult?.expectedLossAtMinLot !== void 0 && posSizeResult?.expectedLossAtMinLot !== null ? Number(posSizeResult.expectedLossAtMinLot).toFixed(2) : "0.00"}
+Expected Loss: ${posSizeResult?.accepted ? posSizeResult?.expectedLoss !== void 0 && posSizeResult?.expectedLoss !== null ? Number(posSizeResult.expectedLoss).toFixed(2) : "0.00" : posSizeResult?.expectedLossAtRequiredLot !== void 0 && posSizeResult?.expectedLossAtRequiredLot !== null ? Number(posSizeResult.expectedLossAtRequiredLot).toFixed(2) : "0.00"}
+Accepted: ${posSizeResult?.accepted ? "YES" : "NO"}
+${analysis.stopLossBasis === "ATR_FALLBACK" ? `ATR: ${marketStructure?.volatilityInformation?.atr !== void 0 && marketStructure?.volatilityInformation?.atr !== null ? Number(marketStructure.volatilityInformation.atr).toFixed(5) : "0.00000"}
 ATR Multiplier: 1.5` : ""}
 `.trim());
       riskResult = {

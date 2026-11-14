@@ -1,55 +1,41 @@
-import { redactApiKey } from './apiKeys.js';
-export function computeKeyFingerprint(key) {
-    if (!key)
-        return 'NONE';
-    const trimmed = key.trim();
-    if (!trimmed)
-        return 'NONE';
-    let hash = 0x811c9dc5;
-    for (let i = 0; i < trimmed.length; i++) {
-        hash ^= trimmed.charCodeAt(i);
-        hash = Math.imul(hash, 0x01000193);
-    }
-    return (hash >>> 0).toString(16).padStart(8, '0').substring(0, 8);
+import { redactApiKey } from "./apiKeys.js";
+function computeKeyFingerprint(key) {
+  if (!key) return "NONE";
+  const trimmed = key.trim();
+  if (!trimmed) return "NONE";
+  let hash = 2166136261;
+  for (let i = 0; i < trimmed.length; i++) {
+    hash ^= trimmed.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0").substring(0, 8);
 }
-export function redactApiKeyInText(text) {
-    if (!text)
-        return '';
-    return text
-        .replace(/AIzaSy[A-Za-z0-9_-]{20,60}/g, '[REDACTED_GEMINI_KEY]')
-        .replace(/AQ\.[A-Za-z0-9_-]{10,120}/g, '[REDACTED_GEMINI_KEY]')
-        .replace(/AQ[A-Za-z0-9_-]{10,120}/g, '[REDACTED_GEMINI_KEY]');
+function redactApiKeyInText(text) {
+  if (!text) return "";
+  return text.replace(/AIzaSy[A-Za-z0-9_-]{20,60}/g, "[REDACTED_GEMINI_KEY]").replace(/AQ\.[A-Za-z0-9_-]{10,120}/g, "[REDACTED_GEMINI_KEY]").replace(/AQ[A-Za-z0-9_-]{10,120}/g, "[REDACTED_GEMINI_KEY]");
 }
-export async function resolveUserGeminiKey(supabase, userId, watcherId = 'manual-scan', context) {
-    let rawKey = null;
-    if (supabase && userId) {
-        try {
-            const { data: keyRecord, error } = await supabase
-                .from('user_api_keys')
-                .select('api_key')
-                .eq('user_id', userId)
-                .eq('provider', 'gemini')
-                .order('created_at', { ascending: false })
-                .limit(1)
-                .maybeSingle();
-            if (!error && keyRecord && keyRecord.api_key) {
-                rawKey = String(keyRecord.api_key).trim();
-            }
-        }
-        catch (err) {
-            console.error(`[Gemini Key Resolution] DB query exception for user ${userId}:`, err);
-        }
+async function resolveUserGeminiKey(supabase, userId, watcherId = "manual-scan", context) {
+  let rawKey = null;
+  if (supabase && userId) {
+    try {
+      const { data: keyRecord, error } = await supabase.from("user_api_keys").select("api_key").eq("user_id", userId).eq("provider", "gemini").order("created_at", { ascending: false }).limit(1).maybeSingle();
+      if (!error && keyRecord && keyRecord.api_key) {
+        rawKey = String(keyRecord.api_key).trim();
+      }
+    } catch (err) {
+      console.error(`[Gemini Key Resolution] DB query exception for user ${userId}:`, err);
     }
-    const keyPresent = !!rawKey;
-    const keySource = keyPresent ? 'user_api_keys' : 'NONE';
-    const keyRedacted = redactApiKey(rawKey);
-    const keyFingerprint = computeKeyFingerprint(rawKey);
-    const status = keyPresent ? 'RESOLVED' : 'MISSING_KEY';
-    const userEmail = context?.userEmail || 'unknown';
-    const pair = context?.pair || 'unknown';
-    const timeframe = context?.timeframe || 'unknown';
-    if (process.env.LOG_LEVEL === 'debug' || process.env.DEBUG === 'true') {
-        console.log(`[Gemini Key Resolution]
+  }
+  const keyPresent = !!rawKey;
+  const keySource = keyPresent ? "user_api_keys" : "NONE";
+  const keyRedacted = redactApiKey(rawKey);
+  const keyFingerprint = computeKeyFingerprint(rawKey);
+  const status = keyPresent ? "RESOLVED" : "MISSING_KEY";
+  const userEmail = context?.userEmail || "unknown";
+  const pair = context?.pair || "unknown";
+  const timeframe = context?.timeframe || "unknown";
+  if (process.env.LOG_LEVEL === "debug" || process.env.DEBUG === "true") {
+    console.log(`[Gemini Key Resolution]
 User ID: ${userId}
 User Email: ${userEmail}
 Watcher: ${watcherId}
@@ -57,158 +43,140 @@ Pair: ${pair}
 Timeframe: ${timeframe}
 Key Source: ${keySource}
 Key Fingerprint: ${keyFingerprint}
-Key Present: ${keyPresent ? 'YES' : 'NO'}
+Key Present: ${keyPresent ? "YES" : "NO"}
 Key Redacted: ${keyRedacted}
 Status: ${status}`);
-    }
-    return {
-        userId,
-        watcherId,
-        keySource,
-        keyPresent,
-        keyRedacted,
-        keyFingerprint,
-        apiKey: rawKey,
-        status
-    };
+  }
+  return {
+    userId,
+    watcherId,
+    keySource,
+    keyPresent,
+    keyRedacted,
+    keyFingerprint,
+    apiKey: rawKey,
+    status
+  };
 }
-export function parseQuotaDetails(error, lowerMsg) {
-    let quotaMetric;
-    let quotaId;
-    let retryDelaySeconds;
-    const metricMatch = lowerMsg.match(/quota metric ['"]?([a-z0-9_./-]+)['"]?/i) || lowerMsg.match(/metric:?\s*['"]?([a-z0-9_./-]+)['"]?/i);
-    if (metricMatch) {
-        quotaMetric = metricMatch[1];
-    }
-    const idMatch = lowerMsg.match(/quota id ['"]?([a-z0-9_./-]+)['"]?/i) || lowerMsg.match(/quotaid:?\s*['"]?([a-z0-9_./-]+)['"]?/i);
-    if (idMatch) {
-        quotaId = idMatch[1];
-    }
-    const retryMatch = lowerMsg.match(/retry after\s*(\d+)/i) || lowerMsg.match(/retrydelay:?\s*(\d+)/i) || lowerMsg.match(/retryin:?\s*(\d+)/i);
-    if (retryMatch) {
-        retryDelaySeconds = parseInt(retryMatch[1], 10);
-    }
-    const isPerDay = lowerMsg.includes('perday') || lowerMsg.includes('per_day') || lowerMsg.includes('daily') || (quotaId && quotaId.toLowerCase().includes('perday')) || (quotaMetric && quotaMetric.toLowerCase().includes('daily'));
-    const isTpm = lowerMsg.includes('token') || lowerMsg.includes('tpm') || (quotaMetric && quotaMetric.toLowerCase().includes('token'));
-    const isRpm = lowerMsg.includes('request') || lowerMsg.includes('rpm') || lowerMsg.includes('minute') || (quotaId && quotaId.toLowerCase().includes('minute')) || (quotaMetric && quotaMetric.toLowerCase().includes('request'));
-    let quotaType = 'QUOTA_UNKNOWN';
-    if (isPerDay) {
-        quotaType = 'QUOTA_RPD';
-    }
-    else if (isTpm) {
-        quotaType = 'QUOTA_TPM';
-    }
-    else if (isRpm) {
-        quotaType = 'QUOTA_RPM';
-    }
-    return {
-        quotaType,
-        quotaMetric,
-        quotaId,
-        retryDelaySeconds
-    };
+function parseQuotaDetails(error, lowerMsg) {
+  let quotaMetric;
+  let quotaId;
+  let retryDelaySeconds;
+  const metricMatch = lowerMsg.match(/quota metric ['"]?([a-z0-9_./-]+)['"]?/i) || lowerMsg.match(/metric:?\s*['"]?([a-z0-9_./-]+)['"]?/i);
+  if (metricMatch) {
+    quotaMetric = metricMatch[1];
+  }
+  const idMatch = lowerMsg.match(/quota id ['"]?([a-z0-9_./-]+)['"]?/i) || lowerMsg.match(/quotaid:?\s*['"]?([a-z0-9_./-]+)['"]?/i);
+  if (idMatch) {
+    quotaId = idMatch[1];
+  }
+  const retryMatch = lowerMsg.match(/retry after\s*(\d+)/i) || lowerMsg.match(/retrydelay:?\s*(\d+)/i) || lowerMsg.match(/retryin:?\s*(\d+)/i);
+  if (retryMatch) {
+    retryDelaySeconds = parseInt(retryMatch[1], 10);
+  }
+  const isPerDay = lowerMsg.includes("perday") || lowerMsg.includes("per_day") || lowerMsg.includes("daily") || quotaId && quotaId.toLowerCase().includes("perday") || quotaMetric && quotaMetric.toLowerCase().includes("daily");
+  const isTpm = lowerMsg.includes("token") || lowerMsg.includes("tpm") || quotaMetric && quotaMetric.toLowerCase().includes("token");
+  const isRpm = lowerMsg.includes("request") || lowerMsg.includes("rpm") || lowerMsg.includes("minute") || quotaId && quotaId.toLowerCase().includes("minute") || quotaMetric && quotaMetric.toLowerCase().includes("request");
+  let quotaType = "QUOTA_UNKNOWN";
+  if (isPerDay) {
+    quotaType = "QUOTA_RPD";
+  } else if (isTpm) {
+    quotaType = "QUOTA_TPM";
+  } else if (isRpm) {
+    quotaType = "QUOTA_RPM";
+  }
+  return {
+    quotaType,
+    quotaMetric,
+    quotaId,
+    retryDelaySeconds
+  };
 }
-export function classifyAndRedactGeminiError(error) {
-    const rawMsg = error?.message || String(error);
-    let extractedMessage = rawMsg;
-    let jsonStatus = 0;
-    let jsonRpcStatus = '';
-    const trimmed = rawMsg.trim();
-    if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
-        try {
-            const parsed = JSON.parse(trimmed);
-            if (parsed?.error) {
-                if (parsed.error.code)
-                    jsonStatus = Number(parsed.error.code);
-                if (parsed.error.status)
-                    jsonRpcStatus = String(parsed.error.status);
-                if (parsed.error.message)
-                    extractedMessage = String(parsed.error.message);
-            }
-        }
-        catch {
-        }
+function classifyAndRedactGeminiError(error) {
+  const rawMsg = error?.message || String(error);
+  let extractedMessage = rawMsg;
+  let jsonStatus = 0;
+  let jsonRpcStatus = "";
+  const trimmed = rawMsg.trim();
+  if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (parsed?.error) {
+        if (parsed.error.code) jsonStatus = Number(parsed.error.code);
+        if (parsed.error.status) jsonRpcStatus = String(parsed.error.status);
+        if (parsed.error.message) extractedMessage = String(parsed.error.message);
+      }
+    } catch {
     }
-    const cleanMsg = redactApiKeyInText(extractedMessage);
-    const errStatus = error?.status || error?.statusCode || (error?.code ? Number(error.code) : 0) || jsonStatus;
-    const lowerMsg = cleanMsg.toLowerCase();
-    const rpcLower = jsonRpcStatus.toLowerCase();
-    let profileStatus = 'NEEDS_ATTENTION';
-    let diagnosticStatus = 'API_ERROR';
-    const isInvalidDeadline = lowerMsg.includes('manually set deadline') || lowerMsg.includes('minimum allowed deadline');
-    const is400 = errStatus === 400 || lowerMsg.includes('invalid argument') || lowerMsg.includes('invalid_argument') || lowerMsg.includes('bad request') || isInvalidDeadline;
-    const is401 = errStatus === 401 || lowerMsg.includes('invalid api key') || lowerMsg.includes('access_token_type_unsupported') || lowerMsg.includes('unauthenticated') || lowerMsg.includes('api_key_invalid');
-    const is403 = errStatus === 403 || rpcLower === 'permission_denied' || lowerMsg.includes('permission denied') || lowerMsg.includes('forbidden') || lowerMsg.includes('denied access');
-    const isTimeout = !is400 && !is401 && !is403 && (lowerMsg.includes('timeout') || lowerMsg.includes('timed out') || lowerMsg.includes('etimedout') || error?.name === 'TimeoutError');
-    const isCancelled = !is400 && !is401 && !is403 && !isTimeout && (errStatus === 499 ||
-        rpcLower === 'cancelled' ||
-        rpcLower === 'canceled' ||
-        lowerMsg.includes('operation was cancelled') ||
-        lowerMsg.includes('operation was canceled') ||
-        lowerMsg.includes('request was cancelled') ||
-        lowerMsg.includes('request was canceled') ||
-        lowerMsg.includes('context canceled') ||
-        lowerMsg.includes('context cancelled') ||
-        error?.name === 'AbortError' ||
-        error?.name === 'CanceledError');
-    const is504 = !is400 && !is401 && !is403 && !isTimeout && !isCancelled && (errStatus === 504 || lowerMsg.includes('504') || lowerMsg.includes('deadline_exceeded') || lowerMsg.includes('deadline expired'));
-    const is503 = !is400 && !is401 && !is403 && !isTimeout && !isCancelled && !is504 && (errStatus === 503 || lowerMsg.includes('503') || lowerMsg.includes('unavailable') || lowerMsg.includes('high demand') || lowerMsg.includes('spikes in demand'));
-    const isQuota = !is400 && !is401 && !is403 && !isTimeout && !isCancelled && !is504 && !is503 && (errStatus === 429 || lowerMsg.includes('429') || lowerMsg.includes('resource_exhausted') || lowerMsg.includes('quota exceeded') || lowerMsg.includes('rate limit') || lowerMsg.includes('retryinfo') || lowerMsg.includes('retrydelay'));
-    let quotaDetails;
-    let finalCleanMessage = cleanMsg;
-    if (is401) {
-        profileStatus = 'INVALID_KEY';
-        diagnosticStatus = 'INVALID_KEY';
+  }
+  const cleanMsg = redactApiKeyInText(extractedMessage);
+  const errStatus = error?.status || error?.statusCode || (error?.code ? Number(error.code) : 0) || jsonStatus;
+  const lowerMsg = cleanMsg.toLowerCase();
+  const rpcLower = jsonRpcStatus.toLowerCase();
+  let profileStatus = "NEEDS_ATTENTION";
+  let diagnosticStatus = "API_ERROR";
+  const isInvalidDeadline = lowerMsg.includes("manually set deadline") || lowerMsg.includes("minimum allowed deadline");
+  const is400 = errStatus === 400 || lowerMsg.includes("invalid argument") || lowerMsg.includes("invalid_argument") || lowerMsg.includes("bad request") || isInvalidDeadline;
+  const is401 = errStatus === 401 || lowerMsg.includes("invalid api key") || lowerMsg.includes("access_token_type_unsupported") || lowerMsg.includes("unauthenticated") || lowerMsg.includes("api_key_invalid");
+  const is403 = errStatus === 403 || rpcLower === "permission_denied" || lowerMsg.includes("permission denied") || lowerMsg.includes("forbidden") || lowerMsg.includes("denied access");
+  const isTimeout = !is400 && !is401 && !is403 && (lowerMsg.includes("timeout") || lowerMsg.includes("timed out") || lowerMsg.includes("etimedout") || error?.name === "TimeoutError");
+  const isCancelled = !is400 && !is401 && !is403 && !isTimeout && (errStatus === 499 || rpcLower === "cancelled" || rpcLower === "canceled" || lowerMsg.includes("operation was cancelled") || lowerMsg.includes("operation was canceled") || lowerMsg.includes("request was cancelled") || lowerMsg.includes("request was canceled") || lowerMsg.includes("context canceled") || lowerMsg.includes("context cancelled") || error?.name === "AbortError" || error?.name === "CanceledError");
+  const is504 = !is400 && !is401 && !is403 && !isTimeout && !isCancelled && (errStatus === 504 || lowerMsg.includes("504") || lowerMsg.includes("deadline_exceeded") || lowerMsg.includes("deadline expired"));
+  const is503 = !is400 && !is401 && !is403 && !isTimeout && !isCancelled && !is504 && (errStatus === 503 || lowerMsg.includes("503") || lowerMsg.includes("unavailable") || lowerMsg.includes("high demand") || lowerMsg.includes("spikes in demand"));
+  const isQuota = !is400 && !is401 && !is403 && !isTimeout && !isCancelled && !is504 && !is503 && (errStatus === 429 || lowerMsg.includes("429") || lowerMsg.includes("resource_exhausted") || lowerMsg.includes("quota exceeded") || lowerMsg.includes("rate limit") || lowerMsg.includes("retryinfo") || lowerMsg.includes("retrydelay"));
+  let quotaDetails;
+  let finalCleanMessage = cleanMsg;
+  if (is401) {
+    profileStatus = "INVALID_KEY";
+    diagnosticStatus = "INVALID_KEY";
+  } else if (is403) {
+    profileStatus = "INVALID_KEY";
+    diagnosticStatus = "PERMISSION_ERROR";
+    if (lowerMsg.includes("denied access") || lowerMsg.includes("project has been denied")) {
+      finalCleanMessage = "Google project denied access: The Google Cloud project associated with this API key has been restricted or lacks Generative Language API access. Please generate a new key in Google AI Studio.";
+    } else {
+      finalCleanMessage = "Gemini API permission denied (403). Please verify API key permissions or generate a new key in Google AI Studio.";
     }
-    else if (is403) {
-        profileStatus = 'INVALID_KEY';
-        diagnosticStatus = 'PERMISSION_ERROR';
-        if (lowerMsg.includes('denied access') || lowerMsg.includes('project has been denied')) {
-            finalCleanMessage = 'Google project denied access: The Google Cloud project associated with this API key has been restricted or lacks Generative Language API access. Please generate a new key in Google AI Studio.';
-        }
-        else {
-            finalCleanMessage = 'Gemini API permission denied (403). Please verify API key permissions or generate a new key in Google AI Studio.';
-        }
-    }
-    else if (is400) {
-        profileStatus = 'NEEDS_ATTENTION';
-        diagnosticStatus = 'INVALID_REQUEST';
-    }
-    else if (isQuota) {
-        profileStatus = 'QUOTA_EXHAUSTED';
-        quotaDetails = parseQuotaDetails(error, lowerMsg);
-        diagnosticStatus = quotaDetails.quotaType;
-    }
-    else if (is504) {
-        profileStatus = 'TEMP_ERROR';
-        diagnosticStatus = 'TEMPORARY_ERROR';
-    }
-    else if (isTimeout) {
-        profileStatus = 'TEMP_ERROR';
-        diagnosticStatus = 'TIMEOUT';
-    }
-    else if (isCancelled) {
-        profileStatus = 'TEMP_ERROR';
-        diagnosticStatus = 'CANCELLED';
-        finalCleanMessage = 'The operation was cancelled';
-    }
-    else if (is503 || errStatus >= 500 || lowerMsg.includes('gateway') || lowerMsg.includes('network')) {
-        profileStatus = 'TEMP_ERROR';
-        diagnosticStatus = 'TEMPORARY_ERROR';
-    }
-    else {
-        profileStatus = 'NEEDS_ATTENTION';
-        diagnosticStatus = 'API_ERROR';
-    }
-    return {
-        profileStatus,
-        diagnosticStatus,
-        cleanErrorMessage: finalCleanMessage,
-        is503,
-        is504,
-        isTimeout,
-        isCancelled,
-        isQuota,
-        quotaDetails
-    };
+  } else if (is400) {
+    profileStatus = "NEEDS_ATTENTION";
+    diagnosticStatus = "INVALID_REQUEST";
+  } else if (isQuota) {
+    profileStatus = "QUOTA_EXHAUSTED";
+    quotaDetails = parseQuotaDetails(error, lowerMsg);
+    diagnosticStatus = quotaDetails.quotaType;
+  } else if (is504) {
+    profileStatus = "TEMP_ERROR";
+    diagnosticStatus = "TEMPORARY_ERROR";
+  } else if (isTimeout) {
+    profileStatus = "TEMP_ERROR";
+    diagnosticStatus = "TIMEOUT";
+  } else if (isCancelled) {
+    profileStatus = "TEMP_ERROR";
+    diagnosticStatus = "CANCELLED";
+    finalCleanMessage = "The operation was cancelled";
+  } else if (is503 || errStatus >= 500 || lowerMsg.includes("gateway") || lowerMsg.includes("network")) {
+    profileStatus = "TEMP_ERROR";
+    diagnosticStatus = "TEMPORARY_ERROR";
+  } else {
+    profileStatus = "NEEDS_ATTENTION";
+    diagnosticStatus = "API_ERROR";
+  }
+  return {
+    profileStatus,
+    diagnosticStatus,
+    cleanErrorMessage: finalCleanMessage,
+    is503,
+    is504,
+    isTimeout,
+    isCancelled,
+    isQuota,
+    quotaDetails
+  };
 }
+export {
+  classifyAndRedactGeminiError,
+  computeKeyFingerprint,
+  parseQuotaDetails,
+  redactApiKeyInText,
+  resolveUserGeminiKey
+};

@@ -154,8 +154,7 @@ export class EconomicEventService {
     const windowEnd = new Date(now.getTime() + pre * 60000).toISOString();
 
     try {
-      // Query database for matching events
-      const { data: events, error } = await this.supabaseClient
+      const query: any = this.supabaseClient
         .from('economic_events')
         .select('*')
         .in('currency', currencies)
@@ -164,25 +163,28 @@ export class EconomicEventService {
         .lte('scheduled_at', windowEnd)
         .order('scheduled_at', { ascending: true });
 
+      const { data: events, error } = typeof query?.limit === 'function' ? await query.limit(50) : await query;
+
       if (error) {
         throw error;
       }
 
       if (events && events.length > 0) {
         const event = events[0];
+        const evName = event.event_name || event.name || 'High-Impact Economic Event';
         const scheduledAt = new Date(event.scheduled_at);
         const minutesDiff = (scheduledAt.getTime() - now.getTime()) / 60000;
 
         const isUpcoming = minutesDiff > 0;
         const blockReason = isUpcoming 
-          ? `NEWS_HARD_PAUSE: HIGH impact event ${event.event_name} in ${Math.round(minutesDiff)} minutes`
-          : `NEWS_HARD_PAUSE: HIGH impact event ${event.event_name} released ${Math.round(Math.abs(minutesDiff))} minutes ago`;
+          ? `NEWS_HARD_PAUSE: HIGH impact event ${evName} in ${Math.round(minutesDiff)} minutes`
+          : `NEWS_HARD_PAUSE: HIGH impact event ${evName} released ${Math.round(Math.abs(minutesDiff))} minutes ago`;
 
         return {
           status: 'BLOCKED',
-          event: event.event_name,
+          event: evName,
           eventDetected: true,
-          eventName: event.event_name,
+          eventName: evName,
           currency: event.currency,
           impact: event.impact as any,
           scheduledAt: event.scheduled_at,
@@ -215,24 +217,55 @@ export class EconomicEventService {
   }
 
   public extractCurrencies(symbol: string): string[] {
-    // Standardize symbol e.g. BTCUSD -> BTC, USD or EUR/USD -> EUR, USD
-    const normalized = symbol.replace(/[^A-Z]/g, '');
+    const clean = (symbol || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+    if (clean.endsWith('USDT') || clean.endsWith('USDC') || clean.endsWith('BUSD')) {
+      return ['USD'];
+    }
+
+    if (
+      clean.startsWith('US30') || clean.startsWith('US100') || clean.startsWith('US500') ||
+      clean.startsWith('US2000') || clean.startsWith('NAS') || clean.startsWith('NDX') ||
+      clean.startsWith('SPX') || clean.startsWith('SP500') || clean.includes('DOW') ||
+      clean.startsWith('USTEC') || clean.startsWith('RUT')
+    ) {
+      return ['USD'];
+    }
+    if (
+      clean.startsWith('GER') || clean.startsWith('DE30') || clean.startsWith('DE40') ||
+      clean.startsWith('DAX') || clean.startsWith('FRA') || clean.startsWith('CAC') ||
+      clean.startsWith('EU50') || clean.startsWith('STOXX')
+    ) {
+      return ['EUR'];
+    }
+    if (clean.startsWith('UK100') || clean.startsWith('FTSE')) return ['GBP'];
+    if (clean.startsWith('JP225') || clean.startsWith('NIKKEI')) return ['JPY'];
+    if (clean.startsWith('HK50') || clean.startsWith('HSI')) return ['HKD'];
+    if (clean.startsWith('AUS200') || clean.startsWith('ASX200')) return ['AUD'];
+
+    const normalized = clean.replace(/[^A-Z]/g, '');
+    if (
+      normalized.includes('BTC') || normalized.includes('ETH') || normalized.includes('SOL') ||
+      normalized.includes('XRP') || normalized.includes('LTC') || normalized.includes('ADA') ||
+      normalized.includes('DOGE') || normalized.includes('BNB') || normalized.includes('AVAX') ||
+      normalized.includes('DOT') || normalized.includes('LINK') || normalized.includes('MATIC') ||
+      normalized.includes('UNI') || normalized.includes('NEAR') || normalized.includes('TRX') ||
+      normalized.includes('ATOM') || normalized.includes('BCH') || normalized.includes('TON') ||
+      normalized.includes('SUI') || normalized.includes('SHIB')
+    ) {
+      return ['USD'];
+    }
+
     if (normalized.length === 6) {
       return [normalized.substring(0, 3), normalized.substring(3, 6)];
     }
-    
-    // Handle specific pairs like US30, GER30, etc.
+
     if (normalized.startsWith('US')) return ['USD'];
     if (normalized.startsWith('GER') || normalized.startsWith('DE')) return ['EUR'];
     if (normalized.startsWith('UK')) return ['GBP'];
     if (normalized.startsWith('JPY')) return ['JPY'];
 
-    // Handle crypto
-    if (normalized.includes('BTC') || normalized.includes('ETH') || normalized.includes('SOL')) {
-      return ['USD']; // Macro policy for crypto
-    }
-    
-    return [normalized];
+    return [normalized || 'USD'];
   }
 }
 

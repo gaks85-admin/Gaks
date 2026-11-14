@@ -4,28 +4,56 @@ export function formatPrice(price: number | string | null | undefined, pair: str
   const num = typeof price === "number" ? price : parseFloat(String(price));
   if (isNaN(num)) return String(price);
 
-  const cleanPair = (pair || "").toUpperCase().replace('/', '');
-  const isIndexOrCrypto = (
+  const cleanPair = (pair || "").toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const isIndexOrMetalOrCrypto = (
     cleanPair.includes("BTC") ||
     cleanPair.includes("ETH") ||
+    cleanPair.includes("SOL") ||
+    cleanPair.includes("XRP") ||
+    cleanPair.includes("LTC") ||
+    cleanPair.includes("ADA") ||
+    cleanPair.includes("DOGE") ||
+    cleanPair.includes("BNB") ||
+    cleanPair.includes("AVAX") ||
+    cleanPair.includes("DOT") ||
+    cleanPair.includes("LINK") ||
+    cleanPair.includes("MATIC") ||
+    cleanPair.includes("UNI") ||
+    cleanPair.includes("TON") ||
+    cleanPair.includes("SUI") ||
+    cleanPair.endsWith("USDT") ||
+    cleanPair.endsWith("USDC") ||
+    cleanPair.endsWith("BUSD") ||
     cleanPair.includes("NAS") ||
+    cleanPair.includes("NDX") ||
     cleanPair.includes("US100") ||
     cleanPair.includes("US500") ||
     cleanPair.includes("US30") ||
+    cleanPair.includes("US2000") ||
     cleanPair.includes("SPX") ||
+    cleanPair.includes("GER") ||
+    cleanPair.includes("DE30") ||
+    cleanPair.includes("DE40") ||
+    cleanPair.includes("UK100") ||
+    cleanPair.includes("JP225") ||
+    cleanPair.includes("HK50") ||
     cleanPair.includes("GOLD") ||
     cleanPair.includes("XAU") ||
+    cleanPair.includes("SILVER") ||
+    cleanPair.includes("XAG") ||
     cleanPair.includes("INDEX")
   );
 
-  const decimals = isIndexOrCrypto ? 2 : (cleanPair.includes("JPY") ? 3 : 5);
+  const decimals = isIndexOrMetalOrCrypto
+    ? (Math.abs(num) >= 10 ? 2 : (Math.abs(num) >= 1 ? 3 : 4))
+    : (cleanPair.includes("JPY") ? 3 : 5);
 
-  if (isIndexOrCrypto && Number.isInteger(num)) {
+  if (isIndexOrMetalOrCrypto && Number.isInteger(num)) {
     return num.toString();
   }
 
   const str = num.toFixed(decimals);
-  if (!isIndexOrCrypto && decimals === 5) {
+  if (!isIndexOrMetalOrCrypto && decimals === 5) {
     return str.replace(/0$/, '');
   }
   return str;

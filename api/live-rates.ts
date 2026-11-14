@@ -20,15 +20,33 @@ function convertSymbolForYahoo(sym: string): string {
     'NZDUSD': 'NZDUSD=X',
     'BTCUSD': 'BTC-USD',
     'ETHUSD': 'ETH-USD',
+    'SOLUSD': 'SOL-USD',
+    'XRPUSD': 'XRP-USD',
+    'LTCUSD': 'LTC-USD',
+    'ADAUSD': 'ADA-USD',
+    'DOGEUSD': 'DOGE-USD',
+    'BNBUSD': 'BNB-USD',
+    'AVAXUSD': 'AVAX-USD',
+    'DOTUSD': 'DOT-USD',
+    'LINKUSD': 'LINK-USD',
     'XAUUSD': 'GC=F',
     'XAGUSD': 'SI=F',
     'NAS100': 'NQ=F',
+    'US100': 'NQ=F',
     'US30': 'YM=F',
     'SPX500': 'ES=F',
+    'US500': 'ES=F',
     'GER30': 'DAX=F',
+    'GER40': 'DAX=F',
     'UK100': 'Z=F'
   };
   if (mappings[canonical]) return mappings[canonical];
+  if (canonical.endsWith('USDT') && canonical.length > 4) {
+    return `${canonical.slice(0, -4)}-USD`;
+  }
+  if (canonical.endsWith('USDC') && canonical.length > 4) {
+    return `${canonical.slice(0, -4)}-USD`;
+  }
   if (canonical.length === 6 && /^[A-Z]{6}$/.test(canonical)) {
     return `${canonical}=X`;
   }

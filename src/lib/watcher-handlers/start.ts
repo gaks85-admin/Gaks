@@ -487,6 +487,7 @@ export default async function handler(req: any, res: any) {
         'EURUSD': 'EUR/USD',
         'GBPUSD': 'GBP/USD',
         'XAUUSD': 'XAU/USD',
+        'XAGUSD': 'XAG/USD',
         'BTCUSD': 'BTC/USD',
         'NAS100': 'QQQ',
         'US30': 'DIA',
@@ -498,8 +499,12 @@ export default async function handler(req: any, res: any) {
         return mappings[mapped];
       }
 
-      const commonCryptoCoins = ["BTC", "ETH", "SOL", "XRP", "ADA", "DOGE", "AVAX", "DOT", "LINK", "MATIC"];
-      const commonCryptoQuote = ["USD", "USDT", "BTC", "ETH", "EUR", "GBP", "FDUSD", "USDC"];
+      const commonCryptoCoins = [
+        "BTC", "ETH", "SOL", "XRP", "LTC", "ADA", "DOGE", "BNB", "AVAX", "DOT", "LINK", "MATIC", "POL",
+        "UNI", "NEAR", "TRX", "ATOM", "BCH", "SHIB", "TON", "SUI", "PEPE", "ARB", "OP", "APT", "AAVE",
+        "ALGO", "FIL", "ICP", "VET", "HBAR", "XLM", "FTM", "SAND", "MANA", "AXS", "INJ", "RUNE", "SEI", "TIA"
+      ];
+      const commonCryptoQuote = ["USD", "USDT", "BTC", "ETH", "EUR", "GBP", "FDUSD", "USDC", "BUSD"];
       
       for (const coin of commonCryptoCoins) {
         if (mapped.startsWith(coin)) {
@@ -514,7 +519,10 @@ export default async function handler(req: any, res: any) {
         return `${mapped.slice(0, 3)}/${mapped.slice(3)}`;
       }
       
-      if (mapped.endsWith('USD') && mapped.length > 3) return mapped.slice(0, -3) + '/USD';
+      if (mapped.endsWith('USDT') && mapped.length > 4) return mapped.slice(0, -4) + '/USDT';
+      if (mapped.endsWith('USDC') && mapped.length > 4) return mapped.slice(0, -4) + '/USDC';
+      if (mapped.endsWith('BUSD') && mapped.length > 4) return mapped.slice(0, -4) + '/BUSD';
+      if (mapped.endsWith('USD') && mapped.length > 3 && !/^(US|XAU|XAG)/.test(mapped) && !/\d/.test(mapped)) return mapped.slice(0, -3) + '/USD';
       if (mapped.endsWith('JPY') && mapped.length > 3) return mapped.slice(0, -3) + '/JPY';
       if (mapped.endsWith('EUR') && mapped.length > 3) return mapped.slice(0, -3) + '/EUR';
       if (mapped.endsWith('GBP') && mapped.length > 3) return mapped.slice(0, -3) + '/GBP';
@@ -707,7 +715,7 @@ export default async function handler(req: any, res: any) {
           console.log(`[Watcher Activation Zone Markout] Watcher ID ${savedWatcherRow.id}: Immediately marked ${markedZone.type} [${markedZone.low} - ${markedZone.high}] (${markedZone.direction})`);
         } else {
           if (htfTrendResult.trend === 'SIDEWAYS' || htfTrendResult.allowedDirection === 'NONE') {
-            initialTrendNotice = `\n\n*HTF Trend:* ${htfTrendResult.timeframe} SIDEWAYS / Consolidation\n*Status:* Defaulting to NO TRADE (Awaiting clear trend alignment)`;
+            initialTrendNotice = `\n\n*HTF Trend:* ${htfTrendResult.timeframe} SIDEWAYS / Consolidation\n*Status:* Active. Scanning for structural Supply & Demand POI/Zone formation.`;
           } else {
             initialTrendNotice = `\n\n*HTF Trend:* ${htfTrendResult.timeframe} ${htfTrendResult.trend}\n*Status:* Trend verified. Awaiting new structural POI/Zone formation.`;
           }

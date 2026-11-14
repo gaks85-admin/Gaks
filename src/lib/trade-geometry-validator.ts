@@ -129,11 +129,26 @@ export function validateTradeGeometry(input: TradeGeometryInput): TradeGeometryR
 
   const calculatedRr = riskDistance > 0 ? Number((rewardDistance / riskDistance).toFixed(4)) : 0;
 
-  // Check explanation consistency against direction
+  // Check explanation consistency against direction using explicit contradictory trade-intent phrases
+  // (avoids false positives on valid SMC phrasing like "Bearish liquidity swept" or "BULLISH_ORDER_BLOCK breaker")
   let explanationConsistent = true;
   if (explanation) {
     if (dir === 'SELL') {
-      const bullishTerms = ['long position', 'bullish entry', 'buy setup', 'target higher levels', 'bullish', 'buying', 'target higher'];
+      const bullishTerms = [
+        'long position',
+        'long setup',
+        'long trade',
+        'bullish entry',
+        'bullish setup',
+        'bullish trade',
+        'buy setup',
+        'buy signal',
+        'buy trade',
+        'buying setup',
+        'target higher levels',
+        'target higher',
+        'targeting higher'
+      ];
       for (const term of bullishTerms) {
         if (explanation.includes(term)) {
           explanationConsistent = false;
@@ -141,7 +156,21 @@ export function validateTradeGeometry(input: TradeGeometryInput): TradeGeometryR
         }
       }
     } else if (dir === 'BUY') {
-      const bearishTerms = ['short position', 'bearish entry', 'sell setup', 'target lower levels', 'bearish', 'selling', 'target lower'];
+      const bearishTerms = [
+        'short position',
+        'short setup',
+        'short trade',
+        'bearish entry',
+        'bearish setup',
+        'bearish trade',
+        'sell setup',
+        'sell signal',
+        'sell trade',
+        'selling setup',
+        'target lower levels',
+        'target lower',
+        'targeting lower'
+      ];
       for (const term of bearishTerms) {
         if (explanation.includes(term)) {
           explanationConsistent = false;

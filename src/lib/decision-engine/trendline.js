@@ -1,35 +1,32 @@
-export class TrendlineEvaluator {
-    evaluateBreakout(rules, market) {
-        if (!rules.trendline_breakout) {
-            return { matched: false, score: 0, reason: "Trendline Breakout rule not active in strategy." };
-        }
-        const isFlatMatched = market.trendline_breakout === true || market.trendline_breakout?.matched === true;
-        const isNestedMatched = market.breakouts && Array.isArray(market.breakouts) &&
-            market.breakouts.some((b) => b.type === 'UPPER_BREAKOUT' || b.type === 'LOWER_BREAKOUT');
-        const isTrendlinePresent = market.trendlines && Array.isArray(market.trendlines) && market.trendlines.length > 0;
-        const matched = isFlatMatched || isNestedMatched || isTrendlinePresent;
-        return {
-            matched,
-            score: matched ? 1 : 0,
-            reason: matched
-                ? "Market structure confirms a trendline breakout."
-                : "No trendline breakout detected in current market structure."
-        };
+class TrendlineEvaluator {
+  evaluateBreakout(rules, market) {
+    if (!rules.trendline_breakout) {
+      return { matched: false, score: 0, reason: "Trendline Breakout rule not active in strategy." };
     }
-    evaluateRetest(rules, market) {
-        if (!rules.break_and_retest) {
-            return { matched: false, score: 0, reason: "Break and Retest rule not active in strategy." };
-        }
-        const isFlatMatched = market.break_and_retest === true || market.break_and_retest?.matched === true;
-        const isNestedMatched = market.retests && Array.isArray(market.retests) &&
-            market.retests.some((r) => r.confirmed === true);
-        const matched = isFlatMatched || isNestedMatched;
-        return {
-            matched,
-            score: matched ? 1 : 0,
-            reason: matched
-                ? "Market structure confirms a break and retest level."
-                : "No break and retest pattern confirmed in current market structure."
-        };
+    const isFlatMatched = market.trendline_breakout === true || market.trendline_breakout?.matched === true;
+    const isNestedMatched = market.breakouts && Array.isArray(market.breakouts) && market.breakouts.some((b) => b.type === "UPPER_BREAKOUT" || b.type === "LOWER_BREAKOUT");
+    const isTrendlinePresent = market.trendlines && Array.isArray(market.trendlines) && market.trendlines.length > 0;
+    const matched = isFlatMatched || isNestedMatched || isTrendlinePresent;
+    return {
+      matched,
+      score: matched ? 1 : 0,
+      reason: matched ? "Market structure confirms a trendline breakout." : "No trendline breakout detected in current market structure."
+    };
+  }
+  evaluateRetest(rules, market) {
+    if (!rules.break_and_retest) {
+      return { matched: false, score: 0, reason: "Break and Retest rule not active in strategy." };
     }
+    const isFlatMatched = market.break_and_retest === true || market.break_and_retest?.matched === true;
+    const isNestedMatched = market.retests && Array.isArray(market.retests) && market.retests.some((r) => r.confirmed === true);
+    const matched = isFlatMatched || isNestedMatched;
+    return {
+      matched,
+      score: matched ? 1 : 0,
+      reason: matched ? "Market structure confirms a break and retest level." : "No break and retest pattern confirmed in current market structure."
+    };
+  }
 }
+export {
+  TrendlineEvaluator
+};

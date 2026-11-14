@@ -94,10 +94,19 @@ export const MARKET_DATA_PROVIDER_LIMITS = {
 // ----------------------------------------------------
 const KNOWN_CANONICAL_SYMBOLS = new Set([
   'EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD', 'USDCAD', 'USDCHF', 'NZDUSD',
-  'EURGBP', 'EURJPY', 'GBPJPY', 'AUDJPY', 'EURAUD', 'EURCAD', 'GBPCHF',
-  'AUDCAD', 'AUDNZD', 'CADJPY', 'CHFJPY', 'NZDJPY', 'GBPAUD', 'GBPCAD',
-  'XAUUSD', 'XAGUSD', 'BTCUSD', 'ETHUSD', 'SOLUSD', 'LTCUSD',
-  'NAS100', 'US30', 'SPX500', 'GER30', 'UK100', 'US500', 'US2000'
+  'EURGBP', 'EURJPY', 'GBPJPY', 'AUDJPY', 'EURAUD', 'EURCAD', 'EURCHF', 'EURNZD',
+  'GBPCHF', 'GBPAUD', 'GBPCAD', 'GBPNZD', 'AUDCAD', 'AUDNZD', 'AUDCHF',
+  'CADJPY', 'CADCHF', 'CHFJPY', 'NZDJPY', 'NZDCAD', 'NZDCHF',
+  'XAUUSD', 'XAGUSD',
+  'BTCUSD', 'ETHUSD', 'SOLUSD', 'XRPUSD', 'LTCUSD', 'ADAUSD', 'DOGEUSD',
+  'BNBUSD', 'AVAXUSD', 'DOTUSD', 'LINKUSD', 'MATICUSD', 'POLUSD', 'UNIUSD',
+  'NEARUSD', 'TRXUSD', 'ATOMUSD', 'BCHUSD', 'TONUSD', 'SUIUSD', 'SHIBUSD',
+  'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT', 'LTCUSDT', 'ADAUSDT', 'DOGEUSDT',
+  'BNBUSDT', 'AVAXUSDT', 'DOTUSDT', 'LINKUSDT', 'MATICUSDT', 'SUIUSDT', 'TONUSDT',
+  'BTCUSDC', 'ETHUSDC', 'SOLUSDC', 'XRPUSDC',
+  'NAS100', 'US100', 'NDX', 'USTEC', 'US30', 'DJ30', 'WS30',
+  'SPX500', 'SPX', 'US500', 'US2000', 'RUT',
+  'GER30', 'GER40', 'DE30', 'DE40', 'DAX', 'UK100', 'FTSE', 'FRA40', 'EU50', 'JP225', 'HK50', 'AUS200'
 ]);
 
 export function mapTimeframeToInterval(timeframe: string): string {
@@ -116,8 +125,22 @@ export function toCanonicalSymbol(symbol: string): string {
 
 export function toDisplaySymbol(symbol: string): string {
   const upper = toCanonicalSymbol(symbol);
-  if (upper.length === 6 && !upper.includes('/')) {
+  if (!upper) return 'EUR/USD';
+  if (upper.endsWith('USDT') && upper.length > 4) {
+    return `${upper.slice(0, -4)}/USDT`;
+  }
+  if (upper.endsWith('USDC') && upper.length > 4) {
+    return `${upper.slice(0, -4)}/USDC`;
+  }
+  if (upper.endsWith('BUSD') && upper.length > 4) {
+    return `${upper.slice(0, -4)}/BUSD`;
+  }
+  const hasDigits = /\d/.test(upper);
+  if (!hasDigits && upper.length === 6) {
     return `${upper.slice(0, 3)}/${upper.slice(3)}`;
+  }
+  if (!hasDigits && upper.length > 6 && (upper.endsWith('USD') || upper.endsWith('EUR') || upper.endsWith('GBP') || upper.endsWith('JPY'))) {
+    return `${upper.slice(0, -3)}/${upper.slice(-3)}`;
   }
   return upper;
 }
@@ -409,12 +432,21 @@ export class MarketDataGateway {
 
     // 1. Instant local validation for known standard pairs (0 API credits used)
     if (isKnownStandardSymbol(canonical)) {
+      const isCryptoSym =
+        canonical.endsWith('USDT') || canonical.endsWith('USDC') || canonical.endsWith('BUSD') ||
+        canonical.includes('BTC') || canonical.includes('ETH') || canonical.includes('SOL') ||
+        canonical.includes('XRP') || canonical.includes('LTC') || canonical.includes('ADA') ||
+        canonical.includes('DOGE') || canonical.includes('BNB') || canonical.includes('AVAX') ||
+        canonical.includes('DOT') || canonical.includes('LINK') || canonical.includes('MATIC') ||
+        canonical.includes('POL') || canonical.includes('UNI') || canonical.includes('NEAR') ||
+        canonical.includes('TRX') || canonical.includes('ATOM') || canonical.includes('BCH') ||
+        canonical.includes('TON') || canonical.includes('SUI') || canonical.includes('SHIB');
+      const isMetalSym = canonical.includes('XAU') || canonical.includes('XAG') || canonical.includes('GOLD') || canonical.includes('SILVER');
+      const isIndexSym = /\d/.test(canonical) || canonical.includes('NDX') || canonical.includes('SPX') || canonical.includes('DAX') || canonical.includes('FTSE') || canonical.includes('DOW');
       const result = {
         isValid: true,
         matchedSymbol: display,
-        instrumentType: canonical.includes('BTC') || canonical.includes('ETH') ? 'Crypto' :
-                        canonical.includes('XAU') || canonical.includes('XAG') ? 'Commodity' :
-                        canonical.includes('NAS') || canonical.includes('SPX') || canonical.includes('US30') ? 'Index' : 'Physical Currency'
+        instrumentType: isCryptoSym ? 'Crypto' : isMetalSym ? 'Commodity' : isIndexSym ? 'Index' : 'Physical Currency'
       };
       this.symbolCache.set(canonical, result);
       return result;
@@ -897,7 +929,11 @@ export class MarketDataGateway {
             const latestCandle = candleData[candleData.length - 1];
             const latestCandleMs = new Date(latestCandle.timestamp).getTime();
             const candleAgeMs = Math.max(0, now - latestCandleMs);
-            const isCrypto = canonical.includes('BTC') || canonical.includes('ETH') || canonical.includes('SOL') || canonical.includes('XRP');
+            const isCrypto = canonical.endsWith('USDT') || canonical.endsWith('USDC') || canonical.endsWith('BUSD') ||
+              canonical.includes('BTC') || canonical.includes('ETH') || canonical.includes('SOL') || canonical.includes('XRP') ||
+              canonical.includes('LTC') || canonical.includes('ADA') || canonical.includes('DOGE') || canonical.includes('BNB') ||
+              canonical.includes('AVAX') || canonical.includes('DOT') || canonical.includes('LINK') || canonical.includes('MATIC') ||
+              canonical.includes('SUI') || canonical.includes('TON');
             const maxAgeMs = MARKET_DATA_PROVIDER_LIMITS.maxAcceptableAgeMs[req.timeframe] || (isCrypto ? 2 * 3600 * 1000 : 4 * 3600 * 1000);
 
             if (candleAgeMs > maxAgeMs) {

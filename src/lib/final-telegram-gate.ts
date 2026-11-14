@@ -28,10 +28,10 @@ export interface FinalTelegramGateResult {
 
 export function computeTradeFingerprint(payload: TelegramTradePayload): string {
   const dir = (payload.direction || '').toUpperCase().trim();
-  const entry = Number(payload.entryPrice || 0);
-  const sl = Number(payload.stopLoss || 0);
-  const tp = Number(payload.takeProfit || 0);
-  const lot = Number(payload.lotSize || 0);
+  const entry = Number.isFinite(Number(payload.entryPrice)) ? Number(payload.entryPrice) : 0;
+  const sl = Number.isFinite(Number(payload.stopLoss)) ? Number(payload.stopLoss) : 0;
+  const tp = Number.isFinite(Number(payload.takeProfit)) ? Number(payload.takeProfit) : 0;
+  const lot = Number.isFinite(Number(payload.lotSize)) ? Number(payload.lotSize) : 0;
   const rawStr = `${dir}|${entry.toFixed(5)}|${sl.toFixed(5)}|${tp.toFixed(5)}|${lot.toFixed(2)}`;
   
   // Simple deterministic hash / string representation
@@ -91,7 +91,7 @@ TP: ${tp}
 Geometry: ${valid ? 'VALID' : 'INVALID'}
 Reason: ${reason}
 R:R: ${geoResult.calculatedRr}
-Risk: ${geoResult.riskDistance.toFixed(5)}
+Risk: ${Number.isFinite(geoResult?.riskDistance) ? geoResult.riskDistance.toFixed(5) : '0.00000'}
 Position: ${payload.lotSize !== undefined ? payload.lotSize : 'N/A'}
 Quality: ${payload.confidenceScore !== undefined ? payload.confidenceScore + '%' : 'N/A'}
 Gemini: ${payload.aiReasoning ? 'YES' : 'NO'}

@@ -1,168 +1,145 @@
-export function calculateAdaptiveQualityRequirement(input) {
-    const baseThreshold = Math.max(0, Math.min(100, Number.isFinite(input.baseThreshold) ? (input.baseThreshold ?? 75) : 75));
-    const sampleSize = Number.isFinite(input.sampleSize) ? input.sampleSize : 0;
-    const classification = input.classification || 'INSUFFICIENT_DATA';
-    const tier = input.tier || 'INSUFFICIENT_DATA';
-    if (tier === 'INSUFFICIENT_DATA' || tier === 'WEAK_SAMPLE' || sampleSize < 10) {
-        return {
-            minRequired: baseThreshold,
-            reason: `Insufficient sample size (${sampleSize} trades). Maintaining baseline quality requirement (${baseThreshold}%).`
-        };
-    }
-    if (classification === 'POOR') {
-        const elevated = Math.min(100, Math.max(baseThreshold + 10, 85));
-        return {
-            minRequired: elevated,
-            reason: `Poor historical performance elevates required quality to ${elevated}%.`
-        };
-    }
-    if (classification === 'DETERIORATING') {
-        const elevated = Math.min(100, Math.max(baseThreshold + 5, 80));
-        return {
-            minRequired: elevated,
-            reason: `Deteriorating historical performance elevates required quality to ${elevated}%.`
-        };
-    }
+function calculateAdaptiveQualityRequirement(input) {
+  const baseThreshold = Math.max(0, Math.min(100, Number.isFinite(input.baseThreshold) ? input.baseThreshold ?? 70 : 70));
+  const sampleSize = Number.isFinite(input.sampleSize) ? input.sampleSize : 0;
+  const classification = input.classification || "INSUFFICIENT_DATA";
+  const tier = input.tier || "INSUFFICIENT_DATA";
+  if (tier === "INSUFFICIENT_DATA" || tier === "WEAK_SAMPLE" || sampleSize < 10) {
     return {
-        minRequired: baseThreshold,
-        reason: `Performance history (${classification}) maintains standard baseline quality requirement (${baseThreshold}%).`
+      minRequired: baseThreshold,
+      reason: `Insufficient sample size (${sampleSize} trades). Maintaining baseline quality requirement (${baseThreshold}%).`
     };
+  }
+  if (classification === "POOR") {
+    const elevated = Math.min(100, Math.max(baseThreshold + 10, 85));
+    return {
+      minRequired: elevated,
+      reason: `Poor historical performance elevates required quality to ${elevated}%.`
+    };
+  }
+  if (classification === "DETERIORATING") {
+    const elevated = Math.min(100, Math.max(baseThreshold + 5, 80));
+    return {
+      minRequired: elevated,
+      reason: `Deteriorating historical performance elevates required quality to ${elevated}%.`
+    };
+  }
+  return {
+    minRequired: baseThreshold,
+    reason: `Performance history (${classification}) maintains standard baseline quality requirement (${baseThreshold}%).`
+  };
 }
-export function evaluateQualityGate(input) {
-    const baseThreshold = input.minQualityThreshold ?? 75;
-    const consecutiveLosses = input.consecutiveLosses ?? 0;
-    let lossStreakRequiredQuality = baseThreshold;
-    if (consecutiveLosses === 2) {
-        lossStreakRequiredQuality = Math.max(lossStreakRequiredQuality, 80);
+function evaluateQualityGate(input) {
+  const baseThreshold = input.minQualityThreshold ?? 70;
+  const consecutiveLosses = input.consecutiveLosses ?? 0;
+  let lossStreakRequiredQuality = baseThreshold;
+  if (consecutiveLosses === 2) {
+    lossStreakRequiredQuality = Math.max(lossStreakRequiredQuality, 80);
+  } else if (consecutiveLosses === 3) {
+    lossStreakRequiredQuality = Math.max(lossStreakRequiredQuality, 85);
+  } else if (consecutiveLosses >= 4) {
+    lossStreakRequiredQuality = 101;
+  }
+  const minRequired = Math.max(baseThreshold, lossStreakRequiredQuality);
+  const ruleScore = Math.max(0, Math.min(100, Math.round(input.ruleScore || 0)));
+  const ms = input.marketStructure || {};
+  const dirUpper = (input.direction || "").toUpperCase();
+  const trendUpper = (ms.trend || "").toUpperCase();
+  const isTrendAligned = dirUpper === "BUY" && ["BULLISH", "UP", "UPTREND"].includes(trendUpper) || dirUpper === "SELL" && ["BEARISH", "DOWN", "DOWNTREND"].includes(trendUpper);
+  const htfBias = Boolean(ms.htfBiasAligned || isTrendAligned);
+  const bosOrChoch = Boolean(ms.bos || ms.choch || ms.structureShift);
+  const fvgOrLiquidity = Boolean(
+    ms.fairValueGaps && ms.fairValueGaps.length > 0 || ms.liquiditySweeps && ms.liquiditySweeps.length > 0 || ms.liquidity_sweep
+  );
+  const srLevel = Boolean(
+    ms.supportZones && ms.supportZones.length > 0 || ms.resistanceZones && ms.resistanceZones.length > 0 || ms.swingHighs && ms.swingHighs.length > 0 || ms.swingLows && ms.swingLows.length > 0
+  );
+  const sessionQuality = Boolean(ms.activeSession || ms.sessionQuality);
+  const volumeConfirmed = Boolean(ms.volumeInformation?.volumeSpike || ms.volumeConfirmed);
+  let confluenceBonus = 0;
+  if (htfBias) confluenceBonus += 3;
+  if (bosOrChoch) confluenceBonus += 4;
+  if (fvgOrLiquidity) confluenceBonus += 4;
+  if (srLevel) confluenceBonus += 3;
+  if (sessionQuality) confluenceBonus += 3;
+  if (volumeConfirmed) confluenceBonus += 3;
+  const geminiBonus = input.geminiApproved ? 5 : 0;
+  const probBonus = input.historicalProbability && input.historicalProbability >= 60 ? 5 : 0;
+  let computedQuality = Math.round(ruleScore + confluenceBonus + geminiBonus + probBonus);
+  computedQuality = Math.max(0, Math.min(100, computedQuality));
+  const isValidDirection = input.direction === "BUY" || input.direction === "SELL";
+  const satisfiesGates = input.mandatoryRulesPassed && isValidDirection && input.slValid && input.tpValid && input.rrValid && (input.geminiRequired ? input.geminiApproved === true : true);
+  if (!satisfiesGates) {
+    computedQuality = Math.min(computedQuality, ruleScore);
+  }
+  let passed = satisfiesGates;
+  let reason = "Sufficient confluence";
+  if (!input.mandatoryRulesPassed) {
+    reason = "Mandatory rules failed";
+    passed = false;
+  } else if (!isValidDirection) {
+    reason = "Invalid trade direction";
+    passed = false;
+  } else if (!input.slValid) {
+    reason = "Invalid stop-loss structure";
+    passed = false;
+  } else if (!input.tpValid) {
+    reason = "Invalid take-profit structure";
+    passed = false;
+  } else if (!input.rrValid) {
+    reason = "Minimum R:R not satisfied";
+    passed = false;
+  } else if (input.geminiRequired && !input.geminiApproved) {
+    reason = "Gemini approval missing or rejected";
+    passed = false;
+  } else if (consecutiveLosses >= 4) {
+    passed = false;
+    reason = "Trade rejected due to 4 consecutive losses on watcher";
+  } else if (computedQuality < minRequired) {
+    passed = false;
+    if (consecutiveLosses >= 2) {
+      reason = `Insufficient quality (${computedQuality}%) under ${consecutiveLosses}-loss streak requirement (${minRequired}%)`;
+    } else {
+      reason = `Insufficient quality (${computedQuality}%) below minimum required threshold (${minRequired}%)`;
     }
-    else if (consecutiveLosses === 3) {
-        lossStreakRequiredQuality = Math.max(lossStreakRequiredQuality, 85);
-    }
-    else if (consecutiveLosses >= 4) {
-        lossStreakRequiredQuality = 101;
-    }
-    const minRequired = Math.max(baseThreshold, lossStreakRequiredQuality);
-    const ruleScore = Math.max(0, Math.min(100, Math.round(input.ruleScore || 0)));
-    const ms = input.marketStructure || {};
-    const dirUpper = (input.direction || '').toUpperCase();
-    const trendUpper = (ms.trend || '').toUpperCase();
-    const isTrendAligned = (dirUpper === 'BUY' && ['BULLISH', 'UP', 'UPTREND'].includes(trendUpper)) ||
-        (dirUpper === 'SELL' && ['BEARISH', 'DOWN', 'DOWNTREND'].includes(trendUpper));
-    const htfBias = Boolean(ms.htfBiasAligned || isTrendAligned);
-    const bosOrChoch = Boolean(ms.bos || ms.choch || ms.structureShift);
-    const fvgOrLiquidity = Boolean((ms.fairValueGaps && ms.fairValueGaps.length > 0) ||
-        (ms.liquiditySweeps && ms.liquiditySweeps.length > 0) ||
-        ms.liquidity_sweep);
-    const srLevel = Boolean((ms.supportZones && ms.supportZones.length > 0) ||
-        (ms.resistanceZones && ms.resistanceZones.length > 0) ||
-        (ms.swingHighs && ms.swingHighs.length > 0) ||
-        (ms.swingLows && ms.swingLows.length > 0));
-    const sessionQuality = Boolean(ms.activeSession || ms.sessionQuality);
-    const volumeConfirmed = Boolean(ms.volumeInformation?.volumeSpike || ms.volumeConfirmed);
-    let confluenceBonus = 0;
-    if (htfBias)
-        confluenceBonus += 3;
-    if (bosOrChoch)
-        confluenceBonus += 4;
-    if (fvgOrLiquidity)
-        confluenceBonus += 4;
-    if (srLevel)
-        confluenceBonus += 3;
-    if (sessionQuality)
-        confluenceBonus += 3;
-    if (volumeConfirmed)
-        confluenceBonus += 3;
-    const geminiBonus = input.geminiApproved ? 5 : 0;
-    const probBonus = (input.historicalProbability && input.historicalProbability >= 60) ? 5 : 0;
-    let computedQuality = Math.round(ruleScore + confluenceBonus + geminiBonus + probBonus);
-    computedQuality = Math.max(0, Math.min(100, computedQuality));
-    const isValidDirection = input.direction === 'BUY' || input.direction === 'SELL';
-    const satisfiesGates = input.mandatoryRulesPassed &&
-        isValidDirection &&
-        input.slValid &&
-        input.tpValid &&
-        input.rrValid &&
-        (input.geminiRequired ? input.geminiApproved === true : true);
-    if (!satisfiesGates) {
-        computedQuality = Math.min(computedQuality, ruleScore);
-    }
-    let passed = satisfiesGates;
-    let reason = 'Sufficient confluence';
-    if (!input.mandatoryRulesPassed) {
-        reason = 'Mandatory rules failed';
-        passed = false;
-    }
-    else if (!isValidDirection) {
-        reason = 'Invalid trade direction';
-        passed = false;
-    }
-    else if (!input.slValid) {
-        reason = 'Invalid stop-loss structure';
-        passed = false;
-    }
-    else if (!input.tpValid) {
-        reason = 'Invalid take-profit structure';
-        passed = false;
-    }
-    else if (!input.rrValid) {
-        reason = 'Minimum R:R not satisfied';
-        passed = false;
-    }
-    else if (input.geminiRequired && !input.geminiApproved) {
-        reason = 'Gemini approval missing or rejected';
-        passed = false;
-    }
-    else if (consecutiveLosses >= 4) {
-        passed = false;
-        reason = 'Trade rejected due to 4 consecutive losses on watcher';
-    }
-    else if (computedQuality < minRequired) {
-        passed = false;
-        if (consecutiveLosses >= 2) {
-            reason = `Insufficient quality (${computedQuality}%) under ${consecutiveLosses}-loss streak requirement (${minRequired}%)`;
-        }
-        else {
-            reason = `Insufficient quality (${computedQuality}%) below minimum required threshold (${minRequired}%)`;
-        }
-    }
-    const action = passed ? 'CONTINUE_TO_RISK' : 'NO_TRADE';
-    const details = input.ruleDetails || [];
-    const rulesEvaluated = details.length;
-    const rulesPassed = details.filter(d => d.status === 'PASS').length;
-    const rulesFailed = details.filter(d => d.status === 'FAIL').length;
-    const rulesUnknown = details.filter(d => d.status === 'UNKNOWN').length;
-    const totalPoints = details.reduce((acc, d) => acc + (d.awarded || 0), 0);
-    const maxPoints = details.reduce((acc, d) => acc + (d.weight || 0), 0);
-    const result = {
-        passed,
-        qualityScore: computedQuality,
-        ruleScore,
-        minRequired,
-        action,
-        reason,
-        confluenceFactors: {
-            ruleScoreContrib: ruleScore,
-            htfBias,
-            bosOrChoch,
-            fvgOrLiquidity,
-            srLevel,
-            sessionQuality,
-            volumeConfirmed,
-            geminiBonus,
-            probBonus
-        },
-        ruleDetails: details
-    };
-    let logOutput = `
+  }
+  const action = passed ? "CONTINUE_TO_RISK" : "NO_TRADE";
+  const details = input.ruleDetails || [];
+  const rulesEvaluated = details.length;
+  const rulesPassed = details.filter((d) => d.status === "PASS").length;
+  const rulesFailed = details.filter((d) => d.status === "FAIL").length;
+  const rulesUnknown = details.filter((d) => d.status === "UNKNOWN").length;
+  const totalPoints = details.reduce((acc, d) => acc + (d.awarded || 0), 0);
+  const maxPoints = details.reduce((acc, d) => acc + (d.weight || 0), 0);
+  const result = {
+    passed,
+    qualityScore: computedQuality,
+    ruleScore,
+    minRequired,
+    action,
+    reason,
+    confluenceFactors: {
+      ruleScoreContrib: ruleScore,
+      htfBias,
+      bosOrChoch,
+      fvgOrLiquidity,
+      srLevel,
+      sessionQuality,
+      volumeConfirmed,
+      geminiBonus,
+      probBonus
+    },
+    ruleDetails: details
+  };
+  let logOutput = `
 [Signal Quality]
 Rule Score: ${ruleScore}%
 Quality Score: ${computedQuality}%
 Minimum Required: ${minRequired}%
-Quality Gate: ${passed ? 'PASSED' : 'FAILED'}
+Quality Gate: ${passed ? "PASSED" : "FAILED"}
 Action: ${action}
 Reason: ${reason}`;
-    if (rulesEvaluated > 0) {
-        logOutput += `
+  if (rulesEvaluated > 0) {
+    logOutput += `
 
 Rules Evaluated: ${rulesEvaluated}
 Rules Passed: ${rulesPassed}
@@ -172,45 +149,47 @@ Total Points: ${totalPoints}
 Maximum Points: ${maxPoints}
 
 [Signal Quality Breakdown]`;
-        details.forEach(r => {
-            logOutput += `
+    details.forEach((r) => {
+      logOutput += `
 
 Rule: ${r.name}
 Result: ${r.status}
 Weight: ${r.weight}
 Awarded: ${r.awarded}
 Reason: ${r.reason}`;
-        });
-    }
-    console.log(logOutput.trim());
-    return result;
-}
-export function calculateConsecutiveLossesForWatcher(trades, watcherId) {
-    if (!Array.isArray(trades))
-        return 0;
-    const validTrades = trades.filter(t => {
-        if (watcherId) {
-            const tWatcherId = t.watcher_id || t.watcherId;
-            if (tWatcherId !== watcherId)
-                return false;
-        }
-        const outcome = (t.outcome || '').toUpperCase();
-        return outcome === 'WIN' || outcome === 'LOSS' || outcome === 'STOP_LOSS' || outcome === 'BREAKEVEN';
     });
-    const sortedTrades = [...validTrades].sort((a, b) => {
-        const timeA = new Date(a.created_at || a.closed_at || a.opened_at || 0).getTime();
-        const timeB = new Date(b.created_at || b.closed_at || b.opened_at || 0).getTime();
-        return timeB - timeA;
-    });
-    let consecutiveLosses = 0;
-    for (const t of sortedTrades) {
-        const outcome = (t.outcome || '').toUpperCase();
-        if (outcome === 'LOSS' || outcome === 'STOP_LOSS') {
-            consecutiveLosses++;
-        }
-        else {
-            break;
-        }
-    }
-    return consecutiveLosses;
+  }
+  console.log(logOutput.trim());
+  return result;
 }
+function calculateConsecutiveLossesForWatcher(trades, watcherId) {
+  if (!Array.isArray(trades)) return 0;
+  const validTrades = trades.filter((t) => {
+    if (watcherId) {
+      const tWatcherId = t.watcher_id || t.watcherId;
+      if (tWatcherId !== watcherId) return false;
+    }
+    const outcome = (t.outcome || "").toUpperCase();
+    return outcome === "WIN" || outcome === "LOSS" || outcome === "STOP_LOSS" || outcome === "BREAKEVEN";
+  });
+  const sortedTrades = [...validTrades].sort((a, b) => {
+    const timeA = new Date(a.created_at || a.closed_at || a.opened_at || 0).getTime();
+    const timeB = new Date(b.created_at || b.closed_at || b.opened_at || 0).getTime();
+    return timeB - timeA;
+  });
+  let consecutiveLosses = 0;
+  for (const t of sortedTrades) {
+    const outcome = (t.outcome || "").toUpperCase();
+    if (outcome === "LOSS" || outcome === "STOP_LOSS") {
+      consecutiveLosses++;
+    } else {
+      break;
+    }
+  }
+  return consecutiveLosses;
+}
+export {
+  calculateAdaptiveQualityRequirement,
+  calculateConsecutiveLossesForWatcher,
+  evaluateQualityGate
+};

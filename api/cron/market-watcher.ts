@@ -377,10 +377,26 @@ export const toDisplaySymbol = (symbol: string): string => {
   const mappings: Record<string, string> = {
     'EURUSD': 'EUR/USD', 'GBPUSD': 'GBP/USD', 'USDJPY': 'USD/JPY', 'AUDUSD': 'AUD/USD',
     'USDCAD': 'USD/CAD', 'USDCHF': 'USD/CHF', 'NZDUSD': 'NZD/USD', 'BTCUSD': 'BTC/USD',
-    'ETHUSD': 'ETH/USD', 'XAUUSD': 'XAU/USD', 'XAGUSD': 'XAG/USD', 'NAS100': 'NAS100',
-    'US30': 'US30', 'SPX500': 'SPX500', 'GER30': 'GER30', 'UK100': 'UK100'
+    'ETHUSD': 'ETH/USD', 'SOLUSD': 'SOL/USD', 'XRPUSD': 'XRP/USD', 'LTCUSD': 'LTC/USD',
+    'ADAUSD': 'ADA/USD', 'DOGEUSD': 'DOGE/USD', 'BNBUSD': 'BNB/USD', 'AVAXUSD': 'AVAX/USD',
+    'DOTUSD': 'DOT/USD', 'LINKUSD': 'LINK/USD', 'MATICUSD': 'MATIC/USD',
+    'XAUUSD': 'XAU/USD', 'XAGUSD': 'XAG/USD', 'NAS100': 'NAS100',
+    'US30': 'US30', 'SPX500': 'SPX500', 'US500': 'US500', 'US2000': 'US2000',
+    'GER30': 'GER30', 'GER40': 'GER40', 'UK100': 'UK100', 'US100': 'US100'
   };
   if (mappings[canonical]) return mappings[canonical];
+  if (canonical.endsWith('USDT') && canonical.length > 4) {
+    return `${canonical.slice(0, -4)}/USDT`;
+  }
+  if (canonical.endsWith('USDC') && canonical.length > 4) {
+    return `${canonical.slice(0, -4)}/USDC`;
+  }
+  if (canonical.endsWith('BUSD') && canonical.length > 4) {
+    return `${canonical.slice(0, -4)}/BUSD`;
+  }
+  if (canonical.endsWith('USD') && canonical.length >= 6 && !/^(US|XAU|XAG)/.test(canonical) && !/\d/.test(canonical)) {
+    return `${canonical.slice(0, -3)}/USD`;
+  }
   if (canonical.length === 6 && /^[A-Z]{6}$/.test(canonical)) {
     return `${canonical.slice(0, 3)}/${canonical.slice(3)}`;
   }
@@ -2110,10 +2126,7 @@ Reason: ${activeValidation.reason}`);
 
         // 1. If an active zone already exists, evaluate its state
         if (currentZone && currentZone.status !== 'INVALIDATED') {
-          // Check if existing zone mismatches HTF trend direction or is an obsolete micro-zone compared to the dominant institutional zone
-          const expectedDirection = htfTrendResult.trend === 'BEARISH' ? 'SELL' : htfTrendResult.trend === 'BULLISH' ? 'BUY' : null;
-          const directionMismatch = expectedDirection && currentZone.direction !== expectedDirection;
-
+          // Only upgrade an un-tapped zone when an objectively stronger institutional zone is discovered (do not delete counter-HTF lower-timeframe zones)
           const rejectedList = getRejectedZones(watcher.id);
           const candidates = identifyCandidateZones(candleData, marketStructure, compiledStrategy, activeCurrentPrice, rejectedList);
           const topCandidate = candidates[0] || null;
@@ -2123,7 +2136,7 @@ Reason: ${activeValidation.reason}`);
             (currentZone.status === 'WAITING_FOR_TAP' && topCandidate.id !== currentZone.id && (topCandidate.strength || 0) >= (currentZone.strength || 0) + 15)
           );
 
-          if (directionMismatch || isSuboptimalZone) {
+          if (isSuboptimalZone) {
             console.log(`[ZONE SELF-CORRECTION] Watcher ID: ${watcher.id} (${selectedPair}): Upgrading active zone [${currentZone.low} - ${currentZone.high}] (${currentZone.type}) to superior institutional zone [${topCandidate?.low} - ${topCandidate?.high}] (Strength: ${topCandidate?.strength} vs ${currentZone.strength || 'N/A'}).`);
             recordRejectedZone(watcher.id, currentZone, 'Self-corrected to dominant structural zone');
             currentZone = null;
@@ -2494,7 +2507,10 @@ Reason: ${activeValidation.reason}`);
 
         // Stage 2
         const cleanSymUpper = (selectedPair || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-        const pipSize = (cleanSymUpper.includes('JPY') || cleanSymUpper.includes('XAU') || cleanSymUpper.includes('GOLD')) ? 0.01 : 0.0001;
+        const isIndexSym = ['NAS', 'NDX', 'US100', 'US30', 'DOW', 'SPX', 'US500', 'US2000', 'GER', 'DE30', 'DE40', 'UK100', 'HK50', 'JP225'].some(k => cleanSymUpper.includes(k));
+        const isCryptoSym = ['BTC', 'ETH', 'SOL', 'XRP', 'LTC', 'ADA', 'DOGE', 'BNB', 'AVAX', 'DOT', 'LINK', 'MATIC', 'UNI', 'NEAR', 'TRX', 'ATOM', 'BCH', 'SHIB', 'TON', 'SUI'].some(k => cleanSymUpper.includes(k)) || cleanSymUpper.endsWith('USDT') || cleanSymUpper.endsWith('USDC');
+        const latestScanPrice = Number(candleData?.[candleData.length - 1]?.close) || 0;
+        const pipSize = isIndexSym ? 1.0 : (isCryptoSym ? (latestScanPrice >= 50 ? 0.01 : 0.0001) : (cleanSymUpper.includes('JPY') || cleanSymUpper.includes('XAU') || cleanSymUpper.includes('GOLD') || cleanSymUpper.includes('XAG') || cleanSymUpper.includes('SILVER')) ? 0.01 : 0.0001);
 
         // Run Weighted Decision Engine (Pass 1 to get matched rules)
         cronTimer.startStage("Decision Engine Evaluation", watcher.id);
@@ -3325,7 +3341,7 @@ Output ONLY valid JSON.
           const localSignal = localAnalysis?.signal || 'NO_TRADE';
           console.log(`[RULE_ONLY DECISION] Direction: ${localSignal}`);
 
-          if (localAnalysis && localAnalysis.signal !== 'NO_TRADE' && localAnalysis.entryPrice) {
+          if (localAnalysis && localAnalysis.signal !== 'NO_TRADE' && localAnalysis.entryPrice && !localAnalysis.stopLoss) {
             if (currentZone) {
               (marketStructure as any).markedZone = currentZone;
             }
@@ -3505,7 +3521,7 @@ Output ONLY valid JSON.
               }
             }
           }
-          if (localAnalysis && localAnalysis.signal !== 'NO_TRADE' && localAnalysis.entryPrice) {
+          if (localAnalysis && localAnalysis.signal !== 'NO_TRADE' && localAnalysis.entryPrice && !localAnalysis.stopLoss) {
             if (currentZone) {
               (marketStructure as any).markedZone = currentZone;
             }
@@ -3987,16 +4003,20 @@ ${analysis.stopLossBasis === 'ATR_FALLBACK' ? `ATR: ${marketStructure?.volatilit
 
         // === STAGE 5 HARDENING: FINAL PRE-EXECUTION REVALIDATION ===
         const finalValidation = revalidatePreExecution({
+          symbol: selectedPair,
           marketDataAvailable: true,
           marketDataFreshness: freshnessResult,
           currentPrice: executedPrice,
           spread: (executedPrice * 1.0001) - (executedPrice * 0.9999),
           entryPrice: posSizeResult.entryPrice || executedPrice,
+          stopLoss: posSizeResult.stopLoss,
+          takeProfit: posSizeResult.takeProfit || 0,
           sl: posSizeResult.stopLoss,
           tp: posSizeResult.takeProfit || 0,
           rr: posSizeResult.actualRr || 0,
           riskGovernorPassed: true,
           newsGate: newsGateResult,
+          lotSize: posSizeResult.calculatedLotSize || posSizeResult.exactLotSize,
           positionSizing: posSizeResult.calculatedLotSize || posSizeResult.exactLotSize,
           userRiskLimitsPassed: true,
           duplicateTradeProtectionPassed: true,
@@ -4190,16 +4210,20 @@ Source: ${brokerQuote.source}`);
 
         // === STAGE 5/7 HARDENING: FINAL PRE-EXECUTION REVALIDATION ===
         const brokerValidation = revalidatePreExecution({
+          symbol: selectedPair,
           marketDataAvailable: true,
           marketDataFreshness: freshnessResult,
           currentPrice: currentExecutionPrice || executedPrice,
           spread: brokerQuote?.spread || ((executedPrice * 1.0001) - (executedPrice * 0.9999)),
           entryPrice: posSizeResult.entryPrice || executedPrice,
+          stopLoss: posSizeResult.stopLoss,
+          takeProfit: posSizeResult.takeProfit || 0,
           sl: posSizeResult.stopLoss,
           tp: posSizeResult.takeProfit || 0,
           rr: posSizeResult.actualRr || 0,
           riskGovernorPassed: true,
           newsGate: newsGateResult,
+          lotSize: posSizeResult.calculatedLotSize || posSizeResult.exactLotSize,
           positionSizing: posSizeResult.calculatedLotSize || posSizeResult.exactLotSize,
           userRiskLimitsPassed: true,
           duplicateTradeProtectionPassed: true,
@@ -4216,37 +4240,45 @@ Source: ${brokerQuote.source}`);
           console.log(`[TEMPORARY DISENGAGEMENT] Suppressed broker quote gate rejection '${brokerValidation.rejectionReason}' for Watcher ID: ${watcher.id} (${selectedPair}). Authorizing signal based solely on break and retest confirmation.`);
         }
 
-        // === STAGE 8/17: SUPERVISED MICROLOT GOVERNOR ===
-        const microlotGovernor = new SupervisedMicrolotGovernor(brokerProvider);
-        const riskAmount = posSizeResult.riskAmount || (posSizeResult.calculatedLotSize * 10); // fallback
-        const microlotResult = await microlotGovernor.validateExecution(selectedPair, riskAmount);
+        // === STAGE 8/17: SUPERVISED MICROLOT GOVERNOR (Opt-in via SUPERVISED_MICROLOT_ENABLED === 'true') ===
+        if (process.env.SUPERVISED_MICROLOT_ENABLED === 'true') {
+          const riskAmount = posSizeResult.riskAmount || (posSizeResult.calculatedLotSize * 10);
+          const microlotGovernor = new SupervisedMicrolotGovernor(brokerProvider, {
+            maxRiskPerTrade: Math.max(50, riskAmount * 1.1),
+            maxDailyLoss: Math.max(200, accountSize * 0.1),
+            maxOpenPositions: 10,
+            maxTradesPerDay: 20,
+            allowedSymbols: ['*', selectedPair]
+          });
+          const microlotResult = await microlotGovernor.validateExecution(selectedPair, riskAmount);
 
-        if (!microlotResult.accepted) {
-            console.warn(`[Stage 8/17 Microlot Rejected] ${microlotResult.reason}`);
-            const scanDurationMs = Date.now() - scanStart;
-            await recordEvaluation(supabase, {
-                user_id: userId,
-                watcher_id: watcher.id,
-                pair: selectedPair,
-                timeframe: selectedTimeframe,
-                strategy_mode: executionMode,
-                decision_score: decisionResult.decision_score,
-                matched_weight: decisionResult.matched_weight,
-                possible_weight: decisionResult.possible_weight,
-                recommendation: decisionResult.recommendation,
-                mandatory_rules_passed: decisionResult.mandatory_rules_passed,
-                matched_rules: decisionResult.matched_rules,
-                failed_rules: decisionResult.failed_rules,
-                gemini_used: geminiCalled,
-                gemini_result: geminiTextResult || null,
-                trade_sent: false,
-                trade_reason: `MICROLOT_GOVERNOR_REJECTED: ${microlotResult.reason}`,
-                scan_duration_ms: scanDurationMs,
-                gemini_duration_ms: geminiDuration,
-                execution_source: brokerExecutionMode,
-                decision_snapshot: decisionSnapshot
-            });
-            return;
+          if (!microlotResult.accepted) {
+              console.warn(`[Stage 8/17 Microlot Rejected] ${microlotResult.reason}`);
+              const scanDurationMs = Date.now() - scanStart;
+              await recordEvaluation(supabase, {
+                  user_id: userId,
+                  watcher_id: watcher.id,
+                  pair: selectedPair,
+                  timeframe: selectedTimeframe,
+                  strategy_mode: executionMode,
+                  decision_score: decisionResult.decision_score,
+                  matched_weight: decisionResult.matched_weight,
+                  possible_weight: decisionResult.possible_weight,
+                  recommendation: decisionResult.recommendation,
+                  mandatory_rules_passed: decisionResult.mandatory_rules_passed,
+                  matched_rules: decisionResult.matched_rules,
+                  failed_rules: decisionResult.failed_rules,
+                  gemini_used: geminiCalled,
+                  gemini_result: geminiTextResult || null,
+                  trade_sent: false,
+                  trade_reason: `MICROLOT_GOVERNOR_REJECTED: ${microlotResult.reason}`,
+                  scan_duration_ms: scanDurationMs,
+                  gemini_duration_ms: geminiDuration,
+                  execution_source: brokerExecutionMode,
+                  decision_snapshot: decisionSnapshot
+              });
+              return;
+          }
         }
 
         // === STAGE 8: CRASH RECOVERY & IDEMPOTENCY ===
@@ -4261,11 +4293,15 @@ Source: ${brokerQuote.source}`);
             if (brokerOrder) {
                 console.log(`[Stage 8 Recovery] Existing order found for ${selectedPair} (ID: ${brokerOrder.orderId}). Rehydrating state.`);
             } else {
-                // Check for existing position to avoid doubling up
-                const existingPos = await brokerProvider.getPosition(selectedPair);
-                if (existingPos) {
-                    console.log(`[Stage 8 Protection] Existing position found for ${selectedPair} at broker. Skipping duplicate execution.`);
-                    return;
+                // Only check singleton broker position in PAPER/LIVE broker modes.
+                // In THEORETICAL mode, TheoreticalBrokerProvider is a process-wide in-memory singleton keyed solely by symbol,
+                // which would otherwise collide across independent watchers/users on the same pair (per-user/watcher checks already ran above).
+                if (brokerExecutionMode === 'PAPER' || brokerExecutionMode === 'LIVE') {
+                    const existingPos = await brokerProvider.getPosition(selectedPair);
+                    if (existingPos) {
+                        console.log(`[Stage 8 Protection] Existing position found for ${selectedPair} at broker. Skipping duplicate execution.`);
+                        return;
+                    }
                 }
 
                 const orderParams = {

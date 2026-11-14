@@ -117,7 +117,15 @@ export const WatcherTab: React.FC<WatcherTabProps> = ({
       return null;
     }
     const cleanSym = (activeTrade.symbol || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-    const pipSize = (cleanSym.includes('JPY') || cleanSym.includes('XAU') || cleanSym.includes('GOLD') || cleanSym.includes('BTC')) ? 0.01 : 0.0001;
+    const isIndex = ['NAS', 'NDX', 'US100', 'US30', 'DOW', 'SPX', 'US500', 'US2000', 'GER', 'DE30', 'DE40', 'DAX', 'UK100', 'FTSE', 'JP225', 'HK50'].some(k => cleanSym.includes(k));
+    const isCrypto = ['BTC', 'ETH', 'SOL', 'XRP', 'LTC', 'ADA', 'DOGE', 'BNB', 'AVAX', 'DOT', 'LINK', 'MATIC', 'TON', 'SUI'].some(k => cleanSym.startsWith(k)) || cleanSym.endsWith('USDT') || cleanSym.endsWith('USDC');
+    const pipSize = isIndex
+      ? 1.0
+      : isCrypto
+        ? (activeTrade.entryPrice >= 1000 ? 1.0 : activeTrade.entryPrice >= 10 ? 0.01 : 0.0001)
+        : (cleanSym.includes('JPY') || cleanSym.includes('XAU') || cleanSym.includes('GOLD') || cleanSym.includes('XAG') || cleanSym.includes('SILVER'))
+          ? 0.01
+          : 0.0001;
     const isBuy = (activeTrade.direction || 'BUY').toUpperCase() === 'BUY';
     const currentPrice = activeTrade.currentPrice || activeTrade.entryPrice;
     

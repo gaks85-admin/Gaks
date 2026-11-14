@@ -156,7 +156,7 @@ function evaluateDecision(compiledStrategy, marketStructure, customWeights, hist
     } else {
       scoreOutOf10 = 0;
     }
-    if (res.matched === true || scoreOutOf10 >= 6) {
+    if (res.matched === true || scoreOutOf10 >= 6 || res.status === "WAITING_FOR_TAP") {
       status = "PASS";
     } else if (status === "UNKNOWN") {
       status = "UNKNOWN";

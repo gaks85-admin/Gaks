@@ -1,7 +1,10 @@
-export const rsiSynonyms = [
-    "rsi",
-    "relative strength index",
-    "rsi overbought",
-    "rsi oversold",
-    "rsi levels"
+const rsiSynonyms = [
+  "rsi",
+  "relative strength index",
+  "rsi overbought",
+  "rsi oversold",
+  "rsi levels"
 ];
+export {
+  rsiSynonyms
+};

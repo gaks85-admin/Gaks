@@ -2,7 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import { GoogleGenAI, Type } from "@google/genai";
 import { defaultMarketDataService, getMarketDataStats, getRequiredCandleCountForTimeframe } from '../market-data-service.js';
 import { analyzeMarket, Candle } from "../strategy-engine.js";
-import { extractRiskPreferences, calculatePositionSize, parseRiskRewardRatio } from "../risk-engine.js";
+import { extractRiskPreferences, calculatePositionSize, parseRiskRewardRatio, resolveInstrumentSpec } from "../risk-engine.js";
 import { calculateStructuralStopLoss, validateAndResolveStopLoss, validateZoneProximityAndStopLoss, getTimeframeMaxSlPips, getMaxDeparturePips } from "../structural-stop-loss.js";
 import { evaluateRules } from "../rule-engine.js";
 import { compileStrategy } from "../strategy-compiler.js";
@@ -763,21 +763,19 @@ export default async function handler(req: any, res: any) {
       }
     }
 
-    const expectedDirection = htfTrendResult.trend === 'BEARISH' ? 'SELL' : htfTrendResult.trend === 'BULLISH' ? 'BUY' : null;
     const rejectedList = getRejectedZones(watcher.id);
     const candidateZones = identifyCandidateZones(candleData, marketStructure, compiledStrategy, activeCurrentPrice, rejectedList);
     const topCandidate = candidateZones[0] || null;
 
     let lastZoneEval: ZoneEvaluationResult | null = null;
     if (currentZone && currentZone.status !== 'INVALIDATED') {
-      // Check if existing zone mismatches HTF trend direction or is an obsolete micro-zone compared to the dominant institutional zone
-      const directionMismatch = expectedDirection && currentZone.direction !== expectedDirection;
+      // Only upgrade an un-tapped zone if an objectively stronger institutional zone is discovered (never purge counter-HTF lower-timeframe zones)
       const isSuboptimalZone = topCandidate && (
         (topCandidate.strength >= 80 && (currentZone.strength || 0) < 65) ||
         (currentZone.status === 'WAITING_FOR_TAP' && topCandidate.id !== currentZone.id && (topCandidate.strength || 0) >= (currentZone.strength || 0) + 15)
       );
 
-      if (directionMismatch || isSuboptimalZone) {
+      if (isSuboptimalZone) {
         console.log(`[ZONE SELF-CORRECTION] Manual Scan - Watcher ${watcher.id} (${symbol}): Upgrading active zone [${currentZone.low} - ${currentZone.high}] (${currentZone.type}) to superior institutional zone [${topCandidate?.low} - ${topCandidate?.high}] (Strength: ${topCandidate?.strength} vs ${currentZone.strength || 'N/A'}).`);
         recordRejectedZone(watcher.id, currentZone, 'Self-corrected to dominant structural zone');
         currentZone = null;
@@ -881,6 +879,23 @@ export default async function handler(req: any, res: any) {
 
           console.log(`[ZONE MARKED & TAPPED] Manual Scan - Watcher ID: ${watcher.id} (${symbol}): Newly discovered zone [${discoveredZone.low} - ${discoveredZone.high}] is already tapped by price (${activeCurrentPrice}). Proceeding to confirmation analysis in same cycle.`);
           currentZone = discoveredZone;
+        } else {
+          discoveredZone.status = 'WAITING_FOR_TAP';
+          discoveredZone.tapCount = 0;
+          discoveredZone.tappedAt = null;
+          activeZonesMemoryMap.set(watcher.id, discoveredZone);
+          await supabase.from("watchers").update({
+            zone_data: discoveredZone,
+            zone_status: 'WAITING_FOR_TAP',
+            zone_high: discoveredZone.high,
+            zone_low: discoveredZone.low,
+            zone_type: discoveredZone.type,
+            zone_invalidation_level: discoveredZone.invalidationLevel,
+            zone_marked_at: new Date().toISOString(),
+            zone_tapped_at: null,
+            updated_at: new Date().toISOString()
+          }).eq("id", watcher.id);
+
           console.log(`[ZONE_IDENTIFIED] Manual Scan - Watcher ID: ${watcher.id} (${symbol}): Newly discovered zone [${discoveredZone.low} - ${discoveredZone.high}]. Status: WAITING_FOR_TAP.`);
           return res.json({
             success: true,
@@ -933,8 +948,7 @@ export default async function handler(req: any, res: any) {
     }
 
     // Stage 2
-    const cleanSymUpper = (symbol || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-    const pipSize = (cleanSymUpper.includes('JPY') || cleanSymUpper.includes('XAU') || cleanSymUpper.includes('GOLD')) ? 0.01 : 0.0001;
+    const pipSize = resolveInstrumentSpec(symbol, activeCurrentPrice).pipSize;
 
     // 8. Weighted Decision Engine Execution (Pass 1 to get matched rules)
     (marketStructure as any).watcherId = watcher.id;
@@ -1068,15 +1082,15 @@ Timeframe: ${selectedTimeframe}
 
 Detailed Numeric Market Structure & Key Levels:
 - Trend: ${marketStructure.trend}
-- Marked Zone: ${currentZone ? `${currentZone.type} [${currentZone.low.toFixed(5)} - ${currentZone.high.toFixed(5)}] (${currentZone.direction})` : 'None'}
+- Marked Zone: ${currentZone ? `${currentZone.type} [${typeof currentZone.low === 'number' ? currentZone.low.toFixed(5) : '0.00000'} - ${typeof currentZone.high === 'number' ? currentZone.high.toFixed(5) : '0.00000'}] (${currentZone.direction})` : 'None'}
 - Zone Status: ${currentZone?.status || 'N/A'}
-- Support Zones: ${marketStructure.supportZones?.map(s => `[${s.priceMin.toFixed(5)} - ${s.priceMax.toFixed(5)}]`).join(', ') || 'None'}
-- Resistance Zones: ${marketStructure.resistanceZones?.map(r => `[${r.priceMin.toFixed(5)} - ${r.priceMax.toFixed(5)}]`).join(', ') || 'None'}
-- Swing Highs: ${marketStructure.swingHighs?.slice(-3).map(s => s.price.toFixed(5)).join(', ') || 'None'}
-- Swing Lows: ${marketStructure.swingLows?.slice(-3).map(s => s.price.toFixed(5)).join(', ') || 'None'}
-- Fair Value Gaps: ${marketStructure.fairValueGaps?.slice(-3).map(f => `${f.type} (${f.bottom.toFixed(5)} - ${f.top.toFixed(5)})`).join(', ') || 'None'}
-- Volume Confirmation: ${marketStructure.volumeInformation.volumeSpike ? 'Confirmed' : 'Normal'}
-- ATR: ${marketStructure.volatilityInformation.atr.toFixed(5)}
+- Support Zones: ${marketStructure.supportZones?.map(s => `[${typeof s.priceMin === 'number' ? s.priceMin.toFixed(5) : '0.00000'} - ${typeof s.priceMax === 'number' ? s.priceMax.toFixed(5) : '0.00000'}]`).join(', ') || 'None'}
+- Resistance Zones: ${marketStructure.resistanceZones?.map(r => `[${typeof r.priceMin === 'number' ? r.priceMin.toFixed(5) : '0.00000'} - ${typeof r.priceMax === 'number' ? r.priceMax.toFixed(5) : '0.00000'}]`).join(', ') || 'None'}
+- Swing Highs: ${marketStructure.swingHighs?.slice(-3).map(s => typeof s.price === 'number' ? s.price.toFixed(5) : '0.00000').join(', ') || 'None'}
+- Swing Lows: ${marketStructure.swingLows?.slice(-3).map(s => typeof s.price === 'number' ? s.price.toFixed(5) : '0.00000').join(', ') || 'None'}
+- Fair Value Gaps: ${marketStructure.fairValueGaps?.slice(-3).map(f => `${f.type} (${typeof f.bottom === 'number' ? f.bottom.toFixed(5) : '0.00000'} - ${typeof f.top === 'number' ? f.top.toFixed(5) : '0.00000'})`).join(', ') || 'None'}
+- Volume Confirmation: ${marketStructure.volumeInformation?.volumeSpike ? 'Confirmed' : 'Normal'}
+- ATR: ${typeof marketStructure.volatilityInformation?.atr === 'number' ? marketStructure.volatilityInformation.atr.toFixed(5) : '0.00000'}
 
 User's Trading Strategy:
 ${strategyText}
@@ -1337,12 +1351,12 @@ Fallback: NO_TRADE`.trim());
                 riskReward: rr,
                 stopLossBasis: proximityValidation.stopLossBasis,
                 structuralLevel: proximityValidation.structuralLevel,
-                reasoning: [`[Break & Retest Confirmation] Price tapped marked ${currentZone.type} [${currentZone.low.toFixed(5)} - ${currentZone.high.toFixed(5)}] and confirmed retest in ${signalDir} direction while holding tight structural Stop Loss (${sl.toFixed(5)}).`]
+                reasoning: [`[Break & Retest Confirmation] Price tapped marked ${currentZone.type} [${typeof currentZone.low === 'number' ? currentZone.low.toFixed(5) : '0.00000'} - ${typeof currentZone.high === 'number' ? currentZone.high.toFixed(5) : '0.00000'}] and confirmed retest in ${signalDir} direction while holding tight structural Stop Loss (${typeof sl === 'number' ? sl.toFixed(5) : '0.00000'}).`]
               } as any;
             }
           }
         }
-        if (localAnalysis && localAnalysis.signal !== 'NO_TRADE' && localAnalysis.entryPrice) {
+        if (localAnalysis && localAnalysis.signal !== 'NO_TRADE' && localAnalysis.entryPrice && !localAnalysis.stopLoss) {
           const slResult = calculateStructuralStopLoss(
             localAnalysis.signal as 'BUY' | 'SELL',
             localAnalysis.entryPrice,
@@ -1421,7 +1435,7 @@ Fallback: NO_TRADE`.trim());
         });
 
         adaptiveReq = calculateAdaptiveQualityRequirement({
-          baseThreshold: 75,
+          baseThreshold: 70,
           classification: adaptiveResult.classification,
           tier: adaptiveResult.tier,
           expectancyR: adaptiveResult.expectancyR,
@@ -1435,8 +1449,8 @@ Requested: ${symbol} + ${selectedTimeframe} + ${compiledStrategy?.strategy_mode 
 Specific Sample: ${adaptiveResult.sampleSize}
 Fallback: ${adaptiveResult.fallbackLevelUsed}
 Classification: ${adaptiveResult.classification}
-Expectancy: ${adaptiveResult.expectancyR.toFixed(2)}R
-Recent Expectancy: ${adaptiveResult.recentExpectancyR.toFixed(2)}R
+Expectancy: ${typeof adaptiveResult?.expectancyR === 'number' && Number.isFinite(adaptiveResult.expectancyR) ? adaptiveResult.expectancyR.toFixed(2) : '0.00'}R
+Recent Expectancy: ${typeof adaptiveResult?.recentExpectancyR === 'number' && Number.isFinite(adaptiveResult.recentExpectancyR) ? adaptiveResult.recentExpectancyR.toFixed(2) : '0.00'}R
 Base Quality: ${analysis.confidence}%
 Adaptive Requirement: ${adaptiveReq.minRequired}%
 Reason: ${adaptiveReq.reason}
@@ -1567,8 +1581,8 @@ Reason: ${adaptiveReq.reason}
             analysis.signal = 'NO_TRADE';
           }
         } else if (calibrationResult.recommendedAction === 'SELECTIVE') {
-          if (analysis.confidence < 75) {
-            console.log(`[Closed-Loop Calibration] Rejecting ${symbol} under SELECTIVE recommendation because confidence (${analysis.confidence}%) < 75% threshold.`);
+          if (analysis.confidence < 70) {
+            console.log(`[Closed-Loop Calibration] Rejecting ${symbol} under SELECTIVE recommendation because confidence (${analysis.confidence}%) < 70% threshold.`);
             analysis.signal = 'NO_TRADE';
           }
         }
@@ -1653,16 +1667,16 @@ SL: ${posSizeResult.stopLoss}
 TP: ${posSizeResult.takeProfit}
 SL Basis: ${analysis.stopLossBasis || 'STRUCTURAL'}
 Structural Level: ${analysis.structuralLevel !== null && analysis.structuralLevel !== undefined ? analysis.structuralLevel : 'N/A'}
-Stop Distance: ${posSizeResult.stopDistance.toFixed(5)}
-Risk Amount: ${posSizeResult.riskAmount.toFixed(2)}
-Required Lot: ${posSizeResult.exactLotSize}
-Minimum Lot: ${posSizeResult.minLot}
-Executable Lot: ${posSizeResult.accepted ? posSizeResult.calculatedLotSize : 'NONE'}
-Theoretical Expected Loss: ${posSizeResult.expectedLossAtRequiredLot.toFixed(2)}
-Minimum Lot Expected Loss: ${posSizeResult.expectedLossAtMinLot.toFixed(2)}
-Expected Loss: ${posSizeResult.accepted ? posSizeResult.expectedLoss.toFixed(2) : posSizeResult.expectedLossAtRequiredLot.toFixed(2)}
-Accepted: ${posSizeResult.accepted ? 'YES' : 'NO'}
-${analysis.stopLossBasis === 'ATR_FALLBACK' ? `ATR: ${marketStructure.volatilityInformation.atr.toFixed(5)}\nATR Multiplier: 1.5` : ''}
+Stop Distance: ${posSizeResult?.stopDistance !== undefined && posSizeResult?.stopDistance !== null ? Number(posSizeResult.stopDistance).toFixed(5) : '0.00000'}
+Risk Amount: ${posSizeResult?.riskAmount !== undefined && posSizeResult?.riskAmount !== null ? Number(posSizeResult.riskAmount).toFixed(2) : '0.00'}
+Required Lot: ${posSizeResult?.exactLotSize ?? '0.01'}
+Minimum Lot: ${posSizeResult?.minLot ?? '0.01'}
+Executable Lot: ${posSizeResult?.accepted ? posSizeResult?.calculatedLotSize : 'NONE'}
+Theoretical Expected Loss: ${posSizeResult?.expectedLossAtRequiredLot !== undefined && posSizeResult?.expectedLossAtRequiredLot !== null ? Number(posSizeResult.expectedLossAtRequiredLot).toFixed(2) : '0.00'}
+Minimum Lot Expected Loss: ${posSizeResult?.expectedLossAtMinLot !== undefined && posSizeResult?.expectedLossAtMinLot !== null ? Number(posSizeResult.expectedLossAtMinLot).toFixed(2) : '0.00'}
+Expected Loss: ${posSizeResult?.accepted ? (posSizeResult?.expectedLoss !== undefined && posSizeResult?.expectedLoss !== null ? Number(posSizeResult.expectedLoss).toFixed(2) : '0.00') : (posSizeResult?.expectedLossAtRequiredLot !== undefined && posSizeResult?.expectedLossAtRequiredLot !== null ? Number(posSizeResult.expectedLossAtRequiredLot).toFixed(2) : '0.00')}
+Accepted: ${posSizeResult?.accepted ? 'YES' : 'NO'}
+${analysis.stopLossBasis === 'ATR_FALLBACK' ? `ATR: ${marketStructure?.volatilityInformation?.atr !== undefined && marketStructure?.volatilityInformation?.atr !== null ? Number(marketStructure.volatilityInformation.atr).toFixed(5) : '0.00000'}\nATR Multiplier: 1.5` : ''}
 `.trim());
       riskResult = {
         accepted: posSizeResult.accepted,

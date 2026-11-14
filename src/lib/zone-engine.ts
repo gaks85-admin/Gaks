@@ -147,12 +147,29 @@ export function generateZoneId(pair: string, type: ZoneType, direction: string):
  * Calculates ATR and price buffer for zone boundary and invalidation cushioning.
  */
 function calculateBuffer(candles: Candle[], currentPrice: number, pair?: string): { atr: number; buffer: number } {
-  const sym = (pair || '').toUpperCase();
-  const isForex = !sym.includes('XAU') && !sym.includes('GOLD') && !sym.includes('BTC') && !sym.includes('ETH') && currentPrice < 50;
+  const sym = (pair || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
   const isGold = sym.includes('XAU') || sym.includes('GOLD');
+  const isSilver = sym.includes('XAG') || sym.includes('SILVER');
   const isJpy = sym.includes('JPY');
+  const isIndex =
+    sym.includes('NAS') || sym.includes('NDX') || sym.includes('US100') ||
+    sym.includes('US30') || sym.includes('DOW') || sym.includes('SPX') ||
+    sym.includes('SP500') || sym.includes('US500') || sym.includes('US2000') ||
+    sym.includes('GER') || sym.includes('DE30') || sym.includes('DE40') ||
+    sym.includes('UK100') || sym.includes('JP225') || sym.includes('HK50') ||
+    sym.includes('INDEX');
+  const isCrypto =
+    sym.includes('BTC') || sym.includes('ETH') || sym.includes('SOL') ||
+    sym.includes('XRP') || sym.includes('LTC') || sym.includes('ADA') ||
+    sym.includes('DOGE') || sym.includes('BNB') || sym.includes('AVAX') ||
+    sym.includes('DOT') || sym.includes('LINK') || sym.includes('MATIC') ||
+    sym.includes('UNI') || sym.includes('ATOM') || sym.includes('TON') ||
+    sym.includes('SUI') || sym.includes('NEAR') || sym.includes('TRX') ||
+    sym.endsWith('USDT') || sym.endsWith('USDC') || sym.endsWith('BUSD') ||
+    sym.includes('CRYPTO');
+  const isForex = !isGold && !isSilver && !isIndex && !isCrypto && !isJpy && currentPrice < 50;
 
-  let atr = currentPrice * 0.002;
+  let atr = currentPrice * (isForex ? 0.002 : 0.003);
   if (candles && candles.length >= 2) {
     let totalTr = 0;
     for (let i = 1; i < candles.length; i++) {
@@ -168,13 +185,17 @@ function calculateBuffer(candles: Candle[], currentPrice: number, pair?: string)
   let buffer: number;
   if (isGold) {
     buffer = Math.min(Math.max(atr * 0.15, 0.40), 2.50);
+  } else if (isSilver) {
+    buffer = Math.min(Math.max(atr * 0.15, 0.03), 0.25);
+  } else if (isIndex) {
+    buffer = Math.min(Math.max(atr * 0.15, 2.0), 15.0);
   } else if (isJpy) {
     buffer = Math.min(Math.max(atr * 0.15, 0.02), 0.06);
   } else if (isForex) {
-    buffer = Math.min(Math.max(atr * 0.15, 0.00015), 0.00030); // 1.5 to 3.0 pips for standard Forex!
+    buffer = Math.min(Math.max(atr * 0.15, 0.00015), 0.00030);
   } else {
-    // Crypto / Indices
-    buffer = Math.min(Math.max(atr * 0.15, currentPrice * 0.0005), currentPrice * 0.002);
+    // Crypto (works cleanly for $0.15 DOGE, $0.55 XRP, $76 SOL, $3000 ETH, $80k BTC)
+    buffer = Math.min(Math.max(atr * 0.15, currentPrice * 0.0005), currentPrice * 0.003);
   }
 
   return { atr, buffer };
@@ -774,7 +795,7 @@ export function identifyCandidateZones(
 
   // Filter out any candidate zones that were previously rejected by quality control features
   // (Prevents repeatedly dwelling on or re-marking the same rejected zone)
-  if (rejectedZones && rejectedZones.length > 0 && filteredCandidates.length > 0) {
+  if (Array.isArray(rejectedZones) && rejectedZones.length > 0 && filteredCandidates.length > 0) {
     const originalCount = filteredCandidates.length;
     filteredCandidates = filteredCandidates.filter(candidate => {
       const isRejected = rejectedZones.some(rz => {
@@ -1107,10 +1128,12 @@ export function evaluateZoneState(
 
   // Check if previously CONFIRMED zone has already departed far beyond entry window
   if (zone.status === 'CONFIRMED') {
-    const pipSize = (zone.high > 50) ? 0.01 : 0.0001;
+    const zPair = (marketStructure?.pair || zone.id || '').toUpperCase();
+    const isIdxOrBigCrypto = zPair.includes('NAS') || zPair.includes('US30') || zPair.includes('SPX') || zPair.includes('GER') || zPair.includes('UK100') || zone.high >= 1000;
+    const pipSize = isIdxOrBigCrypto ? 1.0 : (zone.high > 10 ? 0.01 : 0.0001);
     const departure = zone.direction === 'SELL' ? (zone.low - activePrice) : (activePrice - zone.high);
     const departurePips = departure / pipSize;
-    const maxDepartureTolerance = Math.max(effectiveAtr * 2.5, pipSize * 30);
+    const maxDepartureTolerance = Math.max(effectiveAtr * 3.0, pipSize * 30);
     if (departure > maxDepartureTolerance) {
       updatedZone.status = 'EXPIRED';
       return {
@@ -1317,10 +1340,12 @@ export function evaluateZoneState(
     }
 
     if (madeRetest) {
-      const pipSize = (zone.high > 50) ? 0.01 : 0.0001;
+      const zPair = (marketStructure?.pair || zone.id || '').toUpperCase();
+      const isIdxOrBigCrypto = zPair.includes('NAS') || zPair.includes('US30') || zPair.includes('SPX') || zPair.includes('GER') || zPair.includes('UK100') || zone.high >= 1000;
+      const pipSize = isIdxOrBigCrypto ? 1.0 : (zone.high > 10 ? 0.01 : 0.0001);
       const departure = zone.direction === 'SELL' ? (zone.low - currentPrice) : (currentPrice - zone.high);
       const departurePips = departure / pipSize;
-      const maxDepartureTolerance = Math.max(effectiveAtr * 2.5, pipSize * 30);
+      const maxDepartureTolerance = Math.max(effectiveAtr * 3.0, pipSize * 30);
       if (departure > maxDepartureTolerance) {
         updatedZone.status = 'EXPIRED';
         return {

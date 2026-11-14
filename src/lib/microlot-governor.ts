@@ -23,8 +23,9 @@ export class SupervisedMicrolotGovernor {
   ) {}
 
   async validateExecution(symbol: string, riskAmount: number): Promise<{ accepted: boolean; reason?: string }> {
+    const cleanSym = (symbol || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
     // 1. Check Symbol
-    if (!this.limits.allowedSymbols.includes(symbol)) {
+    if (!this.limits.allowedSymbols.includes('*') && !this.limits.allowedSymbols.includes(symbol) && !this.limits.allowedSymbols.includes(cleanSym)) {
       return { accepted: false, reason: `Symbol ${symbol} not in allowed microlot list.` };
     }
 

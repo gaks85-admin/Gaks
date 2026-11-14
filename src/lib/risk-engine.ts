@@ -15,8 +15,43 @@ export interface InstrumentSpec {
   source: string;
 }
 
-export function resolveInstrumentSpec(symbol: string): InstrumentSpec {
+const CRYPTO_BASES = new Set([
+  'BTC', 'ETH', 'SOL', 'XRP', 'LTC', 'ADA', 'DOGE', 'BNB', 'AVAX', 'DOT',
+  'LINK', 'MATIC', 'POL', 'UNI', 'NEAR', 'TRX', 'ATOM', 'BCH', 'SHIB', 'TON',
+  'SUI', 'PEPE', 'ARB', 'OP', 'APT', 'AAVE', 'ALGO', 'FIL', 'ICP', 'VET',
+  'HBAR', 'XLM', 'FTM', 'SAND', 'MANA', 'AXS', 'CRV', 'MKR', 'SNX', 'COMP',
+  'INJ', 'RUNE', 'SEI', 'TIA', 'WIF', 'BONK', 'FLOKI', 'ETC', 'XMR', 'ZEC',
+  'DASH', 'EOS', 'XTZ', 'THETA', 'KAVA', 'ZIL', 'ENS', 'LDO', 'CRYPTO'
+]);
+
+const APPROX_USD_RATES: Record<string, number> = {
+  USD: 1.0,
+  USDT: 1.0,
+  USDC: 1.0,
+  BUSD: 1.0,
+  EUR: 1.08,
+  GBP: 1.27,
+  AUD: 0.65,
+  NZD: 0.60,
+  CHF: 1 / 0.88,
+  CAD: 1 / 1.38,
+  JPY: 1 / 150.0,
+  HKD: 1 / 7.8,
+  SGD: 1 / 1.34,
+  CNH: 1 / 7.2,
+  CNY: 1 / 7.2,
+  SEK: 1 / 10.5,
+  NOK: 1 / 10.8,
+  DKK: 1 / 6.9,
+  MXN: 1 / 18.0,
+  ZAR: 1 / 18.0,
+  TRY: 1 / 34.0,
+  PLN: 1 / 4.0
+};
+
+export function resolveInstrumentSpec(symbol: string, priceHint?: number): InstrumentSpec {
   const cleanSym = (symbol || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const cryptoBase = cleanSym.replace(/(USDT|USDC|BUSD|USD|EUR|GBP|JPY|AUD|CAD|CHF)$/, '');
 
   let assetClass: AssetClass = 'Forex';
   let contractSize = 100000;
@@ -29,11 +64,8 @@ export function resolveInstrumentSpec(symbol: string): InstrumentSpec {
   let source = 'Forex Specification Resolver';
 
   if (
-    cleanSym.includes('BTC') ||
-    cleanSym.includes('ETH') ||
-    cleanSym.includes('SOL') ||
-    cleanSym.includes('XRP') ||
-    cleanSym.includes('LTC') ||
+    CRYPTO_BASES.has(cleanSym) ||
+    CRYPTO_BASES.has(cryptoBase) ||
     cleanSym.includes('CRYPTO') ||
     cleanSym.endsWith('USDT') ||
     cleanSym.endsWith('USDC') ||
@@ -42,11 +74,17 @@ export function resolveInstrumentSpec(symbol: string): InstrumentSpec {
     assetClass = 'Crypto';
     contractSize = 1;
     minLot = 0.01;
-    maxLot = 100;
+    maxLot = (cryptoBase === 'BTC' || cleanSym.startsWith('BTC')) ? 100 : 10000;
     lotStep = 0.01;
-    tickSize = 0.01;
-    pipSize = 1.0; // For crypto, usually 1 unit is a "pip" in many contexts, or 0.01
-    quoteCurrency = cleanSym.endsWith('USDT') ? 'USDT' : (cleanSym.endsWith('USDC') ? 'USDC' : 'USD');
+    tickSize = priceHint !== undefined && priceHint > 0 && priceHint < 10 ? 0.0001 : 0.01;
+    pipSize = priceHint !== undefined && priceHint > 0 ? (priceHint >= 1000 ? 1.0 : priceHint >= 50 ? 0.01 : priceHint >= 1 ? 0.001 : 0.0001) : 1.0;
+    quoteCurrency = cleanSym.endsWith('USDT')
+      ? 'USDT'
+      : cleanSym.endsWith('USDC')
+        ? 'USDC'
+        : cleanSym.endsWith('BUSD')
+          ? 'BUSD'
+          : (cleanSym.length >= 6 && !cleanSym.endsWith('USD') ? cleanSym.substring(cleanSym.length - 3) : 'USD');
     source = 'Crypto Specification Resolver';
   } else if (
     cleanSym.includes('XAU') ||
@@ -60,28 +98,70 @@ export function resolveInstrumentSpec(symbol: string): InstrumentSpec {
     maxLot = 100;
     lotStep = 0.01;
     tickSize = 0.01;
-    pipSize = 0.01; // Match test expectation for Gold
-    quoteCurrency = 'USD'; // Metals are usually priced in USD
+    pipSize = 0.01;
+    quoteCurrency = 'USD';
     source = 'Metals Specification Resolver';
   } else if (
     cleanSym.includes('NAS') ||
+    cleanSym.includes('NDX') ||
+    cleanSym.includes('US100') ||
+    cleanSym.includes('USTEC') ||
     cleanSym.includes('US30') ||
-    cleanSym.includes('SPX') ||
-    cleanSym.includes('US500') ||
-    cleanSym.includes('GER') ||
-    cleanSym.includes('UK100') ||
-    cleanSym.includes('INDEX') ||
+    cleanSym.includes('DJ30') ||
+    cleanSym.includes('WS30') ||
     cleanSym.includes('DOW') ||
-    cleanSym.includes('US100')
+    cleanSym.includes('SPX') ||
+    cleanSym.includes('SP500') ||
+    cleanSym.includes('US500') ||
+    cleanSym.includes('US2000') ||
+    cleanSym.includes('RUT') ||
+    cleanSym.includes('GER') ||
+    cleanSym.includes('DE30') ||
+    cleanSym.includes('DE40') ||
+    cleanSym.includes('DAX') ||
+    cleanSym.includes('UK100') ||
+    cleanSym.includes('FTSE') ||
+    cleanSym.includes('FRA40') ||
+    cleanSym.includes('CAC40') ||
+    cleanSym.includes('EU50') ||
+    cleanSym.includes('STOXX') ||
+    cleanSym.includes('JP225') ||
+    cleanSym.includes('NIKKEI') ||
+    cleanSym.includes('HK50') ||
+    cleanSym.includes('HSI') ||
+    cleanSym.includes('AUS200') ||
+    cleanSym.includes('ASX200') ||
+    cleanSym.includes('INDEX')
   ) {
     assetClass = 'Indices';
     contractSize = 1;
-    minLot = 0.1; // Indices usually have 0.1 min lot
+    minLot = 0.1;
     maxLot = 1000;
     lotStep = 0.1;
     tickSize = 0.1;
-    pipSize = 1.0; // Indices pip is usually 1.0
-    quoteCurrency = (cleanSym.includes('GER') || cleanSym.includes('DE30') || cleanSym.includes('DE40')) ? 'EUR' : (cleanSym.includes('UK100') ? 'GBP' : 'USD');
+    pipSize = 1.0;
+    if (
+      cleanSym.includes('GER') ||
+      cleanSym.includes('DE30') ||
+      cleanSym.includes('DE40') ||
+      cleanSym.includes('DAX') ||
+      cleanSym.includes('FRA40') ||
+      cleanSym.includes('CAC40') ||
+      cleanSym.includes('EU50') ||
+      cleanSym.includes('STOXX')
+    ) {
+      quoteCurrency = 'EUR';
+    } else if (cleanSym.includes('UK100') || cleanSym.includes('FTSE')) {
+      quoteCurrency = 'GBP';
+    } else if (cleanSym.includes('JP225') || cleanSym.includes('NIKKEI')) {
+      quoteCurrency = 'JPY';
+    } else if (cleanSym.includes('HK50') || cleanSym.includes('HSI')) {
+      quoteCurrency = 'HKD';
+    } else if (cleanSym.includes('AUS200') || cleanSym.includes('ASX200')) {
+      quoteCurrency = 'AUD';
+    } else {
+      quoteCurrency = 'USD';
+    }
     source = 'Indices Specification Resolver';
   } else {
     assetClass = 'Forex';
@@ -89,10 +169,8 @@ export function resolveInstrumentSpec(symbol: string): InstrumentSpec {
     minLot = 0.01;
     maxLot = 100;
     lotStep = 0.01;
-    // JPY pairs use 3 decimals (0.001) for ticks, others usually 5 (0.00001)
     tickSize = cleanSym.includes('JPY') ? 0.001 : 0.00001;
-    // Pips: Match existing test assumptions (JPY=0.001, Others=0.0001)
-    pipSize = cleanSym.includes('JPY') ? 0.001 : 0.0001;
+    pipSize = cleanSym.includes('JPY') ? 0.01 : 0.0001;
     quoteCurrency = cleanSym.length >= 6 ? cleanSym.substring(cleanSym.length - 3) : 'USD';
     source = 'Forex Specification Resolver';
   }
@@ -134,7 +212,7 @@ export interface PositionSizeParams {
   executedEntry?: number;
   stopLoss: number;
   takeProfit?: number;
-  geminiTp?: number;
+  geminiTp?: number | null;
   symbol: string;
   instrument?: string;
   direction?: 'BUY' | 'SELL';
@@ -149,7 +227,7 @@ export interface PositionSizeParams {
   slippagePips?: number;
   commissionPerLot?: number;
   accountCurrency?: string;
-  conversionRate?: number; // Optional: Force a specific conversion rate
+  conversionRate?: number;
 }
 
 export interface PositionSizeResult {
@@ -162,6 +240,7 @@ export interface PositionSizeResult {
   takeProfit?: number;
   riskAmount: number;
   expectedLoss: number;
+  expectedProfit?: number;
   reason?: string;
   skipReason?: string;
   executableLotDisplay?: string;
@@ -176,7 +255,62 @@ export interface PositionSizeResult {
   expectedLossAtMinLot?: number;
 }
 
-export function extractRiskPreferences(prefsRecord?: Partial<TradingPreferences> | null, userId?: string) {
+function getLotTypeLabel(lot: number): string {
+  if (lot >= 1.0) return 'Standard Lot';
+  if (lot >= 0.1) return 'Mini Lot';
+  return 'Micro Lot';
+}
+
+function normalizeCurrency(curr: string): string {
+  const c = (curr || 'USD').toUpperCase().trim();
+  if (c === 'USDT' || c === 'USDC' || c === 'BUSD') return 'USD';
+  return c;
+}
+
+function resolveQuoteToAccountConversionFactor(
+  spec: InstrumentSpec,
+  accountCurrency: string,
+  entryPrice: number,
+  explicitConversionRate?: number
+): number {
+  if (explicitConversionRate !== undefined && !isNaN(explicitConversionRate) && explicitConversionRate > 0) {
+    return explicitConversionRate;
+  }
+
+  const normQuote = normalizeCurrency(spec.quoteCurrency);
+  const normAccount = normalizeCurrency(accountCurrency);
+
+  if (normQuote === normAccount) {
+    return 1.0;
+  }
+
+  if (spec.symbol.startsWith(normAccount) && spec.symbol.endsWith(normQuote) && entryPrice > 0) {
+    return 1 / entryPrice;
+  }
+
+  if (spec.symbol.startsWith(normQuote) && spec.symbol.endsWith(normAccount) && entryPrice > 0) {
+    return 1 / entryPrice;
+  }
+
+  const quoteUsd = APPROX_USD_RATES[normQuote];
+  const accountUsd = APPROX_USD_RATES[normAccount];
+  if (quoteUsd && accountUsd && accountUsd > 0) {
+    return quoteUsd / accountUsd;
+  }
+
+  return 1.0;
+}
+
+function getPricePrecision(spec: InstrumentSpec, price: number): number {
+  if (spec.assetClass === 'Forex') {
+    return spec.symbol.includes('JPY') ? 3 : 5;
+  }
+  if (price >= 1000) return 2;
+  if (price >= 10) return 3;
+  return 5;
+}
+
+export function extractRiskPreferences(prefsRecord?: Partial<TradingPreferences> | null, _userId?: string) {
   let accountSize = 10000;
   if (prefsRecord?.custom_capital) {
     const parsed = parseFloat(String(prefsRecord.custom_capital).replace(/[^0-9.]/g, ''));
@@ -236,14 +370,57 @@ export function calculatePositionSize(params: PositionSizeParams): PositionSizeR
     direction = 'BUY'
   } = params;
 
-  if (accountSize <= 0) {
+  const dir = params.direction
+    ? (String(params.direction).toUpperCase() === 'SELL' ? 'SELL' : 'BUY')
+    : (stopLoss > entryPrice ? 'SELL' : 'BUY');
+
+  if (!Number.isFinite(accountSize) || accountSize <= 0) {
+    const reason = 'Invalid account size';
     return {
       accepted: false,
       lots: 0,
       calculatedLotSize: 0,
       riskAmount: 0,
       expectedLoss: 0,
-      reason: 'Invalid account size'
+      expectedProfit: 0,
+      executableLotDisplay: 'NONE',
+      positionMode,
+      exactLotSize: 0,
+      stopDistance: 0,
+      minLot,
+      lotType: getLotTypeLabel(minLot),
+      contractSize,
+      expectedLossAtRequiredLot: 0,
+      expectedLossAtMinLot: 0,
+      rrValidationPassed: false,
+      reason,
+      skipReason: reason
+    };
+  }
+
+  if (!Number.isFinite(entryPrice) || entryPrice <= 0 || !Number.isFinite(stopLoss) || stopLoss <= 0) {
+    const reason = 'Invalid entry price or stop loss';
+    return {
+      accepted: false,
+      lots: 0,
+      calculatedLotSize: 0,
+      entryPrice,
+      stopLoss,
+      riskAmount: 0,
+      expectedLoss: 0,
+      expectedProfit: 0,
+      executableLotDisplay: 'NONE',
+      positionMode,
+      exactLotSize: 0,
+      stopDistance: 0,
+      minLot,
+      lotType: getLotTypeLabel(minLot),
+      contractSize,
+      expectedLossAtRequiredLot: 0,
+      expectedLossAtMinLot: 0,
+      rrValidationPassed: false,
+      reason,
+      skipReason: reason
     };
   }
 
@@ -251,55 +428,246 @@ export function calculatePositionSize(params: PositionSizeParams): PositionSizeR
   const spreadInPrice = spreadPips * pipsToPrice;
   const slippageInPrice = slippagePips * pipsToPrice;
 
-  // Realized SL distance includes spread and slippage
-  // For a BUY: Executed Entry = theoretical + slippage + 0.5*spread; Exit at SL = stopLoss - slippage
-  // Total Distance = (theoretical + slippage + 0.5*spread) - (stopLoss - slippage)
-  //                = (theoretical - stopLoss) + 2*slippage + 0.5*spread
-  
   const theoreticalSlDistance = Math.abs(entryPrice - stopLoss);
   const realizedSlDistance = theoreticalSlDistance + (2 * slippageInPrice) + (spreadInPrice / 2);
 
   if (theoreticalSlDistance <= 0) {
+    const reason = 'Stop loss is equal to entry price';
     return {
       accepted: false,
       lots: 0,
       calculatedLotSize: 0,
+      entryPrice,
+      stopLoss,
       riskAmount: 0,
       expectedLoss: 0,
-      reason: 'Stop loss is equal to entry price'
+      expectedProfit: 0,
+      executableLotDisplay: 'NONE',
+      positionMode,
+      exactLotSize: 0,
+      stopDistance: 0,
+      minLot,
+      lotType: getLotTypeLabel(minLot),
+      contractSize,
+      expectedLossAtRequiredLot: 0,
+      expectedLossAtMinLot: 0,
+      rrValidationPassed: false,
+      reason,
+      skipReason: reason
     };
   }
 
-  // 1. Handle FIXED_LOT Mode
-  if (positionMode === 'FIXED_LOT' && typeof preferredLotSize === 'number' && preferredLotSize > 0) {
-    const finalLots = Math.min(Math.max(preferredLotSize, minLot), maxLot);
-    const lossPerLot = realizedSlDistance * contractSize;
-    const commissionCost = Math.round((commissionPerLot * finalLots) * 100) / 100;
-    const expectedLoss = Math.round((finalLots * lossPerLot + commissionCost) * 100) / 100;
+  // Resolve Take Profit: explicit takeProfit -> geminiTp -> derived from riskRewardStr
+  const explicitTpRaw =
+    params.takeProfit !== undefined && params.takeProfit !== null && Number.isFinite(Number(params.takeProfit)) && Number(params.takeProfit) > 0
+      ? Number(params.takeProfit)
+      : params.geminiTp !== undefined && params.geminiTp !== null && Number.isFinite(Number(params.geminiTp)) && Number(params.geminiTp) > 0
+        ? Number(params.geminiTp)
+        : undefined;
 
-    // Reject trade if expected loss exceeds account balance
-    if (expectedLoss >= accountSize) {
+  const targetRr = parseRiskRewardRatio(params.riskRewardStr);
+  const priceDecimals = getPricePrecision(spec, entryPrice);
+  const resolvedTp = explicitTpRaw !== undefined
+    ? explicitTpRaw
+    : Number(
+        (dir === 'BUY'
+          ? entryPrice + theoreticalSlDistance * targetRr
+          : entryPrice - theoreticalSlDistance * targetRr
+        ).toFixed(priceDecimals)
+      );
+
+  // Directional geometry check (BUY: SL < Entry < TP, SELL: TP < Entry < SL)
+  const geometryValid = dir === 'BUY'
+    ? (stopLoss < entryPrice && resolvedTp > entryPrice)
+    : (stopLoss > entryPrice && resolvedTp < entryPrice);
+
+  if (!geometryValid) {
+    const reason = dir === 'BUY'
+      ? `Invalid BUY geometry: requires SL (${stopLoss}) < Entry (${entryPrice}) < TP (${resolvedTp}).`
+      : `Invalid SELL geometry: requires TP (${resolvedTp}) < Entry (${entryPrice}) < SL (${stopLoss}).`;
+    return {
+      accepted: false,
+      lots: 0,
+      calculatedLotSize: 0,
+      actualRr: 0,
+      rrValidationPassed: false,
+      entryPrice,
+      stopLoss,
+      takeProfit: resolvedTp,
+      riskAmount: 0,
+      expectedLoss: 0,
+      expectedProfit: 0,
+      executableLotDisplay: 'NONE',
+      positionMode,
+      exactLotSize: 0,
+      stopDistance: theoreticalSlDistance,
+      minLot,
+      lotType: getLotTypeLabel(minLot),
+      contractSize,
+      expectedLossAtRequiredLot: 0,
+      expectedLossAtMinLot: 0,
+      reason,
+      skipReason: reason
+    };
+  }
+
+  const tpDistance = Math.abs(resolvedTp - entryPrice);
+  const actualRr = theoreticalSlDistance > 0
+    ? Math.round((tpDistance / theoreticalSlDistance) * 100) / 100
+    : 0;
+
+  // Validate explicit TP meets minimum R:R target
+  if (explicitTpRaw !== undefined && actualRr < targetRr - 0.05) {
+    const reason = `R:R validation failed: Take Profit yields ${actualRr}:1, below required minimum 1:${targetRr}.`;
+    return {
+      accepted: false,
+      lots: 0,
+      calculatedLotSize: 0,
+      actualRr,
+      rrValidationPassed: false,
+      entryPrice,
+      stopLoss,
+      takeProfit: resolvedTp,
+      riskAmount: 0,
+      expectedLoss: 0,
+      expectedProfit: 0,
+      executableLotDisplay: 'NONE',
+      positionMode,
+      exactLotSize: 0,
+      stopDistance: theoreticalSlDistance,
+      minLot,
+      lotType: getLotTypeLabel(minLot),
+      contractSize,
+      expectedLossAtRequiredLot: 0,
+      expectedLossAtMinLot: 0,
+      reason,
+      skipReason: reason
+    };
+  }
+
+  const accountCurrency = params.accountCurrency || 'USD';
+  const conversionFactor = resolveQuoteToAccountConversionFactor(spec, accountCurrency, entryPrice, params.conversionRate);
+  const lossPerLot = realizedSlDistance * contractSize * conversionFactor;
+  const expectedLossAtMinLot = Math.round((minLot * lossPerLot + minLot * commissionPerLot) * 100) / 100;
+
+  // 1. Handle FIXED_LOT Mode
+  if (positionMode === 'FIXED_LOT') {
+    if (typeof preferredLotSize !== 'number' || !Number.isFinite(preferredLotSize) || preferredLotSize <= 0) {
+      const reason = 'Fixed lot mode enabled but no valid preferred lot size provided.';
       return {
         accepted: false,
         lots: 0,
-        calculatedLotSize: finalLots,
-        riskAmount: expectedLoss,
-        expectedLoss,
-        reason: `Fixed lot order rejected: Expected loss ($${expectedLoss.toFixed(2)}) exceeds available account balance ($${accountSize.toFixed(2)}).`
+        calculatedLotSize: 0,
+        actualRr,
+        rrValidationPassed: true,
+        entryPrice,
+        stopLoss,
+        takeProfit: resolvedTp,
+        riskAmount: 0,
+        expectedLoss: 0,
+        expectedProfit: 0,
+        executableLotDisplay: 'NONE',
+        positionMode: 'FIXED_LOT',
+        exactLotSize: 0,
+        stopDistance: theoreticalSlDistance,
+        minLot,
+        lotType: getLotTypeLabel(minLot),
+        contractSize,
+        expectedLossAtRequiredLot: 0,
+        expectedLossAtMinLot,
+        reason,
+        skipReason: reason
       };
     }
 
-    // STRICT RISK CHECK: If a risk percentage is provided, enforce it as a hard cap even in fixed lot mode
+    if (preferredLotSize < minLot - 1e-9) {
+      const reason = `Fixed lot (${preferredLotSize}) is below broker minimum lot (${minLot}).`;
+      return {
+        accepted: false,
+        lots: 0,
+        calculatedLotSize: 0,
+        actualRr,
+        rrValidationPassed: true,
+        entryPrice,
+        stopLoss,
+        takeProfit: resolvedTp,
+        riskAmount: 0,
+        expectedLoss: 0,
+        expectedProfit: 0,
+        executableLotDisplay: 'NONE',
+        positionMode: 'FIXED_LOT',
+        exactLotSize: preferredLotSize,
+        stopDistance: theoreticalSlDistance,
+        minLot,
+        lotType: getLotTypeLabel(minLot),
+        contractSize,
+        expectedLossAtRequiredLot: Math.round((preferredLotSize * lossPerLot + preferredLotSize * commissionPerLot) * 100) / 100,
+        expectedLossAtMinLot,
+        reason,
+        skipReason: reason
+      };
+    }
+
+    const finalLots = Math.min(preferredLotSize, maxLot);
+    const commissionCost = Math.round((commissionPerLot * finalLots) * 100) / 100;
+    const expectedLoss = Math.round((finalLots * lossPerLot + commissionCost) * 100) / 100;
+    const expectedProfit = Math.round((finalLots * tpDistance * contractSize * conversionFactor) * 100) / 100;
+
+    if (expectedLoss >= accountSize) {
+      const reason = `Fixed lot order rejected: Expected loss ($${expectedLoss.toFixed(2)}) exceeds available account balance ($${accountSize.toFixed(2)}).`;
+      return {
+        accepted: false,
+        lots: 0,
+        calculatedLotSize: 0,
+        actualRr,
+        rrValidationPassed: true,
+        entryPrice,
+        stopLoss,
+        takeProfit: resolvedTp,
+        riskAmount: expectedLoss,
+        expectedLoss,
+        expectedProfit: 0,
+        executableLotDisplay: 'NONE',
+        positionMode: 'FIXED_LOT',
+        exactLotSize: preferredLotSize,
+        stopDistance: theoreticalSlDistance,
+        minLot,
+        lotType: getLotTypeLabel(minLot),
+        contractSize,
+        expectedLossAtRequiredLot: expectedLoss,
+        expectedLossAtMinLot,
+        reason,
+        skipReason: reason
+      };
+    }
+
     if (riskPercentage > 0) {
-      const riskAmount = (accountSize * riskPercentage) / 100;
-      if (expectedLoss > Math.round(riskAmount * 100) / 100) {
+      const riskBudget = (accountSize * riskPercentage) / 100;
+      if (expectedLoss > Math.round(riskBudget * 100) / 100) {
+        const reason = `Fixed lot order rejected: A ${finalLots} lot position risks $${expectedLoss.toFixed(2)} (including spreads, slippage, and commission), which exceeds your ${riskPercentage}% risk budget ($${riskBudget.toFixed(2)}).`;
         return {
           accepted: false,
           lots: 0,
-          calculatedLotSize: finalLots,
-          riskAmount: Math.round(riskAmount * 100) / 100,
+          calculatedLotSize: 0,
+          actualRr,
+          rrValidationPassed: true,
+          entryPrice,
+          stopLoss,
+          takeProfit: resolvedTp,
+          riskAmount: Math.round(riskBudget * 100) / 100,
           expectedLoss,
-          reason: `Fixed lot order rejected: A ${finalLots} lot position risks $${expectedLoss.toFixed(2)} (including spreads, slippage, and commission), which exceeds your ${riskPercentage}% risk budget ($${riskAmount.toFixed(2)}).`
+          expectedProfit: 0,
+          executableLotDisplay: 'NONE',
+          positionMode: 'FIXED_LOT',
+          exactLotSize: preferredLotSize,
+          stopDistance: theoreticalSlDistance,
+          minLot,
+          lotType: getLotTypeLabel(minLot),
+          contractSize,
+          expectedLossAtRequiredLot: expectedLoss,
+          expectedLossAtMinLot,
+          reason,
+          skipReason: reason
         };
       }
     }
@@ -308,109 +676,120 @@ export function calculatePositionSize(params: PositionSizeParams): PositionSizeR
       accepted: true,
       lots: finalLots,
       calculatedLotSize: finalLots,
+      actualRr,
+      rrValidationPassed: true,
       entryPrice,
       stopLoss,
-      takeProfit: params.takeProfit,
+      takeProfit: resolvedTp,
       riskAmount: expectedLoss,
-      expectedLoss
+      expectedLoss,
+      expectedProfit,
+      executableLotDisplay: finalLots.toFixed(2),
+      positionMode: 'FIXED_LOT',
+      exactLotSize: finalLots,
+      stopDistance: theoreticalSlDistance,
+      minLot,
+      lotType: getLotTypeLabel(finalLots),
+      contractSize,
+      expectedLossAtRequiredLot: expectedLoss,
+      expectedLossAtMinLot
     };
   }
 
-  // 2. Handle AUTO_RISK Mode (Calculated from percentage)
-  if (riskPercentage <= 0) {
+  // 2. Handle AUTO_RISK Mode
+  if (!Number.isFinite(riskPercentage) || riskPercentage <= 0) {
+    const reason = 'Invalid risk percentage';
     return {
       accepted: false,
       lots: 0,
       calculatedLotSize: 0,
+      entryPrice,
+      stopLoss,
+      takeProfit: resolvedTp,
       riskAmount: 0,
       expectedLoss: 0,
-      reason: 'Invalid risk percentage'
+      expectedProfit: 0,
+      executableLotDisplay: 'NONE',
+      positionMode: 'AUTO_RISK',
+      exactLotSize: 0,
+      stopDistance: theoreticalSlDistance,
+      minLot,
+      lotType: getLotTypeLabel(minLot),
+      contractSize,
+      expectedLossAtRequiredLot: 0,
+      expectedLossAtMinLot,
+      rrValidationPassed: true,
+      reason,
+      skipReason: reason
     };
   }
 
   const riskAmount = (accountSize * riskPercentage) / 100;
-  
-  // Handle Quote-to-Account Currency Conversion for Risk Calculation
-  const quoteCurrency = spec.quoteCurrency;
-  const accountCurrency = params.accountCurrency || 'USD';
-  let conversionFactor = 1.0;
+  const rawLots = riskAmount / (lossPerLot + commissionPerLot);
+  const exactLotSize = Math.round(rawLots * 10000) / 10000;
+  const expectedLossAtRequiredLot = Math.round((rawLots * lossPerLot + rawLots * commissionPerLot) * 100) / 100;
 
-  if (params.conversionRate !== undefined && !isNaN(params.conversionRate)) {
-    conversionFactor = params.conversionRate;
-  } else if (quoteCurrency !== accountCurrency) {
-    // If quote is JPY and account is USD, we need USDJPY rate.
-    // At the time of entry, we use entryPrice.
-    if (spec.symbol.startsWith(accountCurrency) && spec.symbol.endsWith(quoteCurrency)) {
-      // e.g. USDJPY: Quote is JPY, Account is USD. PnL is in JPY. USD = JPY / entryPrice
-      conversionFactor = 1 / entryPrice;
-    } else if (spec.symbol.startsWith(quoteCurrency) && spec.symbol.endsWith(accountCurrency)) {
-      // e.g. EURUSD: Quote is USD, Account is EUR. PnL is in USD. EUR = USD / entryPrice
-      conversionFactor = 1 / entryPrice;
-    } else {
-      // Fallback: If we can't find a direct conversion, we should theoretically look up a conversion pair.
-      // For now, we keep the strict check but allow it to be bypassed via params.conversionRate.
+  const steppedLots = Math.floor((rawLots + 1e-9) / lotStep) * lotStep;
+  const roundedLots = Math.round(steppedLots * 100) / 100;
+  let finalLots = roundedLots;
+
+  if (finalLots < minLot) {
+    const roundedRiskBudget = Math.floor(riskAmount * 100) / 100;
+    if (expectedLossAtMinLot > roundedRiskBudget + 0.00001) {
+      const reason = `Order rejected: On a $${accountSize.toFixed(2)} account, the smallest trade (${minLot} lot) risks $${expectedLossAtMinLot.toFixed(2)} (including commissions/costs), which exceeds your ${riskPercentage}% budget ($${roundedRiskBudget.toFixed(2)}).`;
       return {
         accepted: false,
         lots: 0,
         calculatedLotSize: 0,
-        riskAmount: 0,
-        expectedLoss: 0,
-        reason: `Unsupported currency conversion: Quote currency "${quoteCurrency}" differs from Account currency "${accountCurrency}". Please provide an explicit conversionRate or use a direct pair.`
-      };
-    }
-  }
-
-  const lossPerLot = realizedSlDistance * contractSize * conversionFactor;
-  
-  // To find the max lots while staying within risk budget:
-  // (lots * lossPerLot) + (lots * commissionPerLot) <= riskAmount
-  // lots * (lossPerLot + commissionPerLot) <= riskAmount
-  // lots <= riskAmount / (lossPerLot + commissionPerLot)
-  
-  const rawLots = riskAmount / (lossPerLot + commissionPerLot);
-
-  // Round down to lotStep to stay WITHIN risk budget
-  // Add a tiny epsilon to handle floating point precision (e.g. 0.1 / 0.01 = 9.99999)
-  const steppedLots = Math.floor((rawLots + 1e-9) / lotStep) * lotStep;
-  const roundedLots = Math.round(steppedLots * 100) / 100;
-
-  let finalLots = roundedLots;
-  
-  // If calculated lots is zero (because budget is too small for 0.01), check if 0.01 lot is acceptable
-  if (finalLots < minLot) {
-    const commissionCostAtMin = Math.round((minLot * commissionPerLot) * 100) / 100;
-    const lossAtMinLot = minLot * lossPerLot + commissionCostAtMin;
-    const minLotExpectedLoss = Math.round(lossAtMinLot * 100) / 100;
-
-    // STRICT ENFORCEMENT: If min lot risks more than the budget, REJECT.
-    // This matches real AI behavior where signals are rejected if they are too risky for the account.
-    const roundedRiskBudget = Math.floor(riskAmount * 100) / 100;
-    if (minLotExpectedLoss > roundedRiskBudget + 0.00001) {
-      return {
-        accepted: false,
-        lots: 0,
-        calculatedLotSize: minLot,
+        actualRr,
+        rrValidationPassed: true,
+        entryPrice,
+        stopLoss,
+        takeProfit: resolvedTp,
         riskAmount: roundedRiskBudget,
-        expectedLoss: minLotExpectedLoss,
+        expectedLoss: expectedLossAtMinLot,
+        expectedProfit: 0,
         executableLotDisplay: 'NONE',
-        positionMode: params.positionMode || 'AUTO_RISK',
-        reason: `Order rejected: On a $${accountSize.toFixed(2)} account, the smallest trade (0.01 lot) risks $${minLotExpectedLoss.toFixed(2)} (including commissions/costs), which exceeds your ${riskPercentage}% budget ($${roundedRiskBudget.toFixed(2)}).`
+        positionMode: 'AUTO_RISK',
+        exactLotSize,
+        stopDistance: theoreticalSlDistance,
+        minLot,
+        lotType: getLotTypeLabel(minLot),
+        contractSize,
+        expectedLossAtRequiredLot,
+        expectedLossAtMinLot,
+        reason,
+        skipReason: reason
       };
     }
 
-    // If min lot fits in budget, use it
-    if (lossAtMinLot < accountSize) {
+    if (expectedLossAtMinLot < accountSize) {
       finalLots = minLot;
     } else {
+      const reason = `Insufficient balance: Broker minimum lot (${minLot}) risks $${expectedLossAtMinLot.toFixed(2)} but you only have $${accountSize.toFixed(2)} available.`;
       return {
         accepted: false,
         lots: 0,
-        calculatedLotSize: minLot,
+        calculatedLotSize: 0,
+        actualRr,
+        rrValidationPassed: true,
+        entryPrice,
+        stopLoss,
+        takeProfit: resolvedTp,
         riskAmount: Math.round(riskAmount * 100) / 100,
-        expectedLoss: minLotExpectedLoss,
+        expectedLoss: expectedLossAtMinLot,
+        expectedProfit: 0,
         executableLotDisplay: 'NONE',
-        positionMode: params.positionMode || 'AUTO_RISK',
-        reason: `Insufficient balance: Broker minimum lot (${minLot}) risks $${minLotExpectedLoss.toFixed(2)} but you only have $${accountSize.toFixed(2)} available.`
+        positionMode: 'AUTO_RISK',
+        exactLotSize,
+        stopDistance: theoreticalSlDistance,
+        minLot,
+        lotType: getLotTypeLabel(minLot),
+        contractSize,
+        expectedLossAtRequiredLot,
+        expectedLossAtMinLot,
+        reason,
+        skipReason: reason
       };
     }
   }
@@ -418,43 +797,63 @@ export function calculatePositionSize(params: PositionSizeParams): PositionSizeR
   finalLots = Math.min(finalLots, maxLot);
   const finalCommissionCost = Math.round((finalLots * commissionPerLot) * 100) / 100;
   const expectedLoss = Math.round((finalLots * lossPerLot + finalCommissionCost) * 100) / 100;
+  const expectedProfit = Math.round((finalLots * tpDistance * contractSize * conversionFactor) * 100) / 100;
 
-  // Reject trade if expected loss exceeds account balance
   if (expectedLoss >= accountSize) {
+    const reason = `Order rejected: Expected loss ($${expectedLoss.toFixed(2)}) exceeds available account balance ($${accountSize.toFixed(2)}).`;
     return {
       accepted: false,
       lots: 0,
-      calculatedLotSize: finalLots,
+      calculatedLotSize: 0,
+      actualRr,
+      rrValidationPassed: true,
+      entryPrice,
+      stopLoss,
+      takeProfit: resolvedTp,
       riskAmount: Math.round(riskAmount * 100) / 100,
       expectedLoss,
+      expectedProfit: 0,
       executableLotDisplay: 'NONE',
-      positionMode: params.positionMode || 'AUTO_RISK',
-      reason: `Order rejected: Expected loss ($${expectedLoss.toFixed(2)}) exceeds available account balance ($${accountSize.toFixed(2)}).`
+      positionMode: 'AUTO_RISK',
+      exactLotSize,
+      stopDistance: theoreticalSlDistance,
+      minLot,
+      lotType: getLotTypeLabel(finalLots),
+      contractSize,
+      expectedLossAtRequiredLot,
+      expectedLossAtMinLot,
+      reason,
+      skipReason: reason
     };
   }
 
-  // FINAL STRICT RISK CHECK (Strictly adhere to the budget)
-  // We use a tiny epsilon (0.00001) for floating point safety, but otherwise zero tolerance.
   const roundedRiskBudget = Math.floor(riskAmount * 100) / 100;
   if (expectedLoss > roundedRiskBudget + 0.00001) {
+    const reason = `Order rejected: Calculated risk ($${expectedLoss.toFixed(2)}) exceeds your strict ${riskPercentage}% budget ($${roundedRiskBudget.toFixed(2)}). Try increasing balance or reducing stop loss distance.`;
     return {
       accepted: false,
       lots: 0,
-      calculatedLotSize: finalLots,
+      calculatedLotSize: 0,
+      actualRr,
+      rrValidationPassed: true,
+      entryPrice,
+      stopLoss,
+      takeProfit: resolvedTp,
       riskAmount: roundedRiskBudget,
       expectedLoss,
+      expectedProfit: 0,
       executableLotDisplay: 'NONE',
-      positionMode: params.positionMode || 'AUTO_RISK',
-      reason: `Order rejected: Calculated risk ($${expectedLoss.toFixed(2)}) exceeds your strict ${riskPercentage}% budget ($${roundedRiskBudget.toFixed(2)}). Try increasing balance or reducing stop loss distance.`
+      positionMode: 'AUTO_RISK',
+      exactLotSize,
+      stopDistance: theoreticalSlDistance,
+      minLot,
+      lotType: getLotTypeLabel(finalLots),
+      contractSize,
+      expectedLossAtRequiredLot,
+      expectedLossAtMinLot,
+      reason,
+      skipReason: reason
     };
-  }
-
-  let actualRr: number | undefined;
-  if (params.takeProfit && theoreticalSlDistance > 0) {
-    const tpDistance = Math.abs(params.takeProfit - entryPrice);
-    actualRr = Math.round((tpDistance / theoreticalSlDistance) * 100) / 100;
-  } else if (params.riskRewardStr) {
-    actualRr = parseRiskRewardRatio(params.riskRewardStr);
   }
 
   return {
@@ -462,12 +861,21 @@ export function calculatePositionSize(params: PositionSizeParams): PositionSizeR
     lots: finalLots,
     calculatedLotSize: finalLots,
     actualRr,
+    rrValidationPassed: true,
     entryPrice,
     stopLoss,
-    takeProfit: params.takeProfit,
+    takeProfit: resolvedTp,
     riskAmount: Math.round(riskAmount * 100) / 100,
     expectedLoss,
+    expectedProfit,
     executableLotDisplay: finalLots.toFixed(2),
-    positionMode: params.positionMode || 'AUTO_RISK'
+    positionMode: 'AUTO_RISK',
+    exactLotSize,
+    stopDistance: theoreticalSlDistance,
+    minLot,
+    lotType: getLotTypeLabel(finalLots),
+    contractSize,
+    expectedLossAtRequiredLot,
+    expectedLossAtMinLot
   };
 }
