@@ -3829,10 +3829,11 @@ Output ONLY valid JSON.
           }
 
           const maxDailyLossAllowed = maxDailyLossAmount || 100;
-          if (totalLossToday >= maxDailyLossAllowed) {
-            logWatcherWarn('DAILY LOSS LIMIT', logCtx, `User daily loss limit reached ($${totalLossToday.toFixed(2)} >= $${maxDailyLossAllowed}). Halting new trades for today.`);
+          const lossTodaySafe = totalLossToday ?? 0;
+          if (lossTodaySafe >= maxDailyLossAllowed) {
+            logWatcherWarn('DAILY LOSS LIMIT', logCtx, `User daily loss limit reached ($${lossTodaySafe.toFixed(2)} >= $${maxDailyLossAllowed}). Halting new trades for today.`);
             analysis.signal = 'NO_TRADE';
-            analysis.reasoning = [`Daily Loss Limit Reached: Lost $${totalLossToday.toFixed(2)} today (Limit: $${maxDailyLossAllowed})`];
+            analysis.reasoning = [`Daily Loss Limit Reached: Lost $${lossTodaySafe.toFixed(2)} today (Limit: $${maxDailyLossAllowed})`];
             
             await supabase.from('watcher_evaluations').insert({
               user_id: userId,
@@ -3848,7 +3849,7 @@ Output ONLY valid JSON.
               failed_rules: ['DAILY_LOSS_LIMIT_REACHED'],
               gemini_used: false,
               trade_sent: false,
-              trade_reason: `Trade setup rejected: Daily loss limit ($${maxDailyLossAllowed}) reached (Today loss: $${totalLossToday.toFixed(2)})`,
+              trade_reason: `Trade setup rejected: Daily loss limit ($${maxDailyLossAllowed}) reached (Today loss: $${lossTodaySafe.toFixed(2)})`,
               scan_duration_ms: Date.now() - scanStart
             });
 
@@ -3882,16 +3883,16 @@ SL: ${posSizeResult.stopLoss}
 TP: ${posSizeResult.takeProfit}
 SL Basis: ${analysis.stopLossBasis || 'STRUCTURAL'}
 Structural Level: ${analysis.structuralLevel !== null && analysis.structuralLevel !== undefined ? analysis.structuralLevel : 'N/A'}
-Stop Distance: ${posSizeResult.stopDistance.toFixed(5)}
-Risk Amount: $${posSizeResult.riskAmount.toFixed(2)}
-Required Lot: ${posSizeResult.exactLotSize}
-Minimum Lot: ${posSizeResult.minLot}
-Executable Lot: ${posSizeResult.accepted ? posSizeResult.calculatedLotSize : 'NONE'}
-Theoretical Expected Loss: $${posSizeResult.expectedLossAtRequiredLot.toFixed(2)}
-Minimum Lot Expected Loss: $${posSizeResult.expectedLossAtMinLot.toFixed(2)}
-Expected Loss: $${posSizeResult.accepted ? posSizeResult.expectedLoss.toFixed(2) : posSizeResult.expectedLossAtRequiredLot.toFixed(2)}
-Accepted: ${posSizeResult.accepted ? 'YES' : 'NO'}
-${analysis.stopLossBasis === 'ATR_FALLBACK' ? `ATR: ${marketStructure.volatilityInformation.atr.toFixed(5)}\nATR Multiplier: 1.5` : ''}
+Stop Distance: ${posSizeResult?.stopDistance?.toFixed(5) || '0.00000'}
+Risk Amount: $${posSizeResult?.riskAmount?.toFixed(2) || '0.00'}
+Required Lot: ${posSizeResult?.exactLotSize || '0.01'}
+Minimum Lot: ${posSizeResult?.minLot || '0.01'}
+Executable Lot: ${posSizeResult?.accepted ? posSizeResult?.calculatedLotSize : 'NONE'}
+Theoretical Expected Loss: $${posSizeResult?.expectedLossAtRequiredLot?.toFixed(2) || '0.00'}
+Minimum Lot Expected Loss: $${posSizeResult?.expectedLossAtMinLot?.toFixed(2) || '0.00'}
+Expected Loss: $${posSizeResult?.accepted ? (posSizeResult?.expectedLoss?.toFixed(2) || '0.00') : (posSizeResult?.expectedLossAtRequiredLot?.toFixed(2) || '0.00')}
+Accepted: ${posSizeResult?.accepted ? 'YES' : 'NO'}
+${analysis.stopLossBasis === 'ATR_FALLBACK' ? `ATR: ${marketStructure?.volatilityInformation?.atr?.toFixed(5) || '0.00000'}\nATR Multiplier: 1.5` : ''}
 `.trim());
 
         // === STAGE 7: EXECUTION MODE ===
@@ -4506,9 +4507,9 @@ Source: ${brokerQuote.source}`);
             'Reasoning': signalReasoning
           });
 
-          const actualRrVal = posSizeResult.actualRr;
-          const formattedRr = actualRrVal > 0
-            ? `1:${actualRrVal % 1 === 0 ? actualRrVal.toFixed(0) : actualRrVal.toFixed(2)}`
+          const actualRrVal = posSizeResult?.actualRr;
+          const formattedRr = (actualRrVal !== undefined && actualRrVal !== null && !isNaN(actualRrVal) && actualRrVal > 0)
+            ? `1:${Number(actualRrVal) % 1 === 0 ? Number(actualRrVal).toFixed(0) : Number(actualRrVal).toFixed(2)}`
             : riskRewardStr;
 
           signal = {
