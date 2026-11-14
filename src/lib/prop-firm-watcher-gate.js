@@ -3,7 +3,7 @@ import { resolvePersistedAccountType } from './prop-firm-service.js';
 export async function evaluateWatcherPropFirmGate(params) {
     const accountType = resolvePersistedAccountType(params.rawAccountType);
     if (accountType === 'personal') {
-        return { passed: true };
+        return { passed: true, allowed: true };
     }
     const settings = params.propFirmSettings;
     if (!settings) {
@@ -35,7 +35,7 @@ export async function evaluateWatcherPropFirmGate(params) {
             };
         }
     }
-    return { passed: true };
+    return { passed: true, allowed: true };
 }
 export async function syncPropFirmStateForActiveWatcher(params) {
     return { success: true };
