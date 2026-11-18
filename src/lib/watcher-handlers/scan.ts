@@ -34,7 +34,8 @@ import {
   ZoneEvaluationResult,
   recordRejectedZone,
   getRejectedZones,
-  clearRejectedZones
+  clearRejectedZones,
+  isZoneOutOfTimeframeScope
 } from "../zone-engine.js";
 import { resolveHigherTimeframeTrend } from "../htf-trend-engine.js";
 import { evaluateWatcherPropFirmGate, WatcherPropFirmGateResult } from "../prop-firm-watcher-gate.js";
@@ -709,6 +710,8 @@ export default async function handler(req: any, res: any) {
 
     // 7. Extract Market Structure & Compile Strategy
     const marketStructure = extractMarketStructure(candleData);
+    marketStructure.pair = symbol;
+    marketStructure.timeframe = selectedTimeframe;
 
     // Enforce Higher Timeframe (HTF: 4H / 1D) Trend Alignment (User Default Requirement)
     const htfPreference = compiledStrategy.compiled_rules?.preferred_htf || 'H4';
@@ -775,10 +778,15 @@ export default async function handler(req: any, res: any) {
           (htfTrendResult.trend === 'BULLISH' && currentZone.direction === 'SELL')
         );
 
-      if (isCounterHtfZone) {
-        const htfInvalidateReason = `Counter-HTF zone cleared: ${htfTrendResult.timeframe} trend is ${htfTrendResult.trend} vs ${currentZone.direction} ${currentZone.type} [${currentZone.low} - ${currentZone.high}].`;
-        console.log(`[ZONE CLEARED BY HTF TREND] Manual Scan - Watcher ${watcher.id} (${symbol}): ${htfInvalidateReason}`);
-        recordRejectedZone(watcher.id, currentZone, htfInvalidateReason);
+      const scopeCheck = isZoneOutOfTimeframeScope(currentZone, candleData, activeCurrentPrice, selectedTimeframe, symbol);
+
+      if (isCounterHtfZone || scopeCheck.outOfScope) {
+        const purgeReason = scopeCheck.outOfScope
+          ? (scopeCheck.reason || `Zone [${currentZone.low} - ${currentZone.high}] is out of ${selectedTimeframe} timeframe scope.`)
+          : `Counter-HTF zone cleared: ${htfTrendResult.timeframe} trend is ${htfTrendResult.trend} vs ${currentZone.direction} ${currentZone.type} [${currentZone.low} - ${currentZone.high}].`;
+        const purgeLogPrefix = scopeCheck.outOfScope ? '[ZONE CLEARED BY TIMEFRAME SCOPE]' : '[ZONE CLEARED BY HTF TREND]';
+        console.log(`${purgeLogPrefix} Manual Scan - Watcher ${watcher.id} (${symbol}): ${purgeReason}`);
+        recordRejectedZone(watcher.id, currentZone, purgeReason);
         activeZonesMemoryMap.delete(watcher.id);
         await supabase.from("watchers").update({
           zone_data: null,

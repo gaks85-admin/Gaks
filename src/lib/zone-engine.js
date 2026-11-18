@@ -1,4 +1,3 @@
-import { extractMarketStructure } from "./market-structure-engine.js";
 const watcherRejectedZonesMap = globalThis.__watcherRejectedZonesMap || /* @__PURE__ */ new Map();
 globalThis.__watcherRejectedZonesMap = watcherRejectedZonesMap;
 function recordRejectedZone(watcherId, zone, reason) {
@@ -70,6 +69,64 @@ function calculateBuffer(candles, currentPrice, pair) {
     buffer = Math.min(Math.max(atr * 0.15, currentPrice * 5e-4), currentPrice * 3e-3);
   }
   return { atr, buffer };
+}
+function normalizeZoneTimeframe(tf) {
+  if (!tf) return "";
+  const clean = tf.toUpperCase().trim();
+  if (clean === "1" || clean === "1M" || clean === "M1") return "M1";
+  if (clean === "5" || clean === "5M" || clean === "M5") return "M5";
+  if (clean === "15" || clean === "15M" || clean === "M15") return "M15";
+  if (clean === "30" || clean === "30M" || clean === "M30") return "M30";
+  if (clean === "60" || clean === "1H" || clean === "H1") return "H1";
+  if (clean === "240" || clean === "4H" || clean === "H4") return "H4";
+  if (clean === "D" || clean === "1D" || clean === "D1") return "D1";
+  if (clean === "W" || clean === "1W" || clean === "W1") return "W1";
+  return clean;
+}
+function isZoneOutOfTimeframeScope(zone, candles, currentPrice, selectedTimeframe, pair) {
+  if (!zone) return { outOfScope: false };
+  const normSelectedTf = normalizeZoneTimeframe(selectedTimeframe);
+  const normZoneTf = normalizeZoneTimeframe(zone.timeframe);
+  if (normSelectedTf && normZoneTf && normZoneTf !== normSelectedTf) {
+    return {
+      outOfScope: true,
+      reason: `Zone timeframe (${zone.timeframe}) does not match watcher selected timeframe (${selectedTimeframe}).`
+    };
+  }
+  if (!candles || candles.length < 5) {
+    return { outOfScope: false };
+  }
+  const sortedCandles = [...candles].sort(
+    (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+  );
+  const latestCandle = sortedCandles[sortedCandles.length - 1];
+  const activePrice = currentPrice && currentPrice > 0 ? currentPrice : latestCandle.close;
+  const { atr } = calculateBuffer(sortedCandles, activePrice, pair);
+  let tfLow = Infinity;
+  let tfHigh = -Infinity;
+  for (const c of sortedCandles) {
+    if (c.low < tfLow) tfLow = c.low;
+    if (c.high > tfHigh) tfHigh = c.high;
+  }
+  if (zone.low > tfHigh + atr * 1.5 || zone.high < tfLow - atr * 1.5) {
+    return {
+      outOfScope: true,
+      reason: `Marked zone [${zone.low} - ${zone.high}] lies outside ${selectedTimeframe || "chosen"} timeframe price range [${tfLow.toFixed(5)} - ${tfHigh.toFixed(5)}].`
+    };
+  }
+  if (sortedCandles.length >= 20) {
+    const earliestMs = new Date(sortedCandles[0].timestamp).getTime();
+    const originStr = zone.createdCandleTime || zone.originCandle;
+    const originMs = originStr ? new Date(originStr).getTime() : NaN;
+    const distToZone = zone.direction === "SELL" ? Math.max(0, zone.low - activePrice) : Math.max(0, activePrice - zone.high);
+    if (!isNaN(earliestMs) && !isNaN(originMs) && originMs < earliestMs && distToZone > atr * 4) {
+      return {
+        outOfScope: true,
+        reason: `Marked zone origin (${originStr}) predates the visible ${selectedTimeframe || "chosen"} timeframe window and sits ${(distToZone / Math.max(1e-5, atr)).toFixed(1)} ATR away.`
+      };
+    }
+  }
+  return { outOfScope: false };
 }
 function identifyCandidateZones(candles, marketStructure, compiledStrategy, currentPrice, rejectedZones) {
   if (!candles || candles.length < 2) return [];
@@ -504,6 +561,7 @@ function identifyCandidateZones(candles, marketStructure, compiledStrategy, curr
           tappedAt: null,
           tapCount: 0,
           status: "WAITING_FOR_TAP",
+          timeframe: marketStructure?.timeframe || "M5",
           reasoning: `Structural Support Zone [${low} - ${high}].`
         });
       }
@@ -528,29 +586,10 @@ function identifyCandidateZones(candles, marketStructure, compiledStrategy, curr
           tappedAt: null,
           tapCount: 0,
           status: "WAITING_FOR_TAP",
+          timeframe: marketStructure?.timeframe || "M5",
           reasoning: `Structural Resistance Zone [${low} - ${high}].`
         });
       }
-    }
-  }
-  if (marketStructure?.htfCandles && marketStructure.htfCandles.length >= 10 && candles !== marketStructure.htfCandles) {
-    try {
-      const htfMs = marketStructure.htfMarketStructure || extractMarketStructure(marketStructure.htfCandles);
-      htfMs.trend = marketStructure.htfTrend || htfMs.trend;
-      htfMs.htfTrend = marketStructure.htfTrend;
-      htfMs.htfTimeframe = marketStructure.htfTimeframe || "H4";
-      htfMs.htfAllowedDirection = marketStructure.htfAllowedDirection;
-      htfMs.pair = pair;
-      const htfCandidates = identifyCandidateZones(marketStructure.htfCandles, htfMs, compiledStrategy, activePrice, rejectedZones);
-      for (const htfCand of htfCandidates) {
-        htfCand.htfTimeframe = marketStructure.htfTimeframe || "H4";
-        htfCand.strength = Math.min(100, (htfCand.strength || 80) + 10);
-        if (!candidateZones.some((cz) => cz.id === htfCand.id || cz.low === htfCand.low && cz.high === htfCand.high)) {
-          candidateZones.push(htfCand);
-        }
-      }
-    } catch (e) {
-      console.warn(`[ZONE ENGINE] Error evaluating HTF candidate zones:`, e);
     }
   }
   if (candidateZones.length === 0) {
@@ -612,6 +651,7 @@ function identifyCandidateZones(candles, marketStructure, compiledStrategy, curr
     return scoreB - scoreA;
   });
   return distinctCandidates.slice(0, 10).map((z) => {
+    z.timeframe = marketStructure?.timeframe || z.timeframe || "M5";
     z.htfTrend = htfTrend || "SIDEWAYS";
     z.htfTimeframe = htfTimeframe;
     z.htfReason = marketStructure?.htfReason;
@@ -965,5 +1005,7 @@ export {
   identifyCandidateZones,
   identifyMarkedZone,
   isPriceInOrTappingZone,
+  isZoneOutOfTimeframeScope,
+  normalizeZoneTimeframe,
   recordRejectedZone
 };

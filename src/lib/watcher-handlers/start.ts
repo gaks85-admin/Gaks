@@ -678,6 +678,8 @@ export default async function handler(req: any, res: any) {
       if (candlesRes.isValid && candlesRes.candles && candlesRes.candles.length >= 10) {
         const compiledStrategy = compileStrategy(strategyDetails.text);
         const marketStructure = extractMarketStructure(candlesRes.candles);
+        marketStructure.pair = canonicalSym;
+        marketStructure.timeframe = finalTimeframe;
         const htfTrendResult = await resolveHigherTimeframeTrend(
           canonicalSym,
           candlesRes.candles,
