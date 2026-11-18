@@ -588,7 +588,7 @@ async function handler(req, res) {
     marketStructure.htfTimeframe = htfTrendResult.timeframe;
     marketStructure.htfReason = htfTrendResult.reason;
     marketStructure.htfAllowedDirection = htfTrendResult.allowedDirection;
-    marketStructure.htfBiasAligned = true;
+    marketStructure.htfBiasAligned = htfTrendResult.trend === "SIDEWAYS" || marketStructure.trend === htfTrendResult.trend;
     marketStructure.htfCandles = htfTrendResult.htfCandles;
     marketStructure.htfMarketStructure = htfTrendResult.htfMarketStructure;
     console.log(`[HTF TREND] Manual Scan - Watcher ID: ${watcher.id} (${symbol}): ${htfTrendResult.timeframe} Trend is ${htfTrendResult.trend} (${htfTrendResult.reason}). Enforcing trend-following zone markout.`);
@@ -623,60 +623,79 @@ async function handler(req, res) {
     const topCandidate = candidateZones[0] || null;
     let lastZoneEval = null;
     if (currentZone && currentZone.status !== "INVALIDATED") {
-      const isSuboptimalZone = topCandidate && (topCandidate.strength >= 80 && (currentZone.strength || 0) < 65 || currentZone.status === "WAITING_FOR_TAP" && topCandidate.id !== currentZone.id && (topCandidate.strength || 0) >= (currentZone.strength || 0) + 15);
-      if (isSuboptimalZone) {
-        console.log(`[ZONE SELF-CORRECTION] Manual Scan - Watcher ${watcher.id} (${symbol}): Upgrading active zone [${currentZone.low} - ${currentZone.high}] (${currentZone.type}) to superior institutional zone [${topCandidate?.low} - ${topCandidate?.high}] (Strength: ${topCandidate?.strength} vs ${currentZone.strength || "N/A"}).`);
-        recordRejectedZone(watcher.id, currentZone, "Self-corrected to dominant structural zone");
+      const isCounterHtfZone = htfTrendResult.confidence >= 70 && (htfTrendResult.trend === "BEARISH" && currentZone.direction === "BUY" || htfTrendResult.trend === "BULLISH" && currentZone.direction === "SELL");
+      if (isCounterHtfZone) {
+        const htfInvalidateReason = `Counter-HTF zone cleared: ${htfTrendResult.timeframe} trend is ${htfTrendResult.trend} vs ${currentZone.direction} ${currentZone.type} [${currentZone.low} - ${currentZone.high}].`;
+        console.log(`[ZONE CLEARED BY HTF TREND] Manual Scan - Watcher ${watcher.id} (${symbol}): ${htfInvalidateReason}`);
+        recordRejectedZone(watcher.id, currentZone, htfInvalidateReason);
+        activeZonesMemoryMap.delete(watcher.id);
+        await supabase.from("watchers").update({
+          zone_data: null,
+          zone_status: "NO_ZONE",
+          zone_high: null,
+          zone_low: null,
+          zone_type: null,
+          zone_invalidation_level: null,
+          zone_tapped_at: null,
+          updated_at: (/* @__PURE__ */ new Date()).toISOString()
+        }).eq("id", watcher.id);
         currentZone = null;
       } else {
-        const zoneEval = evaluateZoneState(currentZone, latestClosedCandle, activeCurrentPrice, marketStructure.volatilityInformation?.atr, candleData, marketStructure);
-        lastZoneEval = zoneEval;
-        if (zoneEval.isInvalidated || zoneEval.status === "EXPIRED_WITHOUT_ENTRY" || zoneEval.status === "EXPIRED") {
-          console.log(`[ZONE CLEARED/EXPIRED] Manual Scan - Watcher ${watcher.id} (${symbol}): Zone [${currentZone.low} - ${currentZone.high}] (${currentZone.type}) state transition: ${zoneEval.status} - ${zoneEval.reason}`);
-          recordRejectedZone(watcher.id, currentZone, zoneEval.reason);
-          activeZonesMemoryMap.set(watcher.id, zoneEval.updatedZone);
-          await supabase.from("watchers").update({
-            zone_data: zoneEval.updatedZone,
-            zone_status: zoneEval.status,
-            zone_high: null,
-            zone_low: null,
-            zone_type: null,
-            zone_invalidation_level: null,
-            updated_at: (/* @__PURE__ */ new Date()).toISOString()
-          }).eq("id", watcher.id);
+        const isSuboptimalZone = topCandidate && (topCandidate.strength >= 80 && (currentZone.strength || 0) < 65 || currentZone.status === "WAITING_FOR_TAP" && topCandidate.id !== currentZone.id && (topCandidate.strength || 0) >= (currentZone.strength || 0) + 15);
+        if (isSuboptimalZone) {
+          console.log(`[ZONE SELF-CORRECTION] Manual Scan - Watcher ${watcher.id} (${symbol}): Upgrading active zone [${currentZone.low} - ${currentZone.high}] (${currentZone.type}) to superior institutional zone [${topCandidate?.low} - ${topCandidate?.high}] (Strength: ${topCandidate?.strength} vs ${currentZone.strength || "N/A"}).`);
+          recordRejectedZone(watcher.id, currentZone, "Self-corrected to dominant structural zone");
           currentZone = null;
-        } else if (!zoneEval.isTapped) {
-          currentZone = zoneEval.updatedZone;
-          activeZonesMemoryMap.set(watcher.id, currentZone);
-          await supabase.from("watchers").update({
-            zone_data: currentZone,
-            zone_status: "WAITING_FOR_TAP",
-            zone_tapped_at: null,
-            last_scan_at: (/* @__PURE__ */ new Date()).toISOString(),
-            updated_at: (/* @__PURE__ */ new Date()).toISOString()
-          }).eq("id", watcher.id);
-          console.log(`[WAITING FOR ZONE TAP] Manual Scan - Watcher ${watcher.id} (${symbol}): Price ${activeCurrentPrice} is outside marked zone [${currentZone.low} - ${currentZone.high}] (${currentZone.type} ${currentZone.direction}). Waiting for price retest to trigger reversal.`);
-          return res.json({
-            success: true,
-            data: {
-              watcher_id: watcher.id,
-              pair: symbol,
-              signal: "NO_TRADE",
-              confidence: 0,
-              status: "WAITING_FOR_TAP",
-              zone: currentZone,
-              reasoning: [`Price ${activeCurrentPrice} is outside marked ${currentZone.type} zone [${currentZone.low} - ${currentZone.high}]. Waiting for price retest to trigger reversal.`]
-            }
-          });
         } else {
-          currentZone = zoneEval.updatedZone;
-          await supabase.from("watchers").update({
-            zone_data: currentZone,
-            zone_status: "ZONE_TAPPED",
-            zone_tapped_at: (/* @__PURE__ */ new Date()).toISOString(),
-            last_scan_at: (/* @__PURE__ */ new Date()).toISOString(),
-            updated_at: (/* @__PURE__ */ new Date()).toISOString()
-          }).eq("id", watcher.id);
+          const zoneEval = evaluateZoneState(currentZone, latestClosedCandle, activeCurrentPrice, marketStructure.volatilityInformation?.atr, candleData, marketStructure);
+          lastZoneEval = zoneEval;
+          if (zoneEval.isInvalidated || zoneEval.status === "EXPIRED_WITHOUT_ENTRY" || zoneEval.status === "EXPIRED") {
+            console.log(`[ZONE CLEARED/EXPIRED] Manual Scan - Watcher ${watcher.id} (${symbol}): Zone [${currentZone.low} - ${currentZone.high}] (${currentZone.type}) state transition: ${zoneEval.status} - ${zoneEval.reason}`);
+            recordRejectedZone(watcher.id, currentZone, zoneEval.reason);
+            activeZonesMemoryMap.set(watcher.id, zoneEval.updatedZone);
+            await supabase.from("watchers").update({
+              zone_data: zoneEval.updatedZone,
+              zone_status: zoneEval.status,
+              zone_high: null,
+              zone_low: null,
+              zone_type: null,
+              zone_invalidation_level: null,
+              updated_at: (/* @__PURE__ */ new Date()).toISOString()
+            }).eq("id", watcher.id);
+            currentZone = null;
+          } else if (!zoneEval.isTapped) {
+            currentZone = zoneEval.updatedZone;
+            activeZonesMemoryMap.set(watcher.id, currentZone);
+            await supabase.from("watchers").update({
+              zone_data: currentZone,
+              zone_status: "WAITING_FOR_TAP",
+              zone_tapped_at: null,
+              last_scan_at: (/* @__PURE__ */ new Date()).toISOString(),
+              updated_at: (/* @__PURE__ */ new Date()).toISOString()
+            }).eq("id", watcher.id);
+            console.log(`[WAITING FOR ZONE TAP] Manual Scan - Watcher ${watcher.id} (${symbol}): Price ${activeCurrentPrice} is outside marked zone [${currentZone.low} - ${currentZone.high}] (${currentZone.type} ${currentZone.direction}). Waiting for price retest to trigger reversal.`);
+            return res.json({
+              success: true,
+              data: {
+                watcher_id: watcher.id,
+                pair: symbol,
+                signal: "NO_TRADE",
+                confidence: 0,
+                status: "WAITING_FOR_TAP",
+                zone: currentZone,
+                reasoning: [`Price ${activeCurrentPrice} is outside marked ${currentZone.type} zone [${currentZone.low} - ${currentZone.high}]. Waiting for price retest to trigger reversal.`]
+              }
+            });
+          } else {
+            currentZone = zoneEval.updatedZone;
+            await supabase.from("watchers").update({
+              zone_data: currentZone,
+              zone_status: "ZONE_TAPPED",
+              zone_tapped_at: (/* @__PURE__ */ new Date()).toISOString(),
+              last_scan_at: (/* @__PURE__ */ new Date()).toISOString(),
+              updated_at: (/* @__PURE__ */ new Date()).toISOString()
+            }).eq("id", watcher.id);
+          }
         }
       }
     }
@@ -791,6 +810,9 @@ async function handler(req, res) {
     marketStructure.zone_rejected = Boolean(lastZoneEval?.isRejected || currentZone?.status === "CONFIRMED");
     marketStructure.rejectionConfirmed = Boolean(lastZoneEval?.isRejected || currentZone?.status === "CONFIRMED");
     marketStructure.zone_direction = currentZone?.direction;
+    if (currentZone) {
+      marketStructure.htfBiasAligned = htfTrendResult.trend === "SIDEWAYS" || currentZone.direction === "BUY" && htfTrendResult.trend === "BULLISH" || currentZone.direction === "SELL" && htfTrendResult.trend === "BEARISH";
+    }
     const initialResult = evaluateDecision(compiledStrategy, marketStructure);
     const histResult = await calculateHistoricalProbability(
       supabase,

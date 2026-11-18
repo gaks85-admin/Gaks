@@ -148,22 +148,22 @@ export function extractMarketStructure(candles: Candle[], supportedDetectors?: s
     });
   }
 
-  // 3. CHOCH Detection
+  // 3. CHOCH Detection & Authoritative Post-Break Trend Classification
   const chochList: MarketStructure['CHOCH'] = [];
-  let currentTrend: 'BULLISH' | 'BEARISH' | 'SIDEWAYS' = 'SIDEWAYS';
-  
+  let preBreakTrend: 'BULLISH' | 'BEARISH' | 'SIDEWAYS' = 'SIDEWAYS';
+
   if (swingHighs.length >= 2 && swingLows.length >= 2) {
     const lastH = swingHighs[swingHighs.length - 1].price;
     const prevH = swingHighs[swingHighs.length - 2].price;
     const lastL = swingLows[swingLows.length - 1].price;
     const prevL = swingLows[swingLows.length - 2].price;
 
-    if (lastH > prevH && lastL > prevL) currentTrend = 'BULLISH';
-    else if (lastH < prevH && lastL < prevL) currentTrend = 'BEARISH';
+    if (lastH > prevH && lastL > prevL) preBreakTrend = 'BULLISH';
+    else if (lastH < prevH && lastL < prevL) preBreakTrend = 'BEARISH';
   }
 
-  if (shouldRun('choch') && currentTrend !== 'SIDEWAYS') {
-    if (currentTrend === 'BULLISH') {
+  if (shouldRun('choch') && preBreakTrend !== 'SIDEWAYS') {
+    if (preBreakTrend === 'BULLISH') {
       const protectedLow = swingLows[swingLows.length - 1];
       for (let j = protectedLow.index + 1; j < sortedCandles.length; j++) {
         if (closes[j] < protectedLow.price) {
@@ -188,6 +188,37 @@ export function extractMarketStructure(candles: Candle[], supportedDetectors?: s
           });
           break;
         }
+      }
+    }
+  }
+
+  let currentTrend: 'BULLISH' | 'BEARISH' | 'SIDEWAYS' = preBreakTrend;
+  if (swingHighs.length >= 2 && swingLows.length >= 2) {
+    const lastHighObj = swingHighs[swingHighs.length - 1];
+    const lastLowObj = swingLows[swingLows.length - 1];
+    const prevLowObj = swingLows[swingLows.length - 2];
+    const prevHighObj = swingHighs[swingHighs.length - 2];
+    const latestClose = closes[closes.length - 1];
+
+    const bearishBreakAfterSwings = bosList.some(
+      b => b.type === 'BEARISH_BOS' && b.candleIndex > Math.max(lastHighObj.index, lastLowObj.index)
+    ) || chochList.some(c => c.type === 'BEARISH_CHOCH');
+
+    const bullishBreakAfterSwings = bosList.some(
+      b => b.type === 'BULLISH_BOS' && b.candleIndex > Math.max(lastHighObj.index, lastLowObj.index)
+    ) || chochList.some(c => c.type === 'BULLISH_CHOCH');
+
+    if (preBreakTrend === 'BULLISH') {
+      const lowBroken = lastLowObj.isBroken || latestClose < lastLowObj.price || bearishBreakAfterSwings;
+      if (lowBroken) {
+        const brokeBothLows = (prevLowObj.isBroken || latestClose < prevLowObj.price);
+        currentTrend = brokeBothLows ? 'BEARISH' : 'SIDEWAYS';
+      }
+    } else if (preBreakTrend === 'BEARISH') {
+      const highBroken = lastHighObj.isBroken || latestClose > lastHighObj.price || bullishBreakAfterSwings;
+      if (highBroken) {
+        const brokeBothHighs = (prevHighObj.isBroken || latestClose > prevHighObj.price);
+        currentTrend = brokeBothHighs ? 'BULLISH' : 'SIDEWAYS';
       }
     }
   }

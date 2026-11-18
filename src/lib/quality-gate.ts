@@ -114,9 +114,15 @@ export function evaluateQualityGate(input: QualityGateInput): QualityGateResult 
   const ms = input.marketStructure || {};
   const dirUpper = (input.direction || '').toUpperCase();
   const trendUpper = (ms.trend || '').toUpperCase();
+  const htfUpper = (ms.htfTrend || '').toUpperCase();
   const isTrendAligned = (dirUpper === 'BUY' && ['BULLISH', 'UP', 'UPTREND'].includes(trendUpper)) ||
                          (dirUpper === 'SELL' && ['BEARISH', 'DOWN', 'DOWNTREND'].includes(trendUpper));
-  const htfBias = Boolean(ms.htfBiasAligned || isTrendAligned);
+  const isHtfDirectional = htfUpper === 'BULLISH' || htfUpper === 'BEARISH';
+  const matchesHtfDir = (dirUpper === 'BUY' && htfUpper === 'BULLISH') ||
+                        (dirUpper === 'SELL' && htfUpper === 'BEARISH');
+  const htfBias = isHtfDirectional
+    ? matchesHtfDir
+    : Boolean(ms.htfBiasAligned || isTrendAligned);
   const bosOrChoch = Boolean(ms.bos || ms.choch || ms.structureShift);
   const fvgOrLiquidity = Boolean(
     (ms.fairValueGaps && ms.fairValueGaps.length > 0) ||

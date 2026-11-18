@@ -723,7 +723,7 @@ export default async function handler(req: any, res: any) {
     marketStructure.htfTimeframe = htfTrendResult.timeframe;
     marketStructure.htfReason = htfTrendResult.reason;
     marketStructure.htfAllowedDirection = htfTrendResult.allowedDirection;
-    marketStructure.htfBiasAligned = true;
+    marketStructure.htfBiasAligned = htfTrendResult.trend === 'SIDEWAYS' || marketStructure.trend === htfTrendResult.trend;
     marketStructure.htfCandles = htfTrendResult.htfCandles;
     marketStructure.htfMarketStructure = htfTrendResult.htfMarketStructure;
 
@@ -769,19 +769,42 @@ export default async function handler(req: any, res: any) {
 
     let lastZoneEval: ZoneEvaluationResult | null = null;
     if (currentZone && currentZone.status !== 'INVALIDATED') {
-      // Only upgrade an un-tapped zone if an objectively stronger institutional zone is discovered (never purge counter-HTF lower-timeframe zones)
-      const isSuboptimalZone = topCandidate && (
-        (topCandidate.strength >= 80 && (currentZone.strength || 0) < 65) ||
-        (currentZone.status === 'WAITING_FOR_TAP' && topCandidate.id !== currentZone.id && (topCandidate.strength || 0) >= (currentZone.strength || 0) + 15)
-      );
+      const isCounterHtfZone =
+        htfTrendResult.confidence >= 70 && (
+          (htfTrendResult.trend === 'BEARISH' && currentZone.direction === 'BUY') ||
+          (htfTrendResult.trend === 'BULLISH' && currentZone.direction === 'SELL')
+        );
 
-      if (isSuboptimalZone) {
-        console.log(`[ZONE SELF-CORRECTION] Manual Scan - Watcher ${watcher.id} (${symbol}): Upgrading active zone [${currentZone.low} - ${currentZone.high}] (${currentZone.type}) to superior institutional zone [${topCandidate?.low} - ${topCandidate?.high}] (Strength: ${topCandidate?.strength} vs ${currentZone.strength || 'N/A'}).`);
-        recordRejectedZone(watcher.id, currentZone, 'Self-corrected to dominant structural zone');
+      if (isCounterHtfZone) {
+        const htfInvalidateReason = `Counter-HTF zone cleared: ${htfTrendResult.timeframe} trend is ${htfTrendResult.trend} vs ${currentZone.direction} ${currentZone.type} [${currentZone.low} - ${currentZone.high}].`;
+        console.log(`[ZONE CLEARED BY HTF TREND] Manual Scan - Watcher ${watcher.id} (${symbol}): ${htfInvalidateReason}`);
+        recordRejectedZone(watcher.id, currentZone, htfInvalidateReason);
+        activeZonesMemoryMap.delete(watcher.id);
+        await supabase.from("watchers").update({
+          zone_data: null,
+          zone_status: 'NO_ZONE',
+          zone_high: null,
+          zone_low: null,
+          zone_type: null,
+          zone_invalidation_level: null,
+          zone_tapped_at: null,
+          updated_at: new Date().toISOString()
+        }).eq("id", watcher.id);
         currentZone = null;
       } else {
-        const zoneEval = evaluateZoneState(currentZone, latestClosedCandle, activeCurrentPrice, marketStructure.volatilityInformation?.atr, candleData, marketStructure);
-        lastZoneEval = zoneEval;
+        // Only upgrade an un-tapped zone if an objectively stronger institutional zone is discovered
+        const isSuboptimalZone = topCandidate && (
+          (topCandidate.strength >= 80 && (currentZone.strength || 0) < 65) ||
+          (currentZone.status === 'WAITING_FOR_TAP' && topCandidate.id !== currentZone.id && (topCandidate.strength || 0) >= (currentZone.strength || 0) + 15)
+        );
+
+        if (isSuboptimalZone) {
+          console.log(`[ZONE SELF-CORRECTION] Manual Scan - Watcher ${watcher.id} (${symbol}): Upgrading active zone [${currentZone.low} - ${currentZone.high}] (${currentZone.type}) to superior institutional zone [${topCandidate?.low} - ${topCandidate?.high}] (Strength: ${topCandidate?.strength} vs ${currentZone.strength || 'N/A'}).`);
+          recordRejectedZone(watcher.id, currentZone, 'Self-corrected to dominant structural zone');
+          currentZone = null;
+        } else {
+          const zoneEval = evaluateZoneState(currentZone, latestClosedCandle, activeCurrentPrice, marketStructure.volatilityInformation?.atr, candleData, marketStructure);
+          lastZoneEval = zoneEval;
 
         if (zoneEval.isInvalidated || zoneEval.status === 'EXPIRED_WITHOUT_ENTRY' || zoneEval.status === 'EXPIRED') {
           console.log(`[ZONE CLEARED/EXPIRED] Manual Scan - Watcher ${watcher.id} (${symbol}): Zone [${currentZone.low} - ${currentZone.high}] (${currentZone.type}) state transition: ${zoneEval.status} - ${zoneEval.reason}`);
@@ -836,6 +859,7 @@ export default async function handler(req: any, res: any) {
             last_scan_at: new Date().toISOString(),
             updated_at: new Date().toISOString()
           }).eq("id", watcher.id);
+          }
         }
       }
     }
@@ -961,6 +985,12 @@ export default async function handler(req: any, res: any) {
     (marketStructure as any).zone_rejected = Boolean(lastZoneEval?.isRejected || currentZone?.status === 'CONFIRMED');
     (marketStructure as any).rejectionConfirmed = Boolean(lastZoneEval?.isRejected || currentZone?.status === 'CONFIRMED');
     (marketStructure as any).zone_direction = currentZone?.direction;
+    if (currentZone) {
+      marketStructure.htfBiasAligned =
+        htfTrendResult.trend === 'SIDEWAYS' ||
+        (currentZone.direction === 'BUY' && htfTrendResult.trend === 'BULLISH') ||
+        (currentZone.direction === 'SELL' && htfTrendResult.trend === 'BEARISH');
+    }
     const initialResult = evaluateDecision(compiledStrategy, marketStructure);
 
     // Fetch Historical Probability from Learning Engine
