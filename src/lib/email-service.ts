@@ -4,6 +4,8 @@
  * or standard SMTP webhook when configured.
  */
 
+import { redactSecretsInText, sanitizeErrorMessage } from './secret-sanitizer.js';
+
 export interface SendEmailResult {
   success: boolean;
   messageId?: string;
@@ -50,10 +52,11 @@ export async function sendNotificationEmail(
         return { success: true, messageId: data.id };
       }
       const errMsg = data?.message || data?.error?.message || (typeof data?.error === 'string' ? data.error : null) || `Resend API error (${resp.status})`;
-      return { success: false, error: errMsg };
+      return { success: false, error: redactSecretsInText(errMsg) };
     } catch (err: any) {
-      console.error('[Email Service Error - Resend]:', err);
-      return { success: false, error: err.message || 'Failed to communicate with Resend API.' };
+      const safeErr = sanitizeErrorMessage(err, 'Failed to communicate with Resend API.');
+      console.error('[Email Service Error - Resend]:', safeErr);
+      return { success: false, error: safeErr };
     }
   }
 
@@ -83,10 +86,11 @@ export async function sendNotificationEmail(
       }
 
       const errText = await resp.text();
-      return { success: false, error: `SendGrid API error (${resp.status}): ${errText}` };
+      return { success: false, error: `SendGrid API error (${resp.status}): ${redactSecretsInText(errText)}` };
     } catch (err: any) {
-      console.error('[Email Service Error - SendGrid]:', err);
-      return { success: false, error: err.message || 'Failed to communicate with SendGrid API.' };
+      const safeErr = sanitizeErrorMessage(err, 'Failed to communicate with SendGrid API.');
+      console.error('[Email Service Error - SendGrid]:', safeErr);
+      return { success: false, error: safeErr };
     }
   }
 
@@ -110,8 +114,9 @@ export async function sendNotificationEmail(
       }
       return { success: false, error: `Email webhook returned status ${resp.status}` };
     } catch (err: any) {
-      console.error('[Email Service Error - Webhook]:', err);
-      return { success: false, error: err.message || 'Failed to reach email webhook.' };
+      const safeErr = sanitizeErrorMessage(err, 'Failed to reach email webhook.');
+      console.error('[Email Service Error - Webhook]:', safeErr);
+      return { success: false, error: safeErr };
     }
   }
 

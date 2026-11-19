@@ -87,14 +87,17 @@ export function calculateUnrealizedPnlR(
 }
 
 /**
- * Evaluates whether an open trade has hit TP, SL, or is currently holding.
+ * Evaluates whether an open trade has hit TP, SL, or is currently holding
+ * based on a single price snapshot. Checks STOP LOSS BEFORE TAKE PROFIT
+ * (`STOP_LOSS_FIRST`) so crossed or ambiguous states never misreport a loss as a win.
  */
 export function evaluateActiveTradeExit(
   direction: string,
   entryPrice: number,
   stopLoss: number,
   takeProfit: number,
-  currentPrice: number
+  currentPrice: number,
+  spreadBufferPrice: number = 0
 ): { exitStatus: 'TP_HIT' | 'SL_HIT' | 'HOLDING'; realizedR: number; outcome: 'WIN' | 'LOSS' | 'ACTIVE' } {
   const isBuy = direction.toUpperCase() === 'BUY' || direction.toUpperCase() === 'LONG';
   const isSell = direction.toUpperCase() === 'SELL' || direction.toUpperCase() === 'SHORT';
@@ -102,20 +105,21 @@ export function evaluateActiveTradeExit(
   const riskDist = isBuy ? entryPrice - stopLoss : stopLoss - entryPrice;
   const rewardDist = isBuy ? takeProfit - entryPrice : entryPrice - takeProfit;
   const targetR = riskDist > 0 ? Math.round((rewardDist / riskDist) * 1000) / 1000 : 2.0;
+  const spread = typeof spreadBufferPrice === 'number' && !isNaN(spreadBufferPrice) && spreadBufferPrice > 0 ? spreadBufferPrice : 0;
 
   if (isBuy) {
+    if (currentPrice <= stopLoss + spread) {
+      return { exitStatus: 'SL_HIT', realizedR: -1.0, outcome: 'LOSS' };
+    }
     if (currentPrice >= takeProfit) {
       return { exitStatus: 'TP_HIT', realizedR: targetR, outcome: 'WIN' };
     }
-    if (currentPrice <= stopLoss) {
+  } else if (isSell) {
+    if (currentPrice + spread >= stopLoss) {
       return { exitStatus: 'SL_HIT', realizedR: -1.0, outcome: 'LOSS' };
     }
-  } else if (isSell) {
     if (currentPrice <= takeProfit) {
       return { exitStatus: 'TP_HIT', realizedR: targetR, outcome: 'WIN' };
-    }
-    if (currentPrice >= stopLoss) {
-      return { exitStatus: 'SL_HIT', realizedR: -1.0, outcome: 'LOSS' };
     }
   }
 
@@ -123,10 +127,226 @@ export function evaluateActiveTradeExit(
   return { exitStatus: 'HOLDING', realizedR: currentUnrealizedR, outcome: 'ACTIVE' };
 }
 
+export interface ActiveTradeCandle {
+  timestamp: string | number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+}
+
+function parseCandleOpenMs(ts: string | number): number {
+  if (typeof ts === 'number') {
+    if (!isFinite(ts)) return NaN;
+    return ts < 1e12 ? ts * 1000 : ts;
+  }
+  return new Date(ts).getTime();
+}
+
+export interface ActiveTradeMonitoringPlan {
+  timeframe: 'M1' | 'M5' | 'M15' | 'H1';
+  requiredCount: number;
+}
+
+export interface EvaluateActiveTradeHistoryInput {
+  direction: string;
+  entryPrice: number;
+  stopLoss: number;
+  takeProfit: number;
+  openedAt?: string | null;
+  currentPrice?: number | null;
+  candles?: ActiveTradeCandle[] | null;
+  spreadBufferPrice?: number;
+  sameCandlePolicy?: 'STOP_LOSS_FIRST' | 'TAKE_PROFIT_FIRST';
+  entryTimestampToleranceMs?: number;
+}
+
+export interface ActiveTradeHistoryExitEvaluation {
+  exitStatus: 'TP_HIT' | 'SL_HIT' | 'HOLDING';
+  realizedR: number;
+  outcome: 'WIN' | 'LOSS' | 'ACTIVE';
+  exitPrice: number;
+  triggeredBy: 'CANDLE_HISTORY' | 'SPOT_PRICE' | 'HOLDING';
+  triggerCandleTimestamp?: string;
+  ambiguousSameCandle?: boolean;
+}
+
+/**
+ * Computes the finest discrete candle timeframe and output size that covers `[openedAt, now]`
+ * while preserving Twelve Data cache-key reuse across watchers.
+ */
+export function resolveActiveTradeMonitoringPlan(
+  openedAt?: string | null,
+  nowMs: number = Date.now()
+): ActiveTradeMonitoringPlan {
+  if (!openedAt) {
+    return { timeframe: 'M5', requiredCount: 60 };
+  }
+  const openedMs = new Date(openedAt).getTime();
+  if (isNaN(openedMs) || openedMs > nowMs) {
+    return { timeframe: 'M1', requiredCount: 60 };
+  }
+
+  const elapsedMinutes = Math.max(1, Math.ceil((nowMs - openedMs) / 60000));
+  if (elapsedMinutes <= 150) {
+    return { timeframe: 'M1', requiredCount: 180 };
+  }
+  if (elapsedMinutes <= 450) {
+    return { timeframe: 'M1', requiredCount: 500 };
+  }
+  if (elapsedMinutes <= 1440) {
+    return { timeframe: 'M5', requiredCount: 300 };
+  }
+  if (elapsedMinutes <= 4320) {
+    return { timeframe: 'M15', requiredCount: 300 };
+  }
+  return { timeframe: 'H1', requiredCount: 300 };
+}
+
+/**
+ * Replays chronological intrabar OHLC candles since `openedAt` to determine whether
+ * SL or TP was triggered first between polling runs, then falls back to `currentPrice`.
+ * Uses conservative `STOP_LOSS_FIRST` tie-breaking when both levels are touched in the same bar.
+ */
+export function evaluateActiveTradeExitWithHistory(
+  input: EvaluateActiveTradeHistoryInput
+): ActiveTradeHistoryExitEvaluation {
+  const {
+    direction,
+    entryPrice,
+    stopLoss,
+    takeProfit,
+    openedAt,
+    currentPrice = null,
+    candles = null,
+    spreadBufferPrice = 0,
+    sameCandlePolicy = 'STOP_LOSS_FIRST',
+    entryTimestampToleranceMs = 5000
+  } = input;
+
+  const isBuy = direction.toUpperCase() === 'BUY' || direction.toUpperCase() === 'LONG';
+  const isSell = direction.toUpperCase() === 'SELL' || direction.toUpperCase() === 'SHORT';
+
+  const riskDist = isBuy ? entryPrice - stopLoss : stopLoss - entryPrice;
+  const rewardDist = isBuy ? takeProfit - entryPrice : entryPrice - takeProfit;
+  const targetR = riskDist > 0 ? Math.round((rewardDist / riskDist) * 1000) / 1000 : 2.0;
+  const spread = typeof spreadBufferPrice === 'number' && !isNaN(spreadBufferPrice) && spreadBufferPrice > 0 ? spreadBufferPrice : 0;
+
+  const openedMs = openedAt ? new Date(openedAt).getTime() : NaN;
+
+  if (!isNaN(openedMs) && Array.isArray(candles) && candles.length > 0 && (isBuy || isSell)) {
+    const eligibleCandles = candles
+      .map((c) => ({ candle: c, openMs: parseCandleOpenMs(c.timestamp) }))
+      .filter(({ candle, openMs }) =>
+        !isNaN(openMs) &&
+        openMs >= openedMs - entryTimestampToleranceMs &&
+        typeof candle.high === 'number' && isFinite(candle.high) &&
+        typeof candle.low === 'number' && isFinite(candle.low)
+      )
+      .sort((a, b) => a.openMs - b.openMs);
+
+    for (const { candle, openMs } of eligibleCandles) {
+      const candleTs = typeof candle.timestamp === 'string' ? candle.timestamp : new Date(openMs).toISOString();
+      const hitSL = isBuy
+        ? candle.low <= stopLoss + spread
+        : candle.high + spread >= stopLoss;
+      const hitTP = isBuy
+        ? candle.high >= takeProfit
+        : candle.low <= takeProfit;
+
+      if (hitSL && hitTP) {
+        if (sameCandlePolicy === 'TAKE_PROFIT_FIRST') {
+          return {
+            exitStatus: 'TP_HIT',
+            realizedR: targetR,
+            outcome: 'WIN',
+            exitPrice: takeProfit,
+            triggeredBy: 'CANDLE_HISTORY',
+            triggerCandleTimestamp: candleTs,
+            ambiguousSameCandle: true
+          };
+        }
+        return {
+          exitStatus: 'SL_HIT',
+          realizedR: -1.0,
+          outcome: 'LOSS',
+          exitPrice: stopLoss,
+          triggeredBy: 'CANDLE_HISTORY',
+          triggerCandleTimestamp: candleTs,
+          ambiguousSameCandle: true
+        };
+      }
+
+      if (hitSL) {
+        return {
+          exitStatus: 'SL_HIT',
+          realizedR: -1.0,
+          outcome: 'LOSS',
+          exitPrice: stopLoss,
+          triggeredBy: 'CANDLE_HISTORY',
+          triggerCandleTimestamp: candleTs
+        };
+      }
+
+      if (hitTP) {
+        return {
+          exitStatus: 'TP_HIT',
+          realizedR: targetR,
+          outcome: 'WIN',
+          exitPrice: takeProfit,
+          triggeredBy: 'CANDLE_HISTORY',
+          triggerCandleTimestamp: candleTs
+        };
+      }
+    }
+  }
+
+  if (typeof currentPrice === 'number' && !isNaN(currentPrice) && isFinite(currentPrice)) {
+    const spotEval = evaluateActiveTradeExit(direction, entryPrice, stopLoss, takeProfit, currentPrice, spread);
+    if (spotEval.exitStatus === 'SL_HIT') {
+      return {
+        exitStatus: 'SL_HIT',
+        realizedR: -1.0,
+        outcome: 'LOSS',
+        exitPrice: stopLoss,
+        triggeredBy: 'SPOT_PRICE'
+      };
+    }
+    if (spotEval.exitStatus === 'TP_HIT') {
+      return {
+        exitStatus: 'TP_HIT',
+        realizedR: spotEval.realizedR,
+        outcome: 'WIN',
+        exitPrice: takeProfit,
+        triggeredBy: 'SPOT_PRICE'
+      };
+    }
+    return {
+      exitStatus: 'HOLDING',
+      realizedR: spotEval.realizedR,
+      outcome: 'ACTIVE',
+      exitPrice: currentPrice,
+      triggeredBy: 'HOLDING'
+    };
+  }
+
+  return {
+    exitStatus: 'HOLDING',
+    realizedR: 0,
+    outcome: 'ACTIVE',
+    exitPrice: entryPrice,
+    triggeredBy: 'HOLDING'
+  };
+}
+
 /**
  * Builds a structured, complete active trade telemetry payload from watcher data and current price.
  */
-export function buildActiveTradeTelemetry(watcher: any, currentPrice: number): ActiveTradeTelemetry | null {
+export function buildActiveTradeTelemetry(
+  watcher: any,
+  currentPrice: number,
+  options?: { exitStatus?: 'HOLDING' | 'TP_HIT' | 'SL_HIT' }
+): ActiveTradeTelemetry | null {
   const validation = validateActiveTradeState(watcher);
   if (!validation.valid) {
     return null;
@@ -142,6 +362,7 @@ export function buildActiveTradeTelemetry(watcher: any, currentPrice: number): A
   const tradeId = watcher.active_trade_id || watcher.last_signal_data?.trade_id || watcher.last_signal_data?.tradeId || null;
 
   const exitEval = evaluateActiveTradeExit(direction, entryPrice, stopLoss, takeProfit, currentPrice);
+  const resolvedStatus = options?.exitStatus || exitEval.exitStatus;
   const unrealizedPnlR = calculateUnrealizedPnlR(direction, entryPrice, stopLoss, currentPrice);
 
   const pipSize = getPipSize(symbol);
@@ -191,7 +412,7 @@ export function buildActiveTradeTelemetry(watcher: any, currentPrice: number): A
     pipsToSL,
     pipsInProfit,
     progressPercentage,
-    status: exitEval.exitStatus,
+    status: resolvedStatus,
     openedAt,
     durationMinutes
   };

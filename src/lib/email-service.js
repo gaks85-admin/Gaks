@@ -1,3 +1,4 @@
+import { redactSecretsInText, sanitizeErrorMessage } from "./secret-sanitizer.js";
 async function sendNotificationEmail(toEmail, messageText) {
   const recipient = toEmail.trim();
   if (!recipient || !recipient.includes("@")) {
@@ -30,10 +31,11 @@ async function sendNotificationEmail(toEmail, messageText) {
         return { success: true, messageId: data.id };
       }
       const errMsg = data?.message || data?.error?.message || (typeof data?.error === "string" ? data.error : null) || `Resend API error (${resp.status})`;
-      return { success: false, error: errMsg };
+      return { success: false, error: redactSecretsInText(errMsg) };
     } catch (err) {
-      console.error("[Email Service Error - Resend]:", err);
-      return { success: false, error: err.message || "Failed to communicate with Resend API." };
+      const safeErr = sanitizeErrorMessage(err, "Failed to communicate with Resend API.");
+      console.error("[Email Service Error - Resend]:", safeErr);
+      return { success: false, error: safeErr };
     }
   }
   if (sendgridKey) {
@@ -59,10 +61,11 @@ async function sendNotificationEmail(toEmail, messageText) {
         return { success: true, messageId: `sg_${Date.now()}` };
       }
       const errText = await resp.text();
-      return { success: false, error: `SendGrid API error (${resp.status}): ${errText}` };
+      return { success: false, error: `SendGrid API error (${resp.status}): ${redactSecretsInText(errText)}` };
     } catch (err) {
-      console.error("[Email Service Error - SendGrid]:", err);
-      return { success: false, error: err.message || "Failed to communicate with SendGrid API." };
+      const safeErr = sanitizeErrorMessage(err, "Failed to communicate with SendGrid API.");
+      console.error("[Email Service Error - SendGrid]:", safeErr);
+      return { success: false, error: safeErr };
     }
   }
   if (customEmailEndpoint) {
@@ -83,8 +86,9 @@ async function sendNotificationEmail(toEmail, messageText) {
       }
       return { success: false, error: `Email webhook returned status ${resp.status}` };
     } catch (err) {
-      console.error("[Email Service Error - Webhook]:", err);
-      return { success: false, error: err.message || "Failed to reach email webhook." };
+      const safeErr = sanitizeErrorMessage(err, "Failed to reach email webhook.");
+      console.error("[Email Service Error - Webhook]:", safeErr);
+      return { success: false, error: safeErr };
     }
   }
   console.warn("[Email Service] No email provider configured (RESEND_API_KEY, SENDGRID_API_KEY, or EMAIL_WEBHOOK_URL).");

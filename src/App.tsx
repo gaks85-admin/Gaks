@@ -1051,7 +1051,7 @@ export default function App() {
             parsedJson = await parseUserStrategy(selectedStrat.text, geminiKey);
             console.log("[Strategy Parser] Parsed JSON:", parsedJson);
           } catch (parseError) {
-            console.error("[Strategy Parser] Parse failed:", parseError);
+            console.error("[Strategy Parser] Parse failed:", parseError instanceof Error ? parseError.message.replace(/AIza[A-Za-z0-9_-]{20,}|\bAQ\.?[A-Za-z0-9_-]{10,}/g, '[REDACTED_GEMINI_KEY]') : 'Parse error');
           }
         } else {
           console.warn("[Strategy Parser] No Gemini API key found. Skipping parsing.");
@@ -1658,7 +1658,7 @@ export default function App() {
         setGeminiStatus('not_connected');
       }
     } catch (err: any) {
-      console.error("Error loading Gemini key:", err);
+      console.error("Error loading Gemini key:", err?.message ? String(err.message).replace(/AIza[A-Za-z0-9_-]{20,}|\bAQ\.?[A-Za-z0-9_-]{10,}/g, '[REDACTED_GEMINI_KEY]') : 'Failed to load key');
       setGeminiStatus('not_connected');
     } finally {
       setIsGeminiKeyLoading(false);

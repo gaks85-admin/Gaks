@@ -1,5 +1,6 @@
 import { validateFinalTelegramTradePayload, computeTradeFingerprint } from './final-telegram-gate.js';
 import { buildTelegramAlertMessage } from './telegram-formatter.js';
+import { redactSecretsInText, sanitizeErrorMessage } from './secret-sanitizer.js';
 
 export async function sendTelegramMessage(chatId: string | number, text: string): Promise<boolean> {
   const token = process.env.TELEGRAM_BOT_TOKEN;
@@ -23,12 +24,12 @@ export async function sendTelegramMessage(chatId: string | number, text: string)
     });
     if (!response.ok) {
       const errText = await response.text();
-      console.error(`Telegram API Error: ${response.status} - ${errText}`);
+      console.error(`Telegram API Error: ${response.status} - ${redactSecretsInText(errText)}`);
       return false;
     }
     return true;
   } catch (error: any) {
-    console.error("Error sending Telegram message:", error);
+    console.error("Error sending Telegram message:", sanitizeErrorMessage(error));
     return false;
   }
 }

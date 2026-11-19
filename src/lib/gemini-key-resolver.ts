@@ -1,4 +1,5 @@
 import { redactApiKey } from './apiKeys.js';
+import { redactSecretsInText, sanitizeErrorMessage } from './secret-sanitizer.js';
 
 export interface GeminiKeyResolutionResult {
   userId: string;
@@ -28,14 +29,10 @@ export function computeKeyFingerprint(key: string | null | undefined): string {
 }
 
 /**
- * Redacts any embedded Gemini API key (e.g. AIzaSy... or AQ...) inside arbitrary text or error messages.
+ * Redacts any embedded API keys, tokens, JWTs, or secret query parameters inside arbitrary text or error messages.
  */
 export function redactApiKeyInText(text: string | null | undefined): string {
-  if (!text) return '';
-  return text
-    .replace(/AIzaSy[A-Za-z0-9_-]{20,60}/g, '[REDACTED_GEMINI_KEY]')
-    .replace(/AQ\.[A-Za-z0-9_-]{10,120}/g, '[REDACTED_GEMINI_KEY]')
-    .replace(/AQ[A-Za-z0-9_-]{10,120}/g, '[REDACTED_GEMINI_KEY]');
+  return redactSecretsInText(text);
 }
 
 /**
@@ -66,7 +63,7 @@ export async function resolveUserGeminiKey(
         rawKey = String(keyRecord.api_key).trim();
       }
     } catch (err) {
-      console.error(`[Gemini Key Resolution] DB query exception for user ${userId}:`, err);
+      console.error(`[Gemini Key Resolution] DB query exception for user ${userId}:`, sanitizeErrorMessage(err));
     }
   }
 

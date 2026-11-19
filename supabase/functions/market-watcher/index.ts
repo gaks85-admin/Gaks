@@ -2,6 +2,20 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 import { GoogleGenAI, Type } from "npm:@google/genai"
 
+function redactSecrets(input: unknown): string {
+  if (input === null || input === undefined) return '';
+  const text = typeof input === 'string' ? input : String(input);
+  return text
+    .replace(/AIza[A-Za-z0-9_-]{20,}/g, '[REDACTED_GEMINI_KEY]')
+    .replace(/\bAQ\.[A-Za-z0-9_-]{10,}/g, '[REDACTED_GEMINI_KEY]')
+    .replace(/\bAQ[A-Za-z0-9_-]{16,}/g, '[REDACTED_GEMINI_KEY]')
+    .replace(/(https?:\/\/api\.telegram\.org\/)bot\d+:[A-Za-z0-9_-]+/gi, '$1bot[REDACTED_TELEGRAM_TOKEN]')
+    .replace(/\bbot\d{6,14}:[A-Za-z0-9_-]{20,}\b/g, 'bot[REDACTED_TELEGRAM_TOKEN]')
+    .replace(/([?&](?:apikey|api_key|token|secret|access_token)=)[^&\s"'`<>]+/gi, '$1[REDACTED]')
+    .replace(/(Authorization\s*[:=]\s*(?:Bearer|apikey|Basic|Token)\s+)[^\s"',;}\]]+/gi, '$1[REDACTED]')
+    .replace(/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g, '[REDACTED_JWT]');
+}
+
 serve(async (req) => {
   // 1. Verify Authorization Header (Supabase recommended auth)
   const authHeader = req.headers.get('Authorization')
@@ -53,10 +67,10 @@ serve(async (req) => {
           body: JSON.stringify({ chat_id: chatId, text, parse_mode: "Markdown" })
         })
         if (!response.ok) {
-          console.error(`Telegram send failed: HTTP ${response.status}`, await response.text())
+          console.error(`Telegram send failed: HTTP ${response.status}`, redactSecrets(await response.text()))
         }
-      } catch (err) {
-        console.error("Error sending Telegram message:", err)
+      } catch (err: any) {
+        console.error("Error sending Telegram message:", redactSecrets(err?.message || err))
       }
     }
 
@@ -75,7 +89,7 @@ serve(async (req) => {
           console.warn(`[Fetch Retry] Attempt ${attempt} returned HTTP ${response.status}. Retrying...`);
         } catch (err: any) {
           if (attempt >= maxRetries) throw err;
-          console.warn(`[Fetch Retry] Attempt ${attempt} network error: ${err.message || err}. Retrying...`);
+          console.warn(`[Fetch Retry] Attempt ${attempt} network error: ${redactSecrets(err?.message || err)}. Retrying...`);
         }
         await new Promise(resolve => setTimeout(resolve, baseDelayMs * attempt));
       }
@@ -84,8 +98,8 @@ serve(async (req) => {
 
     async function validateSymbolWithTwelveData(symbol: string, apiKey: string): Promise<{ isValid: boolean; matchedSymbol?: string; instrumentType?: string }> {
       try {
-        const searchUrl = `https://api.twelvedata.com/symbol_search?symbol=${encodeURIComponent(symbol)}&apikey=${apiKey}`;
-        const response = await fetchWithRetry(searchUrl, {}, 2, 500);
+        const searchUrl = `https://api.twelvedata.com/symbol_search?symbol=${encodeURIComponent(symbol)}`;
+        const response = await fetchWithRetry(searchUrl, { headers: { Authorization: `apikey ${apiKey}` } }, 2, 500);
         if (!response.ok) return { isValid: true };
         const data = await response.json();
         if (data.status === "error") return { isValid: true };
@@ -101,7 +115,7 @@ serve(async (req) => {
         }
         return { isValid: true, matchedSymbol: symbol };
       } catch (err: any) {
-        console.error(`[Symbol Search] Error validating symbol ${symbol}:`, err.message || err);
+        console.error(`[Symbol Search] Error validating symbol ${symbol}:`, redactSecrets(err?.message || err));
         return { isValid: true };
       }
     }
@@ -180,7 +194,7 @@ serve(async (req) => {
 
         } catch (err: any) {
           if (timer) clearTimeout(timer);
-          const errMsg = err?.message || String(err);
+          const errMsg = redactSecrets(err?.message || String(err));
           const isTimeout = err?.name === 'TimeoutError' || errMsg.includes('timed out');
           const isRateLimit = errMsg.includes('429') || errMsg.includes('RESOURCE_EXHAUSTED') || errMsg.includes('quota');
           const isServerError = errMsg.includes('503') || errMsg.includes('UNAVAILABLE') || errMsg.includes('high demand');
@@ -274,7 +288,7 @@ Institutional-grade multi-timeframe strategy for intraday trend capture.
               watcherId: items[index]?.id || 'unknown',
               status: 'FAILED',
               errorCategory: 'UNHANDLED_EXCEPTION',
-              error: err?.message || String(err)
+              error: redactSecrets(err?.message || String(err))
             } as unknown as R;
           }
         }
@@ -388,10 +402,10 @@ Institutional-grade multi-timeframe strategy for intraday trend capture.
         let quoteData: any = null;
         let twelveDataStatus = 'SUCCESS';
 
-        const timeSeriesUrl = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(finalSymbol)}&interval=${interval}&outputsize=1&apikey=${twelveDataKey}`;
+        const timeSeriesUrl = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(finalSymbol)}&interval=${interval}&outputsize=1`;
 
         try {
-          const tsRes = await fetchWithRetry(timeSeriesUrl, {}, 2, 1000);
+          const tsRes = await fetchWithRetry(timeSeriesUrl, { headers: { Authorization: `apikey ${twelveDataKey}` } }, 2, 1000);
           if (tsRes.ok) {
             const tsData = await tsRes.json();
             if (tsData.status === "ok" && tsData.values && tsData.values.length > 0) {
@@ -399,12 +413,12 @@ Institutional-grade multi-timeframe strategy for intraday trend capture.
             }
           }
         } catch (tsErr: any) {
-          console.warn(`[TWELVE DATA] Watcher: ${watcher.id} time_series error: ${tsErr.message || tsErr}`);
+          console.warn(`[TWELVE DATA] Watcher: ${watcher.id} time_series error: ${redactSecrets(tsErr.message || tsErr)}`);
         }
 
         if (!quoteData) {
-          const quoteUrl = `https://api.twelvedata.com/quote?symbol=${encodeURIComponent(finalSymbol)}&apikey=${twelveDataKey}`;
-          const qRes = await fetchWithRetry(quoteUrl, {}, 2, 1000);
+          const quoteUrl = `https://api.twelvedata.com/quote?symbol=${encodeURIComponent(finalSymbol)}`;
+          const qRes = await fetchWithRetry(quoteUrl, { headers: { Authorization: `apikey ${twelveDataKey}` } }, 2, 1000);
           if (qRes.ok) {
             const qData = await qRes.json();
             if (qData.status !== "error") {
@@ -521,7 +535,8 @@ Market Data: ${JSON.stringify(marketData)}`;
 
       } catch (watcherError: any) {
         const totalWatcherDuration = Date.now() - watcherStartTime;
-        console.error(`[WATCHER ERROR] Watcher ID: ${watcher.id}, Error: ${watcherError.message || watcherError}`);
+        const safeErr = redactSecrets(watcherError?.message || watcherError);
+        console.error(`[WATCHER ERROR] Watcher ID: ${watcher.id}, Error: ${safeErr}`);
         return {
           watcherId: watcher.id,
           userId,
@@ -529,7 +544,7 @@ Market Data: ${JSON.stringify(marketData)}`;
           timeframe: selectedTimeframe,
           status: 'FAILED',
           errorCategory: 'WATCHER_EXECUTION_EXCEPTION',
-          error: watcherError.message || String(watcherError),
+          error: safeErr,
           durationMs: totalWatcherDuration
         };
       }
@@ -545,8 +560,9 @@ Market Data: ${JSON.stringify(marketData)}`;
     });
 
   } catch (err: any) {
-    console.error("[Market Watcher Edge] Fatal Error:", err.message || err);
-    return new Response(JSON.stringify({ error: err.message || "Unknown error" }), {
+    const safeErr = redactSecrets(err?.message || "Unknown error");
+    console.error("[Market Watcher Edge] Fatal Error:", safeErr);
+    return new Response(JSON.stringify({ error: safeErr }), {
       status: 500,
       headers: { "Content-Type": "application/json" }
     });

@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { redactSecretsInText, sanitizeErrorMessage } from '../secret-sanitizer.js';
 
 const getSupabase = (token?: string) => {
   const url = process.env.VITE_SUPABASE_URL || "https://wkujrqmxivljnuvumfau.supabase.co";
@@ -63,8 +64,9 @@ export default async function handler(req: any, res: any) {
     const { data: allWatchers, error: fetchError } = await query;
 
     if (fetchError) {
-      console.error("[Watcher Stop] Error fetching watchers:", fetchError.message);
-      return res.status(500).json({ success: false, error: fetchError.message });
+      const safeErr = redactSecretsInText(fetchError.message);
+      console.error("[Watcher Stop] Error fetching watchers:", safeErr);
+      return res.status(500).json({ success: false, error: safeErr });
     }
 
     let watchers = allWatchers || [];
@@ -122,7 +124,8 @@ export default async function handler(req: any, res: any) {
       message: `Watcher(s) successfully ${action === 'delete' ? 'deleted' : 'stopped'} and trade state cleared.`
     });
   } catch (err: any) {
-    console.error("[Watcher Stop] Unexpected error:", err);
-    return res.status(500).json({ success: false, error: err.message || "Internal server error" });
+    const safeErr = sanitizeErrorMessage(err);
+    console.error("[Watcher Stop] Unexpected error:", safeErr);
+    return res.status(500).json({ success: false, error: safeErr });
   }
 }

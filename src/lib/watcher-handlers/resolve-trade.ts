@@ -4,6 +4,7 @@ import { validateActiveTradeState } from '../trade-validator.js';
 import { calculateUnrealizedPnlR, evaluateActiveTradeExit, calculatePipsDistance } from '../active-trade-monitor.js';
 import { buildTelegramTradeOutcomeMessage } from '../telegram-formatter.js';
 import { diagnoseLossOutcome, LossPostMortem } from '../trade-post-mortem-engine.js';
+import { sanitizeErrorMessage } from '../secret-sanitizer.js';
 
 async function sendTelegramMessage(chatId: string | number, text: string): Promise<boolean> {
   const token = process.env.TELEGRAM_BOT_TOKEN;
@@ -62,7 +63,7 @@ export default async function handler(req: any, res: any) {
       if (user) userId = user.id;
     }
   } catch (err) {
-    console.warn("Auth token lookup failed:", err);
+    console.warn("Auth token lookup failed:", sanitizeErrorMessage(err));
   }
 
   if (!userId) {
@@ -285,7 +286,8 @@ export default async function handler(req: any, res: any) {
       }
     });
   } catch (err: any) {
-    console.error("[Resolve Trade API] Error:", err);
-    return res.status(500).json({ success: false, error: err.message || "Internal server error" });
+    const safeErr = sanitizeErrorMessage(err);
+    console.error("[Resolve Trade API] Error:", safeErr);
+    return res.status(500).json({ success: false, error: safeErr });
   }
 }

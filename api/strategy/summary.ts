@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { createClient } from '@supabase/supabase-js';
 import { generateStrategySummary } from '../../src/lib/strategy-summarizer.js';
 import { resolveUserGeminiKey } from '../../src/lib/gemini-key-resolver.js';
+import { sanitizeErrorMessage } from '../../src/lib/secret-sanitizer.js';
 
 const getSupabase = (token?: string) => {
   const url = process.env.VITE_SUPABASE_URL || "https://wkujrqmxivljnuvumfau.supabase.co";
@@ -122,11 +123,12 @@ export default async function strategySummaryHandler(req: Request, res: Response
       updated_in_db: updatedInDb
     });
   } catch (err: any) {
-    console.error('[Strategy Summary API] Error:', err.message);
+    const safeErr = sanitizeErrorMessage(err);
+    console.error('[Strategy Summary API] Error:', safeErr);
     const statusCode = err.errorType === 'QUOTA_EXHAUSTED' ? 429 : 400;
     return res.status(statusCode).json({
       success: false,
-      error: err.message || 'Internal server error',
+      error: safeErr,
       errorType: err.errorType
     });
   }

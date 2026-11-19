@@ -9,6 +9,7 @@ import liveRatesHandler from './api/live-rates.ts';
 import performanceSnapshotHandler from './api/performance/snapshot.ts';
 import strategySummaryHandler from './api/strategy/summary.ts';
 import telegramWebhookHandler from './api/telegram/webhook.ts';
+import { sanitizeErrorMessage } from './src/lib/secret-sanitizer.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -44,7 +45,7 @@ async function startServer() {
       const { default: cronHandler } = await import('./api/cron/market-watcher.ts');
       return cronHandler(req as any, res as any);
     } catch (err: any) {
-      return res.status(500).json({ success: false, error: err.message });
+      return res.status(500).json({ success: false, error: sanitizeErrorMessage(err) });
     }
   });
   app.all('/api/performance/snapshot*', (req, res) => performanceSnapshotHandler(req as any, res as any));
@@ -69,10 +70,10 @@ async function startServer() {
   }
 
   process.on('uncaughtException', (err) => {
-    console.error('[Gaks Dev Server Uncaught Exception]:', err);
+    console.error('[Gaks Dev Server Uncaught Exception]:', sanitizeErrorMessage(err));
   });
   process.on('unhandledRejection', (reason) => {
-    console.error('[Gaks Dev Server Unhandled Rejection]:', reason);
+    console.error('[Gaks Dev Server Unhandled Rejection]:', sanitizeErrorMessage(reason));
   });
 
   const server = app.listen(Number(port), '0.0.0.0', () => {
@@ -80,11 +81,11 @@ async function startServer() {
   });
 
   server.on('error', (err: any) => {
-    console.error('[Gaks Server Listen Error]:', err);
+    console.error('[Gaks Server Listen Error]:', sanitizeErrorMessage(err));
   });
 }
 
 startServer().catch((err) => {
-  console.error('[Gaks Server Start Failed]:', err);
+  console.error('[Gaks Server Start Failed]:', sanitizeErrorMessage(err));
 });
 

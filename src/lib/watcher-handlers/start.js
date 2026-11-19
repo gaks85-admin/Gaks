@@ -10,6 +10,7 @@ import { compileStrategy } from "../strategy-compiler.js";
 import { extractMarketStructure } from "../market-structure-engine.js";
 import { resolveHigherTimeframeTrend } from "../htf-trend-engine.js";
 import { identifyMarkedZone } from "../zone-engine.js";
+import { redactSecretsInText, sanitizeErrorMessage, sanitizeObjectForLog } from "../secret-sanitizer.js";
 const getSupabase = (token) => {
   const url = process.env.VITE_SUPABASE_URL || "https://wkujrqmxivljnuvumfau.supabase.co";
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY;
@@ -50,12 +51,12 @@ async function sendTelegramMessage(chatId, text) {
       })
     });
     if (!response.ok) {
-      console.error(`Telegram sendMessage failed with status ${response.status}:`, await response.text());
+      console.error(`Telegram sendMessage failed with status ${response.status}:`, redactSecretsInText(await response.text()));
       return false;
     }
     return true;
   } catch (err) {
-    console.error("Error sending Telegram message:", err);
+    console.error("Error sending Telegram message:", sanitizeErrorMessage(err));
     return false;
   }
 }
@@ -205,20 +206,30 @@ async function handler(req, res) {
     if (profileError) {
       console.warn("[Watcher Start] Profile query warning:", profileError.message);
     }
-    console.log("[Watcher Start] Profile result:", JSON.stringify(profile, null, 2));
+    console.log("[Watcher Start] Profile result:", JSON.stringify(sanitizeObjectForLog(profile), null, 2));
     console.log("[Watcher Start] Checking telegram connection...");
     let { data: telegramConn, error: telegramError } = await supabase.from("telegram_connections").select("*").eq("user_id", userId).maybeSingle();
     if (!telegramConn) {
       console.log("[Watcher Start] No telegram connection found. Auto-creating row...");
       const { data: newConn, error: insertError } = await supabase.from("telegram_connections").insert({ user_id: userId, connected: false, connection_token: randomUUID(), created_at: (/* @__PURE__ */ new Date()).toISOString(), updated_at: (/* @__PURE__ */ new Date()).toISOString() }).select().single();
       if (insertError) {
-        console.error("[Watcher Start] Failed to create telegram_connections row:", insertError.message);
+        console.error("[Watcher Start] Failed to create telegram_connections row:", redactSecretsInText(insertError.message));
       } else {
-        console.log("[Watcher Start] Auto-created telegram connection row:", JSON.stringify(newConn, null, 2));
+        console.log("[Watcher Start] Auto-created telegram connection row:", JSON.stringify({
+          id: newConn?.id,
+          user_id: newConn?.user_id,
+          connected: newConn?.connected,
+          hasChatId: Boolean(newConn?.telegram_chat_id)
+        }));
         telegramConn = newConn;
       }
     } else {
-      console.log("[Watcher Start] Existing telegram connection found:", JSON.stringify(telegramConn, null, 2));
+      console.log("[Watcher Start] Existing telegram connection found:", JSON.stringify({
+        id: telegramConn?.id,
+        user_id: telegramConn?.user_id,
+        connected: telegramConn?.connected,
+        hasChatId: Boolean(telegramConn?.telegram_chat_id)
+      }));
     }
     if (telegramError && !telegramConn) {
       console.warn("[Watcher Start] Telegram connection lookup error:", telegramError.message);
@@ -672,28 +683,26 @@ I will now monitor the markets and alert you when price retests your marked zone
       telegram_delivered: telegramSuccess
     });
   } catch (err) {
-    console.error("[Watcher Start] Unhandled internal exception:", err);
-    console.error("[Watcher Start] Stack Trace:", err.stack);
+    const safeMsg = sanitizeErrorMessage(err, "Unknown error");
+    console.error("[Watcher Start] Unhandled internal exception:", safeMsg);
     if (telegramChatId) {
       try {
         await sendTelegramMessage(telegramChatId, `\u274C *Market Watcher Activation Failed*
 
-Reason: Internal server error during activation: ${err.message || "Unknown error"}`);
+Reason: Internal server error during activation: ${safeMsg}`);
       } catch (tgErr) {
-        console.error("[Watcher Start] Failed to send error notification to Telegram:", tgErr);
+        console.error("[Watcher Start] Failed to send error notification to Telegram:", sanitizeErrorMessage(tgErr));
       }
     }
     console.log("[Watcher Activation] FAILED at Catch Block:", {
-      reason: err.message || "Internal server error during watcher activation",
+      reason: safeMsg,
       user_id: userId,
       selected_pair: selectedPair,
       selected_timeframe: selectedTimeframe
     });
     return res.status(500).json({
       success: false,
-      error: "Internal server error during watcher activation: " + (err.message || "Unknown error"),
-      stack: err.stack,
-      details: err
+      error: "Internal server error during watcher activation: " + safeMsg
     });
   }
 }

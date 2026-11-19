@@ -1,5 +1,6 @@
 import { EconomicEvent, EconomicEventProvider, EconomicEventImpact, EconomicEventStatus } from './economic-calendar-provider.js';
 import { getCurrencyForCountry } from '../utils/currency-mapping.js';
+import { sanitizeErrorMessage } from '../secret-sanitizer.js';
 
 interface FmpEconomicEvent {
   event: string;
@@ -54,7 +55,7 @@ export class FmpEconomicCalendarProvider implements EconomicEventProvider {
       const data: FmpEconomicEvent[] = await response.json();
       return data.map(event => this.normalizeEvent(event));
     } catch (error) {
-      console.error('Error fetching economic events from FMP:', error);
+      console.error('Error fetching economic events from FMP:', sanitizeErrorMessage(error));
       return [];
     }
   }

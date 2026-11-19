@@ -1,3 +1,5 @@
+import { redactSecretsInText, sanitizeErrorMessage, sanitizeObjectForLog } from './secret-sanitizer.js';
+
 export interface WatcherLogContext {
   userEmail: string;
   watcherId: string;
@@ -43,9 +45,9 @@ export function logWatcherResult(
   if (result === 'TRADE') {
     console.log(`[WATCHER] user=${user} | watcher=${watcher} | pair=${pair} | tf=${tf} | result=TRADE | signal=${details.signal || 'BUY'} | lot=${details.lot ?? '0.01'} | sl=${details.sl ?? 'N/A'} | tp=${details.tp ?? 'N/A'} | duration=${duration}`);
   } else if (result === 'ERROR') {
-    console.log(`[WATCHER] user=${user} | watcher=${watcher} | pair=${pair} | tf=${tf} | result=ERROR | reason=${details.reason || 'unknown_error'} | duration=${duration}`);
+    console.log(`[WATCHER] user=${user} | watcher=${watcher} | pair=${pair} | tf=${tf} | result=ERROR | reason=${redactSecretsInText(details.reason || 'unknown_error')} | duration=${duration}`);
   } else {
-    console.log(`[WATCHER] user=${user} | watcher=${watcher} | pair=${pair} | tf=${tf} | result=NO_TRADE | reason=${details.reason || 'no_setup'} | duration=${duration}`);
+    console.log(`[WATCHER] user=${user} | watcher=${watcher} | pair=${pair} | tf=${tf} | result=NO_TRADE | reason=${redactSecretsInText(details.reason || 'no_setup')} | duration=${duration}`);
   }
 }
 
@@ -88,7 +90,7 @@ export async function resolveWatcherUserContext(
 
     if (profileErr) {
       if (isDebugMode()) {
-        console.error(`[WATCHER CONTEXT ERROR] Watcher: ${watcherId} | Reason: Profiles query error - ${profileErr.message}`);
+        console.error(`[WATCHER CONTEXT ERROR] Watcher: ${watcherId} | Reason: Profiles query error - ${redactSecretsInText(profileErr.message)}`);
       }
     } else if (profile && profile.email && profile.email.trim() !== '') {
       return { userEmail: profile.email.trim(), watcherId, pair, timeframe };
@@ -99,7 +101,7 @@ export async function resolveWatcherUserContext(
     }
   } catch (err: any) {
     if (isDebugMode()) {
-      console.error(`[WATCHER CONTEXT ERROR] Watcher: ${watcherId} | Reason: Exception querying profiles - ${err?.message || err}`);
+      console.error(`[WATCHER CONTEXT ERROR] Watcher: ${watcherId} | Reason: Exception querying profiles - ${sanitizeErrorMessage(err)}`);
     }
   }
 
@@ -109,7 +111,7 @@ export async function resolveWatcherUserContext(
       const { data: authUser, error: authErr } = await supabase.auth.admin.getUserById(userId);
       if (authErr) {
         if (isDebugMode()) {
-          console.error(`[WATCHER CONTEXT ERROR] Watcher: ${watcherId} | Reason: Auth user lookup failed - ${authErr.message}`);
+          console.error(`[WATCHER CONTEXT ERROR] Watcher: ${watcherId} | Reason: Auth user lookup failed - ${redactSecretsInText(authErr.message)}`);
         }
       } else if (authUser?.user?.email && authUser.user.email.trim() !== '') {
         return { userEmail: authUser.user.email.trim(), watcherId, pair, timeframe };
@@ -124,7 +126,7 @@ export async function resolveWatcherUserContext(
       }
     } catch (err: any) {
       if (isDebugMode()) {
-        console.error(`[WATCHER CONTEXT ERROR] Watcher: ${watcherId} | Reason: Exception querying auth.admin - ${err?.message || err}`);
+        console.error(`[WATCHER CONTEXT ERROR] Watcher: ${watcherId} | Reason: Exception querying auth.admin - ${sanitizeErrorMessage(err)}`);
       }
     }
   } else {
@@ -144,9 +146,10 @@ export function logWatcherEvent(eventName: string, ctx: WatcherLogContext, detai
       return;
     }
     if (typeof details === 'string') {
-      console.log(`${header}\n${details}`);
+      console.log(`${header}\n${redactSecretsInText(details)}`);
     } else {
-      const lines = Object.entries(details)
+      const safeDetails = sanitizeObjectForLog(details) as Record<string, any>;
+      const lines = Object.entries(safeDetails)
         .filter(([_, v]) => v !== undefined && v !== null)
         .map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : v}`)
         .join('\n');
@@ -157,13 +160,14 @@ export function logWatcherEvent(eventName: string, ctx: WatcherLogContext, detai
 
 export function logWatcherError(eventName: string, ctx: WatcherLogContext, error: any, details?: Record<string, any>): void {
   const shortId = formatShortId(ctx.watcherId);
-  const errMsg = error?.message || String(error || 'Unknown error');
+  const errMsg = sanitizeErrorMessage(error, 'Unknown error');
   console.error(`[WATCHER] ERROR | pair=${ctx.pair} | watcher=${shortId} | reason=${errMsg}`);
   if (isDebugMode()) {
     const header = formatWatcherHeader(eventName, ctx);
     let body = `Error: ${errMsg}`;
     if (details) {
-      const lines = Object.entries(details)
+      const safeDetails = sanitizeObjectForLog(details) as Record<string, any>;
+      const lines = Object.entries(safeDetails)
         .filter(([_, v]) => v !== undefined && v !== null)
         .map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : v}`)
         .join('\n');
@@ -176,9 +180,10 @@ export function logWatcherError(eventName: string, ctx: WatcherLogContext, error
 export function logWatcherWarn(eventName: string, ctx: WatcherLogContext, message: string, details?: Record<string, any>): void {
   if (isDebugMode()) {
     const header = formatWatcherHeader(eventName, ctx);
-    let body = `Warning: ${message}`;
+    let body = `Warning: ${redactSecretsInText(message)}`;
     if (details) {
-      const lines = Object.entries(details)
+      const safeDetails = sanitizeObjectForLog(details) as Record<string, any>;
+      const lines = Object.entries(safeDetails)
         .filter(([_, v]) => v !== undefined && v !== null)
         .map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : v}`)
         .join('\n');

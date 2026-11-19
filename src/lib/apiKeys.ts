@@ -3,6 +3,7 @@ import { runGeminiRequest } from './geminiWrapper.js';
 import { executeBoundedGeminiCall } from './geminiWrapper.js';
 import { sendTelegramMessage } from './telegramWrapper.js';
 import { redactApiKeyInText } from './gemini-key-resolver.js';
+import { redactSecretsInText, sanitizeErrorMessage } from './secret-sanitizer.js';
 
 async function getSupabase() {
   const { supabase } = await import('../supabaseClient.js');
@@ -331,7 +332,7 @@ export async function getGeminiKey(): Promise<string | null> {
     const supabase = await getSupabase();
     const { data: { session }, error: sessionError } = await supabase.auth.getSession();
     if (sessionError || !session?.user) {
-      console.warn("getGeminiKey: No active session found", sessionError);
+      console.warn("getGeminiKey: No active session found", sessionError ? sanitizeErrorMessage(sessionError) : '');
       return null;
     }
 
@@ -343,7 +344,7 @@ export async function getGeminiKey(): Promise<string | null> {
       .maybeSingle();
 
     if (error) {
-      console.warn("Could not fetch Gemini key from database:", error.message);
+      console.warn("Could not fetch Gemini key from database:", redactSecretsInText(error.message));
       return null;
     }
 
@@ -353,7 +354,7 @@ export async function getGeminiKey(): Promise<string | null> {
 
     return null;
   } catch (err) {
-    console.error("Exception in getGeminiKey:", err);
+    console.error("Exception in getGeminiKey:", sanitizeErrorMessage(err));
     return null;
   }
 }
@@ -397,7 +398,7 @@ export async function saveGeminiKey(
     const supabase = await getSupabase();
     const { data: { session }, error: sessionError } = await supabase.auth.getSession();
     if (sessionError || !session?.user) {
-      console.warn("[Gemini Save] No session error or session user", sessionError);
+      console.warn("[Gemini Save] No session error or session user", sessionError ? sanitizeErrorMessage(sessionError) : '');
       return { success: false, error: "You must be logged in to save API keys." };
     }
 
@@ -467,7 +468,7 @@ export async function saveGeminiKey(
       .maybeSingle();
 
     if (checkError) {
-      console.warn("Could not query existing key, attempting upsert anyway", checkError);
+      console.warn("Could not query existing key, attempting upsert anyway", sanitizeErrorMessage(checkError));
     }
 
     const dbOpType = existingKey?.id ? 'UPDATE' : 'INSERT';
@@ -629,14 +630,16 @@ export async function deleteGeminiKey(): Promise<{ success: boolean; error?: str
       .eq('provider', 'gemini');
 
     if (error) {
-      console.warn("Could not delete API key from database:", error.message);
-      return { success: false, error: error.message };
+      const safeMsg = redactSecretsInText(error.message);
+      console.warn("Could not delete API key from database:", safeMsg);
+      return { success: false, error: safeMsg };
     }
 
     return { success: true };
   } catch (err: any) {
-    console.error("Exception in deleteGeminiKey:", err);
-    return { success: false, error: err.message || "An unexpected error occurred." };
+    const safeMsg = sanitizeErrorMessage(err, "An unexpected error occurred.");
+    console.error("Exception in deleteGeminiKey:", safeMsg);
+    return { success: false, error: safeMsg };
   }
 }
 

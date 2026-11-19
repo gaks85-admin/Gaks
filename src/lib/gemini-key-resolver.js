@@ -1,4 +1,5 @@
 import { redactApiKey } from "./apiKeys.js";
+import { redactSecretsInText, sanitizeErrorMessage } from "./secret-sanitizer.js";
 function computeKeyFingerprint(key) {
   if (!key) return "NONE";
   const trimmed = key.trim();
@@ -11,8 +12,7 @@ function computeKeyFingerprint(key) {
   return (hash >>> 0).toString(16).padStart(8, "0").substring(0, 8);
 }
 function redactApiKeyInText(text) {
-  if (!text) return "";
-  return text.replace(/AIzaSy[A-Za-z0-9_-]{20,60}/g, "[REDACTED_GEMINI_KEY]").replace(/AQ\.[A-Za-z0-9_-]{10,120}/g, "[REDACTED_GEMINI_KEY]").replace(/AQ[A-Za-z0-9_-]{10,120}/g, "[REDACTED_GEMINI_KEY]");
+  return redactSecretsInText(text);
 }
 async function resolveUserGeminiKey(supabase, userId, watcherId = "manual-scan", context) {
   let rawKey = null;
@@ -23,7 +23,7 @@ async function resolveUserGeminiKey(supabase, userId, watcherId = "manual-scan",
         rawKey = String(keyRecord.api_key).trim();
       }
     } catch (err) {
-      console.error(`[Gemini Key Resolution] DB query exception for user ${userId}:`, err);
+      console.error(`[Gemini Key Resolution] DB query exception for user ${userId}:`, sanitizeErrorMessage(err));
     }
   }
   const keyPresent = !!rawKey;

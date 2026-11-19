@@ -1,5 +1,6 @@
 import { Candle } from "./strategy-engine.js";
 import { getMarketSchedule } from "./market-hours.js";
+import { redactSecretsInText, sanitizeErrorMessage } from "./secret-sanitizer.js";
 
 export interface MarketDataRequest {
   symbol: string;
@@ -482,9 +483,12 @@ export class MarketDataGateway {
     }
 
     const promise = (async () => {
-      const searchUrl = `https://api.twelvedata.com/symbol_search?symbol=${encodeURIComponent(display)}&apikey=${key}`;
+      const searchUrl = `https://api.twelvedata.com/symbol_search?symbol=${encodeURIComponent(display)}`;
       try {
-        const response = await fetch(searchUrl, { signal: AbortSignal.timeout(MARKET_DATA_PROVIDER_LIMITS.requestTimeoutMs) });
+        const response = await fetch(searchUrl, {
+          headers: { Authorization: `apikey ${key}` },
+          signal: AbortSignal.timeout(MARKET_DATA_PROVIDER_LIMITS.requestTimeoutMs),
+        });
         if (response.status === 429) {
           this.recordRequestFailure(429, 'Rate limit', response.headers);
           this.logRequest({
@@ -503,12 +507,13 @@ export class MarketDataGateway {
 
         const data = await response.json();
         if (data.status === 'error') {
+          const safeMsg = redactSecretsInText(data.message || 'Symbol validation error');
           if (data.code === 429 || String(data.message).includes('limit')) {
-            this.recordRequestFailure(429, data.message, response.headers);
+            this.recordRequestFailure(429, safeMsg, response.headers);
             return { isValid: false, reason: 'MARKET_DATA_PROVIDER_QUOTA_EXHAUSTED' };
           }
-          this.recordRequestFailure(response.status, data.message, response.headers);
-          return { isValid: false, reason: data.message };
+          this.recordRequestFailure(response.status, safeMsg, response.headers);
+          return { isValid: false, reason: safeMsg };
         }
 
         if (response.ok) {
@@ -528,8 +533,9 @@ export class MarketDataGateway {
         this.recordRequestFailure(response.status, 'HTTP Error', response.headers);
         return { isValid: false, reason: `HTTP error ${response.status}` };
       } catch (err: any) {
-        this.recordRequestFailure(null, err.message);
-        return { isValid: false, reason: err.message || 'Symbol search network failure' };
+        const safeErr = sanitizeErrorMessage(err, 'Symbol search network failure');
+        this.recordRequestFailure(null, safeErr);
+        return { isValid: false, reason: safeErr };
       }
     })();
 
@@ -584,9 +590,12 @@ export class MarketDataGateway {
     if (!key) return null;
 
     const promise = (async (): Promise<number | null> => {
-      const priceUrl = `https://api.twelvedata.com/price?symbol=${encodeURIComponent(display)}&apikey=${key}`;
+      const priceUrl = `https://api.twelvedata.com/price?symbol=${encodeURIComponent(display)}`;
       try {
-        const response = await fetch(priceUrl, { signal: AbortSignal.timeout(MARKET_DATA_PROVIDER_LIMITS.requestTimeoutMs) });
+        const response = await fetch(priceUrl, {
+          headers: { Authorization: `apikey ${key}` },
+          signal: AbortSignal.timeout(MARKET_DATA_PROVIDER_LIMITS.requestTimeoutMs),
+        });
         if (response.status === 429) {
           this.recordRequestFailure(429, 'Rate limit', response.headers);
           return cached ? cached.price : null;
@@ -594,7 +603,7 @@ export class MarketDataGateway {
 
         const data = await response.json();
         if (data.status === 'error') {
-          this.recordRequestFailure(response.status, data.message, response.headers);
+          this.recordRequestFailure(response.status, redactSecretsInText(data.message), response.headers);
           return cached ? cached.price : null;
         }
 
@@ -608,7 +617,7 @@ export class MarketDataGateway {
         }
         return cached ? cached.price : null;
       } catch (err: any) {
-        this.recordRequestFailure(null, err.message);
+        this.recordRequestFailure(null, sanitizeErrorMessage(err));
         return cached ? cached.price : null;
       }
     })();
@@ -770,7 +779,7 @@ export class MarketDataGateway {
       console.log(`[TWELVE DATA REQUEST]\nSymbol: ${canonical}\nTimeframe: ${req.timeframe}\nOutputSize: ${req.requiredCount}`);
       this.healthState.totalRequests++;
 
-      const timeSeriesUrl = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(display)}&interval=${interval}&outputsize=${req.requiredCount}&timezone=UTC&apikey=${key}`;
+      const timeSeriesUrl = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(display)}&interval=${interval}&outputsize=${req.requiredCount}&timezone=UTC`;
 
       let attempt = 0;
       const maxRetries = MARKET_DATA_PROVIDER_LIMITS.maxRetries;
@@ -778,7 +787,10 @@ export class MarketDataGateway {
       while (attempt < maxRetries) {
         attempt++;
         try {
-          const response = await fetch(timeSeriesUrl, { signal: AbortSignal.timeout(MARKET_DATA_PROVIDER_LIMITS.requestTimeoutMs) });
+          const response = await fetch(timeSeriesUrl, {
+            headers: { Authorization: `apikey ${key}` },
+            signal: AbortSignal.timeout(MARKET_DATA_PROVIDER_LIMITS.requestTimeoutMs),
+          });
 
           // Inspect headers for quota monitoring without making auxiliary requests
           this.inspectQuotaHeaders(response.headers);
@@ -821,7 +833,7 @@ export class MarketDataGateway {
             const lowerMsg = rawMsg.toLowerCase();
 
             if (data.code === 429 || lowerMsg.includes('limit') || lowerMsg.includes('credits') || lowerMsg.includes('quota')) {
-              this.recordRequestFailure(429, data.message, response.headers);
+              this.recordRequestFailure(429, redactSecretsInText(data.message), response.headers);
               console.warn(`[TWELVE DATA RATE LIMIT]\nSymbol: ${canonical}\nTimeframe: ${req.timeframe}\nAction: CACHE_ONLY`);
 
               return {
@@ -835,7 +847,7 @@ export class MarketDataGateway {
             }
 
             if (data.code === 400 || lowerMsg.includes('not found') || lowerMsg.includes('invalid')) {
-              this.recordRequestFailure(404, data.message, response.headers);
+              this.recordRequestFailure(404, redactSecretsInText(data.message), response.headers);
               return {
                 isValid: false,
                 candles: [],
@@ -846,7 +858,7 @@ export class MarketDataGateway {
             }
 
             if (data.code === 401 || data.code === 403) {
-              this.recordRequestFailure(data.code, data.message, response.headers);
+              this.recordRequestFailure(data.code, redactSecretsInText(data.message), response.headers);
               return {
                 isValid: false,
                 candles: [],
@@ -857,7 +869,7 @@ export class MarketDataGateway {
               };
             }
 
-            this.recordRequestFailure(response.status, data.message, response.headers);
+            this.recordRequestFailure(response.status, redactSecretsInText(data.message), response.headers);
             return {
               isValid: false,
               candles: [],
@@ -989,7 +1001,7 @@ export class MarketDataGateway {
           }
 
           if (attempt >= maxRetries) {
-            this.recordRequestFailure(null, err.message);
+            this.recordRequestFailure(null, sanitizeErrorMessage(err));
             return {
               isValid: false,
               candles: [],

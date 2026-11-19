@@ -1,4 +1,5 @@
 import { getCurrencyForCountry } from "../utils/currency-mapping.js";
+import { sanitizeErrorMessage } from "../secret-sanitizer.js";
 class FmpEconomicCalendarProvider {
   apiKey;
   baseUrl = "https://financialmodelingprep.com/stable";
@@ -32,7 +33,7 @@ class FmpEconomicCalendarProvider {
       const data = await response.json();
       return data.map((event) => this.normalizeEvent(event));
     } catch (error) {
-      console.error("Error fetching economic events from FMP:", error);
+      console.error("Error fetching economic events from FMP:", sanitizeErrorMessage(error));
       return [];
     }
   }

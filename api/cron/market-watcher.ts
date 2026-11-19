@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 import { CronTimer } from '../../src/lib/cron-timer.js';
+import { redactSecretsInText, sanitizeErrorMessage, sanitizeUrl } from '../../src/lib/secret-sanitizer.js';
 import { WatcherLogContext, logWatcherEvent, logWatcherError, logWatcherWarn, resolveWatcherUserContext, logWatcherStart, logWatcherResult, isDebugMode } from '../../src/lib/watcher-logger.js';
 import { GoogleGenAI, Type } from '@google/genai';
 import { analyzeMarket, Candle } from '../../src/lib/strategy-engine.js';
@@ -22,7 +23,7 @@ import { getBrokerProvider } from '../../src/lib/broker-factory.js';
 import { recordEvaluation } from '../../src/lib/explainability-engine.js';
 import { defaultMarketDataService, getMarketDataStats, getRequiredCandleCountForTimeframe } from '../../src/lib/market-data-service.js';
 import { calculateHistoricalProbability, recordCompletedTrade, getUserWinRateStats } from '../../src/lib/learning-engine.js';
-import { calculatePipsDistance, calculateUnrealizedPnlR } from '../../src/lib/active-trade-monitor.js';
+import { calculatePipsDistance, calculateUnrealizedPnlR, evaluateActiveTradeExitWithHistory, resolveActiveTradeMonitoringPlan } from '../../src/lib/active-trade-monitor.js';
 import { diagnoseLossOutcome, LossPostMortem, checkRecentSlMitigationForPair } from '../../src/lib/trade-post-mortem-engine.js';
 import { BrokerReconciliationService } from '../../src/lib/broker-reconciliation-service.js';
 import { SafetyGovernor, defaultSafetyLimits } from '../../src/lib/safety-governor.js';
@@ -443,7 +444,7 @@ export async function sendTelegramMessage(chatId: string | number, text: string)
     });
     if (!response.ok) {
       const errText = await response.text();
-      console.warn(`Telegram API Error: ${response.status} - ${errText}. Retrying without parse_mode...`);
+      console.warn(`Telegram API Error: ${response.status} - ${redactSecretsInText(errText)}. Retrying without parse_mode...`);
       const fallbackResponse = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -451,20 +452,21 @@ export async function sendTelegramMessage(chatId: string | number, text: string)
       });
       if (!fallbackResponse.ok) {
         const fbErr = await fallbackResponse.text();
-        console.error(`Telegram API Error (Plain text fallback): ${fallbackResponse.status} - ${fbErr}`);
+        console.error(`Telegram API Error (Plain text fallback): ${fallbackResponse.status} - ${redactSecretsInText(fbErr)}`);
         return false;
       }
       return true;
     }
     return true;
   } catch (error: any) {
-    console.error("Error sending Telegram message:", error);
+    console.error("Error sending Telegram message:", sanitizeErrorMessage(error));
     return false;
   }
 }
 
 async function fetchWithRetry(url: string, options: RequestInit = {}, maxRetries = 3, baseDelayMs = 1000): Promise<Response> {
   let attempt = 0;
+  const safeUrl = sanitizeUrl(url);
   while (attempt < maxRetries) {
     attempt++;
     try {
@@ -473,7 +475,7 @@ async function fetchWithRetry(url: string, options: RequestInit = {}, maxRetries
         return response;
       }
       if (response.status === 429) {
-        console.warn(`[Twelve Data Rate Limit] HTTP 429 rate limit received from ${url}. Never retrying 429.`);
+        console.warn(`[Twelve Data Rate Limit] HTTP 429 rate limit received from ${safeUrl}. Never retrying 429.`);
         return response;
       }
       if (response.status === 404 || response.status === 400) {
@@ -485,7 +487,7 @@ async function fetchWithRetry(url: string, options: RequestInit = {}, maxRetries
       if (attempt >= maxRetries) {
         throw err;
       }
-      console.warn(`[Fetch Retry] Attempt ${attempt} threw network error: ${err.message || err}. Retrying in ${baseDelayMs * Math.pow(2, attempt - 1)}ms...`);
+      console.warn(`[Fetch Retry] Attempt ${attempt} threw network error: ${sanitizeErrorMessage(err)}. Retrying in ${baseDelayMs * Math.pow(2, attempt - 1)}ms...`);
     }
     await new Promise(resolve => setTimeout(resolve, baseDelayMs * Math.pow(2, attempt - 1)));
   }
@@ -663,16 +665,17 @@ export default async function handler(req: any, res: any) {
       set cacheHits(val) { requestsSavedThroughCachingCount = val; }
     };
 
-    // Debug logging immediately before the authorization check
+    // Debug logging immediately before the authorization check (boolean presence only — never log raw headers or secrets)
     if (isDebugMode()) {
       console.log("DEBUG CRON AUTH:", {
         method: req.method,
-        authorization: req.headers.authorization || req.headers['authorization'] || null,
+        hasAuthorizationHeader: Boolean(req.headers.authorization || req.headers['authorization']),
+        hasXCronSecret: Boolean(req.headers['x-cron-secret']),
       });
     }
 
-    // Protect the endpoint using a CRON_SECRET
-    const authHeader = req.headers.authorization || req.headers['authorization'] || req.headers['x-cron-secret'] || (req.query && req.query.secret ? `Bearer ${req.query.secret}` : null);
+    // Protect the endpoint using CRON_SECRET via headers only (never accept query-string secrets)
+    const authHeader = req.headers.authorization || req.headers['authorization'] || req.headers['x-cron-secret'] || null;
     
     const cleanCronSecret = cronSecretRaw ? cronSecretRaw.trim().replace(/^['"]|['"]$/g, '').trim() : "";
 
@@ -688,11 +691,11 @@ export default async function handler(req: any, res: any) {
 
     // 2. Require Bearer or valid token authentication (401 if missing, invalid format, or token mismatch)
     if (!authHeader) {
-      console.warn("[CRON SECURITY REJECTED] Missing Authorization header or secret.");
+      console.warn("[CRON SECURITY REJECTED] Missing Authorization header.");
       return res.status(401).json({
         success: false,
         error: "Unauthorized",
-        reason: "Authorization header or secret parameter is missing."
+        reason: "Authorization header is missing."
       });
     }
 
@@ -703,7 +706,11 @@ export default async function handler(req: any, res: any) {
     }
     token = token.replace(/^['"]|['"]$/g, '').trim();
 
-    if (!token || token !== cleanCronSecret) {
+    const tokenBuf = Buffer.from(token, 'utf8');
+    const secretBuf = Buffer.from(cleanCronSecret, 'utf8');
+    const isTokenValid = token.length > 0 && tokenBuf.length === secretBuf.length && crypto.timingSafeEqual(tokenBuf, secretBuf);
+
+    if (!isTokenValid) {
       console.warn("[CRON SECURITY REJECTED] Invalid or mismatched Bearer token provided.");
       return res.status(401).json({
         success: false,
@@ -1419,26 +1426,48 @@ Reason: ${activeValidation.reason}`);
           currentMarketPrice: currentPrice
         });
 
-        let isTP = false;
-        let isSL = false;
-
-        if (isBuy) {
-          if (takeProfit !== null && !isNaN(takeProfit) && currentPrice >= takeProfit) {
-            isTP = true;
-          }
-          if (stopLoss !== null && !isNaN(stopLoss) && currentPrice <= stopLoss) {
-            isSL = true;
-          }
-        } else if (isSell) {
-          if (takeProfit !== null && !isNaN(takeProfit) && currentPrice <= takeProfit) {
-            isTP = true;
-          }
-          if (stopLoss !== null && !isNaN(stopLoss) && currentPrice >= stopLoss) {
-            isSL = true;
+        // Fetch chronological intrabar candles since opened_at so we never miss an SL/TP
+        // hit that occurred and reversed between polling intervals.
+        let activeTradeCandles: Candle[] = [];
+        if (watcher.opened_at) {
+          try {
+            const monitoringPlan = resolveActiveTradeMonitoringPlan(watcher.opened_at);
+            const historyRes = await defaultMarketDataService.getMarketData(
+              {
+                symbol: selectedPair,
+                timeframe: monitoringPlan.timeframe,
+                requiredCount: monitoringPlan.requiredCount,
+                watcherId: watcher.id,
+                userId,
+                purpose: 'Active Trade Exit Verification'
+              },
+              twelveDataKey
+            );
+            if (historyRes.isValid && Array.isArray(historyRes.candles)) {
+              activeTradeCandles = historyRes.candles;
+            } else if (historyRes.errorType === 'QUOTA_EXHAUSTED' || historyRes.reason === 'TWELVE_DATA_RATE_LIMITED') {
+              twelveDataExhausted = true;
+            }
+          } catch (historyErr: any) {
+            logWatcherWarn('ACTIVE EXIT HISTORY', logCtx, `Could not load intrabar candles, falling back to spot check: ${sanitizeErrorMessage(historyErr)}`);
           }
         }
 
-        if (!isTP && !isSL) {
+        const safeEntryPrice = entryPrice ?? 0;
+        const safeStopLoss = stopLoss ?? 0;
+        const safeTakeProfit = takeProfit ?? 0;
+        const exitEval = evaluateActiveTradeExitWithHistory({
+          direction: dir,
+          entryPrice: safeEntryPrice,
+          stopLoss: safeStopLoss,
+          takeProfit: safeTakeProfit,
+          openedAt: watcher.opened_at,
+          currentPrice,
+          candles: activeTradeCandles
+        });
+        const resolvedExitPrice = exitEval.exitPrice;
+
+        if (exitEval.exitStatus === 'HOLDING') {
           console.log(`[STATE 2 - ACTIVE] Neither TP nor SL hit for Watcher ID: ${watcher.id} (${selectedPair}). Exiting immediately.`);
           watchersProcessedCount++;
           isWatcherSkipped = false;
@@ -1450,131 +1479,9 @@ Reason: ${activeValidation.reason}`);
         const lastScanMs = watcher.last_scan_at ? new Date(watcher.last_scan_at).getTime() : now.getTime();
         const cooldownUntilIso = new Date(Math.max(now.getTime(), lastScanMs) + scanIntervalMinutes * 60 * 1000).toISOString();
 
-        // Handle TP Reached
-        if (isTP) {
-          console.log(`[STATE 2 - ACTIVE] ✅ Target reached for Watcher ID: ${watcher.id} (${selectedPair})! Exit price: ${currentPrice}, TP: ${takeProfit}`);
-
-          // Record completed trade to Learning Engine
-          let latestEval: any = null;
-          try {
-            const { data } = await supabase
-              .from('watcher_evaluations')
-              .select('*')
-              .eq('watcher_id', watcher.id)
-              .order('created_at', { ascending: false })
-              .limit(1)
-              .maybeSingle();
-            latestEval = data;
-          } catch (e: any) {
-            console.warn('[Learning Engine] Could not fetch latest evaluation:', e.message);
-          }
-
-          const activeTradeId = watcher.active_trade_id || watcher.last_signal_data?.trade_id || watcher.last_signal_data?.tradeId || null;
-
-          await recordCompletedTrade(supabase, {
-            user_id: userId,
-            watcher_id: watcher.id,
-            trade_id: activeTradeId,
-            evaluation_id: latestEval?.id || null,
-            pair: selectedPair,
-            timeframe: selectedTimeframe,
-            strategy_mode: latestEval?.strategy_mode || 'HYBRID',
-            entry_price: entryPrice || 0,
-            stop_loss: stopLoss,
-            take_profit: takeProfit,
-            exit_price: currentPrice,
-            direction: dir,
-            outcome: 'WIN',
-            opened_at: watcher.opened_at || new Date(Date.now() - 30 * 60 * 1000).toISOString(),
-            closed_at: new Date().toISOString(),
-            decision_score: latestEval?.decision_score || null,
-            matched_weight: latestEval?.matched_weight || null,
-            possible_weight: latestEval?.possible_weight || null,
-            matched_rules: latestEval?.matched_rules || [],
-            failed_rules: latestEval?.failed_rules || [],
-            gemini_used: latestEval?.gemini_used || false,
-            gemini_confidence: null,
-            market_snapshot: {},
-            session: null,
-            volatility: 'MEDIUM',
-            notes: `Trade closed via TP. Exit Price: ${currentPrice}`,
-            decision_snapshot: latestEval?.decision_snapshot || null
-          });
-
-          // Send Telegram alert with trade outcome and real-time win rate
-          if (telegramChatId) {
-            try {
-              const stats = await getUserWinRateStats(supabase, userId, selectedPair);
-              const pipsDistance = Math.abs(calculatePipsDistance(selectedPair, entryPrice || currentPrice, currentPrice));
-              const realizedR = calculateUnrealizedPnlR(dir, entryPrice || currentPrice, stopLoss || 0, currentPrice);
-
-              const tpMsg = buildTelegramTradeOutcomeMessage({
-                pair: selectedPair,
-                direction: dir as 'BUY' | 'SELL',
-                entryPrice: entryPrice || 0,
-                exitPrice: currentPrice,
-                stopLoss,
-                takeProfit,
-                outcome: 'WIN',
-                pips: pipsDistance,
-                realizedR: realizedR > 0 ? realizedR : 2.0,
-                totalTrades: stats.totalTrades,
-                wins: stats.wins,
-                losses: stats.losses,
-                winRate: stats.winRate,
-                pairTotalTrades: stats.pairTotalTrades,
-                pairWins: stats.pairWins,
-                pairWinRate: stats.pairWinRate
-              });
-              await sendTelegramMessage(telegramChatId, tpMsg);
-              telegramMessagesSentCount++;
-            } catch (tgErr: any) {
-              console.error(`[TELEGRAM OUTCOME ERROR] Error sending TP outcome message:`, tgErr);
-            }
-          }
-
-          // Transition to COOLDOWN & clear zone so another zone is not marked until cooldown expires
-          const { data: tpCooldownData, error: tpCooldownErr } = await supabase
-            .from("watchers")
-            .update({
-              trade_status: 'COOLDOWN',
-              active_trade_id: null,
-              zone_data: null,
-              zone_status: 'NO_ZONE',
-              zone_high: null,
-              zone_low: null,
-              closed_at: new Date().toISOString(),
-              cooldown_until: cooldownUntilIso,
-              last_scan_at: new Date().toISOString(),
-              updated_at: new Date().toISOString()
-            })
-            .eq("id", watcher.id)
-            .select();
-
-          if (tpCooldownErr || !tpCooldownData || tpCooldownData.length === 0) {
-            console.error(`[COOLDOWN UPDATE ERROR] Watcher ID: ${watcher.id} failed to update to COOLDOWN:`, tpCooldownErr?.message || 'No rows returned');
-          } else {
-            console.log(`[COOLDOWN UPDATE SUCCESS] Watcher ID: ${watcher.id} successfully updated to trade_status = COOLDOWN in Supabase.`);
-          }
-
-          await syncPropFirmStateForActiveWatcher({
-            supabase,
-            userId,
-            rawAccountType: prefsMap.get(userId)?.account_type,
-            symbol: selectedPair,
-            currentMarketPrice: currentPrice
-          });
-
-          watchersProcessedCount++;
-          isWatcherSkipped = false;
-          results.push({ userId, symbol, tradeStatus: 'COOLDOWN', result: 'Closed TP' });
-          console.log(`ACTIVE branch exited.`);
-          return;
-        }
-
-        // Handle SL Reached
-        if (isSL) {
-          console.log(`[STATE 2 - ACTIVE] ❌ Stop loss hit for Watcher ID: ${watcher.id} (${selectedPair})! Exit price: ${currentPrice}, SL: ${stopLoss}`);
+        // Handle SL Reached FIRST (conservative STOP_LOSS_FIRST tie-breaking)
+        if (exitEval.exitStatus === 'SL_HIT') {
+          console.log(`[STATE 2 - ACTIVE] ❌ Stop loss hit for Watcher ID: ${watcher.id} (${selectedPair})! Trigger: ${exitEval.triggeredBy}${exitEval.triggerCandleTimestamp ? ` @ ${exitEval.triggerCandleTimestamp}` : ''}, Exit price: ${resolvedExitPrice}, Spot: ${currentPrice}, SL: ${stopLoss}`);
 
           // Record completed trade to Learning Engine
           let latestEval: any = null;
@@ -1600,10 +1507,10 @@ Reason: ${activeValidation.reason}`);
               pair: selectedPair,
               timeframe: selectedTimeframe,
               direction: dir,
-              entryPrice: entryPrice || 0,
-              stopLoss: stopLoss,
-              takeProfit: takeProfit,
-              exitPrice: currentPrice,
+              entryPrice: safeEntryPrice,
+              stopLoss: safeStopLoss,
+              takeProfit: safeTakeProfit,
+              exitPrice: resolvedExitPrice,
               openedAt: watcher.opened_at,
               closedAt: new Date().toISOString(),
               matchedRules: latestEval?.matched_rules || [],
@@ -1618,9 +1525,10 @@ Reason: ${activeValidation.reason}`);
             ...(lossPostMortem ? { loss_post_mortem: lossPostMortem } : {})
           };
 
+          const triggerContext = exitEval.triggerCandleTimestamp ? ` (${exitEval.triggeredBy} @ ${exitEval.triggerCandleTimestamp})` : '';
           const notesWithPM = lossPostMortem
-            ? `Trade closed via SL. Exit: ${currentPrice}. AI Post-Mortem: ${lossPostMortem.rootCauseTitle} - ${lossPostMortem.preventiveAdjustment}`
-            : `Trade closed via SL. Exit Price: ${currentPrice}`;
+            ? `Trade closed via SL${triggerContext}. Exit: ${resolvedExitPrice}. AI Post-Mortem: ${lossPostMortem.rootCauseTitle} - ${lossPostMortem.preventiveAdjustment}`
+            : `Trade closed via SL${triggerContext}. Exit Price: ${resolvedExitPrice}`;
 
           await recordCompletedTrade(supabase, {
             user_id: userId,
@@ -1630,10 +1538,10 @@ Reason: ${activeValidation.reason}`);
             pair: selectedPair,
             timeframe: selectedTimeframe,
             strategy_mode: latestEval?.strategy_mode || 'HYBRID',
-            entry_price: entryPrice || 0,
-            stop_loss: stopLoss,
-            take_profit: takeProfit,
-            exit_price: currentPrice,
+            entry_price: safeEntryPrice,
+            stop_loss: safeStopLoss,
+            take_profit: safeTakeProfit,
+            exit_price: resolvedExitPrice,
             direction: dir,
             outcome: 'LOSS',
             opened_at: watcher.opened_at || new Date(Date.now() - 30 * 60 * 1000).toISOString(),
@@ -1656,15 +1564,15 @@ Reason: ${activeValidation.reason}`);
           if (telegramChatId) {
             try {
               const stats = await getUserWinRateStats(supabase, userId, selectedPair);
-              const pipsDistance = Math.abs(calculatePipsDistance(selectedPair, entryPrice || currentPrice, currentPrice));
+              const pipsDistance = Math.abs(calculatePipsDistance(selectedPair, safeEntryPrice || resolvedExitPrice, resolvedExitPrice));
 
               const slMsg = buildTelegramTradeOutcomeMessage({
                 pair: selectedPair,
                 direction: dir as 'BUY' | 'SELL',
-                entryPrice: entryPrice || 0,
-                exitPrice: currentPrice,
-                stopLoss,
-                takeProfit,
+                entryPrice: safeEntryPrice,
+                exitPrice: resolvedExitPrice,
+                stopLoss: safeStopLoss,
+                takeProfit: safeTakeProfit,
                 outcome: 'LOSS',
                 pips: pipsDistance,
                 realizedR: -1.0,
@@ -1714,6 +1622,128 @@ Reason: ${activeValidation.reason}`);
           watchersProcessedCount++;
           isWatcherSkipped = false;
           results.push({ userId, symbol, tradeStatus: 'COOLDOWN', result: 'Closed SL' });
+          console.log(`ACTIVE branch exited.`);
+          return;
+        }
+
+        // Handle TP Reached
+        if (exitEval.exitStatus === 'TP_HIT') {
+          console.log(`[STATE 2 - ACTIVE] ✅ Target reached for Watcher ID: ${watcher.id} (${selectedPair})! Trigger: ${exitEval.triggeredBy}${exitEval.triggerCandleTimestamp ? ` @ ${exitEval.triggerCandleTimestamp}` : ''}, Exit price: ${resolvedExitPrice}, TP: ${takeProfit}`);
+
+          // Record completed trade to Learning Engine
+          let latestEval: any = null;
+          try {
+            const { data } = await supabase
+              .from('watcher_evaluations')
+              .select('*')
+              .eq('watcher_id', watcher.id)
+              .order('created_at', { ascending: false })
+              .limit(1)
+              .maybeSingle();
+            latestEval = data;
+          } catch (e: any) {
+            console.warn('[Learning Engine] Could not fetch latest evaluation:', e.message);
+          }
+
+          const activeTradeId = watcher.active_trade_id || watcher.last_signal_data?.trade_id || watcher.last_signal_data?.tradeId || null;
+
+          await recordCompletedTrade(supabase, {
+            user_id: userId,
+            watcher_id: watcher.id,
+            trade_id: activeTradeId,
+            evaluation_id: latestEval?.id || null,
+            pair: selectedPair,
+            timeframe: selectedTimeframe,
+            strategy_mode: latestEval?.strategy_mode || 'HYBRID',
+            entry_price: safeEntryPrice,
+            stop_loss: safeStopLoss,
+            take_profit: safeTakeProfit,
+            exit_price: resolvedExitPrice,
+            direction: dir,
+            outcome: 'WIN',
+            opened_at: watcher.opened_at || new Date(Date.now() - 30 * 60 * 1000).toISOString(),
+            closed_at: new Date().toISOString(),
+            decision_score: latestEval?.decision_score || null,
+            matched_weight: latestEval?.matched_weight || null,
+            possible_weight: latestEval?.possible_weight || null,
+            matched_rules: latestEval?.matched_rules || [],
+            failed_rules: latestEval?.failed_rules || [],
+            gemini_used: latestEval?.gemini_used || false,
+            gemini_confidence: null,
+            market_snapshot: {},
+            session: null,
+            volatility: 'MEDIUM',
+            notes: `Trade closed via TP${exitEval.triggerCandleTimestamp ? ` (${exitEval.triggeredBy} @ ${exitEval.triggerCandleTimestamp})` : ''}. Exit Price: ${resolvedExitPrice}`,
+            decision_snapshot: latestEval?.decision_snapshot || null
+          });
+
+          // Send Telegram alert with trade outcome and real-time win rate
+          if (telegramChatId) {
+            try {
+              const stats = await getUserWinRateStats(supabase, userId, selectedPair);
+              const pipsDistance = Math.abs(calculatePipsDistance(selectedPair, safeEntryPrice || resolvedExitPrice, resolvedExitPrice));
+              const realizedR = exitEval.realizedR > 0 ? exitEval.realizedR : calculateUnrealizedPnlR(dir, safeEntryPrice || resolvedExitPrice, safeStopLoss, resolvedExitPrice);
+
+              const tpMsg = buildTelegramTradeOutcomeMessage({
+                pair: selectedPair,
+                direction: dir as 'BUY' | 'SELL',
+                entryPrice: safeEntryPrice,
+                exitPrice: resolvedExitPrice,
+                stopLoss: safeStopLoss,
+                takeProfit: safeTakeProfit,
+                outcome: 'WIN',
+                pips: pipsDistance,
+                realizedR: realizedR > 0 ? realizedR : 2.0,
+                totalTrades: stats.totalTrades,
+                wins: stats.wins,
+                losses: stats.losses,
+                winRate: stats.winRate,
+                pairTotalTrades: stats.pairTotalTrades,
+                pairWins: stats.pairWins,
+                pairWinRate: stats.pairWinRate
+              });
+              await sendTelegramMessage(telegramChatId, tpMsg);
+              telegramMessagesSentCount++;
+            } catch (tgErr: any) {
+              console.error(`[TELEGRAM OUTCOME ERROR] Error sending TP outcome message:`, tgErr);
+            }
+          }
+
+          // Transition to COOLDOWN & clear zone so another zone is not marked until cooldown expires
+          const { data: tpCooldownData, error: tpCooldownErr } = await supabase
+            .from("watchers")
+            .update({
+              trade_status: 'COOLDOWN',
+              active_trade_id: null,
+              zone_data: null,
+              zone_status: 'NO_ZONE',
+              zone_high: null,
+              zone_low: null,
+              closed_at: new Date().toISOString(),
+              cooldown_until: cooldownUntilIso,
+              last_scan_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            })
+            .eq("id", watcher.id)
+            .select();
+
+          if (tpCooldownErr || !tpCooldownData || tpCooldownData.length === 0) {
+            console.error(`[COOLDOWN UPDATE ERROR] Watcher ID: ${watcher.id} failed to update to COOLDOWN:`, tpCooldownErr?.message || 'No rows returned');
+          } else {
+            console.log(`[COOLDOWN UPDATE SUCCESS] Watcher ID: ${watcher.id} successfully updated to trade_status = COOLDOWN in Supabase.`);
+          }
+
+          await syncPropFirmStateForActiveWatcher({
+            supabase,
+            userId,
+            rawAccountType: prefsMap.get(userId)?.account_type,
+            symbol: selectedPair,
+            currentMarketPrice: resolvedExitPrice
+          });
+
+          watchersProcessedCount++;
+          isWatcherSkipped = false;
+          results.push({ userId, symbol, tradeStatus: 'COOLDOWN', result: 'Closed TP' });
           console.log(`ACTIVE branch exited.`);
           return;
         }
@@ -5112,10 +5142,11 @@ Source: ${brokerQuote.source}`);
     });
 
   } catch (err: any) {
-    console.error("[CRON FATAL]", err);
+    const safeMsg = sanitizeErrorMessage(err);
+    console.error("[CRON FATAL]", safeMsg);
     return res.status(500).json({ 
       success: false, 
-      error: String(err)
+      error: safeMsg
     });
   }
 }

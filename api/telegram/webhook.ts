@@ -1,6 +1,7 @@
 type VercelRequest = any;
 type VercelResponse = any;
 import { createClient } from '@supabase/supabase-js';
+import { maskTokenPrefix, redactSecretsInText, sanitizeErrorMessage } from '../../src/lib/secret-sanitizer.js';
 
 /**
  * Self-contained Supabase client initialization.
@@ -46,10 +47,10 @@ async function sendTelegramMessage(chatId: string | number, text: string) {
     });
 
     if (!response.ok) {
-      console.error(`Telegram sendMessage failed with status ${response.status}:`, await response.text());
+      console.error(`Telegram sendMessage failed with status ${response.status}:`, redactSecretsInText(await response.text()));
     }
   } catch (err) {
-    console.error("Error sending Telegram message:", err);
+    console.error("Error sending Telegram message:", sanitizeErrorMessage(err));
   }
 }
 
@@ -122,7 +123,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           return res.status(200).json({ success: true, reason: "Start command without token" });
         }
 
-        console.log(`[Telegram Webhook Vercel] Looking up token: ${token} for Chat ID: ${chatId}`);
+        console.log(`[Telegram Webhook Vercel] Looking up token prefix: ${maskTokenPrefix(token)} for Chat ID: ${chatId}`);
 
         // Query database for matching connection token
         const { data: connection, error: selectError } = await supabase
@@ -132,7 +133,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           .maybeSingle();
 
         if (selectError || !connection) {
-          console.error(`[Telegram Webhook Vercel] Connection token invalid or lookup failed:`, selectError);
+          console.error(`[Telegram Webhook Vercel] Connection token invalid or lookup failed:`, selectError ? sanitizeErrorMessage(selectError) : 'NOT_FOUND');
           await sendTelegramMessage(
             chatId,
             "❌ *Verification Failed*\n\nThe connection token is invalid or has expired. Please return to the Gaks AI Dashboard, regenerate your link, and try again."
@@ -163,7 +164,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           .eq("connection_token", token);
 
         if (updateError) {
-          console.error("[Telegram Webhook Vercel] Database update error:", updateError);
+          console.error("[Telegram Webhook Vercel] Database update error:", sanitizeErrorMessage(updateError));
           await sendTelegramMessage(
             chatId,
             "❌ *Database Sync Error*\n\nWe encountered an error while saving your profile link. Please try again in a few moments."
@@ -180,8 +181,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       return res.status(200).json({ success: true });
     } catch (error: any) {
-      console.error("[Telegram Webhook Vercel] Unhandled exception:", error);
-      return res.status(500).json({ success: false, error: error.message || "Internal server error" });
+      const safeErr = sanitizeErrorMessage(error);
+      console.error("[Telegram Webhook Vercel] Unhandled exception:", safeErr);
+      return res.status(500).json({ success: false, error: safeErr });
     }
   }
 

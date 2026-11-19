@@ -1,6 +1,7 @@
 import { GoogleGenAI } from "@google/genai";
 import { executeBoundedGeminiCall } from "./geminiWrapper.js";
 import { redactApiKeyInText } from "./gemini-key-resolver.js";
+import { redactSecretsInText, sanitizeErrorMessage } from "./secret-sanitizer.js";
 async function getSupabase() {
   const { supabase } = await import("../supabaseClient.js");
   return supabase;
@@ -224,12 +225,12 @@ async function getGeminiKey() {
     const supabase = await getSupabase();
     const { data: { session }, error: sessionError } = await supabase.auth.getSession();
     if (sessionError || !session?.user) {
-      console.warn("getGeminiKey: No active session found", sessionError);
+      console.warn("getGeminiKey: No active session found", sessionError ? sanitizeErrorMessage(sessionError) : "");
       return null;
     }
     const { data, error } = await supabase.from("user_api_keys").select("api_key").eq("user_id", session.user.id).eq("provider", "gemini").maybeSingle();
     if (error) {
-      console.warn("Could not fetch Gemini key from database:", error.message);
+      console.warn("Could not fetch Gemini key from database:", redactSecretsInText(error.message));
       return null;
     }
     if (data && data.api_key) {
@@ -237,7 +238,7 @@ async function getGeminiKey() {
     }
     return null;
   } catch (err) {
-    console.error("Exception in getGeminiKey:", err);
+    console.error("Exception in getGeminiKey:", sanitizeErrorMessage(err));
     return null;
   }
 }
@@ -257,7 +258,7 @@ async function saveGeminiKey(key, options) {
     const supabase = await getSupabase();
     const { data: { session }, error: sessionError } = await supabase.auth.getSession();
     if (sessionError || !session?.user) {
-      console.warn("[Gemini Save] No session error or session user", sessionError);
+      console.warn("[Gemini Save] No session error or session user", sessionError ? sanitizeErrorMessage(sessionError) : "");
       return { success: false, error: "You must be logged in to save API keys." };
     }
     userId = session.user.id;
@@ -305,7 +306,7 @@ async function saveGeminiKey(key, options) {
     failureStage = "DB";
     const { data: existingKey, error: checkError } = await supabase.from("user_api_keys").select("id").eq("user_id", userId).eq("provider", "gemini").maybeSingle();
     if (checkError) {
-      console.warn("Could not query existing key, attempting upsert anyway", checkError);
+      console.warn("Could not query existing key, attempting upsert anyway", sanitizeErrorMessage(checkError));
     }
     const dbOpType = existingKey?.id ? "UPDATE" : "INSERT";
     const commonFields = {
@@ -424,13 +425,15 @@ async function deleteGeminiKey() {
     const userId = session.user.id;
     const { error } = await supabase.from("user_api_keys").delete().eq("user_id", userId).eq("provider", "gemini");
     if (error) {
-      console.warn("Could not delete API key from database:", error.message);
-      return { success: false, error: error.message };
+      const safeMsg = redactSecretsInText(error.message);
+      console.warn("Could not delete API key from database:", safeMsg);
+      return { success: false, error: safeMsg };
     }
     return { success: true };
   } catch (err) {
-    console.error("Exception in deleteGeminiKey:", err);
-    return { success: false, error: err.message || "An unexpected error occurred." };
+    const safeMsg = sanitizeErrorMessage(err, "An unexpected error occurred.");
+    console.error("Exception in deleteGeminiKey:", safeMsg);
+    return { success: false, error: safeMsg };
   }
 }
 export {

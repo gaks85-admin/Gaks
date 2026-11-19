@@ -3,6 +3,7 @@ import watcherStopHandler from '../src/lib/watcher-handlers/stop.js';
 import watcherScanHandler from '../src/lib/watcher-handlers/scan.js';
 import watcherResolveTradeHandler from '../src/lib/watcher-handlers/resolve-trade.js';
 import watcherReplayHandler from '../src/lib/watcher-handlers/replay.js';
+import { sanitizeErrorMessage } from '../src/lib/secret-sanitizer.js';
 
 export default async function handler(req: any, res: any) {
   // CORS configuration - MUST be first to prevent "Failed to fetch" on preflight
@@ -46,7 +47,7 @@ export default async function handler(req: any, res: any) {
         results
       });
     } catch (err: any) {
-      return res.status(500).json({ success: false, error: err.message });
+      return res.status(500).json({ success: false, error: sanitizeErrorMessage(err) });
     }
   }
 

@@ -1,3 +1,4 @@
+import { redactSecretsInText, sanitizeErrorMessage, sanitizeObjectForLog } from "./secret-sanitizer.js";
 function isDebugMode() {
   return process.env.LOG_LEVEL === "debug" || process.env.DEBUG === "true";
 }
@@ -27,9 +28,9 @@ function logWatcherResult(ctx, result, details = {}) {
   if (result === "TRADE") {
     console.log(`[WATCHER] user=${user} | watcher=${watcher} | pair=${pair} | tf=${tf} | result=TRADE | signal=${details.signal || "BUY"} | lot=${details.lot ?? "0.01"} | sl=${details.sl ?? "N/A"} | tp=${details.tp ?? "N/A"} | duration=${duration}`);
   } else if (result === "ERROR") {
-    console.log(`[WATCHER] user=${user} | watcher=${watcher} | pair=${pair} | tf=${tf} | result=ERROR | reason=${details.reason || "unknown_error"} | duration=${duration}`);
+    console.log(`[WATCHER] user=${user} | watcher=${watcher} | pair=${pair} | tf=${tf} | result=ERROR | reason=${redactSecretsInText(details.reason || "unknown_error")} | duration=${duration}`);
   } else {
-    console.log(`[WATCHER] user=${user} | watcher=${watcher} | pair=${pair} | tf=${tf} | result=NO_TRADE | reason=${details.reason || "no_setup"} | duration=${duration}`);
+    console.log(`[WATCHER] user=${user} | watcher=${watcher} | pair=${pair} | tf=${tf} | result=NO_TRADE | reason=${redactSecretsInText(details.reason || "no_setup")} | duration=${duration}`);
   }
 }
 function formatWatcherHeader(eventName, ctx) {
@@ -54,7 +55,7 @@ async function resolveWatcherUserContext(supabase, watcher) {
     const { data: profile, error: profileErr } = await supabase.from("profiles").select("email, full_name").eq("id", userId).maybeSingle();
     if (profileErr) {
       if (isDebugMode()) {
-        console.error(`[WATCHER CONTEXT ERROR] Watcher: ${watcherId} | Reason: Profiles query error - ${profileErr.message}`);
+        console.error(`[WATCHER CONTEXT ERROR] Watcher: ${watcherId} | Reason: Profiles query error - ${redactSecretsInText(profileErr.message)}`);
       }
     } else if (profile && profile.email && profile.email.trim() !== "") {
       return { userEmail: profile.email.trim(), watcherId, pair, timeframe };
@@ -65,7 +66,7 @@ async function resolveWatcherUserContext(supabase, watcher) {
     }
   } catch (err) {
     if (isDebugMode()) {
-      console.error(`[WATCHER CONTEXT ERROR] Watcher: ${watcherId} | Reason: Exception querying profiles - ${err?.message || err}`);
+      console.error(`[WATCHER CONTEXT ERROR] Watcher: ${watcherId} | Reason: Exception querying profiles - ${sanitizeErrorMessage(err)}`);
     }
   }
   if (supabase?.auth?.admin?.getUserById) {
@@ -73,7 +74,7 @@ async function resolveWatcherUserContext(supabase, watcher) {
       const { data: authUser, error: authErr } = await supabase.auth.admin.getUserById(userId);
       if (authErr) {
         if (isDebugMode()) {
-          console.error(`[WATCHER CONTEXT ERROR] Watcher: ${watcherId} | Reason: Auth user lookup failed - ${authErr.message}`);
+          console.error(`[WATCHER CONTEXT ERROR] Watcher: ${watcherId} | Reason: Auth user lookup failed - ${redactSecretsInText(authErr.message)}`);
         }
       } else if (authUser?.user?.email && authUser.user.email.trim() !== "") {
         return { userEmail: authUser.user.email.trim(), watcherId, pair, timeframe };
@@ -88,7 +89,7 @@ async function resolveWatcherUserContext(supabase, watcher) {
       }
     } catch (err) {
       if (isDebugMode()) {
-        console.error(`[WATCHER CONTEXT ERROR] Watcher: ${watcherId} | Reason: Exception querying auth.admin - ${err?.message || err}`);
+        console.error(`[WATCHER CONTEXT ERROR] Watcher: ${watcherId} | Reason: Exception querying auth.admin - ${sanitizeErrorMessage(err)}`);
       }
     }
   } else {
@@ -107,9 +108,10 @@ function logWatcherEvent(eventName, ctx, details) {
     }
     if (typeof details === "string") {
       console.log(`${header}
-${details}`);
+${redactSecretsInText(details)}`);
     } else {
-      const lines = Object.entries(details).filter(([_, v]) => v !== void 0 && v !== null).map(([k, v]) => `${k}: ${typeof v === "object" ? JSON.stringify(v) : v}`).join("\n");
+      const safeDetails = sanitizeObjectForLog(details);
+      const lines = Object.entries(safeDetails).filter(([_, v]) => v !== void 0 && v !== null).map(([k, v]) => `${k}: ${typeof v === "object" ? JSON.stringify(v) : v}`).join("\n");
       console.log(lines ? `${header}
 ${lines}` : header);
     }
@@ -117,13 +119,14 @@ ${lines}` : header);
 }
 function logWatcherError(eventName, ctx, error, details) {
   const shortId = formatShortId(ctx.watcherId);
-  const errMsg = error?.message || String(error || "Unknown error");
+  const errMsg = sanitizeErrorMessage(error, "Unknown error");
   console.error(`[WATCHER] ERROR | pair=${ctx.pair} | watcher=${shortId} | reason=${errMsg}`);
   if (isDebugMode()) {
     const header = formatWatcherHeader(eventName, ctx);
     let body = `Error: ${errMsg}`;
     if (details) {
-      const lines = Object.entries(details).filter(([_, v]) => v !== void 0 && v !== null).map(([k, v]) => `${k}: ${typeof v === "object" ? JSON.stringify(v) : v}`).join("\n");
+      const safeDetails = sanitizeObjectForLog(details);
+      const lines = Object.entries(safeDetails).filter(([_, v]) => v !== void 0 && v !== null).map(([k, v]) => `${k}: ${typeof v === "object" ? JSON.stringify(v) : v}`).join("\n");
       if (lines) body += `
 ${lines}`;
     }
@@ -134,9 +137,10 @@ ${body}`);
 function logWatcherWarn(eventName, ctx, message, details) {
   if (isDebugMode()) {
     const header = formatWatcherHeader(eventName, ctx);
-    let body = `Warning: ${message}`;
+    let body = `Warning: ${redactSecretsInText(message)}`;
     if (details) {
-      const lines = Object.entries(details).filter(([_, v]) => v !== void 0 && v !== null).map(([k, v]) => `${k}: ${typeof v === "object" ? JSON.stringify(v) : v}`).join("\n");
+      const safeDetails = sanitizeObjectForLog(details);
+      const lines = Object.entries(safeDetails).filter(([_, v]) => v !== void 0 && v !== null).map(([k, v]) => `${k}: ${typeof v === "object" ? JSON.stringify(v) : v}`).join("\n");
       if (lines) body += `
 ${lines}`;
     }

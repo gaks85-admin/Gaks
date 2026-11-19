@@ -9,6 +9,7 @@ import { defaultMarketDataService, getMarketDataStats, getRequiredCandleCountFor
 import { marketDataGateway } from '../src/lib/market-data-gateway.js';
 import { sendNotificationEmail } from '../src/lib/email-service.js';
 import { verifyAdminAuth } from '../src/lib/auth-admin.js';
+import { sanitizeErrorMessage } from '../src/lib/secret-sanitizer.js';
 import {
   createBacktestDataset,
   listBacktestDatasets,
@@ -102,13 +103,13 @@ async function health_handler(req: any, res: any) {
         const responseText = await runGeminiRequest(supabase, user?.id || 'admin', "Reply only with OK", model);
         return res.status(200).json({ success: true, geminiDebug: { authenticated: true, model, geminiResponse: responseText } });
       } catch (err: any) {
-        return res.status(200).json({ success: false, geminiDebug: { authenticated: true, model, geminiError: err.message } });
+        return res.status(200).json({ success: false, geminiDebug: { authenticated: true, model, geminiError: sanitizeErrorMessage(err) } });
       }
     }
 
     return res.status(200).json({ success: true, status: 'ONLINE' });
   } catch (err: any) {
-    return res.status(500).json({ success: false, error: err.message });
+    return res.status(500).json({ success: false, error: sanitizeErrorMessage(err) });
   }
 }
 
@@ -180,7 +181,7 @@ async function settings_handler(req: any, res: any) {
       return res.status(200).json({ success: true, message: "Settings saved successfully.", settings: appSettings });
     }
   } catch (err: any) {
-    return res.status(500).json({ success: false, error: err.message });
+    return res.status(500).json({ success: false, error: sanitizeErrorMessage(err) });
   }
 }
 
@@ -193,7 +194,7 @@ async function signals_handler(req: any, res: any) {
     const { data } = await supabase.from('watcher_evaluations').select('*').order('created_at', { ascending: false }).limit(50);
     return res.status(200).json({ success: true, signals: data || [] });
   } catch (err: any) {
-    return res.status(500).json({ success: false, error: err.message });
+    return res.status(500).json({ success: false, error: sanitizeErrorMessage(err) });
   }
 }
 
@@ -247,8 +248,9 @@ async function stats_handler(req: any, res: any) {
 
     return res.status(200).json({ success: true, stats });
   } catch (err: any) {
-    console.error("[Admin Stats Error]:", err);
-    return res.status(500).json({ success: false, error: err.message });
+    const safeErr = sanitizeErrorMessage(err);
+    console.error("[Admin Stats Error]:", safeErr);
+    return res.status(500).json({ success: false, error: safeErr });
   }
 }
 
@@ -304,8 +306,9 @@ async function performance_handler(req: any, res: any) {
 
     return res.status(200).json({ success: true, chartData });
   } catch (err: any) {
-    console.error("[Admin Performance Error]:", err);
-    return res.status(500).json({ success: false, error: err.message });
+    const safeErr = sanitizeErrorMessage(err);
+    console.error("[Admin Performance Error]:", safeErr);
+    return res.status(500).json({ success: false, error: safeErr });
   }
 }
 
@@ -322,7 +325,7 @@ async function users_handler(req: any, res: any) {
     const { data } = await supabase.from('profiles').select('*');
     return res.status(200).json({ success: true, users: data || [] });
   } catch (err: any) {
-    return res.status(500).json({ success: false, error: err.message });
+    return res.status(500).json({ success: false, error: sanitizeErrorMessage(err) });
   }
 }
 
@@ -390,7 +393,7 @@ async function notifications_send_handler(req: any, res: any) {
 
     return res.status(200).json({ success: true, message: `Successfully broadcasted to ${sentCount} recipient(s).` });
   } catch (err: any) {
-    return res.status(500).json({ success: false, error: err.message });
+    return res.status(500).json({ success: false, error: sanitizeErrorMessage(err) });
   }
 }
 
@@ -493,8 +496,9 @@ async function zone_history_handler(req: any, res: any) {
 
     return res.status(200).json({ success: true, count: zones.length, zones });
   } catch (err: any) {
-    console.error("[Admin Zone History Error]:", err);
-    return res.status(500).json({ success: false, error: err.message });
+    const safeErr = sanitizeErrorMessage(err);
+    console.error("[Admin Zone History Error]:", safeErr);
+    return res.status(500).json({ success: false, error: safeErr });
   }
 }
 
@@ -507,7 +511,7 @@ async function watchers_handler(req: any, res: any) {
     const { data } = await supabase.from('watchers').select('*');
     return res.status(200).json({ success: true, watchers: data || [] });
   } catch (err: any) {
-    return res.status(500).json({ success: false, error: err.message });
+    return res.status(500).json({ success: false, error: sanitizeErrorMessage(err) });
   }
 }
 
@@ -608,8 +612,9 @@ async function system_health_handler(req: any, res: any) {
 
     return res.status(200).json({ success: true, ...health });
   } catch (err: any) {
-    console.error("[System Health Error]:", err);
-    return res.status(500).json({ success: false, error: err.message });
+    const safeErr = sanitizeErrorMessage(err);
+    console.error("[System Health Error]:", safeErr);
+    return res.status(500).json({ success: false, error: safeErr });
   }
 }
 
@@ -670,7 +675,7 @@ async function send_test_alert_handler(req: any, res: any) {
 
     return res.status(200).json({ success: true, user: target.profiles?.email || target.telegram_username || 'User' });
   } catch (err: any) {
-    return res.status(500).json({ success: false, error: err.message });
+    return res.status(500).json({ success: false, error: sanitizeErrorMessage(err) });
   }
 }
 
@@ -692,8 +697,9 @@ async function sync_economic_events_handler(req: any, res: any) {
     
     return res.status(200).json({ success: true, message: 'Economic events sync completed successfully.' });
   } catch (err: any) {
-    console.error("[Admin Economic Sync Error]:", err);
-    return res.status(500).json({ success: false, error: err.message });
+    const safeErr = sanitizeErrorMessage(err);
+    console.error("[Admin Economic Sync Error]:", safeErr);
+    return res.status(500).json({ success: false, error: safeErr });
   }
 }
 
@@ -760,8 +766,9 @@ async function backtest_dataset_handler(req: any, res: any) {
 
     return res.status(405).json({ success: false, error: 'Method Not Allowed' });
   } catch (err: any) {
-    console.error('[Admin Backtest Handler Error]:', err);
-    return res.status(500).json({ success: false, error: err.message || 'Internal Server Error' });
+    const safeErr = sanitizeErrorMessage(err);
+    console.error('[Admin Backtest Handler Error]:', safeErr);
+    return res.status(500).json({ success: false, error: safeErr });
   }
 }
 
@@ -808,8 +815,9 @@ async function backtest_run_handler(req: any, res: any) {
       runId: saveRes.runId
     });
   } catch (err: any) {
-    console.error('[Admin Backtest Run Error]:', err);
-    return res.status(500).json({ success: false, error: err.message || 'Backtest execution failed' });
+    const safeErr = sanitizeErrorMessage(err, 'Backtest execution failed');
+    console.error('[Admin Backtest Run Error]:', safeErr);
+    return res.status(500).json({ success: false, error: safeErr });
   }
 }
 
@@ -855,8 +863,9 @@ async function backtest_runs_handler(req: any, res: any) {
 
     return res.status(405).json({ success: false, error: 'Method Not Allowed' });
   } catch (err: any) {
-    console.error('[Admin Backtest Runs Handler Error]:', err);
-    return res.status(500).json({ success: false, error: err.message || 'Internal Server Error' });
+    const safeErr = sanitizeErrorMessage(err);
+    console.error('[Admin Backtest Runs Handler Error]:', safeErr);
+    return res.status(500).json({ success: false, error: safeErr });
   }
 }
 
@@ -915,6 +924,6 @@ export default async function handler(req: any, res: any) {
     if (pathname.endsWith('/send-test-alert')) return send_test_alert_handler(req, res);
     return stats_handler(req, res);
   } catch (err: any) {
-    return res.status(500).json({ success: false, error: err.message });
+    return res.status(500).json({ success: false, error: sanitizeErrorMessage(err) });
   }
 }

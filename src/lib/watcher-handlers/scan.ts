@@ -24,7 +24,7 @@ import { evaluateClosedLoopCalibration } from "../closed-loop-calibration-engine
 import { resolveAuthoritativeDecision, DecisionGateResult } from "../decision-attribution.js";
 import { calculateHistoricalProbability, recordCompletedTrade, getUserWinRateStats } from "../learning-engine.js";
 import { validateActiveTradeState } from "../trade-validator.js";
-import { buildActiveTradeTelemetry, evaluateActiveTradeExit, calculatePipsDistance } from "../active-trade-monitor.js";
+import { buildActiveTradeTelemetry, evaluateActiveTradeExit, evaluateActiveTradeExitWithHistory, resolveActiveTradeMonitoringPlan, calculatePipsDistance } from "../active-trade-monitor.js";
 import { buildTelegramTradeOutcomeMessage } from "../telegram-formatter.js";
 import { diagnoseLossOutcome, LossPostMortem } from "../trade-post-mortem-engine.js";
 import { 
@@ -42,6 +42,7 @@ import {
 import { resolveHigherTimeframeTrend } from "../htf-trend-engine.js";
 import { evaluateWatcherPropFirmGate, WatcherPropFirmGateResult } from "../prop-firm-watcher-gate.js";
 import { evaluateEconomicNewsGate } from "../economic-news-gate.js";
+import { redactSecretsInText, sanitizeErrorMessage } from "../secret-sanitizer.js";
 
 // Set to null to honor user execution mode (default HYBRID with user-provided Gemini API key).
 const MARKET_WATCHER_DECISION_MODE_OVERRIDE: 'RULE_ONLY' | 'HYBRID' | 'AI_ONLY' | null = null;
@@ -94,21 +95,21 @@ async function sendTelegramMessage(chatId: string | number, text: string): Promi
 
     if (!response.ok) {
       const errText = await response.text();
-      console.warn(`Telegram sendMessage Markdown failed (${response.status}: ${errText}). Retrying with plaintext...`);
+      console.warn(`Telegram sendMessage Markdown failed (${response.status}: ${redactSecretsInText(errText)}). Retrying with plaintext...`);
       const fallbackResponse = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ chat_id: chatId, text: text })
       });
       if (!fallbackResponse.ok) {
-        console.error(`Telegram sendMessage failed with status ${fallbackResponse.status}:`, await fallbackResponse.text());
+        console.error(`Telegram sendMessage failed with status ${fallbackResponse.status}:`, redactSecretsInText(await fallbackResponse.text()));
         return false;
       }
       return true;
     }
     return true;
   } catch (err) {
-    console.error("Error sending Telegram message:", err);
+    console.error("Error sending Telegram message:", sanitizeErrorMessage(err));
     return false;
   }
 }
@@ -131,7 +132,7 @@ async function fetchWithRetry(url: string, options: RequestInit = {}, maxRetries
       if (attempt >= maxRetries) {
         throw err;
       }
-      console.warn(`[Fetch Retry] Attempt ${attempt} threw network error: ${err.message || err}. Retrying in ${baseDelayMs * Math.pow(2, attempt - 1)}ms...`);
+      console.warn(`[Fetch Retry] Attempt ${attempt} threw network error: ${sanitizeErrorMessage(err)}. Retrying in ${baseDelayMs * Math.pow(2, attempt - 1)}ms...`);
     }
     await new Promise(resolve => setTimeout(resolve, baseDelayMs * Math.pow(2, attempt - 1)));
   }
@@ -319,120 +320,40 @@ export default async function handler(req: any, res: any) {
       const stopLoss = parseFloat(String(watcher.stop_loss));
       const takeProfit = parseFloat(String(watcher.take_profit));
       const dir = (watcher.direction || '').toUpperCase().trim();
-      const exitEval = evaluateActiveTradeExit(dir, entryPrice, stopLoss, takeProfit, currentPrice);
-      const telemetry = buildActiveTradeTelemetry(watcher, currentPrice);
 
-      // 1. Target Reached (TP_HIT)
-      if (exitEval.exitStatus === 'TP_HIT') {
-        let latestEval: any = null;
+      let activeTradeCandles: Candle[] = [];
+      if (watcher.opened_at) {
         try {
-          const { data } = await supabase
-            .from('watcher_evaluations')
-            .select('*')
-            .eq('watcher_id', watcher.id)
-            .order('created_at', { ascending: false })
-            .limit(1)
-            .maybeSingle();
-          latestEval = data;
-        } catch (e) {}
-
-        const activeTradeId = watcher.active_trade_id || watcher.last_signal_data?.trade_id || null;
-
-        await recordCompletedTrade(supabase, {
-          user_id: userId,
-          watcher_id: watcher.id,
-          trade_id: activeTradeId,
-          evaluation_id: latestEval?.id || null,
-          pair: symbol,
-          timeframe: watcher.selected_timeframe || 'H1',
-          strategy_mode: latestEval?.strategy_mode || 'HYBRID',
-          entry_price: entryPrice,
-          stop_loss: stopLoss,
-          take_profit: takeProfit,
-          exit_price: currentPrice,
-          direction: dir,
-          outcome: 'WIN',
-          opened_at: watcher.opened_at || new Date(Date.now() - 30 * 60 * 1000).toISOString(),
-          closed_at: new Date().toISOString(),
-          decision_score: latestEval?.decision_score || null,
-          matched_weight: latestEval?.matched_weight || null,
-          possible_weight: latestEval?.possible_weight || null,
-          matched_rules: latestEval?.matched_rules || [],
-          failed_rules: latestEval?.failed_rules || [],
-          gemini_used: latestEval?.gemini_used || false,
-          notes: `Trade closed via TP. Exit Price: ${currentPrice}`,
-          decision_snapshot: latestEval?.decision_snapshot || null
-        });
-
-        // Send Telegram alert with trade outcome and real-time win rate
-        try {
-          const { data: conn } = await supabase
-            .from("telegram_connections")
-            .select("telegram_chat_id, connected")
-            .eq("user_id", userId)
-            .maybeSingle();
-
-          if (conn?.connected && conn?.telegram_chat_id) {
-            const stats = await getUserWinRateStats(supabase, userId, symbol);
-            const pipsDistance = Math.abs(calculatePipsDistance(symbol, entryPrice || currentPrice, currentPrice));
-            const realizedR = exitEval.realizedR > 0 ? exitEval.realizedR : 2.0;
-
-            const tpMsg = buildTelegramTradeOutcomeMessage({
-              pair: symbol,
-              direction: dir as 'BUY' | 'SELL',
-              entryPrice: entryPrice || 0,
-              exitPrice: currentPrice,
-              stopLoss,
-              takeProfit,
-              outcome: 'WIN',
-              pips: pipsDistance,
-              realizedR,
-              totalTrades: stats.totalTrades,
-              wins: stats.wins,
-              losses: stats.losses,
-              winRate: stats.winRate,
-              pairTotalTrades: stats.pairTotalTrades,
-              pairWins: stats.pairWins,
-              pairWinRate: stats.pairWinRate
-            });
-            await sendTelegramMessage(conn.telegram_chat_id, tpMsg);
+          const monitoringPlan = resolveActiveTradeMonitoringPlan(watcher.opened_at);
+          const historyRes = await defaultMarketDataService.getMarketData({
+            symbol,
+            timeframe: monitoringPlan.timeframe,
+            requiredCount: monitoringPlan.requiredCount,
+            watcherId: watcher.id,
+            userId,
+            purpose: 'Manual Scan Active Trade Exit Verification'
+          });
+          if (historyRes.isValid && Array.isArray(historyRes.candles)) {
+            activeTradeCandles = historyRes.candles;
           }
-        } catch (tgErr) {
-          console.error("Failed to send TP Telegram outcome message:", tgErr);
+        } catch (histErr: any) {
+          console.warn(`[Manual Scan] Could not load intrabar candles for exit check, falling back to spot:`, sanitizeErrorMessage(histErr));
         }
-
-        const cooldownUntilIso = new Date(Date.now() + 5 * 60 * 1000).toISOString();
-        await supabase.from("watchers").update({
-          trade_status: 'COOLDOWN',
-          active_trade_id: null,
-          zone_data: null,
-          zone_status: 'NO_ZONE',
-          zone_high: null,
-          zone_low: null,
-          closed_at: new Date().toISOString(),
-          cooldown_until: cooldownUntilIso,
-          last_scan_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        }).eq("id", watcher.id);
-
-        return res.status(200).json({
-          success: true,
-          data: {
-            watcher_id: watcher.id,
-            pair: symbol,
-            signal: 'NO_TRADE',
-            status: 'COOLDOWN',
-            resolution: 'TP_HIT',
-            outcome: 'WIN',
-            realizedR: exitEval.realizedR,
-            exitPrice: currentPrice,
-            telemetry,
-            message: `Target reached! Trade closed at ${currentPrice} (+${exitEval.realizedR}R)`
-          }
-        });
       }
 
-      // 2. Stop Loss Hit (SL_HIT)
+      const exitEval = evaluateActiveTradeExitWithHistory({
+        direction: dir,
+        entryPrice,
+        stopLoss,
+        takeProfit,
+        openedAt: watcher.opened_at,
+        currentPrice,
+        candles: activeTradeCandles
+      });
+      const resolvedExitPrice = exitEval.exitPrice;
+      const telemetry = buildActiveTradeTelemetry(watcher, currentPrice, { exitStatus: exitEval.exitStatus });
+
+      // 1. Stop Loss Hit FIRST (SL_HIT - conservative STOP_LOSS_FIRST tie-breaking)
       if (exitEval.exitStatus === 'SL_HIT') {
         let latestEval: any = null;
         try {
@@ -458,7 +379,7 @@ export default async function handler(req: any, res: any) {
             entryPrice: entryPrice,
             stopLoss: stopLoss,
             takeProfit: takeProfit,
-            exitPrice: currentPrice,
+            exitPrice: resolvedExitPrice,
             openedAt: watcher.opened_at,
             closedAt: new Date().toISOString(),
             matchedRules: latestEval?.matched_rules || [],
@@ -473,9 +394,10 @@ export default async function handler(req: any, res: any) {
           ...(lossPostMortem ? { loss_post_mortem: lossPostMortem } : {})
         };
 
-        const notesWithPM = lossPostMortem 
-          ? `Trade closed via SL. Exit: ${currentPrice}. AI Post-Mortem: ${lossPostMortem.rootCauseTitle} - ${lossPostMortem.preventiveAdjustment}`
-          : `Trade closed via SL. Exit Price: ${currentPrice}`;
+        const triggerContext = exitEval.triggerCandleTimestamp ? ` (${exitEval.triggeredBy} @ ${exitEval.triggerCandleTimestamp})` : '';
+        const notesWithPM = lossPostMortem
+          ? `Trade closed via SL${triggerContext}. Exit: ${resolvedExitPrice}. AI Post-Mortem: ${lossPostMortem.rootCauseTitle} - ${lossPostMortem.preventiveAdjustment}`
+          : `Trade closed via SL${triggerContext}. Exit Price: ${resolvedExitPrice}`;
 
         await recordCompletedTrade(supabase, {
           user_id: userId,
@@ -488,7 +410,7 @@ export default async function handler(req: any, res: any) {
           entry_price: entryPrice,
           stop_loss: stopLoss,
           take_profit: takeProfit,
-          exit_price: currentPrice,
+          exit_price: resolvedExitPrice,
           direction: dir,
           outcome: 'LOSS',
           opened_at: watcher.opened_at || new Date(Date.now() - 30 * 60 * 1000).toISOString(),
@@ -513,13 +435,13 @@ export default async function handler(req: any, res: any) {
 
           if (conn?.connected && conn?.telegram_chat_id) {
             const stats = await getUserWinRateStats(supabase, userId, symbol);
-            const pipsDistance = Math.abs(calculatePipsDistance(symbol, entryPrice || currentPrice, currentPrice));
+            const pipsDistance = Math.abs(calculatePipsDistance(symbol, entryPrice || resolvedExitPrice, resolvedExitPrice));
 
             const slMsg = buildTelegramTradeOutcomeMessage({
               pair: symbol,
               direction: dir as 'BUY' | 'SELL',
               entryPrice: entryPrice || 0,
-              exitPrice: currentPrice,
+              exitPrice: resolvedExitPrice,
               stopLoss,
               takeProfit,
               outcome: 'LOSS',
@@ -565,9 +487,119 @@ export default async function handler(req: any, res: any) {
             resolution: 'SL_HIT',
             outcome: 'LOSS',
             realizedR: -1.0,
-            exitPrice: currentPrice,
+            exitPrice: resolvedExitPrice,
             telemetry,
-            message: `Stop loss hit. Trade closed at ${currentPrice} (-1.0R)`
+            message: `Stop loss hit. Trade closed at ${resolvedExitPrice} (-1.0R)`
+          }
+        });
+      }
+
+      // 2. Target Reached (TP_HIT)
+      if (exitEval.exitStatus === 'TP_HIT') {
+        let latestEval: any = null;
+        try {
+          const { data } = await supabase
+            .from('watcher_evaluations')
+            .select('*')
+            .eq('watcher_id', watcher.id)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          latestEval = data;
+        } catch (e) {}
+
+        const activeTradeId = watcher.active_trade_id || watcher.last_signal_data?.trade_id || null;
+
+        await recordCompletedTrade(supabase, {
+          user_id: userId,
+          watcher_id: watcher.id,
+          trade_id: activeTradeId,
+          evaluation_id: latestEval?.id || null,
+          pair: symbol,
+          timeframe: watcher.selected_timeframe || 'H1',
+          strategy_mode: latestEval?.strategy_mode || 'HYBRID',
+          entry_price: entryPrice,
+          stop_loss: stopLoss,
+          take_profit: takeProfit,
+          exit_price: resolvedExitPrice,
+          direction: dir,
+          outcome: 'WIN',
+          opened_at: watcher.opened_at || new Date(Date.now() - 30 * 60 * 1000).toISOString(),
+          closed_at: new Date().toISOString(),
+          decision_score: latestEval?.decision_score || null,
+          matched_weight: latestEval?.matched_weight || null,
+          possible_weight: latestEval?.possible_weight || null,
+          matched_rules: latestEval?.matched_rules || [],
+          failed_rules: latestEval?.failed_rules || [],
+          gemini_used: latestEval?.gemini_used || false,
+          notes: `Trade closed via TP${exitEval.triggerCandleTimestamp ? ` (${exitEval.triggeredBy} @ ${exitEval.triggerCandleTimestamp})` : ''}. Exit Price: ${resolvedExitPrice}`,
+          decision_snapshot: latestEval?.decision_snapshot || null
+        });
+
+        // Send Telegram alert with trade outcome and real-time win rate
+        try {
+          const { data: conn } = await supabase
+            .from("telegram_connections")
+            .select("telegram_chat_id, connected")
+            .eq("user_id", userId)
+            .maybeSingle();
+
+          if (conn?.connected && conn?.telegram_chat_id) {
+            const stats = await getUserWinRateStats(supabase, userId, symbol);
+            const pipsDistance = Math.abs(calculatePipsDistance(symbol, entryPrice || resolvedExitPrice, resolvedExitPrice));
+            const realizedR = exitEval.realizedR > 0 ? exitEval.realizedR : 2.0;
+
+            const tpMsg = buildTelegramTradeOutcomeMessage({
+              pair: symbol,
+              direction: dir as 'BUY' | 'SELL',
+              entryPrice: entryPrice || 0,
+              exitPrice: resolvedExitPrice,
+              stopLoss,
+              takeProfit,
+              outcome: 'WIN',
+              pips: pipsDistance,
+              realizedR,
+              totalTrades: stats.totalTrades,
+              wins: stats.wins,
+              losses: stats.losses,
+              winRate: stats.winRate,
+              pairTotalTrades: stats.pairTotalTrades,
+              pairWins: stats.pairWins,
+              pairWinRate: stats.pairWinRate
+            });
+            await sendTelegramMessage(conn.telegram_chat_id, tpMsg);
+          }
+        } catch (tgErr) {
+          console.error("Failed to send TP Telegram outcome message:", tgErr);
+        }
+
+        const cooldownUntilIso = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+        await supabase.from("watchers").update({
+          trade_status: 'COOLDOWN',
+          active_trade_id: null,
+          zone_data: null,
+          zone_status: 'NO_ZONE',
+          zone_high: null,
+          zone_low: null,
+          closed_at: new Date().toISOString(),
+          cooldown_until: cooldownUntilIso,
+          last_scan_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        }).eq("id", watcher.id);
+
+        return res.status(200).json({
+          success: true,
+          data: {
+            watcher_id: watcher.id,
+            pair: symbol,
+            signal: 'NO_TRADE',
+            status: 'COOLDOWN',
+            resolution: 'TP_HIT',
+            outcome: 'WIN',
+            realizedR: exitEval.realizedR,
+            exitPrice: resolvedExitPrice,
+            telemetry,
+            message: `Target reached! Trade closed at ${resolvedExitPrice} (+${exitEval.realizedR}R)`
           }
         });
       }
@@ -2145,9 +2177,9 @@ ${analysis.stopLossBasis === 'ATR_FALLBACK' ? `ATR: ${marketStructure?.volatilit
     return res.json({ success: true, analysis });
 
   } catch (err: any) {
-    console.error("Manual scan failed");
-    console.error(`Exception: ${err.message}`);
-    return res.status(500).json({ success: false, error: err.message, stack: err.stack });
+    const safeMsg = sanitizeErrorMessage(err);
+    console.error("Manual scan failed:", safeMsg);
+    return res.status(500).json({ success: false, error: safeMsg });
   }
 }
 

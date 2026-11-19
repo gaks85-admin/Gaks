@@ -3,6 +3,7 @@ type VercelResponse = any;
 import { getSupabase } from '../lib/supabase-server.js';
 import { determineMarketBias, Candle } from '../src/lib/strategy-engine.js';
 import { toCanonicalSymbol, toDisplaySymbol } from '../lib/market-utils.js';
+import { sanitizeErrorMessage } from '../src/lib/secret-sanitizer.js';
 
 /**
  * Converts a canonical symbol to Yahoo Finance symbol format.
@@ -100,7 +101,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         watcherSymbols = watchers.map(w => toCanonicalSymbol(w.selected_pair));
       }
     } catch (dbErr) {
-      console.warn('[Live Rates] Could not fetch active watchers from Supabase:', dbErr);
+      console.warn('[Live Rates] Could not fetch active watchers from Supabase:', sanitizeErrorMessage(dbErr));
     }
 
     const uniqueSymbols = Array.from(new Set([...DEFAULT_SYMBOLS, ...watcherSymbols])).filter(Boolean);
@@ -212,7 +213,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).json(responsePayload);
 
   } catch (error: any) {
-    console.error('[Live Rates] Endpoint Error:', error);
+    const safeErr = sanitizeErrorMessage(error);
+    console.error('[Live Rates] Endpoint Error:', safeErr);
     if (cached) {
       console.warn('[Live Rates] Returning stale cached rates after endpoint exception.');
       return res.status(200).json({
@@ -223,7 +225,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     return res.status(500).json({
       success: false,
-      error: error.message || 'Internal server error'
+      error: safeErr
     });
   }
 }

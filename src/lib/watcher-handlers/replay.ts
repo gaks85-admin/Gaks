@@ -1,4 +1,5 @@
 import { runWatcherDiagnosticReplay } from '../watcher-diagnostic-engine.js';
+import { sanitizeErrorMessage } from '../secret-sanitizer.js';
 
 export default async function handler(req: any, res: any) {
   if (req.method !== 'POST' && req.method !== 'GET') {
@@ -41,10 +42,11 @@ export default async function handler(req: any, res: any) {
     return res.status(200).json(report);
 
   } catch (err: any) {
-    console.error('[API Watcher Replay Error]:', err);
+    const safeMsg = sanitizeErrorMessage(err);
+    console.error('[API Watcher Replay Error]:', safeMsg);
     return res.status(500).json({
       error: 'Diagnostic replay execution failed',
-      message: err.message || String(err)
+      message: safeMsg
     });
   }
 }
