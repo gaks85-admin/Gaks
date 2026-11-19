@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import { GoogleGenAI, Type } from "@google/genai";
 import { defaultMarketDataService, getMarketDataStats, getRequiredCandleCountForTimeframe } from '../market-data-service.js';
 import { analyzeMarket, Candle } from "../strategy-engine.js";
+import type { ParsedStrategy } from "../strategy-parser.js";
 import { extractRiskPreferences, calculatePositionSize, parseRiskRewardRatio, resolveInstrumentSpec } from "../risk-engine.js";
 import { calculateStructuralStopLoss, validateAndResolveStopLoss, validateZoneProximityAndStopLoss, getTimeframeMaxSlPips, getMaxDeparturePips } from "../structural-stop-loss.js";
 import { evaluateRules } from "../rule-engine.js";
@@ -12,6 +13,7 @@ import { recordEvaluation } from "../explainability-engine.js";
 import { validateMarketDataIntegrity } from "../market-integrity.js";
 import { normalizeConfidence } from "../confidence-engine.js";
 import { resolveUserGeminiKey, classifyAndRedactGeminiError } from "../gemini-key-resolver.js";
+import { checkAndIncrementGeminiBudget } from "../gemini-budget-tracker.js";
 import { executeBoundedGeminiCall, GEMINI_MARKET_WATCHER_MODEL } from "../geminiWrapper.js";
 import { computeEquityAnalytics, deriveEquityState, fetchUserCompletedTrades, computeDailyPnL } from "../equity-learning-engine.js";
 import { evaluateRiskGovernor } from "../risk-governor.js";
@@ -41,8 +43,8 @@ import { resolveHigherTimeframeTrend } from "../htf-trend-engine.js";
 import { evaluateWatcherPropFirmGate, WatcherPropFirmGateResult } from "../prop-firm-watcher-gate.js";
 import { evaluateEconomicNewsGate } from "../economic-news-gate.js";
 
-// TEMPORARY MODE FLAG: Force Market Watcher into RULE_ONLY mode for immediate zone marking and high-speed execution.
-const MARKET_WATCHER_DECISION_MODE_OVERRIDE: 'RULE_ONLY' | 'HYBRID' | 'AI_ONLY' | null = 'RULE_ONLY';
+// Set to null to honor user execution mode (default HYBRID with user-provided Gemini API key).
+const MARKET_WATCHER_DECISION_MODE_OVERRIDE: 'RULE_ONLY' | 'HYBRID' | 'AI_ONLY' | null = null;
  
  // In-memory runtime cache for marked zones to guarantee persistence across scan cycles
  // even if the Supabase watchers table is temporarily missing the zone columns.
@@ -709,7 +711,10 @@ export default async function handler(req: any, res: any) {
     const scanStart = Date.now();
 
     // 7. Extract Market Structure & Compile Strategy
-    const marketStructure = extractMarketStructure(candleData);
+    const marketStructure = extractMarketStructure(
+      candleData,
+      compiledStrategy.blueprint || compiledStrategy.detector_validation?.supported_detectors
+    );
     marketStructure.pair = symbol;
     marketStructure.timeframe = selectedTimeframe;
 
@@ -1042,26 +1047,59 @@ export default async function handler(req: any, res: any) {
     let geminiTextResult = "";
     let geminiStart = 0;
     let geminiDuration = 0;
+    let usedFallback = false;
 
     const recommendation = decisionResult.recommendation; // PASS, LIKELY_PASS, AMBIGUOUS, FAIL
-    let executionMode = watcher?.strategy_mode || compiledStrategy.strategy_mode || 'RULE_ONLY';
+    let executionMode: 'RULE_ONLY' | 'HYBRID' | 'AI_ONLY' = 'HYBRID';
+    if (prefsRecord?.account_type) {
+      const amMatch = String(prefsRecord.account_type).match(/ANALYSIS:([^|]+)/);
+      if (amMatch) {
+        const parsed = amMatch[1];
+        if (parsed === 'HYBRID' || parsed === 'RULE_ONLY' || parsed === 'AI_ONLY') {
+          executionMode = parsed as any;
+        }
+      }
+    } else if (watcher?.strategy_mode) {
+      executionMode = watcher.strategy_mode;
+    } else if (compiledStrategy.strategy_mode) {
+      executionMode = compiledStrategy.strategy_mode as any;
+    }
 
     if (MARKET_WATCHER_DECISION_MODE_OVERRIDE) {
       executionMode = MARKET_WATCHER_DECISION_MODE_OVERRIDE;
     }
     console.log(`[DECISION MODE] ${executionMode}${MARKET_WATCHER_DECISION_MODE_OVERRIDE ? ' (TEMPORARY OVERRIDE)' : ''}`);
 
-    // Deterministic Pre-Filtering Gate
+    // Deterministic Pre-Filtering Gate + Key-Zone Tap Verification
     const PRE_FILTER_MIN_SCORE = 70;
     const mandatoryPassed = decisionResult.mandatory_rules_passed !== false;
     const meetsQualityThreshold = (decisionResult.decision_score ?? 0) >= PRE_FILTER_MIN_SCORE;
     const isViableRecommendation = recommendation === 'PASS' || recommendation === 'LIKELY_PASS';
 
-    const passesDeterministicGate = executionMode === 'AI_ONLY' || (
-      mandatoryPassed && meetsQualityThreshold && isViableRecommendation
+    const passesDeterministicGate = mandatoryPassed && meetsQualityThreshold && isViableRecommendation;
+    const hasTappedKeyZone = Boolean(
+      currentZone && (currentZone.status === 'ZONE_TAPPED' || currentZone.status === 'CONFIRMED' || lastZoneEval?.isTapped)
     );
 
-    const requiresGemini = passesDeterministicGate && (executionMode !== 'RULE_ONLY');
+    let localZoneSetupRejected = false;
+    let localZoneRejectReason = '';
+    if (passesDeterministicGate && hasTappedKeyZone && currentZone) {
+      const zonePreCheck = validateZoneProximityAndStopLoss(
+        currentZone.direction,
+        activeCurrentPrice || candleData[candleData.length - 1]?.close || 0,
+        currentZone,
+        selectedTimeframe,
+        symbol || watcher?.pair || 'EURUSD',
+        marketStructure?.volatilityInformation?.atr
+      );
+      if (zonePreCheck.isLateEntry || zonePreCheck.isSlTooWide) {
+        localZoneSetupRejected = true;
+        localZoneRejectReason = zonePreCheck.lateReason ||
+          `Stop loss distance (${zonePreCheck.slDistancePips?.toFixed(1) || '0.0'} pips) is too wide for ${selectedTimeframe}. Setup rejected.`;
+      }
+    }
+
+    const requiresGemini = passesDeterministicGate && hasTappedKeyZone && !localZoneSetupRejected && (executionMode !== 'RULE_ONLY');
 
     console.log(`
 [Decision Routing]
@@ -1070,8 +1108,9 @@ Execution Mode: ${executionMode}
 Rule Score: ${decisionResult.decision_score}
 Rule Recommendation: ${recommendation}
 Passes Deterministic Gate: ${passesDeterministicGate ? 'YES' : 'NO'}
+Key Zone Tapped: ${hasTappedKeyZone ? 'YES' : 'NO'}
 Requires Gemini: ${requiresGemini ? 'YES' : 'NO'}
-Reason: ${decisionResult.explanation || (requiresGemini ? 'Passed deterministic pre-filter gate with high score; proceeding to Gemini AI validation' : 'Rule evaluation sufficient or pre-filter filtered setup')}
+Reason: ${decisionResult.explanation || (requiresGemini ? 'Valid rule-based setup detected at key zone; proceeding to Gemini AI validation' : 'Rule evaluation sufficient or setup/key-zone gate filtered setup')}
 `.trim());
 
     if (requiresGemini) {
@@ -1100,9 +1139,75 @@ Reason: ${decisionResult.explanation || (requiresGemini ? 'Passed deterministic 
           reasoning: ['User has no Gemini API key configured. Gemini required for execution.']
         };
       } else {
+        const dailyBudget = await checkAndIncrementGeminiBudget(supabase, userId);
+        if (!dailyBudget.allowed) {
+          geminiCalled = false;
+          usedFallback = true;
+          console.log(`[GEMINI DAILY LIMIT REACHED] Manual Scan - User ${userId} hit strict daily limit (${dailyBudget.currentCount}/${dailyBudget.maxLimit} calls/day). Falling back to local rule engine.`);
+
+          if (executionMode === 'AI_ONLY') {
+            analysis = {
+              signal: 'NO_TRADE',
+              confidence: 0,
+              entryPrice: null,
+              stopLoss: null,
+              takeProfit: null,
+              riskReward: null,
+              reasoning: [`Daily Gemini API limit reached (${dailyBudget.currentCount}/${dailyBudget.maxLimit} calls/day). Setup paused to prevent rate limiting.`]
+            };
+          } else if (currentZone) {
+            const signalDir = currentZone.direction;
+            const entry = activeCurrentPrice || candleData[candleData.length - 1]?.close;
+            const proximityValidation = validateZoneProximityAndStopLoss(
+              signalDir,
+              entry,
+              currentZone,
+              selectedTimeframe,
+              symbol || watcher?.pair || 'EURUSD',
+              marketStructure?.volatilityInformation?.atr
+            );
+            if (proximityValidation.isLateEntry || proximityValidation.isSlTooWide) {
+              const rejectReason = proximityValidation.lateReason ||
+                `Stop loss distance (${proximityValidation.slDistancePips?.toFixed(1) || '0.0'} pips) is too wide for ${selectedTimeframe}. Setup rejected.`;
+              analysis = {
+                signal: 'NO_TRADE',
+                confidence: 0,
+                entryPrice: null,
+                stopLoss: null,
+                takeProfit: null,
+                riskReward: null,
+                reasoning: [rejectReason]
+              };
+            } else {
+              const sl = proximityValidation.stopLoss;
+              const risk = Math.abs(entry - sl);
+              const rr = parseRiskRewardRatio(riskRewardStr);
+              const priceDecimals = entry >= 1000 ? 2 : entry >= 10 ? 3 : 5;
+              const tp = Number((signalDir === 'BUY' ? entry + (risk * rr) : entry - (risk * rr)).toFixed(priceDecimals));
+              analysis = {
+                signal: signalDir,
+                confidence: Math.max(ruleDecisionScore || 0, 85),
+                entryPrice: entry,
+                stopLoss: sl,
+                takeProfit: tp,
+                riskReward: rr,
+                stopLossBasis: proximityValidation.stopLossBasis,
+                structuralLevel: proximityValidation.structuralLevel,
+                reasoning: [`[Local Rule Fallback — Daily Gemini Limit ${dailyBudget.currentCount}/${dailyBudget.maxLimit} Reached] Price tapped marked ${currentZone.type} [${typeof currentZone.low === 'number' ? currentZone.low.toFixed(5) : '0.00000'} - ${typeof currentZone.high === 'number' ? currentZone.high.toFixed(5) : '0.00000'}] and confirmed retest in ${signalDir} direction.`]
+              };
+            }
+          }
+        } else {
         const geminiKey = keyRes.apiKey;
         try {
-          const ai = new GoogleGenAI({ apiKey: geminiKey });
+          const ai = new GoogleGenAI({
+            apiKey: geminiKey,
+            httpOptions: {
+              headers: {
+                'User-Agent': 'aistudio-build'
+              }
+            }
+          });
           const currentPrice = candleData[candleData.length - 1].close;
           const evaluatorMandatoryIds = compiledStrategy.canonical_rule_set?.mandatory_rule_ids || [];
           const mandatoryRulesList = (decisionResult.rule_details || [])
@@ -1329,6 +1434,7 @@ Fallback: NO_TRADE`.trim());
             geminiDuration = Date.now() - geminiStart;
           }
         }
+        }
       }
     } else {
       // Gemini NOT required! Check recommendation
@@ -1353,68 +1459,92 @@ Fallback: NO_TRADE`.trim());
         };
       } else {
         console.log(`[Decision Engine] Recommendation is ${recommendation}. Evaluating local strategy engine.`);
+        const mappedParsedStrategy: ParsedStrategy = {
+          indicators: [],
+          emaValues: compiledStrategy.compiled_rules?.ema?.periods || [],
+          rsiThresholds: {
+            overbought: compiledStrategy.compiled_rules?.rsi?.overbought,
+            oversold: compiledStrategy.compiled_rules?.rsi?.oversold
+          },
+          bos: compiledStrategy.compiled_rules?.bos,
+          choch: compiledStrategy.compiled_rules?.choch,
+          liquiditySweep: compiledStrategy.compiled_rules?.liquidity_sweep,
+          fairValueGap: compiledStrategy.compiled_rules?.fair_value_gap,
+          session: compiledStrategy.compiled_rules?.session?.[0],
+          timeframe: compiledStrategy.compiled_rules?.timeframes?.[0],
+          minimumRiskReward: compiledStrategy.compiled_rules?.risk_reward?.min_ratio
+        };
         const activeZoneDir = currentZone?.direction;
-        let localAnalysis = analyzeMarket(candleData, compiledStrategy as any, activeZoneDir);
-        if (currentZone && (currentZone.status === 'ZONE_TAPPED' || currentZone.status === 'CONFIRMED')) {
+        let localAnalysis = analyzeMarket(candleData, mappedParsedStrategy, activeZoneDir);
+        if (currentZone && (currentZone.status === 'ZONE_TAPPED' || currentZone.status === 'CONFIRMED' || lastZoneEval?.isTapped)) {
           const signalDir = currentZone.direction;
-          if (!localAnalysis || localAnalysis.signal !== signalDir) {
-            const entry = activeCurrentPrice || candleData[candleData.length - 1]?.close;
-            const proximityValidation = validateZoneProximityAndStopLoss(
-              signalDir,
-              entry,
-              currentZone,
-              selectedTimeframe,
-              watcher?.pair || 'EURUSD',
-              marketStructure?.volatilityInformation?.atr
-            );
+          const entry = activeCurrentPrice || candleData[candleData.length - 1]?.close;
+          const proximityValidation = validateZoneProximityAndStopLoss(
+            signalDir,
+            entry,
+            currentZone,
+            selectedTimeframe,
+            symbol || watcher?.pair || 'EURUSD',
+            marketStructure?.volatilityInformation?.atr
+          );
 
-            if (proximityValidation.isLateEntry || proximityValidation.isSlTooWide) {
-              console.log(`[LOCAL ENGINE REJECT] Watcher ID: ${watcher?.id}: ${proximityValidation.lateReason || 'Stop loss too wide for timeframe'}`);
-              localAnalysis = {
-                signal: 'NO_TRADE',
-                confidence: 0,
-                reasoning: [proximityValidation.lateReason || 'Stop loss too wide for timeframe']
-              } as any;
-            } else {
-              const sl = proximityValidation.stopLoss;
-              const risk = Math.abs(entry - sl);
-              const rr = parseRiskRewardRatio(riskRewardStr);
-              const tp = signalDir === 'BUY' ? entry + (risk * rr) : entry - (risk * rr);
-              localAnalysis = {
-                signal: signalDir,
-                confidence: 85,
-                entryPrice: entry,
-                stopLoss: sl,
-                takeProfit: tp,
-                riskReward: rr,
-                stopLossBasis: proximityValidation.stopLossBasis,
-                structuralLevel: proximityValidation.structuralLevel,
-                reasoning: [`[Break & Retest Confirmation] Price tapped marked ${currentZone.type} [${typeof currentZone.low === 'number' ? currentZone.low.toFixed(5) : '0.00000'} - ${typeof currentZone.high === 'number' ? currentZone.high.toFixed(5) : '0.00000'}] and confirmed retest in ${signalDir} direction while holding tight structural Stop Loss (${typeof sl === 'number' ? sl.toFixed(5) : '0.00000'}).`]
-              } as any;
-            }
+          if (proximityValidation.isLateEntry || proximityValidation.isSlTooWide) {
+            const rejectReason = proximityValidation.lateReason ||
+              `Stop loss distance (${proximityValidation.slDistancePips?.toFixed(1) || '0.0'} pips) is too wide for ${selectedTimeframe}. Setup rejected.`;
+            console.log(`[LOCAL ENGINE REJECT] Watcher ID: ${watcher?.id}: ${rejectReason}`);
+            localAnalysis = {
+              signal: 'NO_TRADE',
+              confidence: 0,
+              entryPrice: null,
+              stopLoss: null,
+              takeProfit: null,
+              riskReward: null,
+              reasoning: [rejectReason]
+            } as any;
+          } else {
+            const sl = proximityValidation.stopLoss;
+            const risk = Math.abs(entry - sl);
+            const rr = parseRiskRewardRatio(riskRewardStr);
+            const priceDecimals = entry >= 1000 ? 2 : entry >= 10 ? 3 : 5;
+            const tp = Number((signalDir === 'BUY' ? entry + (risk * rr) : entry - (risk * rr)).toFixed(priceDecimals));
+            localAnalysis = {
+              signal: signalDir,
+              confidence: Math.max(localAnalysis?.confidence || 0, 85),
+              entryPrice: entry,
+              stopLoss: sl,
+              takeProfit: tp,
+              riskReward: rr,
+              stopLossBasis: proximityValidation.stopLossBasis,
+              structuralLevel: proximityValidation.structuralLevel,
+              reasoning: [`[Break & Retest Confirmation] Price tapped marked ${currentZone.type} [${typeof currentZone.low === 'number' ? currentZone.low.toFixed(5) : '0.00000'} - ${typeof currentZone.high === 'number' ? currentZone.high.toFixed(5) : '0.00000'}] and confirmed retest in ${signalDir} direction while holding tight structural Stop Loss (${typeof sl === 'number' ? sl.toFixed(5) : '0.00000'}).`]
+            } as any;
           }
-        }
-        if (localAnalysis && localAnalysis.signal !== 'NO_TRADE' && localAnalysis.entryPrice && !localAnalysis.stopLoss) {
+        } else if (localAnalysis && (localAnalysis.signal === 'BUY' || localAnalysis.signal === 'SELL')) {
+          if (currentZone) {
+            (marketStructure as any).markedZone = currentZone;
+          }
+          const entry = activeCurrentPrice || localAnalysis.entryPrice || candleData[candleData.length - 1]?.close || 0;
           const slResult = calculateStructuralStopLoss(
             localAnalysis.signal as 'BUY' | 'SELL',
-            localAnalysis.entryPrice,
+            entry,
             marketStructure
           );
+          const riskDist = Math.abs(entry - slResult.stopLoss);
+          const rrRatio = parseRiskRewardRatio(riskRewardStr);
+          const priceDecimals = entry >= 1000 ? 2 : entry >= 10 ? 3 : 5;
+          localAnalysis.entryPrice = entry;
           localAnalysis.stopLoss = slResult.stopLoss;
           (localAnalysis as any).stopLossBasis = slResult.stopLossBasis;
           (localAnalysis as any).structuralLevel = slResult.structuralLevel;
-
-          const riskDist = Math.abs(localAnalysis.entryPrice - slResult.stopLoss);
-          const rrRatio = parseRiskRewardRatio(riskRewardStr);
-          localAnalysis.takeProfit = localAnalysis.signal === 'BUY'
-            ? localAnalysis.entryPrice + (riskDist * rrRatio)
-            : localAnalysis.entryPrice - (riskDist * rrRatio);
+          localAnalysis.takeProfit = Number((localAnalysis.signal === 'BUY'
+            ? entry + (riskDist * rrRatio)
+            : entry - (riskDist * rrRatio)).toFixed(priceDecimals));
         }
         analysis = localAnalysis;
       }
     }
 
-    if (requiresGemini) {
+    if (requiresGemini && !usedFallback) {
       if (analysis.signal !== 'BUY' && analysis.signal !== 'SELL') {
         console.log(`[Safety Invariant] Gemini required. Executed: ${geminiCalled ? 'YES' : 'NO'}, Final Signal reset to NO_TRADE.`);
         analysis = {
@@ -1437,7 +1567,7 @@ Fallback: NO_TRADE`.trim());
         marketStructure: marketStructure,
         mandatoryRulesPassed: decisionResult.mandatory_rules_passed ?? true,
         geminiApproved: geminiCalled ? geminiSucceeded : undefined,
-        geminiRequired: requiresGemini,
+        geminiRequired: requiresGemini && !usedFallback,
         direction: analysis.signal,
         slValid: Boolean(analysis.stopLoss),
         tpValid: Boolean(analysis.takeProfit),

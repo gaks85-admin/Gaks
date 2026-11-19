@@ -28,6 +28,7 @@ export async function runGeminiZoneBudgetTestSuite(): Promise<{ passed: number; 
         let queryUserId: string | null = null;
         let queryDate: string | null = null;
         const builder: any = {
+          select: () => builder,
           eq: (col: string, val: any) => {
             if (col === 'user_id') queryUserId = val;
             if (col === 'date_lagos') queryDate = val;
@@ -101,10 +102,11 @@ export async function runGeminiZoneBudgetTestSuite(): Promise<{ passed: number; 
   assert(regCheck.allowed === false, 'Test 4 & 6 - Request 11 for regular user is blocked (max 10/day)');
   assert(regCheck.currentCount === 10, 'Test Reg Count correct');
 
-  // 5 & 7. Admin user budget: Max 15 requests per Lagos calendar day, Request 16 blocked
-  mockUsageDb[`${adminUserId}_${dateLagos}`] = 15;
+  // 5 & 7. Admin user budget: Strictly capped at 10 requests per Lagos calendar day, Request 11 blocked
+  mockUsageDb[`${adminUserId}_${dateLagos}`] = 10;
   const adminCheck = await checkAndIncrementGeminiBudget(mockSupabase, adminUserId, 'gaks6535@gmail.com');
-  assert(adminCheck.allowed === false, 'Test 5 & 7 - Request 16 for admin is blocked (max 15/day)');
+  assert(adminCheck.allowed === false, 'Test 5 & 7 - Request 11 for admin is strictly blocked (max 10/day)');
+  assert(adminCheck.maxLimit === 10, 'Test Admin strict maxLimit === 10');
   assert(adminCheck.isAdmin === true, 'Test Admin privilege recognized server-side');
 
   // 8. Concurrent requests cannot exceed budget (tested via atomic count checks)

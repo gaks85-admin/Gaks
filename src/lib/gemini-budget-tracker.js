@@ -8,6 +8,7 @@ function getLagosCalendarDate() {
     return d.toISOString().split("T")[0];
   }
 }
+const STRICT_MAX_GEMINI_CALLS_PER_USER_PER_DAY = 10;
 const inMemoryDailyUsage = /* @__PURE__ */ new Map();
 async function checkAndIncrementGeminiBudget(supabase, userId, userEmail) {
   const dateLagos = getLagosCalendarDate();
@@ -19,12 +20,17 @@ async function checkAndIncrementGeminiBudget(supabase, userId, userEmail) {
     } catch {
     }
   }
-  const maxLimit = isAdmin ? 15 : 10;
+  const maxLimit = STRICT_MAX_GEMINI_CALLS_PER_USER_PER_DAY;
   const usageKey = `${userId}_${dateLagos}`;
   let currentCount = 0;
   try {
     const { data, error } = await supabase.from("gemini_daily_usage").select("request_count").eq("user_id", userId).eq("date_lagos", dateLagos).maybeSingle();
-    if (!error && data) {
+    if (error) {
+      const mem = inMemoryDailyUsage.get(usageKey);
+      if (mem && mem.date === dateLagos) {
+        currentCount = mem.count;
+      }
+    } else if (data) {
       currentCount = data.request_count || 0;
     }
   } catch {
@@ -46,12 +52,15 @@ async function checkAndIncrementGeminiBudget(supabase, userId, userEmail) {
   const newCount = currentCount + 1;
   inMemoryDailyUsage.set(usageKey, { count: newCount, date: dateLagos });
   try {
-    await supabase.from("gemini_daily_usage").upsert({
+    const { error: upsertErr } = await supabase.from("gemini_daily_usage").upsert({
       user_id: userId,
       date_lagos: dateLagos,
       request_count: newCount,
       updated_at: (/* @__PURE__ */ new Date()).toISOString()
     }, { onConflict: "user_id,date_lagos" });
+    if (upsertErr && upsertErr.code !== "PGRST205" && !upsertErr.message?.includes("does not exist")) {
+      console.warn("[Gemini Budget Tracker] Upsert warning:", upsertErr.message);
+    }
   } catch (err) {
     if (err?.code !== "PGRST205" && !err?.message?.includes("does not exist")) {
       console.warn("[Gemini Budget Tracker] Upsert warning:", err?.message || err);
@@ -75,18 +84,25 @@ async function getGeminiBudgetStatus(supabase, userId, userEmail) {
     } catch {
     }
   }
-  const maxLimit = isAdmin ? 15 : 10;
+  const maxLimit = STRICT_MAX_GEMINI_CALLS_PER_USER_PER_DAY;
+  const usageKey = `${userId}_${dateLagos}`;
   let currentCount = 0;
   try {
-    const { data } = await supabase.from("gemini_daily_usage").select("request_count").eq("user_id", userId).eq("date_lagos", dateLagos).maybeSingle();
-    if (data) currentCount = data.request_count || 0;
+    const { data, error } = await supabase.from("gemini_daily_usage").select("request_count").eq("user_id", userId).eq("date_lagos", dateLagos).maybeSingle();
+    if (error) {
+      const mem = inMemoryDailyUsage.get(usageKey);
+      if (mem && mem.date === dateLagos) currentCount = mem.count;
+    } else if (data) {
+      currentCount = data.request_count || 0;
+    }
   } catch {
-    const mem = inMemoryDailyUsage.get(`${userId}_${dateLagos}`);
+    const mem = inMemoryDailyUsage.get(usageKey);
     if (mem && mem.date === dateLagos) currentCount = mem.count;
   }
   return { currentCount, maxLimit, isAdmin, dateLagos };
 }
 export {
+  STRICT_MAX_GEMINI_CALLS_PER_USER_PER_DAY,
   checkAndIncrementGeminiBudget,
   getGeminiBudgetStatus,
   getLagosCalendarDate

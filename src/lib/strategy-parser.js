@@ -1,7 +1,14 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { executeBoundedGeminiCall } from "./geminiWrapper.js";
 async function parseUserStrategy(strategyText, apiKey) {
-  const ai = new GoogleGenAI({ apiKey });
+  const ai = new GoogleGenAI({
+    apiKey,
+    httpOptions: {
+      headers: {
+        "User-Agent": "aistudio-build"
+      }
+    }
+  });
   const systemInstruction = `You are a professional trading strategy parsing assistant.
 Your job is to read a natural language trading strategy and convert it into a structured JSON format.
 Extract any mentioned indicators, specific EMA values, RSI thresholds, Smart Money Concepts (BOS, CHoCH, liquidity sweeps, fair value gaps), session preferences, timeframes, entry conditions, exit conditions, stop loss parameters, take profit parameters, and minimum risk-reward ratio.

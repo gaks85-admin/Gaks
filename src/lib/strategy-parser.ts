@@ -29,7 +29,14 @@ export async function parseUserStrategy(
   strategyText: string,
   apiKey: string
 ): Promise<ParsedStrategy> {
-  const ai = new GoogleGenAI({ apiKey });
+  const ai = new GoogleGenAI({
+    apiKey,
+    httpOptions: {
+      headers: {
+        'User-Agent': 'aistudio-build'
+      }
+    }
+  });
 
   const systemInstruction = `You are a professional trading strategy parsing assistant.
 Your job is to read a natural language trading strategy and convert it into a structured JSON format.

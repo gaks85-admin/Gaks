@@ -258,7 +258,7 @@ export default function App() {
   const [accountType, setAccountType] = useState<'personal' | 'prop' | null>(null);
   const [positionMode, setPositionMode] = useState<'AUTO_RISK' | 'FIXED_LOT'>('AUTO_RISK');
   const [fixedLotSize, setFixedLotSize] = useState<string>("0.01");
-  const [analysisMode, setAnalysisMode] = useState<"HYBRID" | "RULE_ONLY" | "AI_ONLY">("RULE_ONLY");
+  const [analysisMode, setAnalysisMode] = useState<"HYBRID" | "RULE_ONLY" | "AI_ONLY">("HYBRID");
   const [preferredSessions, setPreferredSessions] = useState<string[]>(['London', 'New York', 'Tokyo']);
   const [preferredTimeframes, setPreferredTimeframes] = useState<string[]>(['M15', 'H1']);
   const [lastSavedStrategyText, setLastSavedStrategyText] = useState<string>('');
@@ -436,7 +436,7 @@ export default function App() {
     accountType: null,
     positionMode: 'AUTO_RISK',
     fixedLotSize: '0.01',
-    analysisMode: 'RULE_ONLY' as 'HYBRID' | 'RULE_ONLY' | 'AI_ONLY',
+    analysisMode: 'HYBRID' as 'HYBRID' | 'RULE_ONLY' | 'AI_ONLY',
     preferredSessions: ['London', 'New York', 'Tokyo'],
     preferredTimeframes: ['M15', 'H1'],
     personalNewsRestriction: false,
@@ -914,7 +914,7 @@ export default function App() {
         accountType: (savedAccount === 'personal' || savedAccount === 'prop') ? (savedAccount as 'personal' | 'prop') : null,
         positionMode: 'AUTO_RISK',
         fixedLotSize: '0.01',
-        analysisMode: 'RULE_ONLY',
+        analysisMode: 'HYBRID',
         preferredSessions: savedSessions,
         preferredTimeframes: savedTimeframes,
         personalNewsRestriction: savedNewsRest,
@@ -1390,11 +1390,11 @@ export default function App() {
           modeVal = 'FIXED_LOT';
         }
 
-        let amVal: 'HYBRID' | 'RULE_ONLY' | 'AI_ONLY' = 'RULE_ONLY';
+        let amVal: 'HYBRID' | 'RULE_ONLY' | 'AI_ONLY' = 'HYBRID';
         const amMatch = rawAccountType.match(/ANALYSIS:([^|]+)/);
         if (amMatch) {
           const parsed = amMatch[1];
-          if (parsed === 'RULE_ONLY' || parsed === 'AI_ONLY') amVal = parsed as any;
+          if (parsed === 'HYBRID' || parsed === 'RULE_ONLY' || parsed === 'AI_ONLY') amVal = parsed as any;
         }
         setAnalysisMode(amVal);
 

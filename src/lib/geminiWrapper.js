@@ -1,5 +1,6 @@
 import { GoogleGenAI } from "@google/genai";
 import { resolveUserGeminiKey, classifyAndRedactGeminiError } from "./gemini-key-resolver.js";
+import { checkAndIncrementGeminiBudget, STRICT_MAX_GEMINI_CALLS_PER_USER_PER_DAY } from "./gemini-budget-tracker.js";
 const GEMINI_API_DEADLINE_MS = 14e3;
 const GEMINI_APPLICATION_TIMEOUT_MS = 12e3;
 const GEMINI_MARKET_WATCHER_MODEL = "gemini-3.6-flash";
@@ -7,9 +8,9 @@ class UserGeminiRateLimiter {
   requestsMap = /* @__PURE__ */ new Map();
   maxRpm;
   maxRpd;
-  constructor(maxRpm = Number(process.env.MAX_GEMINI_RPM_PER_USER) || 10, maxRpd = Number(process.env.MAX_GEMINI_RPD_PER_USER) || 18) {
-    this.maxRpm = maxRpm;
-    this.maxRpd = maxRpd;
+  constructor(maxRpm = Number(process.env.MAX_GEMINI_RPM_PER_USER) || 10, maxRpd = Number(process.env.MAX_GEMINI_RPD_PER_USER) || STRICT_MAX_GEMINI_CALLS_PER_USER_PER_DAY) {
+    this.maxRpm = Math.max(1, maxRpm);
+    this.maxRpd = Math.min(STRICT_MAX_GEMINI_CALLS_PER_USER_PER_DAY, Math.max(1, maxRpd));
   }
   canMakeRequest(userId) {
     if (!userId) return { allowed: true, currentRpm: 0, maxRpm: this.maxRpm, currentRpd: 0, maxRpd: this.maxRpd };
@@ -86,14 +87,28 @@ async function executeBoundedGeminiCall(ai, options, context) {
   let retried = false;
   const startTime = Date.now();
   while (attempt <= maxRetriesFor503) {
+    if (context.userId) {
+      const retryLimitCheck = globalUserGeminiRateLimiter.canMakeRequest(context.userId);
+      if (!retryLimitCheck.allowed) {
+        const isDaily = retryLimitCheck.currentRpd >= retryLimitCheck.maxRpd;
+        const metricStr = isDaily ? `${retryLimitCheck.currentRpd}/${retryLimitCheck.maxRpd} RPD (daily budget)` : `${retryLimitCheck.currentRpm}/${retryLimitCheck.maxRpm} RPM`;
+        return {
+          success: false,
+          errorType: "QUOTA_EXHAUSTED",
+          diagnosticStatus: isDaily ? "QUOTA_RPD" : "QUOTA_RPM",
+          cleanErrorMessage: `Application per-user Gemini rate limit safety threshold reached (${metricStr})`,
+          attemptsExecuted: attempt,
+          durationMs: Date.now() - startTime,
+          retried
+        };
+      }
+      globalUserGeminiRateLimiter.recordRequest(context.userId);
+    }
     attempt++;
     if (attempt > 1) {
       retried = true;
     }
     const attemptStart = Date.now();
-    if (context.userId) {
-      globalUserGeminiRateLimiter.recordRequest(context.userId);
-    }
     const elapsedSoFar = Date.now() - startTime;
     const remainingGlobalBudget = options.remainingGlobalBudgetMs !== void 0 ? options.remainingGlobalBudgetMs - elapsedSoFar : 25e3;
     if (options.remainingGlobalBudgetMs !== void 0 && remainingGlobalBudget < appTimeoutMs) {
@@ -323,11 +338,22 @@ async function runGeminiRequest(supabase, userId, prompt, model = GEMINI_MARKET_
   if (!watcher) {
     throw new Error("Watcher skipped because no active watcher found.");
   }
-  const ai = new GoogleGenAI({ apiKey: finalApiKey });
+  const budgetCheck = await checkAndIncrementGeminiBudget(supabase, userId);
+  if (!budgetCheck.allowed) {
+    throw new Error(`Daily Gemini API limit reached (${budgetCheck.currentCount}/${budgetCheck.maxLimit} calls per user per day).`);
+  }
+  const ai = new GoogleGenAI({
+    apiKey: finalApiKey,
+    httpOptions: {
+      headers: {
+        "User-Agent": "aistudio-build"
+      }
+    }
+  });
   const res = await executeBoundedGeminiCall(
     ai,
     { model, contents: prompt, config, timeoutMs: GEMINI_APPLICATION_TIMEOUT_MS, apiDeadlineMs: GEMINI_API_DEADLINE_MS, maxRetriesFor503: 1 },
-    { watcherId: "gemini-wrapper" }
+    { userId, watcherId: "gemini-wrapper", keySource: keyRes.keySource }
   );
   if (!res.success || !res.text) {
     throw new Error(res.cleanErrorMessage || "Gemini execution failed in bounded wrapper");

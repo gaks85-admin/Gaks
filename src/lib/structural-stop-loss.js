@@ -127,19 +127,13 @@ function getTimeframeMaxSlPips(timeframe, symbol, atr, currentPrice) {
     return defaultByTf;
   }
   if (kind === "JPY") {
-    if (tf === "M1" || tf === "M5") return 5;
-    if (tf === "M15") return 8;
-    if (tf === "M30") return 12;
-    if (tf === "H1") return 20;
-    return 40;
+    const base = tf === "M1" ? 4.5 : tf === "M5" ? 7 : tf === "M15" ? 11 : tf === "M30" ? 15 : tf === "H1" ? 24 : 42;
+    const cap = base * 2;
+    return atrPips > 0 ? Math.min(Math.max(base, atrPips * 2.2), cap) : base;
   }
-  if (tf === "M1") return 4;
-  if (tf === "M5") return 6.5;
-  if (tf === "M15") return 10;
-  if (tf === "M30") return 15;
-  if (tf === "H1") return 22;
-  if (tf === "H4") return 40;
-  return 10;
+  const forexBase = tf === "M1" ? 5 : tf === "M5" ? 8 : tf === "M15" ? 12 : tf === "M30" ? 16 : tf === "H1" ? 24 : tf === "H4" ? 42 : 12;
+  const forexCap = forexBase * 2;
+  return atrPips > 0 ? Math.min(Math.max(forexBase, atrPips * 2.2), forexCap) : forexBase;
 }
 function getMaxDeparturePips(timeframe, symbol, atr, currentPrice) {
   const tf = (timeframe || "M5").toUpperCase();
@@ -167,17 +161,13 @@ function getMaxDeparturePips(timeframe, symbol, atr, currentPrice) {
     return defaultByTf;
   }
   if (kind === "JPY") {
-    if (tf === "M1" || tf === "M5") return 5;
-    if (tf === "M15") return 8;
-    if (tf === "M30") return 12;
-    if (tf === "H1") return 18;
-    return 30;
+    const base = tf === "M1" || tf === "M5" ? 5 : tf === "M15" ? 8 : tf === "M30" ? 12 : tf === "H1" ? 18 : 30;
+    const cap = base * 2;
+    return atrPips > 0 ? Math.min(Math.max(base, atrPips * 1.6), cap) : base;
   }
-  if (tf === "M1" || tf === "M5") return 3.5;
-  if (tf === "M15") return 5;
-  if (tf === "M30") return 7.5;
-  if (tf === "H1") return 12;
-  return 25;
+  const forexBase = tf === "M1" || tf === "M5" ? 4 : tf === "M15" ? 6 : tf === "M30" ? 8.5 : tf === "H1" ? 14 : 25;
+  const forexCap = forexBase * 2.25;
+  return atrPips > 0 ? Math.min(Math.max(forexBase, atrPips * 1.5), forexCap) : forexBase;
 }
 function validateZoneProximityAndStopLoss(direction, currentPrice, zone, timeframe, symbol, atr) {
   const sym = (symbol || "").toUpperCase();

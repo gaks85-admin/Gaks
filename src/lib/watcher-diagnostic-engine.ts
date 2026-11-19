@@ -394,7 +394,14 @@ export async function runWatcherDiagnosticReplay(options: ReplayOptions): Promis
       cleanErrorMessage = 'No valid Gemini API key available for user profile';
     } else {
       aiCalled = true;
-      const ai = new GoogleGenAI({ apiKey: apiKeyToUse });
+      const ai = new GoogleGenAI({
+        apiKey: apiKeyToUse,
+        httpOptions: {
+          headers: {
+            'User-Agent': 'aistudio-build'
+          }
+        }
+      });
       const startTime = Date.now();
 
       const promptString = `${systemInstructions}\n\nSTRATEGY:\n${rawStrategyText}\n\nMARKET DATA SUMMARY:\n${marketSummaryText}`;

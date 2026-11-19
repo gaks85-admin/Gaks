@@ -18,8 +18,10 @@ import { TimeframeParser } from './strategy-compiler/timeframe.js';
 import { ClassificationParser } from './strategy-compiler/classification.js';
 import { isMandatory, isOptional, extractDedicatedMandatorySection, normalizeRuleId } from './strategy-compiler/normalizer.js';
 import { validateDetectors } from './detector-capability-validator.js';
+import { buildStrategyBlueprint } from './strategy-modules/blueprint-engine.js';
 
 export * from './strategy-compiler/types.js';
+export * from './strategy-modules/index.js';
 
 /**
  * Strategy Compiler converts natural language strategies into structured JSON rules
@@ -48,6 +50,16 @@ export function compileStrategy(strategyText: string): CompilerOutput {
       optional_rules: [],
       canonical_rule_set: emptyRuleSet,
       weighted_rules: [],
+      blueprint: {
+        version: '1.0',
+        activatedModuleIds: [],
+        mandatoryModuleIds: [],
+        optionalModuleIds: [],
+        modules: [],
+        preferredHtf: 'H4',
+        strategyMode: 'AI_ONLY',
+        executionMode: 'AI_ONLY'
+      },
       status: 'AMBIGUOUS_STRATEGY'
     };
   }
@@ -345,8 +357,15 @@ export function compileStrategy(strategyText: string): CompilerOutput {
   optional_rules.sort();
   canonical_rules.sort();
 
-  const detector_validation = validateDetectors(Object.keys(compiled_rules));
-  const execution_mode = detector_validation?.execution_mode || strategy_mode;
+  const activeRulesForValidation = [
+    ...canonical_rules,
+    ...(classificationResult.parsedRule.subjective_elements || []),
+    ...(classificationResult.parsedRule.ai_only_elements || [])
+  ];
+  const detector_validation = validateDetectors(activeRulesForValidation);
+  const execution_mode = strategy_mode !== 'RULE_ONLY'
+    ? strategy_mode
+    : (detector_validation?.execution_mode || strategy_mode);
 
   const canonical_rule_set: CanonicalRuleSet = {
     strategy_mode,
@@ -372,7 +391,7 @@ export function compileStrategy(strategyText: string): CompilerOutput {
   console.log(`Strategy Mode: ${strategy_mode}`);
   console.log(`Execution Mode: ${execution_mode}\n`);
 
-  return {
+  const compilerOutput: CompilerOutput = {
     strategy_mode,
     compiled_rules,
     mandatory_rules,
@@ -388,4 +407,7 @@ export function compileStrategy(strategyText: string): CompilerOutput {
     status,
     error_message
   };
+
+  compilerOutput.blueprint = buildStrategyBlueprint(compilerOutput);
+  return compilerOutput;
 }

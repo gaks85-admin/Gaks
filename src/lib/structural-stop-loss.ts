@@ -114,21 +114,21 @@ export function getTimeframeMaxSlPips(timeframe?: string, symbol?: string, atr?:
   }
 
   if (kind === 'JPY') {
-    if (tf === 'M1' || tf === 'M5') return 5.0;
-    if (tf === 'M15') return 8.0;
-    if (tf === 'M30') return 12.0;
-    if (tf === 'H1') return 20.0;
-    return 40.0;
+    const base = tf === 'M1' ? 4.5 : tf === 'M5' ? 7.0 : tf === 'M15' ? 11.0 : tf === 'M30' ? 15.0 : tf === 'H1' ? 24.0 : 42.0;
+    const cap = base * 2.0;
+    return atrPips > 0 ? Math.min(Math.max(base, atrPips * 2.2), cap) : base;
   }
 
   // Major & Cross Forex (EURUSD, GBPUSD, EURGBP, etc.)
-  if (tf === 'M1') return 4.0;
-  if (tf === 'M5') return 6.5;
-  if (tf === 'M15') return 10.0;
-  if (tf === 'M30') return 15.0;
-  if (tf === 'H1') return 22.0;
-  if (tf === 'H4') return 40.0;
-  return 10.0;
+  const forexBase =
+    tf === 'M1' ? 5.0 :
+    tf === 'M5' ? 8.0 :
+    tf === 'M15' ? 12.0 :
+    tf === 'M30' ? 16.0 :
+    tf === 'H1' ? 24.0 :
+    tf === 'H4' ? 42.0 : 12.0;
+  const forexCap = forexBase * 2.0;
+  return atrPips > 0 ? Math.min(Math.max(forexBase, atrPips * 2.2), forexCap) : forexBase;
 }
 
 /**
@@ -166,19 +166,15 @@ export function getMaxDeparturePips(timeframe?: string, symbol?: string, atr?: n
   }
 
   if (kind === 'JPY') {
-    if (tf === 'M1' || tf === 'M5') return 5.0;
-    if (tf === 'M15') return 8.0;
-    if (tf === 'M30') return 12.0;
-    if (tf === 'H1') return 18.0;
-    return 30.0;
+    const base = tf === 'M1' || tf === 'M5' ? 5.0 : tf === 'M15' ? 8.0 : tf === 'M30' ? 12.0 : tf === 'H1' ? 18.0 : 30.0;
+    const cap = base * 2.0;
+    return atrPips > 0 ? Math.min(Math.max(base, atrPips * 1.6), cap) : base;
   }
 
   // Standard Forex
-  if (tf === 'M1' || tf === 'M5') return 3.5;
-  if (tf === 'M15') return 5.0;
-  if (tf === 'M30') return 7.5;
-  if (tf === 'H1') return 12.0;
-  return 25.0;
+  const forexBase = tf === 'M1' || tf === 'M5' ? 4.0 : tf === 'M15' ? 6.0 : tf === 'M30' ? 8.5 : tf === 'H1' ? 14.0 : 25.0;
+  const forexCap = forexBase * 2.25;
+  return atrPips > 0 ? Math.min(Math.max(forexBase, atrPips * 1.5), forexCap) : forexBase;
 }
 
 export interface ZoneProximityAndSlResult {

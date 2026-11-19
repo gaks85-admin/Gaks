@@ -285,39 +285,65 @@ export function analyzeMarket(
   // Trade Execution Parameters
   if (result.signal !== 'NO_TRADE') {
     result.entryPrice = currentCandle.close;
+    const priceDecimals = result.entryPrice >= 1000 ? 2 : result.entryPrice >= 10 ? 3 : 5;
 
-    // Parse Stop Loss
-    let slPercent = 0.01; // 1% default
+    // Calculate recent candle ATR so default SL/TP scale realistically with timeframe volatility
+    const atrWindow = candles.slice(-15);
+    let atrSum = 0;
+    let atrCount = 0;
+    for (let i = 1; i < atrWindow.length; i++) {
+      const h = atrWindow[i].high;
+      const l = atrWindow[i].low;
+      const pc = atrWindow[i - 1].close;
+      const tr = Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc));
+      if (Number.isFinite(tr) && tr > 0) {
+        atrSum += tr;
+        atrCount++;
+      }
+    }
+    const localAtr = atrCount > 0 ? atrSum / atrCount : Math.max(currentCandle.high - currentCandle.low, result.entryPrice * 0.0005);
+
+    // Parse Stop Loss (only use percentage if explicitly configured with '%')
+    let slDistance = Math.max(localAtr * 1.5, result.entryPrice * 0.0005);
     if (strategyObj.stopLoss) {
       result.reasoning.push(`Applied Stop Loss logic: ${strategyObj.stopLoss}`);
       const match = strategyObj.stopLoss.match(/(\d+(?:\.\d+)?)\s*%/);
       if (match && match[1]) {
-        slPercent = parseFloat(match[1]) / 100;
-      }
-    }
-
-    // Parse Take Profit
-    let tpPercent = 0.02; // 2% default
-    if (strategyObj.takeProfit) {
-      result.reasoning.push(`Applied Take Profit logic: ${strategyObj.takeProfit}`);
-      const match = strategyObj.takeProfit.match(/(\d+(?:\.\d+)?)\s*%/);
-      if (match && match[1]) {
-        tpPercent = parseFloat(match[1]) / 100;
+        slDistance = result.entryPrice * (parseFloat(match[1]) / 100);
       }
     }
 
     if (result.signal === 'BUY') {
-      result.stopLoss = result.entryPrice * (1 - slPercent);
-      result.takeProfit = result.entryPrice * (1 + tpPercent);
+      result.stopLoss = Number((result.entryPrice - slDistance).toFixed(priceDecimals));
     } else {
-      result.stopLoss = result.entryPrice * (1 + slPercent);
-      result.takeProfit = result.entryPrice * (1 - tpPercent);
+      result.stopLoss = Number((result.entryPrice + slDistance).toFixed(priceDecimals));
+    }
+
+    const roundedRisk = Math.abs(result.entryPrice - result.stopLoss);
+
+    // Parse Take Profit (only use percentage if explicitly configured with '%', else scale by rounded SL risk * R:R)
+    const targetRr = strategyObj.minimumRiskReward && strategyObj.minimumRiskReward > 0
+      ? strategyObj.minimumRiskReward
+      : 2.0;
+    let tpDistance = roundedRisk * targetRr;
+    if (strategyObj.takeProfit) {
+      result.reasoning.push(`Applied Take Profit logic: ${strategyObj.takeProfit}`);
+      const match = strategyObj.takeProfit.match(/(\d+(?:\.\d+)?)\s*%/);
+      if (match && match[1]) {
+        tpDistance = result.entryPrice * (parseFloat(match[1]) / 100);
+      }
+    }
+
+    if (result.signal === 'BUY') {
+      result.takeProfit = Number((result.entryPrice + tpDistance).toFixed(priceDecimals));
+    } else {
+      result.takeProfit = Number((result.entryPrice - tpDistance).toFixed(priceDecimals));
     }
 
     // Risk / Reward Ratio
     const risk = Math.abs(result.entryPrice - result.stopLoss);
     const reward = Math.abs(result.takeProfit - result.entryPrice);
-    result.riskReward = risk > 0 ? (reward / risk) : null;
+    result.riskReward = risk > 0 ? Number((reward / risk).toFixed(2)) : null;
 
     // Calculate dynamic realistic confidence score between 50 and 98
     let baseConfidence = 82;
@@ -358,7 +384,7 @@ export function analyzeMarket(
 
     // Minimum Risk Reward check
     if (strategyObj.minimumRiskReward && result.riskReward !== null) {
-      if (result.riskReward < strategyObj.minimumRiskReward) {
+      if (result.riskReward < strategyObj.minimumRiskReward - 0.01) {
         result.signal = 'NO_TRADE';
         result.entryPrice = null;
         result.stopLoss = null;

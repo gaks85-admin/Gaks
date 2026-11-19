@@ -183,32 +183,52 @@ function analyzeMarket(candles, parsedStrategy, targetDirection) {
   }
   if (result.signal !== "NO_TRADE") {
     result.entryPrice = currentCandle.close;
-    let slPercent = 0.01;
+    const priceDecimals = result.entryPrice >= 1e3 ? 2 : result.entryPrice >= 10 ? 3 : 5;
+    const atrWindow = candles.slice(-15);
+    let atrSum = 0;
+    let atrCount = 0;
+    for (let i = 1; i < atrWindow.length; i++) {
+      const h = atrWindow[i].high;
+      const l = atrWindow[i].low;
+      const pc = atrWindow[i - 1].close;
+      const tr = Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc));
+      if (Number.isFinite(tr) && tr > 0) {
+        atrSum += tr;
+        atrCount++;
+      }
+    }
+    const localAtr = atrCount > 0 ? atrSum / atrCount : Math.max(currentCandle.high - currentCandle.low, result.entryPrice * 5e-4);
+    let slDistance = Math.max(localAtr * 1.5, result.entryPrice * 5e-4);
     if (strategyObj.stopLoss) {
       result.reasoning.push(`Applied Stop Loss logic: ${strategyObj.stopLoss}`);
       const match = strategyObj.stopLoss.match(/(\d+(?:\.\d+)?)\s*%/);
       if (match && match[1]) {
-        slPercent = parseFloat(match[1]) / 100;
+        slDistance = result.entryPrice * (parseFloat(match[1]) / 100);
       }
     }
-    let tpPercent = 0.02;
+    if (result.signal === "BUY") {
+      result.stopLoss = Number((result.entryPrice - slDistance).toFixed(priceDecimals));
+    } else {
+      result.stopLoss = Number((result.entryPrice + slDistance).toFixed(priceDecimals));
+    }
+    const roundedRisk = Math.abs(result.entryPrice - result.stopLoss);
+    const targetRr = strategyObj.minimumRiskReward && strategyObj.minimumRiskReward > 0 ? strategyObj.minimumRiskReward : 2;
+    let tpDistance = roundedRisk * targetRr;
     if (strategyObj.takeProfit) {
       result.reasoning.push(`Applied Take Profit logic: ${strategyObj.takeProfit}`);
       const match = strategyObj.takeProfit.match(/(\d+(?:\.\d+)?)\s*%/);
       if (match && match[1]) {
-        tpPercent = parseFloat(match[1]) / 100;
+        tpDistance = result.entryPrice * (parseFloat(match[1]) / 100);
       }
     }
     if (result.signal === "BUY") {
-      result.stopLoss = result.entryPrice * (1 - slPercent);
-      result.takeProfit = result.entryPrice * (1 + tpPercent);
+      result.takeProfit = Number((result.entryPrice + tpDistance).toFixed(priceDecimals));
     } else {
-      result.stopLoss = result.entryPrice * (1 + slPercent);
-      result.takeProfit = result.entryPrice * (1 - tpPercent);
+      result.takeProfit = Number((result.entryPrice - tpDistance).toFixed(priceDecimals));
     }
     const risk = Math.abs(result.entryPrice - result.stopLoss);
     const reward = Math.abs(result.takeProfit - result.entryPrice);
-    result.riskReward = risk > 0 ? reward / risk : null;
+    result.riskReward = risk > 0 ? Number((reward / risk).toFixed(2)) : null;
     let baseConfidence = 82;
     const bodyRange = Math.abs(currentCandle.close - currentCandle.open);
     const totalRange = currentCandle.high - currentCandle.low;
@@ -241,7 +261,7 @@ function analyzeMarket(candles, parsedStrategy, targetDirection) {
     cleanReasons.push("\u2022 Strategy conditions satisfied.");
     result.reasoning = cleanReasons;
     if (strategyObj.minimumRiskReward && result.riskReward !== null) {
-      if (result.riskReward < strategyObj.minimumRiskReward) {
+      if (result.riskReward < strategyObj.minimumRiskReward - 0.01) {
         result.signal = "NO_TRADE";
         result.entryPrice = null;
         result.stopLoss = null;

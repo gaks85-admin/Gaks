@@ -37,7 +37,14 @@ async function generateStrategySummary(strategyText, apiKeyOrOptions) {
   console.log("[Strategy Summarizer] Gemini key resolved");
   console.log(`Key Source: ${keySource}`);
   console.log("Key Present: YES");
-  const ai = new GoogleGenAI({ apiKey: resolvedApiKey.trim() });
+  const ai = new GoogleGenAI({
+    apiKey: resolvedApiKey.trim(),
+    httpOptions: {
+      headers: {
+        "User-Agent": "aistudio-build"
+      }
+    }
+  });
   const prompt = `You are an expert trading strategy classifier. Analyze the following trading strategy text and classify it into a single concise strategy label or name.
 
 Examples of standard concise strategy labels:

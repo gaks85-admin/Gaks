@@ -1,4 +1,14 @@
 import { Candle } from './strategy-engine.js';
+import { CompilerOutput } from './strategy-compiler/types.js';
+import {
+  ALL_CONCEPT_MODULES,
+  ConceptModuleId,
+  ConceptModuleResult,
+  StrategyBlueprint,
+  buildStrategyBlueprint,
+  executeStrategyBlueprint,
+  resolveConceptModuleId
+} from './strategy-modules/index.js';
 
 export interface SwingLevel {
   index: number;
@@ -34,22 +44,26 @@ export interface MarketStructure {
   supportZones: { priceMin: number; priceMax: number; strength: number }[];
   resistanceZones: { priceMin: number; priceMax: number; strength: number }[];
   fairValueGaps: FVG[];
-  BOS: { 
-    type: 'BULLISH_BOS' | 'BEARISH_BOS' | 'NONE'; 
-    price: number; 
+  orderBlocks?: any[];
+  trendlines?: any[];
+  breakouts?: any[];
+  retests?: any[];
+  BOS: {
+    type: 'BULLISH_BOS' | 'BEARISH_BOS' | 'NONE';
+    price: number;
     candleIndex: number;
     evidence: string;
     levelIndex: number;
   }[];
-  CHOCH: { 
-    type: 'BULLISH_CHOCH' | 'BEARISH_CHOCH' | 'NONE'; 
-    price: number; 
+  CHOCH: {
+    type: 'BULLISH_CHOCH' | 'BEARISH_CHOCH' | 'NONE';
+    price: number;
     candleIndex: number;
     evidence: string;
   }[];
-  liquiditySweeps: { 
-    type: 'HIGH_SWEEP' | 'LOW_SWEEP' | 'NONE'; 
-    price: number; 
+  liquiditySweeps: {
+    type: 'HIGH_SWEEP' | 'LOW_SWEEP' | 'NONE';
+    price: number;
     candleIndex: number;
     levelPrice: number;
     rejectionEvidence: string;
@@ -58,257 +72,99 @@ export interface MarketStructure {
   volumeInformation: { averageVolume: number; latestVolume: number; volumeSpike: boolean };
   volatilityInformation: { atr: number; volatilityLevel: 'HIGH' | 'NORMAL' | 'LOW' };
   latestCandles: Candle[];
+  activatedModules?: ConceptModuleId[];
+  moduleResults?: Record<string, ConceptModuleResult>;
+  [key: string]: any;
 }
 
-/**
- * Pure market structure extraction engine.
- * Reads candles and extracts factual observations only.
- */
-export function extractMarketStructure(candles: Candle[], supportedDetectors?: string[]): MarketStructure {
-  if (!candles || candles.length < 5) {
-    return {
-      trend: 'SIDEWAYS',
-      swingHighs: [],
-      swingLows: [],
-      supportZones: [],
-      resistanceZones: [],
-      fairValueGaps: [],
-      BOS: [],
-      CHOCH: [],
-      liquiditySweeps: [],
-      candlePatterns: [],
-      volumeInformation: { averageVolume: 0, latestVolume: 0, volumeSpike: false },
-      volatilityInformation: { atr: 0, volatilityLevel: 'NORMAL' },
-      latestCandles: []
-    };
-  }
-
-  const sortedCandles = [...candles].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-  const closes = sortedCandles.map(c => c.close);
-  const highs = sortedCandles.map(c => c.high);
-  const lows = sortedCandles.map(c => c.low);
-  const volumes = sortedCandles.map(c => c.volume || 0);
-
-  const shouldRun = (id: string) => !supportedDetectors || supportedDetectors.includes(id.toLowerCase());
-
-  // 1. Swing Detection (Fractal)
-  const swingHighs: SwingLevel[] = [];
-  const swingLows: SwingLevel[] = [];
-
-  for (let i = 2; i < sortedCandles.length - 2; i++) {
-    const h = highs[i];
-    const l = lows[i];
-    const isHighPeak = h >= highs[i - 1] && h >= highs[i - 2] && h >= highs[i + 1] && h >= highs[i + 2] && (h > highs[i - 1] || h > highs[i + 1]);
-    if (isHighPeak) {
-      swingHighs.push({ index: i, price: h, timestamp: sortedCandles[i].timestamp, isBroken: false });
-    }
-    const isLowValley = l <= lows[i - 1] && l <= lows[i - 2] && l <= lows[i + 1] && l <= lows[i + 2] && (l < lows[i - 1] || l < lows[i + 1]);
-    if (isLowValley) {
-      swingLows.push({ index: i, price: l, timestamp: sortedCandles[i].timestamp, isBroken: false });
-    }
-  }
-
-  // 2. Deterministic BOS Detection
-  const bosList: MarketStructure['BOS'] = [];
-  if (shouldRun('bos')) {
-    // Bullish BOS: Candle close > protected swing high
-    swingHighs.forEach((sh, shIdx) => {
-      for (let j = sh.index + 1; j < sortedCandles.length; j++) {
-        if (closes[j] > sh.price) {
-          sh.isBroken = true;
-          sh.brokenByIndex = j;
-          bosList.push({
-            type: 'BULLISH_BOS',
-            price: sh.price,
-            candleIndex: j,
-            evidence: `Candle at index ${j} (close: ${closes[j]}) closed above swing high at index ${sh.index} (price: ${sh.price})`,
-            levelIndex: shIdx
-          });
-          break; // Level consumed
-        }
-      }
-    });
-
-    // Bearish BOS: Candle close < protected swing low
-    swingLows.forEach((sl, slIdx) => {
-      for (let j = sl.index + 1; j < sortedCandles.length; j++) {
-        if (closes[j] < sl.price) {
-          sl.isBroken = true;
-          sl.brokenByIndex = j;
-          bosList.push({
-            type: 'BEARISH_BOS',
-            price: sl.price,
-            candleIndex: j,
-            evidence: `Candle at index ${j} (close: ${closes[j]}) closed below swing low at index ${sl.index} (price: ${sl.price})`,
-            levelIndex: slIdx
-          });
-          break; // Level consumed
-        }
-      }
-    });
-  }
-
-  // 3. CHOCH Detection & Authoritative Post-Break Trend Classification
-  const chochList: MarketStructure['CHOCH'] = [];
-  let preBreakTrend: 'BULLISH' | 'BEARISH' | 'SIDEWAYS' = 'SIDEWAYS';
-
-  if (swingHighs.length >= 2 && swingLows.length >= 2) {
-    const lastH = swingHighs[swingHighs.length - 1].price;
-    const prevH = swingHighs[swingHighs.length - 2].price;
-    const lastL = swingLows[swingLows.length - 1].price;
-    const prevL = swingLows[swingLows.length - 2].price;
-
-    if (lastH > prevH && lastL > prevL) preBreakTrend = 'BULLISH';
-    else if (lastH < prevH && lastL < prevL) preBreakTrend = 'BEARISH';
-  }
-
-  if (shouldRun('choch') && preBreakTrend !== 'SIDEWAYS') {
-    if (preBreakTrend === 'BULLISH') {
-      const protectedLow = swingLows[swingLows.length - 1];
-      for (let j = protectedLow.index + 1; j < sortedCandles.length; j++) {
-        if (closes[j] < protectedLow.price) {
-          chochList.push({
-            type: 'BEARISH_CHOCH',
-            price: protectedLow.price,
-            candleIndex: j,
-            evidence: `Bullish trend protected low at index ${protectedLow.index} (price: ${protectedLow.price}) broken by close at index ${j} (price: ${closes[j]})`
-          });
-          break;
-        }
-      }
-    } else {
-      const protectedHigh = swingHighs[swingHighs.length - 1];
-      for (let j = protectedHigh.index + 1; j < sortedCandles.length; j++) {
-        if (closes[j] > protectedHigh.price) {
-          chochList.push({
-            type: 'BULLISH_CHOCH',
-            price: protectedHigh.price,
-            candleIndex: j,
-            evidence: `Bearish trend protected high at index ${protectedHigh.index} (price: ${protectedHigh.price}) broken by close at index ${j} (price: ${closes[j]})`
-          });
-          break;
-        }
-      }
-    }
-  }
-
-  let currentTrend: 'BULLISH' | 'BEARISH' | 'SIDEWAYS' = preBreakTrend;
-  if (swingHighs.length >= 2 && swingLows.length >= 2) {
-    const lastHighObj = swingHighs[swingHighs.length - 1];
-    const lastLowObj = swingLows[swingLows.length - 1];
-    const prevLowObj = swingLows[swingLows.length - 2];
-    const prevHighObj = swingHighs[swingHighs.length - 2];
-    const latestClose = closes[closes.length - 1];
-
-    const bearishBreakAfterSwings = bosList.some(
-      b => b.type === 'BEARISH_BOS' && b.candleIndex > Math.max(lastHighObj.index, lastLowObj.index)
-    ) || chochList.some(c => c.type === 'BEARISH_CHOCH');
-
-    const bullishBreakAfterSwings = bosList.some(
-      b => b.type === 'BULLISH_BOS' && b.candleIndex > Math.max(lastHighObj.index, lastLowObj.index)
-    ) || chochList.some(c => c.type === 'BULLISH_CHOCH');
-
-    if (preBreakTrend === 'BULLISH') {
-      const lowBroken = lastLowObj.isBroken || latestClose < lastLowObj.price || bearishBreakAfterSwings;
-      if (lowBroken) {
-        const brokeBothLows = (prevLowObj.isBroken || latestClose < prevLowObj.price);
-        currentTrend = brokeBothLows ? 'BEARISH' : 'SIDEWAYS';
-      }
-    } else if (preBreakTrend === 'BEARISH') {
-      const highBroken = lastHighObj.isBroken || latestClose > lastHighObj.price || bullishBreakAfterSwings;
-      if (highBroken) {
-        const brokeBothHighs = (prevHighObj.isBroken || latestClose > prevHighObj.price);
-        currentTrend = brokeBothHighs ? 'BULLISH' : 'SIDEWAYS';
-      }
-    }
-  }
-
-  // 4. FVG Detection & Filling State
-  const fvgList: FVG[] = [];
-  if (shouldRun('fvg')) {
-    for (let i = 2; i < sortedCandles.length; i++) {
-      let fvg: FVG | null = null;
-      if (lows[i] > highs[i - 2]) {
-        fvg = { type: 'BULLISH_FVG', top: lows[i], bottom: highs[i - 2], candleIndex: i, isFilled: false, filledPercentage: 0 };
-      } else if (highs[i] < lows[i - 2]) {
-        fvg = { type: 'BEARISH_FVG', top: lows[i - 2], bottom: highs[i], candleIndex: i, isFilled: false, filledPercentage: 0 };
-      }
-
-      if (fvg) {
-        const gapSize = fvg.top - fvg.bottom;
-        for (let j = i + 1; j < sortedCandles.length; j++) {
-          if (fvg.type === 'BULLISH_FVG') {
-            const penetration = Math.max(0, fvg.top - lows[j]);
-            fvg.filledPercentage = Math.max(fvg.filledPercentage, Math.min(1, penetration / gapSize));
-            if (lows[j] <= fvg.bottom) fvg.isFilled = true;
-          } else {
-            const penetration = Math.max(0, highs[j] - fvg.bottom);
-            fvg.filledPercentage = Math.max(fvg.filledPercentage, Math.min(1, penetration / gapSize));
-            if (highs[j] >= fvg.top) fvg.isFilled = true;
-          }
-          if (fvg.isFilled) break;
-        }
-        fvgList.push(fvg);
-      }
-    }
-  }
-
-  // 5. Liquidity Sweep Detection
-  const sweepList: MarketStructure['liquiditySweeps'] = [];
-  if (shouldRun('liquidity_sweep')) {
-    const historicalLevels = [...swingHighs, ...swingLows].filter(s => s.index < sortedCandles.length - 10);
-    for (let i = sortedCandles.length - 5; i < sortedCandles.length; i++) {
-      for (const level of historicalLevels) {
-        const isHigh = swingHighs.includes(level);
-        if (isHigh) {
-          if (highs[i] > level.price && closes[i] < level.price) {
-            sweepList.push({
-              type: 'HIGH_SWEEP',
-              price: highs[i],
-              candleIndex: i,
-              levelPrice: level.price,
-              rejectionEvidence: `Price wicked to ${highs[i]} above level ${level.price} but closed at ${closes[i]}`
-            });
-          }
-        } else {
-          if (lows[i] < level.price && closes[i] > level.price) {
-            sweepList.push({
-              type: 'LOW_SWEEP',
-              price: lows[i],
-              candleIndex: i,
-              levelPrice: level.price,
-              rejectionEvidence: `Price wicked to ${lows[i]} below level ${level.price} but closed at ${closes[i]}`
-            });
-          }
-        }
-      }
-    }
-  }
-
-  // 6. Volatility & Volume
-  let totalTrueRange = 0;
-  for (let i = 1; i < sortedCandles.length; i++) {
-    const tr = Math.max(highs[i] - lows[i], Math.abs(highs[i] - closes[i - 1]), Math.abs(lows[i] - closes[i - 1]));
-    totalTrueRange += tr;
-  }
-  const atr = sortedCandles.length > 1 ? totalTrueRange / (sortedCandles.length - 1) : (highs[0] - lows[0]);
-  const avgVolume = volumes.reduce((a, b) => a + b, 0) / (volumes.length || 1);
-  const latestVol = volumes[volumes.length - 1] || 0;
-
+function emptyMarketStructure(): MarketStructure {
   return {
-    trend: currentTrend,
-    swingHighs,
-    swingLows,
+    trend: 'SIDEWAYS',
+    swingHighs: [],
+    swingLows: [],
     supportZones: [],
     resistanceZones: [],
-    fairValueGaps: fvgList,
-    BOS: bosList,
-    CHOCH: chochList,
-    liquiditySweeps: sweepList,
-    candlePatterns: [], // To be implemented with detailed logic if requested
-    volumeInformation: { averageVolume: avgVolume, latestVolume: latestVol, volumeSpike: latestVol > avgVolume * 1.5 },
-    volatilityInformation: { atr, volatilityLevel: atr > (closes[closes.length - 1] * 0.02) ? 'HIGH' : 'NORMAL' },
-    latestCandles: sortedCandles.slice(-20)
+    fairValueGaps: [],
+    orderBlocks: [],
+    BOS: [],
+    CHOCH: [],
+    liquiditySweeps: [],
+    candlePatterns: [],
+    volumeInformation: { averageVolume: 0, latestVolume: 0, volumeSpike: false },
+    volatilityInformation: { atr: 0, volatilityLevel: 'NORMAL' },
+    latestCandles: [],
+    activatedModules: []
   };
 }
 
+/**
+ * Pure modular market structure extraction engine.
+ * - When `blueprintOrDetectors` is supplied (StrategyBlueprint, CompilerOutput, or string[] detector list),
+ *   dynamically activates and runs ONLY the mathematical concept modules chosen for that strategy.
+ * - When omitted (`undefined`), runs the full structural extraction suite for backwards compatibility.
+ */
+export function extractMarketStructure(
+  candles: Candle[],
+  blueprintOrDetectors?: string[] | StrategyBlueprint | CompilerOutput
+): MarketStructure {
+  if (!candles || candles.length < 5) {
+    return emptyMarketStructure();
+  }
+
+  let blueprint: StrategyBlueprint;
+  let overrideModuleIds: ConceptModuleId[] | undefined;
+
+  if (!blueprintOrDetectors) {
+    // Unfiltered mode: run all structural, zone, price-action & volatility modules
+    const allIds: ConceptModuleId[] = ALL_CONCEPT_MODULES.map(m => m.id);
+    blueprint = {
+      version: '1.0',
+      activatedModuleIds: allIds,
+      mandatoryModuleIds: [],
+      optionalModuleIds: allIds,
+      modules: [],
+      preferredHtf: 'H4',
+      strategyMode: 'RULE_ONLY',
+      executionMode: 'RULE_ONLY'
+    };
+    overrideModuleIds = [
+      'bos',
+      'choch',
+      'fair_value_gap',
+      'order_block',
+      'liquidity_sweep',
+      'support',
+      'resistance',
+      'trendline_breakout',
+      'break_and_retest',
+      'confirmation_candle',
+      'atr',
+      'volume_confirmation'
+    ];
+  } else if (Array.isArray(blueprintOrDetectors)) {
+    const resolved = blueprintOrDetectors
+      .map(id => resolveConceptModuleId(id))
+      .filter((id): id is ConceptModuleId => id !== null);
+    const deduped = [...new Set(resolved)];
+    blueprint = {
+      version: '1.0',
+      activatedModuleIds: deduped,
+      mandatoryModuleIds: [],
+      optionalModuleIds: deduped,
+      modules: [],
+      preferredHtf: 'H4',
+      strategyMode: 'RULE_ONLY',
+      executionMode: 'RULE_ONLY'
+    };
+    overrideModuleIds = deduped;
+  } else if ('compiled_rules' in blueprintOrDetectors) {
+    blueprint = blueprintOrDetectors.blueprint || buildStrategyBlueprint(blueprintOrDetectors);
+    overrideModuleIds = blueprint.activatedModuleIds;
+  } else {
+    blueprint = blueprintOrDetectors;
+    overrideModuleIds = blueprint.activatedModuleIds;
+  }
+
+  const report = executeStrategyBlueprint(blueprint, candles, { overrideModuleIds });
+  return report.marketStructure as MarketStructure;
+}

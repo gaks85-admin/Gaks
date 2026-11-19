@@ -1,3 +1,5 @@
+import type { StrategyBlueprint } from '../strategy-modules/types.js';
+
 export interface ParserResult<T = any> {
   supported: boolean;
   confidence: number;
@@ -81,6 +83,7 @@ export interface CompilerOutput {
   };
   matched_phrases: string[];
   canonical_rules: string[];
+  blueprint?: StrategyBlueprint;
   detector_validation?: any;
   status: 'SUCCESS' | 'AMBIGUOUS_STRATEGY' | 'FAILURE';
   error_message?: string;

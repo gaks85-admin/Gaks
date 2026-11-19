@@ -226,20 +226,20 @@ export async function runGeminiAuditTestSuite(): Promise<{ passed: number; total
   assert(passesAmb === false, 'Test M3 - Ambiguous setup blocked by Pre-Filter Gate');
 
   // ==========================================
-  // TEST N: PER-USER DAILY CALL BUDGET (18 RPD)
+  // TEST N: PER-USER DAILY CALL BUDGET (STRICT 10 RPD)
   // ==========================================
   console.log("\n--- TEST N: Per-User Daily Budget Limiter ---");
   const { UserGeminiRateLimiter } = await import('./geminiWrapper.js');
-  const testLimiter = new UserGeminiRateLimiter(10, 18);
+  const testLimiter = new UserGeminiRateLimiter(10, 18); // Must clamp strictly to 10 RPD
   const testUid = 'user_rate_limit_test_1';
   
   assert(testLimiter.canMakeRequest(testUid).allowed === true, 'Test N1 - Initial request allowed');
-  for (let i = 0; i < 18; i++) {
+  for (let i = 0; i < 10; i++) {
     testLimiter.recordRequest(testUid);
   }
   const capCheck = testLimiter.canMakeRequest(testUid);
-  assert(capCheck.allowed === false, 'Test N2 - 19th request blocked after reaching 18 calls/day');
-  assert(capCheck.currentRpd === 18 && capCheck.maxRpd === 18, 'Test N3 - Correctly tracks 18/18 daily calls');
+  assert(capCheck.allowed === false, 'Test N2 - 11th request blocked after reaching 10 calls/day');
+  assert(capCheck.currentRpd === 10 && capCheck.maxRpd === 10, 'Test N3 - Strictly clamps and tracks 10/10 daily calls');
 
   console.log(`\n==========================================`);
   console.log(`GEMINI AUDIT TESTS COMPLETED: ${passedCount}/${totalCount} PASSED`);

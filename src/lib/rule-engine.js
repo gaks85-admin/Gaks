@@ -1,46 +1,55 @@
-import { calculateEMA } from "./strategy-engine.js";
-function evaluateRules(watcher, candles) {
-  const watcherActive = watcher && watcher.status === "active";
-  const tradeStatusOk = true;
-  const lastScan = watcher?.last_scan_at ? new Date(watcher.last_scan_at).getTime() : 0;
-  const now = Date.now();
-  const cooldownMs = 60 * 1e3;
-  const cooldownPassed = now - lastScan >= cooldownMs || !watcher?.last_scan_at;
-  const marketSessionActive = true;
-  const session = "London/New York Active";
-  let atr = 0;
-  if (candles.length >= 14) {
-    let trSum = 0;
-    for (let i = 1; i < candles.length; i++) {
-      const high = Number(candles[i].high);
-      const low = Number(candles[i].low);
-      const prevClose = Number(candles[i - 1].close);
-      const tr = Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose));
-      trSum += tr;
-    }
-    atr = trSum / (candles.length - 1);
-  } else {
-    atr = 1e-3;
+import { compileStrategy } from "./strategy-compiler.js";
+import {
+  buildStrategyBlueprint,
+  computeAtr,
+  executeStrategyBlueprint
+} from "./strategy-modules/index.js";
+function evaluateRules(watcher, candles, options = {}) {
+  const safeCandles = Array.isArray(candles) ? candles : [];
+  const strategyText = options.strategyText || watcher?.strategy_text || watcher?.strategy || watcher?.compiled_strategy_text || "";
+  let compiled = options.compiledStrategy || null;
+  if (!compiled && typeof strategyText === "string" && strategyText.trim().length > 0) {
+    compiled = compileStrategy(strategyText);
   }
-  const atrFilterPassed = atr > 0;
-  const closes = candles.map((c) => Number(c.close));
-  const ema20 = calculateEMA(closes, 20) || closes[closes.length - 1];
-  const currentPrice = closes[closes.length - 1];
-  const trend = currentPrice >= ema20 ? "Bullish" : "Bearish";
-  const emaTrendPassed = true;
-  const highs = candles.map((c) => Number(c.high));
-  const lows = candles.map((c) => Number(c.low));
-  const maxHigh = Math.max(...highs);
-  const minLow = Math.min(...lows);
-  const distToRes = Math.abs(maxHigh - currentPrice);
-  const distToSup = Math.abs(currentPrice - minLow);
-  const srProximityPassed = distToRes / currentPrice < 0.05 || distToSup / currentPrice < 0.05 || true;
-  const breakout = candles[candles.length - 1].close > candles[candles.length - 2].high || candles[candles.length - 1].close < candles[candles.length - 2].low;
-  const trendlineBreakoutPassed = true;
-  const recentVol = candles[candles.length - 1]?.volume || 0;
-  const volumeConfirmed = recentVol >= 0 || true;
-  const volumeConfirmationPassed = true;
-  const userTimeframeValid = !!watcher?.selected_timeframe;
+  const blueprint = options.blueprint || compiled?.blueprint || (compiled ? buildStrategyBlueprint(compiled) : void 0);
+  const watcherActive = Boolean(watcher && watcher.status === "active");
+  const tradeStatusOk = watcher?.has_open_trade !== true && watcher?.trade_status !== "OPEN";
+  const nowMs = (options.now || /* @__PURE__ */ new Date()).getTime();
+  const lastScan = watcher?.last_scan_at ? new Date(watcher.last_scan_at).getTime() : 0;
+  const cooldownMs = 60 * 1e3;
+  const cooldownPassed = !watcher?.last_scan_at || nowMs - lastScan >= cooldownMs;
+  const userTimeframeValid = Boolean(watcher?.selected_timeframe);
+  const report = blueprint && blueprint.activatedModuleIds.length > 0 && safeCandles.length >= 2 ? executeStrategyBlueprint(compiled || blueprint, safeCandles, {
+    pair: watcher?.selected_pair,
+    timeframe: watcher?.selected_timeframe,
+    now: options.now
+  }) : null;
+  const ms = report?.marketStructure || {};
+  const results = report?.resultsByModule || {};
+  const atr = Number((ms.volatilityInformation?.atr ?? computeAtr(safeCandles, 14)) || 0);
+  const rawTrend = String(ms.trend || "SIDEWAYS").toUpperCase();
+  const trend = rawTrend === "BULLISH" ? "Bullish" : rawTrend === "BEARISH" ? "Bearish" : "Neutral";
+  const isActivated = (id) => Boolean(report?.executedModules.includes(id));
+  const sessionRes = results["session"];
+  const marketSessionActive = isActivated("session") ? Boolean(sessionRes?.matched) : true;
+  const session = sessionRes?.metrics?.activeSessions?.join("/") || ms.session || "Any UTC Session";
+  const atrRes = results["atr"];
+  const atrFilterPassed = isActivated("atr") ? Boolean(atrRes?.matched) : atr > 0;
+  const emaRes = results["ema"];
+  const emaTrendPassed = isActivated("ema") ? Boolean(emaRes?.matched) : true;
+  const supportRes = results["support"] || results["support_rejection"];
+  const resistanceRes = results["resistance"] || results["resistance_rejection"];
+  const srActive = isActivated("support") || isActivated("resistance") || isActivated("support_rejection") || isActivated("resistance_rejection");
+  const supportProximity = Boolean(supportRes?.matched);
+  const resistanceProximity = Boolean(resistanceRes?.matched);
+  const srProximityPassed = srActive ? supportProximity || resistanceProximity : true;
+  const breakoutRes = results["trendline_breakout"];
+  const breakout = Boolean(breakoutRes?.matched);
+  const trendlineBreakoutPassed = isActivated("trendline_breakout") ? breakout : true;
+  const volumeRes = results["volume_confirmation"];
+  const volumeConfirmed = Boolean(volumeRes?.matched);
+  const volumeConfirmationPassed = isActivated("volume_confirmation") ? volumeConfirmed : true;
+  const mandatoryRulesPassed = report ? report.mandatoryPassed : true;
   const details = {
     watcherActive,
     tradeStatusOk,
@@ -51,38 +60,49 @@ function evaluateRules(watcher, candles) {
     srProximityPassed,
     trendlineBreakoutPassed,
     volumeConfirmationPassed,
-    userTimeframeValid
+    userTimeframeValid,
+    mandatoryRulesPassed
   };
-  const allPassed = Object.values(details).every(Boolean);
-  const score = Object.values(details).filter(Boolean).length * 10;
+  const preflightPassed = watcherActive && tradeStatusOk && cooldownPassed && userTimeframeValid;
+  const score = report ? report.score : Math.round(
+    [watcherActive, tradeStatusOk, cooldownPassed, atrFilterPassed, userTimeframeValid].filter(Boolean).length / 5 * 100
+  );
+  const passed = report ? Boolean(preflightPassed && report.passed) : Boolean(preflightPassed && atrFilterPassed);
   return {
     trend,
     atr,
     session,
     breakout,
     volumeConfirmed,
-    supportProximity: srProximityPassed,
-    resistanceProximity: srProximityPassed,
+    supportProximity,
+    resistanceProximity,
     score,
-    passed: allPassed,
+    passed,
     geminiCalled: false,
+    blueprint,
+    activatedModules: report?.activatedModules || [],
+    skippedModules: report?.skippedModules || [],
+    passedModules: report?.passedModules || [],
+    failedModules: report?.failedModules || [],
+    moduleResults: results,
     details
   };
 }
 function logRuleEngineAudit(result) {
   console.log(`
-========== RULE ENGINE ==========`);
+========== MODULAR RULE ENGINE ==========`);
   console.log(`Trend: ${result.trend}`);
   console.log(`ATR: ${result.atr.toFixed(5)}`);
   console.log(`Session: ${result.session}`);
-  console.log(`Breakout: ${result.breakout ? "YES" : "NO"}`);
-  console.log(`Volume: ${result.volumeConfirmed ? "Confirmed" : "Unconfirmed"}`);
-  console.log(`Support: ${result.supportProximity ? "Near Support" : "Neutral"}`);
-  console.log(`Resistance: ${result.resistanceProximity ? "Near Resistance" : "Neutral"}`);
+  if (result.activatedModules && result.activatedModules.length > 0) {
+    console.log(`Activated Modules (${result.activatedModules.length}): [${result.activatedModules.join(", ")}]`);
+    console.log(`Passed Modules: [${(result.passedModules || []).join(", ")}]`);
+    console.log(`Failed Modules: [${(result.failedModules || []).join(", ")}]`);
+  }
   console.log(`Score: ${result.score}/100`);
   console.log(`Passed: ${result.passed ? "YES" : "NO"}`);
   console.log(`Gemini Called: ${result.geminiCalled ? "YES" : "NO"}`);
-  console.log(`================================
+  console.log(`=========================================
 `);
 }
 export {

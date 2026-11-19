@@ -12,7 +12,7 @@ function getSettingsFile() {
   }
 }
 const DEFAULT_SETTINGS = {
-  executionMode: "RULE_ONLY",
+  executionMode: "HYBRID",
   defaultGeminiModel: "gemini-3.5-flash-lite",
   defaultStrategy: "Gaks AI Default Strategy",
   scanInterval: 15,
@@ -57,12 +57,12 @@ async function getGlobalExecutionSettings(supabaseClient) {
   return settings;
 }
 function normalizeExecutionMode(rawMode) {
-  if (!rawMode) return "RULE_ONLY";
+  if (!rawMode) return "HYBRID";
   const clean = String(rawMode).trim().toUpperCase();
   if (clean === "RULE_ONLY") return "RULE_ONLY";
   if (clean === "AI_ONLY") return "AI_ONLY";
   if (clean === "HYBRID") return "HYBRID";
-  return "RULE_ONLY";
+  return "HYBRID";
 }
 export {
   getGlobalExecutionSettings,

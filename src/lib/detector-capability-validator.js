@@ -7,6 +7,7 @@ const DETECTOR_REGISTRY = [
   { id: "choch", name: "CHOCH", implemented: true, version: "1.0", confidence: 0.9 },
   { id: "trendline", name: "Trendline", implemented: true, version: "1.0", confidence: 0.8 },
   { id: "trendline_breakout", name: "Trendline Breakout", implemented: true, version: "1.0", confidence: 0.8 },
+  { id: "break_and_retest", name: "Break and Retest", implemented: true, version: "1.0", confidence: 0.8 },
   { id: "retest", name: "Retest", implemented: true, version: "1.0", confidence: 0.7 },
   { id: "support", name: "Support", implemented: true, version: "1.0", confidence: 0.8 },
   { id: "resistance", name: "Resistance", implemented: true, version: "1.0", confidence: 0.8 },
@@ -25,6 +26,7 @@ const DETECTOR_REGISTRY = [
   { id: "volume_confirmation", name: "Volume Confirmation", implemented: true, version: "1.0", confidence: 0.75 },
   { id: "session", name: "Session", implemented: true, version: "1.0", confidence: 1 },
   { id: "timeframe", name: "Timeframe", implemented: true, version: "1.0", confidence: 1 },
+  { id: "timeframes", name: "Timeframe", implemented: true, version: "1.0", confidence: 1 },
   { id: "risk_reward", name: "Risk Reward", implemented: true, version: "1.0", confidence: 1 }
 ];
 function validateDetectors(requiredRules) {
@@ -34,6 +36,11 @@ function validateDetectors(requiredRules) {
   const unsupported = requiredRules.filter(
     (rule) => !DETECTOR_REGISTRY.some((d) => d.id === rule.toLowerCase() && d.implemented)
   );
+  const supportedSet = new Set(supported.map((s) => s.toLowerCase()));
+  if (supportedSet.has("fair_value_gap")) supportedSet.add("fvg");
+  if (supportedSet.has("fvg")) supportedSet.add("fair_value_gap");
+  if (supportedSet.has("timeframes")) supportedSet.add("timeframe");
+  if (supportedSet.has("break_and_retest")) supportedSet.add("retest");
   const coverage = requiredRules.length > 0 ? supported.length / requiredRules.length * 100 : 100;
   let execution_mode = "RULE_ONLY";
   if (coverage === 100) {
@@ -46,6 +53,7 @@ function validateDetectors(requiredRules) {
   return {
     coverage,
     supported,
+    supported_detectors: Array.from(supportedSet),
     unsupported,
     execution_mode
   };
